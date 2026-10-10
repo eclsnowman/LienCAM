@@ -58,6 +58,9 @@ jobs:
           cache: npm
       - name: Install pinned dependencies
         run: npm ci
+      # Some public tests drive the built app (tools/examples/lib/drive.mjs needs dist/index.html).
+      - name: Build
+        run: npm run build
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Public tests
