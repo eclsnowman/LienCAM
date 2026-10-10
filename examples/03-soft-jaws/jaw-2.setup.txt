@@ -1,0 +1,44 @@
+LienCAM Setup Sheet
+Program: "03_Soft_jaws.nc"
+Units: mm
+
+Setup: "Jaw 2 - G55" (G55)
+  Work offset origin: X0 Y38 Z16 mm
+  Stock: "Stock 2" size 80 x 18 x 16 mm
+  Origin offset from stock min corner: X0 Y0 Z16 mm
+  Workholding:
+    Method: Vise
+    Note: "Starter demonstration vise: jaw 2, 80 x 18 x 16 mm blank at Y 38 mm, G55. Close the vise on a 20 mm spacer below Z 8 mm. Secure both jaw blanks in place of the hard jaws before facing and cutting the grip recess. Mounting features: two 3 mm holes at local X 20 and 60, Y 3 mm, and 6 mm counterbores, 3 mm deep below the faced top. The holes clear the support ledge; vertical bolts span the gap to the vise base. Use temporary clamps clear of the paths while machining mounting features; spindle stopped and parked before fitting bolts. This demonstration vise uses vertical mounting; adapt hole locations to the actual vise. Keep bolts, clamps and spacer below the cutter paths."
+    Vise: "Starter demonstration vise"
+
+1. "Face 1"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -0.5 to 15 mm
+   NC lines: 4-25
+
+2. "Pocket 2"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -8 to 15 mm
+   NC lines: 26-691
+
+3. "Drill 3"
+   Tool: T3 "3 mm drill" dia 3mm flute length 20mm
+   Spindle: 10000 RPM
+   Feed: cutting 180mm/min, plunge 150mm/min
+   Z range: -16 to 15 mm
+   NC lines: 692-703
+
+4. "Bore 4"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -3.5 to 15 mm
+   NC lines: 704-876
+
+File: "03_Soft_jaws.nc"
+Bytes: 28132
+SHA-256: 792cb350a5a9f689c924f7df85f4f48e4c7411b4eccd70c87eab78ae8e635b77

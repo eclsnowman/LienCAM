@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W4-1.png": {
+      "commit": "1ef15aafb5206efc46bca0dc15de7451d1cfc9b3",
+      "workingTreeDirty": false,
+      "workingTreeScope": [
+        "examples/06-knob-handwheel/knob-handwheel.camproject",
+        "src",
+        "tools/capture/scenes.json"
+      ],
+      "sourceExcludes": [
+        "src/tests"
+      ],
+      "sourceHash": "daddbff1cdb4480efaca22c54fefb7fee8da52847f1a770cc1555bb09065752f",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 1234,
+      "sourceProjectSha256": "98db5c00ebde40cb65d555eb7235806968899fa3c89404b07f99776d2e20eafc",
+      "screenshotBytes": 195578,
+      "screenshotSha256": "1ace476603d7a7f172f9ebc21b15fcd891b3e8b56b973c8db2e25c2c6405c3da",
+      "productionEvidence": "src/tests/evidence/WO-2548/finish/model.png"
+    }
+  }
+}

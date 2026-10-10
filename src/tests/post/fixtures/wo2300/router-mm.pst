@@ -1,0 +1,30 @@
+# Hand-written MP fixture, no vendor file content.
+# Post Name : WO-2300 Mastercam MM
+met_tool : 1
+omitseq : no
+seqinc : 7
+arcoutput : 0
+breakarcs : 1
+fs2 2 0.5 0.4
+fs2 15 0.3 0.2
+fmt X 2 xabs
+fmt F 15 feed
+sg02 G2
+sg03 G3
+sm03 M13
+sm04 M14
+sm05 M15
+sm08 M18
+sm08_1 M17
+sm09 M19
+pheader
+  pbld, n, "(PST HEADER)", e
+  pbld, n, "G90", "G21", e
+  if tool > 0, "CONDITIONAL MUST NOT LEAK", e
+ptlchg
+  pbld, n, "T", t, "M6", e
+peof
+  pbld, n, *sm05, e
+  pbld, n, *sm09, e
+  pbld, n, "(PST FOOTER)", e
+  pbld, n, "M2", e

@@ -1,0 +1,32 @@
+{
+  "placements": [
+    {
+      "partId": "host",
+      "instanceId": "host#0",
+      "x": 0,
+      "y": 0,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "small",
+      "instanceId": "small#0",
+      "x": 7,
+      "y": 7,
+      "rotationDeg": 0,
+      "windowParentId": "host#0",
+      "depth": 1
+    }
+  ],
+  "unplaced": [
+    {
+      "partId": "small",
+      "count": 2
+    }
+  ],
+  "utilization": 1.390625,
+  "sheetUsed": {
+    "width": 80,
+    "height": 80
+  }
+}

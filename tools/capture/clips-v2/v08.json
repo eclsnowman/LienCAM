@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "V08",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/06-knob-handwheel/lobed-knob-source.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "formEdit"
+    },
+    {
+      "action": "formCircular"
+    },
+    {
+      "action": "formDisplay",
+      "mode": "cage"
+    },
+    {
+      "action": "formDisplay",
+      "mode": "both"
+    },
+    {
+      "action": "formDisplay",
+      "mode": "smooth"
+    },
+    {
+      "action": "formFinish"
+    },
+    {
+      "action": "zebra"
+    },
+    {
+      "action": "hold"
+    }
+  ]
+}

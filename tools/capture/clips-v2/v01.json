@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "durationSeconds": 72,
+  "viewport": { "width": 1920, "height": 1080 },
+  "project": "examples/02-toe-clamps/toe-clamps.camproject",
+  "steps": [
+    { "at": 1, "action": "zoom", "duration": 3, "deltaY": -120 },
+    { "at": 6, "action": "play", "duration": 1.1 },
+    { "at": 12, "action": "orbit", "duration": 4, "from": [0.59, 0.48], "to": [0.65, 0.50] },
+    { "at": 30, "action": "orbit", "duration": 4, "from": [0.65, 0.48], "to": [0.59, 0.43] },
+    { "at": 53, "action": "zoom", "duration": 1.5, "deltaY": 200 },
+    { "at": 55, "action": "orbit", "duration": 4, "from": [0.59, 0.48], "to": [0.64, 0.70], "finished": true },
+    { "at": 60, "action": "compare", "duration": 1.2 },
+    { "at": 62, "action": "opacity", "duration": 4 }
+  ]
+}

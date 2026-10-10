@@ -1,0 +1,29 @@
+{
+  "tag": "v0.36.0-alpha.1",
+  "version": "0.36.0-alpha.1",
+  "prerelease": true,
+  "assets": [
+    {
+      "platform": "windows",
+      "kind": "portable",
+      "arch": "x64",
+      "name": "LienCAM-0.36.0-alpha.1-win-x64-portable.exe",
+      "size": 22,
+      "sha256": "c0c71bcaea0e5bd7ecc891c8bd3ec47b1cf0bef1b1e6f0e76380651d99edb38d",
+      "url": "https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-win-x64-portable.exe",
+      "unsigned": true,
+      "tested": false
+    },
+    {
+      "platform": "windows",
+      "kind": "installer",
+      "arch": "x64",
+      "name": "LienCAM-0.36.0-alpha.1-win-x64-setup.exe",
+      "size": 23,
+      "sha256": "1b6316d34c7aaab039f23c8054892632195e2b6134ef1f8a7c893c6eb4881b6b",
+      "url": "https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-win-x64-setup.exe",
+      "unsigned": true,
+      "tested": false
+    }
+  ]
+}

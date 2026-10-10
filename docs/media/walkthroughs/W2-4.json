@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W2-4.png": {
+      "commit": "39bce69b4dbd4ca479320071786655fe0ac346b3",
+      "workingTreeDirty": true,
+      "workingTreeScope": [
+        "examples/01-fixture-plate/fixture-plate.camproject",
+        "src",
+        "tools/examples/build-fixture-plate.mjs"
+      ],
+      "sourceExcludes": [
+        "src/tests/evidence"
+      ],
+      "sourceHash": "92355e589880462c23dfc575aa6dd43bc7f3d0d1db57bc9d5e7467390793fbb2",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 4335,
+      "screenshotBytes": 242939,
+      "screenshotSha256": "6d1cdad0eae43c306111f34ce78bbafdfd6004859976ad4e93c9d3fd12b67d2a"
+    }
+  }
+}

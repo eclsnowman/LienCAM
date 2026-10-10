@@ -1,0 +1,120 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+/release/
+.vite/
+
+# Test / tooling output
+coverage/
+/*.log
+test-output*.txt
+
+# Test-run render byproducts (some viewport tests write these to cwd).
+# coordination/ additionally must never exist in this repo (see LIENCAM.md);
+# ignoring it keeps a stray test write from ever landing one in a commit.
+/review-images/
+/coordination/
+
+# Environment
+.env
+.env.*
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+*.swp
+
+# Runner control artifacts and legacy worktrees (new checkouts live in the
+# sibling LienCAM-worktrees directory, outside this repository)
+.worktrees/
+
+# Mission Control runtime state (answers/board/images are queue traffic,
+# not history - durable outcomes get written into WO .md files instead)
+/queue/mc/
+
+# Capture scratch (curated evidence gets copied beside its WO)
+/tools/capture/out/
+
+# Machine-local config (e.g. tools/notify.topic.local - ntfy topics are
+# public-by-name, so the topic never lands in the repo)
+*.local
+.vite-cache/
+
+# Per-order runner/landing logs in .planning (disk only; prune-worktree-logs.py
+# ages them out once their order is archived).
+/.planning/land-*.log
+/.planning/land-*.log.census
+/.planning/dispatch-*.log
+/.planning/build-*.log
+/.planning/gate-*.log
+/.planning/runner-watch-*.log
+/.planning/census-*.log
+
+# The external Codex review dump lives OUTSIDE the repo at
+# the external reference archive/ (1.4 GB); never bring it back.
+/docs/Codex Audit/
+
+# Throwaway dev-server process logs captured in .planning. Kept on disk -
+# deleting them is the operator's call (2026-08-17 overnight caretaker note).
+/.planning/devserver-stdout.log
+/.planning/devserver-stderr.log
+/.planning/runner-watch.out.log
+/.planning/runner-watch.err.log
+
+# Raw full-suite capture output. BASELINE-<date>.md is the evidence of
+# record and stays in git; the multi-megabyte raw logs live on disk only
+# (2026-08-18 Task 1 - they were 12 MB of the pack).
+/.planning/baseline/vitest-*.txt
+/.planning/baseline/lint-*.txt
+/.planning/baseline/tsc-*.txt
+vitest-*.log
+/.planning/baseline/vitest-*.json
+/.planning/baseline/wo394-*.json
+/.planning/baseline/WO-*-before.json
+/.planning/baseline/WO-*-after.json
+/.planning/baseline/wo394-*.log
+/.planning/baseline/build-*.log
+
+# machine bridge build output and the vendor wrapper it is compiled against
+pendant/uccnc-bridge/bin/
+pendant/uccnc-bridge/UC100_wrapper.cs
+/.planning/census-*.json
+src/tests/evidence/WO-439/_last-run/
+/src/tests/evidence/_corpus-scratch/
+
+# machine-specific Claude Code permissions (probe binaries on this mini PC)
+.claude/settings.local.json
+
+# Stray captures at the repo ROOT only - never anything under
+# src/tests/evidence/. A Playwright/corpus run that forgets CORPUS_OUT_DIR
+# drops its PNG here; good-corpus-generated.png sat untracked at the root
+# from 2026-08-20 to 2026-08-22. Evidence has a home; the root is not it.
+/*.png
+
+# WO-960: scratch dirs for the typed-mock baseline recorder and its controls
+# (src/tests/evidence/WO-960/record-mock-baseline.mjs, runtime-evasion-control.mjs)
+.wo960-record/
+.wo960-control/
+
+# Local-model evaluation: per-run seat scratch trees (eval/local-model/run.mjs).
+# The harness recreates these on every run; the RESULTS beside them are committed.
+/eval/local-model/scratch/
+
+# WO-1902: untracked scratch for test captures (src/tests/helpers/evidenceScratch.ts)
+/.test-scratch/
+/dist-pages/
+
+# Rehearsal app snapshots (git-archive copies, ~20k files each) - regenerable; they made every git status crawl (10-03)
+/.planning/rehearsal-*/pin-*/
+/.planning/rehearsal-*/main-*/
+/.planning/rehearsal-*/lcnc/
+/.planning/rehearsal-*/native/
+/.planning/rehearsal-*/snap-*/
+/.planning/rehearsal-*/profile-*/
+/.planning/rehearsal-2026-09-29-evening/probing/
+/.planning/rehearsal-2026-09-29-evening/rotation/

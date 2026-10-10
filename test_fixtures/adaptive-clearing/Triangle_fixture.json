@@ -1,0 +1,54 @@
+{
+  "name": "Sketch1 / Triangle",
+  "description": "Right triangle \u2014 acute corner is a known hard case for linking adjacency. Tool params are defaults \u2014 set toolRadius/stepover to match the reference CAM tool before comparing. Seed is advisory (AC recomputes via findSeed).",
+  "toolRadius": 3.0,
+  "stepover": 1.5,
+  "cellSize": 0.5,
+  "firstLevel": 3.0,
+  "marginRevolutions": 0,
+  "stock": [
+    {
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "x": 77.48078,
+      "y": 0.0
+    },
+    {
+      "x": 77.48078,
+      "y": 96.67789
+    },
+    {
+      "x": 0.0,
+      "y": 96.67789
+    }
+  ],
+  "boundary": [
+    {
+      "x": 72.48078,
+      "y": 5.0
+    },
+    {
+      "x": 72.48078,
+      "y": 91.67789
+    },
+    {
+      "x": 5.0,
+      "y": 91.67789
+    },
+    {
+      "x": 5.0,
+      "y": 60.26443
+    },
+    {
+      "x": 38.74039,
+      "y": 60.26443
+    }
+  ],
+  "islands": [],
+  "seed": {
+    "x": 53.36122,
+    "y": 72.59712
+  }
+}

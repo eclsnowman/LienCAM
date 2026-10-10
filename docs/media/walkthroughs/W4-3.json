@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W4-3.png": {
+      "commit": "1ef15aafb5206efc46bca0dc15de7451d1cfc9b3",
+      "workingTreeDirty": false,
+      "workingTreeScope": [
+        "examples/06-knob-handwheel/knob-handwheel.camproject",
+        "src",
+        "tools/capture/scenes.json"
+      ],
+      "sourceExcludes": [
+        "src/tests"
+      ],
+      "sourceHash": "daddbff1cdb4480efaca22c54fefb7fee8da52847f1a770cc1555bb09065752f",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 1234,
+      "sourceProjectSha256": "98db5c00ebde40cb65d555eb7235806968899fa3c89404b07f99776d2e20eafc",
+      "screenshotBytes": 215185,
+      "screenshotSha256": "ae2fb8c1661a33a45eeb4de5501aa7229f39902074965045f08bfc72000bcd71",
+      "productionEvidence": "src/tests/evidence/WO-2548/finish/simulation-with-vise.png",
+      "completedStock": {
+        "samples": 15853,
+        "maxMm": 0.24982270786425,
+        "p95Mm": 0.0611604402309088,
+        "rmsMm": 0.042893228968015076,
+        "floorMachineMm": 5.114086151123047,
+        "worstSample": {
+          "distanceMm": 0.24982270786425,
+          "stockPoint": [
+            21.220333099365234,
+            1.7475568056106567,
+            16.74729347229004
+          ],
+          "modelPoint": [
+            21.406561946450644,
+            1.9094546938948231,
+            16.786271358930968
+          ]
+        }
+      }
+    }
+  }
+}

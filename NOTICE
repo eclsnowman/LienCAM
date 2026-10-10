@@ -1,0 +1,14 @@
+LienCAM
+Copyright (c) 2026 Eric Lien and LienCAM contributors
+
+LienCAM's own code is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Two folders are licensed differently:
+
+- src/lib/cam/adaptiveClearing2d/engine/ is LGPL-2.1-or-later. It is derived
+  from FreeCAD's Adaptive2d, Copyright (c) 2018 Kresimir Tusek. See the LICENSE
+  and README.md in that folder.
+- pendant/linuxcnc-gateway/ is a separate program licensed GPL-3.0-or-later.
+  See the LICENSE and README.md in that folder.
+
+Third-party components and their licences are listed in THIRD_PARTY_LICENSES.md.

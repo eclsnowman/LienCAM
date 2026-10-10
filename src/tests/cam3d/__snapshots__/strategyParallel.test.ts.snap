@@ -1,0 +1,59 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parallelFinish on wave(100, 317) > determinism: byte-stable IR snapshot (ball d6, stepover 2, angle 0, tol 0.01) > wave-ball6-so2-a0-tol001 1`] = `
+{
+  "fingerprint": "01cb778c0d9a2471",
+  "firstMoves": [
+    {
+      "role": "rapid",
+      "t": "rapid",
+      "x": 19.702215657073005,
+      "y": 0,
+      "z": 25,
+    },
+    {
+      "role": "rapid",
+      "t": "rapid",
+      "x": 19.702215657073005,
+      "y": 0,
+      "z": 16,
+    },
+    {
+      "role": "lead_in",
+      "t": "feed",
+      "x": 19.51219512195122,
+      "y": 0,
+      "z": 15.966494252769369,
+    },
+  ],
+  "lastMove": {
+    "role": "rapid",
+    "t": "rapid",
+    "x": 100,
+    "y": 100,
+    "z": 25,
+  },
+  "meta": {
+    "cutterId": "ball-d6",
+    "params": {
+      "angleDeg": 0,
+      "boundaryRingCount": 0,
+      "clearanceZ": 25,
+      "refinedChords": 4147,
+      "retractZ": 16,
+      "sampleStep": 0.4898979485566356,
+      "stepover": 2,
+      "tolerance": 0.01,
+      "zSeed": 0,
+    },
+    "strategyId": "parallel_finish",
+  },
+  "moveCount": 14765,
+  "roleCounts": {
+    "cut": 14602,
+    "lead_in": 60,
+    "rapid": 3,
+    "stepover": 100,
+  },
+}
+`;

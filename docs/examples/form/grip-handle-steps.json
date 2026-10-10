@@ -1,0 +1,47 @@
+{
+  "part": "grip-handle",
+  "steps": [
+    {
+      "step": 1,
+      "text": "Sketch on XZ: a 26 mm arch, its feet 3 mm below XY where the plate will be."
+    },
+    {
+      "step": 2,
+      "text": "Select the sketch in the tree, click Form. Pipe radius 6 mm, then Pipe: a tube along the sketch."
+    },
+    {
+      "step": 3,
+      "text": "Mirror X keeps the halves the same. Soft radius 22 mm: nearby points follow a move, fading out."
+    },
+    {
+      "step": 4,
+      "text": "Click the top of the arch, drag the Z arrow up 5 mm: a palm swell."
+    },
+    {
+      "step": 5,
+      "text": "Display: Smooth. Name it and Finish."
+    },
+    {
+      "step": 6,
+      "text": "Sketch an 80 x 30 mm rectangle on XY, extrude it 6 mm up, joined to the grip: one solid."
+    },
+    {
+      "step": 7,
+      "text": "Fillet the four plate corners, 5 mm."
+    },
+    {
+      "step": 8,
+      "text": "Offset plane 6 mm up (the plate top), four 5 mm circles on it, extrude-cut through: mounting holes."
+    },
+    {
+      "step": 9,
+      "text": "Left-drag up to orbit underneath: the holes go through. Back over the top, Display Mode: Zebra."
+    }
+  ],
+  "result": {
+    "body": "HOLES",
+    "ok": true,
+    "volume": 23350.30068024372,
+    "faces": 16
+  }
+}

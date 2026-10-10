@@ -1,0 +1,86 @@
+{
+  "name": "Sketch1 / BootL",
+  "description": "Boot / L with thin foot \u2014 mixed wide-body + narrow-arm clearing. Tool params are defaults \u2014 set toolRadius/stepover to match the reference CAM tool before comparing. Seed is advisory (AC recomputes via findSeed).",
+  "toolRadius": 3.0,
+  "stepover": 1.5,
+  "cellSize": 0.5,
+  "firstLevel": 3.0,
+  "marginRevolutions": 0,
+  "stock": [
+    {
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "x": 71.25581,
+      "y": 0.0
+    },
+    {
+      "x": 71.25581,
+      "y": 72.77936
+    },
+    {
+      "x": 0.0,
+      "y": 72.77936
+    }
+  ],
+  "boundary": [
+    {
+      "x": 63.59407,
+      "y": 5.0
+    },
+    {
+      "x": 63.59407,
+      "y": 37.35829
+    },
+    {
+      "x": 44.96604,
+      "y": 37.35829
+    },
+    {
+      "x": 54.62207,
+      "y": 48.3722
+    },
+    {
+      "x": 66.25581,
+      "y": 48.3722
+    },
+    {
+      "x": 66.25581,
+      "y": 58.57409
+    },
+    {
+      "x": 54.62207,
+      "y": 58.57409
+    },
+    {
+      "x": 20.25779,
+      "y": 19.37734
+    },
+    {
+      "x": 20.25779,
+      "y": 39.06521
+    },
+    {
+      "x": 30.10172,
+      "y": 39.06521
+    },
+    {
+      "x": 30.10172,
+      "y": 67.77936
+    },
+    {
+      "x": 5.0,
+      "y": 67.77936
+    },
+    {
+      "x": 5.0,
+      "y": 5.0
+    }
+  ],
+  "islands": [],
+  "seed": {
+    "x": 43.54011,
+    "y": 21.218
+  }
+}

@@ -1,0 +1,3846 @@
+{
+  "schema": 1,
+  "tier": "full",
+  "generatedAt": "2026-10-06T23:05:26.633237Z",
+  "reason": "WO-2647: selectively repin 10 failing full cells; per-cell values and production controls in src/tests/evidence/WO-2647/cells.md. WO-2530 (44c09c207) intentionally refines remaining-stock columns from 0.5 to 0.2 mm; the shared WO-1641 finish classifier now rapids more proven air. The engagement-pocket clearance cell also includes WO-2209 (9d05b10c8), whose earlier improvement was left unrepinned. Bands, safety asserts, timing fields and every other value retained. Prior authority: WO-2475: selectively repin 34 failing finish cells measured through production computeOperationToolpath. WO-2209 (9d05b10c8) cuts every pass from sample 0; WO-2210 (d17fdcc7c, df206992d, 296c2ae92) lowers links and re-entry to proven remaining stock plus standoff. Operator ruling 2026-09-29: \"All three (recommended)\", including \"every pass cut end to end - the half-skipped surface defect\" and \"low re-entry - lift only as high as the material along the link, rapid near the surface, short feed in\". Per-cell historical controls and values: src/tests/evidence/WO-2475/attribution.md. The pre-WO-2209 control reproduces every original deterministic metric exactly. WO-2405 moves no cells in this matrix. All other cells, bands, asserts and timing values retained; rough twin allowances follow Operator ruling 2026-10-03 \"Keep full-clear, record the difference\", not a rough baseline change. Prior rough baseline authority remains WO-2196 (WO-2145/2168/2169; src/tests/evidence/WO-2196/rows.md).",
+  "rows": [
+    {
+      "key": "feature-block-mesh/top/rough-6-flat/bm-flat-6/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-6",
+      "toolDiameterMm": 6,
+      "metrics": {
+        "moves": {
+          "value": 1654,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 1615,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 6959.15103,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 6591.462831,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 367.688199,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 92,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 10,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 82,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 10,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 13,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 109,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 7,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 12.049995,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 1407,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 228,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 16.204691,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 29.552239,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 2.362205,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 175.174283,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 54.402287,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 0.349999,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 2356,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 2309,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 21674.134485,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.511487,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.414714,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 6508.665963,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 335104.328089,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 9,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 7194.3936,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 27948,
+        "cutSamplesOverPart": 26977,
+        "steepInteriorSamplesSkipped": 523
+      }
+    },
+    {
+      "key": "feature-block-mesh/top/finish-3-ball/bm-ball-3/whole",
+      "opType": "parallel_3d",
+      "toolId": "bm-ball-3",
+      "toolDiameterMm": 3,
+      "metrics": {
+        "moves": {
+          "value": 3775,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 3707,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 3618.07775,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 3384.275427,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 276.364111,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 45,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 6,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 39,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 13,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 189,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 79,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 8.032291,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 0,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 168,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 0.507867,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 288,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 2387,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 2407.471931,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 342724.881753,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 76.4706,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0.06582,
+        "minCutMarginMm": -0.06582,
+        "stockToLeaveMm": 0,
+        "gougeToleranceMm": 0.4,
+        "samplesOverPart": 11475,
+        "cutSamplesOverPart": 10525,
+        "steepInteriorSamplesSkipped": 2429
+      }
+    },
+    {
+      "key": "feature-block-step/top/rough-6-flat/bm-flat-6/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-6",
+      "toolDiameterMm": 6,
+      "metrics": {
+        "moves": {
+          "value": 1620,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 1587,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 6905.76357,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 6548.725571,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 357.037998,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 89,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 8,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 81,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 8,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 11,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 107,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 5.249996,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 1388,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 209,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 15.057637,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 27.55418,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 2.362205,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 173.352189,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 73.129395,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 0.349999,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 2356,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 2310,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 21673.334486,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.52015,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.415637,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 6474.068343,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 332208.234192,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 9,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 7,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 6235.2024,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 27776,
+        "cutSamplesOverPart": 26812,
+        "steepInteriorSamplesSkipped": 458
+      }
+    },
+    {
+      "key": "feature-block-step/top/finish-3-ball/bm-ball-3/whole",
+      "opType": "parallel_3d",
+      "toolId": "bm-ball-3",
+      "toolDiameterMm": 3,
+      "metrics": {
+        "moves": {
+          "value": 3759,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 3691,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 3617.769385,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 3383.975952,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 276.356188,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 45,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 6,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 39,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 13,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 189,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 79,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 8.002016,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 0,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 189,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 0.507867,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 288,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 2387,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 2406.998568,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 342689.205021,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 55.0858,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0.064158,
+        "minCutMarginMm": -0.064158,
+        "stockToLeaveMm": 0,
+        "gougeToleranceMm": 0.4,
+        "samplesOverPart": 11461,
+        "cutSamplesOverPart": 10511,
+        "steepInteriorSamplesSkipped": 2439
+      }
+    },
+    {
+      "key": "engagement-pocket/rest-pencil/rough-6-flat/bm-flat-6/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-6",
+      "toolDiameterMm": 6,
+      "metrics": {
+        "moves": {
+          "value": 2262,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 2243,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 6010.103882,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 5662.33386,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 347.770022,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 197,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 192,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 7,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 246,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 506,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 197.580093,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 1299,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 63,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 4.849885,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 4.849885,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 4.849885,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 89.92229,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 89.92229,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 236,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 1,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 2360,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 2122,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 24827.399595,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.417349,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.386938,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 5239.295794,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 296228.080326,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 4,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 3189.1836,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 26667,
+        "cutSamplesOverPart": 25569,
+        "steepInteriorSamplesSkipped": 304
+      }
+    },
+    {
+      "key": "engagement-pocket/rest-pencil/rest-rough-4-flat/bm-flat-4/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-4",
+      "toolDiameterMm": 4,
+      "metrics": {
+        "moves": {
+          "value": 849,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 835,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 348.733986,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 205.744143,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 142.989842,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 23,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 3,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 20,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 3,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 6,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 20,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 735,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 84.745129,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 60,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 639,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 1,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 2360,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 37,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 432.899993,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.273891,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.243104,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 110.885828,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 22897.25116,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 6,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 4,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 4,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 865.2154,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 1686,
+        "cutSamplesOverPart": 1303,
+        "steepInteriorSamplesSkipped": 196
+      }
+    },
+    {
+      "key": "engagement-pocket/rest-pencil/pencil-2-ball/bm-ball-2/whole",
+      "opType": "pencil_3d",
+      "toolId": "bm-ball-2",
+      "toolDiameterMm": 2,
+      "metrics": {
+        "moves": {
+          "value": 23113,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 22980,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 1761.113406,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 1697.951927,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 64.078538,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 168,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 13,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 1586,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 1075,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 67.797738,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 67.797738,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 67.797738,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 1,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 180,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 90,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 2159,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 11.769809,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 2034,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 640.5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 2392.324619,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": null,
+          "reason": "pencil_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": null,
+          "reason": "pencil_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": null,
+          "reason": "pencil_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": null,
+          "reason": "pencil_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": null,
+          "reason": "pencil_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": null,
+          "reason": "pencil_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 259072.155359,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); pencil_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); pencil_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); pencil_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); pencil_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); pencil_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 5072.6608,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0,
+        "stockToLeaveMm": 0,
+        "gougeToleranceMm": 0.4,
+        "samplesOverPart": 20862,
+        "cutSamplesOverPart": 20692,
+        "steepInteriorSamplesSkipped": 3441
+      }
+    },
+    {
+      "key": "engagement-pocket/top/rough-6-flat/bm-flat-6/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-6",
+      "toolDiameterMm": 6,
+      "metrics": {
+        "moves": {
+          "value": 2205,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 2186,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 5586.353829,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 5239.399305,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 346.954524,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 257,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 252,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 7,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 336,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 506,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 197.580093,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 1095,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 48,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 4.383562,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 4.383562,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 4.383562,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 89.923401,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 89.923401,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 236,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 1,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 2360,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 1825,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 21352.499652,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.451964,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.39764,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 4794.321247,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 275071.566618,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 4,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 2976.681,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 24849,
+        "cutSamplesOverPart": 23754,
+        "steepInteriorSamplesSkipped": 304
+      }
+    },
+    {
+      "key": "engagement-pocket/top/finish-3-ball/bm-ball-3/whole",
+      "opType": "parallel_3d",
+      "toolId": "bm-ball-3",
+      "toolDiameterMm": 3,
+      "metrics": {
+        "moves": {
+          "value": 4144,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 3855,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 4842.938142,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 4256.882899,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 620.188249,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 30,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 30,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 61,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 287,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 0,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 46,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 0.274029,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 1364,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 2308.5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 5186.275894,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 432720.952771,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 24.6982,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0.089502,
+        "minCutMarginMm": -0.089502,
+        "stockToLeaveMm": 0,
+        "gougeToleranceMm": 0.3,
+        "samplesOverPart": 13720,
+        "cutSamplesOverPart": 13193,
+        "steepInteriorSamplesSkipped": 4206
+      }
+    },
+    {
+      "key": "stepped-boss/top/rough-6-flat/bm-flat-6/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-6",
+      "toolDiameterMm": 6,
+      "metrics": {
+        "moves": {
+          "value": 224,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 218,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 1168.32854,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 1119.479053,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 48.849487,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 3,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 212,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 13,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 6.132075,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 6.944444,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 5.714286,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 2,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 12.319799,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 7.624391,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 2,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 6,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 1415.04,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 1393.28,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 10849.215734,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.523028,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.501556,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 1117.557484,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 56560.146495,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 2,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 2,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 1630.3585,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 4917,
+        "cutSamplesOverPart": 4846,
+        "steepInteriorSamplesSkipped": 121
+      }
+    },
+    {
+      "key": "stepped-boss/top/finish-3-ball/bm-ball-3/whole",
+      "opType": "parallel_3d",
+      "toolId": "bm-ball-3",
+      "toolDiameterMm": 3,
+      "metrics": {
+        "moves": {
+          "value": 1832,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 1829,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 1591.415456,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 1561.14876,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 30.266696,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 27,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 27,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 55,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 12.327084,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 0,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 55,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": null,
+          "reason": "no non-cutting sample over the part",
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 217.28,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 1287.68,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 416.631489,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 158767.391909,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 13.7439,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0.044533,
+        "minCutMarginMm": -0.044533,
+        "stockToLeaveMm": 0,
+        "gougeToleranceMm": 0.3,
+        "samplesOverPart": 5971,
+        "cutSamplesOverPart": 5971,
+        "steepInteriorSamplesSkipped": 1293
+      }
+    },
+    {
+      "key": "boss-taper-step/top/rough-6-flat/bm-flat-6/whole",
+      "opType": "adaptive_3d",
+      "toolId": "bm-flat-6",
+      "toolDiameterMm": 6,
+      "metrics": {
+        "moves": {
+          "value": 757,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 748,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 4699.606859,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 4587.17484,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 112.432019,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 3,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 3,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 739,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 53,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 7.171854,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 8.370044,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 6.557377,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 133.756958,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 27.327662,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": 5.796187,
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 3339,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 3205.25,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 35631.374426,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": 0.49339,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": 0.412518,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": 0.75,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": 4582.163975,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 230707.926237,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": 6,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": 3,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 16080.5041,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0,
+        "minCutMarginMm": 0.3,
+        "stockToLeaveMm": 0.3,
+        "gougeToleranceMm": 0.05,
+        "samplesOverPart": 20401,
+        "cutSamplesOverPart": 20115,
+        "steepInteriorSamplesSkipped": 162
+      }
+    },
+    {
+      "key": "boss-taper-step/top/finish-3-ball/bm-ball-3/whole",
+      "opType": "parallel_3d",
+      "toolId": "bm-ball-3",
+      "toolDiameterMm": 3,
+      "metrics": {
+        "moves": {
+          "value": 4573,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "cutMoves": {
+          "value": 4567,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flownDistanceMm": {
+          "value": 4483.229473,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutLengthMm": {
+          "value": 4447.97507,
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "rapidDistanceMm": {
+          "value": 35.254403,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "links": {
+          "value": 62,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "liftedLinks": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "keepDownRides": {
+          "value": 61,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "retracts": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "rapidRepositions": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "feedLinkMoves": {
+          "value": 123,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "entryCutMoves": {
+          "value": 2,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "entryCutLengthMm": {
+          "value": 16.907483,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "turns": {
+          "value": 0,
+          "band": {
+            "pct": 0.02,
+            "abs": 2
+          }
+        },
+        "flips": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 2
+          }
+        },
+        "flipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "worstZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "bestZFlipRatePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "scoredZLevels": {
+          "value": 0,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "maxFlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "p95FlipDeg": {
+          "value": 0,
+          "band": {
+            "pct": 0.1,
+            "abs": 1
+          }
+        },
+        "distinctCutZValues": {
+          "value": 296,
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "minLinkClearanceMm": {
+          "value": null,
+          "reason": "no non-cutting sample over the part",
+          "band": {
+            "pct": 0.1,
+            "abs": 0.02
+          }
+        },
+        "uncutAreaMm2": {
+          "value": 155.5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "machinedAreaMm2": {
+          "value": 3346.5,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "removedVolumeMm3": {
+          "value": 1902.238798,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "peakEngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "p95EngagementFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.02
+          }
+        },
+        "engagementCapFraction": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "engagementOverCapLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "engagementOverCapPct": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
+        "measuredCuttingLengthMm": {
+          "value": null,
+          "reason": "parallel_3d declares no engagement cap (BenchmarkStep.engagementCapFraction), and measurePathEngagement replays from the UNCUT stock box with no pre-carved-field entry point, so a later step in a chain cannot be measured against the stock it really cuts.",
+          "band": {
+            "pct": 0.02,
+            "abs": 0.5
+          }
+        },
+        "cutTimeMs": {
+          "value": 448058.348337,
+          "band": {
+            "pct": 0.03,
+            "abs": 200
+          }
+        },
+        "levelCount": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "plannedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "machinedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "skippedRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        },
+        "partialRegions": {
+          "value": null,
+          "reason": "the application publishes region diagnostics only for adaptive rough (OperationDiagnostics.adaptiveRough); parallel_3d publishes none, and the harness measures the application rather than modelling it. Area coverage for this row is carried by uncutAreaMm2 / machinedAreaMm2 / removedVolumeMm3, which ARE measured.",
+          "band": {
+            "pct": 0,
+            "abs": 0
+          }
+        }
+      },
+      "planMs": {
+        "value": 77.1512,
+        "band": {
+          "pct": 0.6,
+          "abs": 400
+        }
+      },
+      "asserts": {
+        "maxGougeMm": 0.067143,
+        "minCutMarginMm": -0.067143,
+        "stockToLeaveMm": 0,
+        "gougeToleranceMm": 0.4,
+        "samplesOverPart": 15405,
+        "cutSamplesOverPart": 15405,
+        "steepInteriorSamplesSkipped": 2792
+      }
+    }
+  ]
+}

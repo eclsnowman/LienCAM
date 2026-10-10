@@ -1,0 +1,41 @@
+name: Request a feature
+description: Suggest something LienCAM should do. It is voted on in Discussions.
+title: "[Idea]: "
+labels: ["idea", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Ideas are collected and voted on in Discussions > Ideas, and the project owners
+        pick from the most wanted ones as time allows; no schedule is promised. Design stays with
+        the owners, so please describe the problem you have, not only the button you want.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do that LienCAM makes hard or impossible?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What do you do today instead?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Import and model, Toolpaths and operations, Simulation, Post and G-code, Machine control, Probing and setup, Help and docs, Other]
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched Discussions > Ideas and this is not already there (I will vote there instead).
+          required: true

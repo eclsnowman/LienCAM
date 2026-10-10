@@ -1,0 +1,103 @@
+{
+  "normalization": "CRLF and CR are normalized to LF before exact snippet comparison",
+  "mutations": [
+    {
+      "id": "M1-project-append",
+      "file": "src/lib/sketch/sketcher/toolController.ts",
+      "namedTest": "face entry is blank until explicit Project / Use, then the real projected profile extrudes",
+      "preimage": "    beforeMutate?.()\n    doc.append({ entities, constraints: commit.constraints }, [])\n    const linked = entities.some(",
+      "mutation": "    beforeMutate?.()\n    const linked = entities.some("
+    },
+    {
+      "id": "M2-construction-default",
+      "file": "src/lib/sketch/sketcher/toolController.ts",
+      "namedTest": "face entry is blank until explicit Project / Use, then the real projected profile extrudes",
+      "preimage": "    const built = buildProjectCommit(candidate, s.constructionMode)",
+      "mutation": "    const built = buildProjectCommit(candidate, true)"
+    },
+    {
+      "id": "M3-drop-inner-loops",
+      "file": "src/components/model3d/workbench/faceBoundary.ts",
+      "namedTest": "face projection commit preserves the inner loop as a profile void",
+      "preimage": "  return { ok: true, loops: withArea.map((entry) => entry.loop) }",
+      "mutation": "  return { ok: true, loops: withArea.slice(0, 1).map((entry) => entry.loop) }"
+    },
+    {
+      "id": "M4-flatten-preview",
+      "file": "src/lib/sketch/sketcher/overlayPainter.ts",
+      "namedTest": "renders each disconnected path as its own line with no connector segment",
+      "preimage": "    const drawable = paths.filter((path) => path.length >= 2)",
+      "mutation": "    const drawable = [paths.flat()].filter((path) => path.length >= 2)"
+    },
+    {
+      "id": "M5-remove-depth-check",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "a back edge behind the nearest face is occluded",
+      "preimage": "  const hit = edgeHit !== null && (faceHit === null || edgeHit.distance <= faceHit.distance + depthTolerance)",
+      "mutation": "  const hit = edgeHit !== null"
+    },
+    {
+      "id": "M6-live-body",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "live-body independently excludes its hit",
+      "preimage": "    case 'live-body': return !visibility.liveBodyIds.has(bodyId)",
+      "mutation": "    case 'live-body': return false"
+    },
+    {
+      "id": "M6-tree-eye",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "tree-eye independently excludes its hit",
+      "preimage": "    case 'tree-eye': return visibility.treeVisible.get(bodyId) === false",
+      "mutation": "    case 'tree-eye': return false"
+    },
+    {
+      "id": "M6-hidden-body",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "hidden-body independently excludes its hit",
+      "preimage": "    case 'hidden-body': return visibility.hiddenBodyIds.has(bodyId)",
+      "mutation": "    case 'hidden-body': return false"
+    },
+    {
+      "id": "M6-isolate-body",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "isolate-body independently excludes its hit",
+      "preimage": "    case 'isolate-body': return visibility.isolate !== null && !visibility.isolate.bodyIds.has(bodyId)",
+      "mutation": "    case 'isolate-body': return false"
+    },
+    {
+      "id": "M6-hidden-face",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "hidden-face independently excludes its hit",
+      "preimage": "  if (source !== 'hidden-face' && source !== 'isolate-face') return false",
+      "mutation": "  if (source !== 'isolate-face') return false"
+    },
+    {
+      "id": "M6-isolate-face",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "isolate-face independently excludes its hit",
+      "preimage": "  if (source !== 'hidden-face' && source !== 'isolate-face') return false",
+      "mutation": "  if (source !== 'hidden-face') return false"
+    },
+    {
+      "id": "M6-edge-adjacency-only",
+      "file": "src/components/model3d/workbench/projectGeometry.ts",
+      "namedTest": "hidden-face x all-excluded produces the required edge visibility outcome",
+      "preimage": "  return adjacent.every(faceExcluded)",
+      "mutation": "  return false"
+    },
+    {
+      "id": "M7-restore-fresh-seed",
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "namedTest": "face entry is blank until explicit Project / Use, then the real projected profile extrudes",
+      "preimage": "        layerId: `face:${faceId}`, sizeHintMm: radiusMm,",
+      "mutation": "        layerId: `face:${faceId}`, seed: faceBoundarySeed(body, faceId, frame, rawSketchId).seed, sizeHintMm: radiusMm,"
+    },
+    {
+      "id": "M8-remove-nonempty-ref-guard",
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "namedTest": "undoing the owning feature degrades the datum (badge + Reattach affordance); reattach + regen heals it",
+      "preimage": "        const priorRefs = payload.externalRefs ?? []\n        if (priorRefs.length === 0) continue\n        const rawId = sketch3dIdFromNodeId(sid) ?? sketch.id",
+      "mutation": "        const priorRefs = payload.externalRefs ?? []\n        const rawId = sketch3dIdFromNodeId(sid) ?? sketch.id"
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+[
+  {
+    "id": "starter-inch-1",
+    "name": "1/8 inch flat end mill",
+    "type": "flat_end_mill",
+    "diameter": 3.175,
+    "shankDiameter": 6.35,
+    "overallLength": 50.8,
+    "fluteLength": 12,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 1,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 450,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 1.27,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  },
+  {
+    "id": "starter-inch-2",
+    "name": "1/4 inch flat end mill",
+    "type": "flat_end_mill",
+    "diameter": 6.35,
+    "shankDiameter": 6.35,
+    "overallLength": 50.8,
+    "fluteLength": 18,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 2,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 800,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 2.54,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  },
+  {
+    "id": "starter-inch-3",
+    "name": "1/8 inch drill",
+    "type": "drill",
+    "diameter": 3.175,
+    "shankDiameter": 6.35,
+    "overallLength": 50.8,
+    "fluteLength": 20,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "hss",
+    "coating": "none",
+    "toolNumber": 3,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 180,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 1.27,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  },
+  {
+    "id": "starter-inch-4",
+    "name": "1/8 inch single-point thread mill",
+    "type": "thread_mill",
+    "diameter": 3.175,
+    "shankDiameter": 6.35,
+    "overallLength": 50.8,
+    "fluteLength": 6,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "neckDiameter": 2.4,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 1,
+    "threadPitch": 1.27,
+    "neckTransitionAngleDeg": 45,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 4,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 300,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 1.27,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  },
+  {
+    "id": "starter-inch-5",
+    "name": "1/4 inch 60 deg V-bit",
+    "type": "v_bit",
+    "diameter": 6.35,
+    "shankDiameter": 6.35,
+    "overallLength": 50.8,
+    "fluteLength": 12,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 30,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 5,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 500,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 2.54,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  },
+  {
+    "id": "starter-inch-6",
+    "name": "1/4 inch 90 deg chamfer mill",
+    "type": "chamfer_mill",
+    "diameter": 6.35,
+    "shankDiameter": 6.35,
+    "overallLength": 50.8,
+    "fluteLength": 12,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 45,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 6,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 400,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 2.54,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  }
+]

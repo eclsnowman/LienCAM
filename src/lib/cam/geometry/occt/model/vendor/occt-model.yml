@@ -1,0 +1,87 @@
+# Custom opencascade.js build for the B-rep MODEL kernel (ADR 0018 D1).
+# Second module alongside vendor/occt-fillet.yml (toolpath worker); this one loads
+# lazily in the dedicated model worker and carries:
+#   STEP import + shape healing + tessellation + topology queries + surface
+#   classification (planar/cylindrical) + exact planar sections + bbox/mass props.
+# Pinned image: donalffons/opencascade.js:2.0.0-beta.b5ff984 (single-threaded).
+# embind gotchas (see ../../vendor/README.md): base classes must be listed
+# explicitly (full inheritance chains); ocjs does not support C++ default
+# arguments, so Message_ProgressRange must be bound to call TransferRoots /
+# Perform / Build from JS.
+mainBuild:
+  name: occt-model.js
+  bindings:
+    # --- STEP import ---
+    - symbol: STEPControl_Reader
+    - symbol: XSControl_Reader             # base of STEPControl_Reader
+    - symbol: IFSelect_ReturnStatus        # enum: ReadFile/TransferRoots status
+    - symbol: Message_ProgressRange        # required arg (no default-arg support) for TransferRoots/Perform/Build
+    # --- Healing ---
+    - symbol: ShapeFix_Shape
+    - symbol: ShapeFix_Root                # base of ShapeFix_Shape
+    # --- Tessellation ---
+    - symbol: BRepMesh_IncrementalMesh
+    - symbol: BRepMesh_DiscretRoot         # base of BRepMesh_IncrementalMesh
+    - symbol: BRep_Tool
+    - symbol: Poly_Triangulation
+    - symbol: Handle_Poly_Triangulation    # BRep_Tool::Triangulation returns the handle
+    - symbol: Poly_Array1OfTriangle
+    - symbol: Poly_Triangle
+    - symbol: TopLoc_Location
+    - symbol: TColgp_Array1OfPnt
+    # --- Edge discretization (BRepAdaptor route proven in occt-fillet.yml) ---
+    - symbol: GCPnts_TangentialDeflection
+    - symbol: BRepAdaptor_Curve
+    - symbol: Adaptor3d_Curve              # base of BRepAdaptor_Curve
+    - symbol: Standard_Transient           # chain root (Adaptor3d_*, Poly_Triangulation, ShapeFix_*, BRepMesh_*)
+    # --- Topology ---
+    - symbol: TopExp
+    - symbol: TopExp_Explorer
+    - symbol: TopTools_IndexedMapOfShape   # stable subshape identity (ADR 0018 D3)
+    - symbol: TopAbs_ShapeEnum             # enum
+    - symbol: TopAbs_Orientation           # enum
+    - symbol: TopoDS                       # static downcasts (TopoDS::Face etc.)
+    - symbol: TopoDS_Shape
+    - symbol: TopoDS_Face
+    - symbol: TopoDS_Edge
+    - symbol: TopoDS_Wire
+    - symbol: TopoDS_Shell
+    - symbol: TopoDS_Solid
+    - symbol: TopoDS_Compound
+    - symbol: TopoDS_Vertex
+    - symbol: BRepTools                    # OuterWire
+    # --- Surface queries (planarity D5, cylinder = hole detection) ---
+    - symbol: BRepAdaptor_Surface
+    - symbol: Adaptor3d_Surface            # base of BRepAdaptor_Surface
+    - symbol: GeomAbs_SurfaceType          # enum
+    - symbol: GeomAbs_CurveType            # enum
+    - symbol: gp_Pln
+    - symbol: gp_Cylinder
+    # --- Planar sections ---
+    - symbol: BRepAlgoAPI_Section
+    - symbol: BRepAlgoAPI_BooleanOperation # base chain of BRepAlgoAPI_Section ...
+    - symbol: BRepAlgoAPI_BuilderAlgo
+    - symbol: BRepAlgoAPI_Algo
+    - symbol: BRepBuilderAPI_MakeShape
+    - symbol: BRepBuilderAPI_Command       # ... down to the chain root
+    # --- gp / misc ---
+    - symbol: gp_Pnt
+    - symbol: gp_Dir
+    - symbol: gp_Vec
+    - symbol: gp_Ax1
+    - symbol: gp_Ax2
+    - symbol: gp_Ax3
+    - symbol: gp_Trsf
+    - symbol: gp_Circ
+    - symbol: Bnd_Box
+    - symbol: BRepBndLib
+    - symbol: BRepGProp
+    - symbol: GProp_GProps
+  emccFlags:
+    - -O3
+    - -fexceptions                         # ADR 0018: NOT -fwasm-exceptions (conflicts with OCCT setjmp usage)
+    - -sEXPORT_ES6=1
+    - -sUSE_ES6_IMPORT_META=0
+    - -sEXPORTED_RUNTIME_METHODS=['FS']    # MEMFS access: JS writes the STEP bytes, ReadFile takes the MEMFS path
+    - -sALLOW_MEMORY_GROWTH=1
+    - -sEXPORT_NAME='occtModel'

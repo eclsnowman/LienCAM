@@ -1,0 +1,240 @@
+/* Relief palette and height map (relief mode inside the Model screen). Tokens only - no raw colours. */
+
+.relief-palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+}
+
+.relief-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.relief-section-title .relief-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.relief-section-title:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.relief-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.relief-row-label {
+  width: 4.6rem;
+  color: var(--text-muted);
+}
+
+.relief-unit,
+.relief-hint {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.relief-image-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.relief-thumb {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.relief-image-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.relief-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relief-open {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.relief-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+}
+
+.relief-slider {
+  flex: 1;
+  min-width: 6rem;
+  accent-color: var(--accent);
+}
+
+.relief-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.relief-seg button {
+  padding: 1px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.relief-seg button + button {
+  border-left: 1px solid var(--border);
+}
+
+.relief-seg button.active {
+  background: var(--accent);
+  color: var(--text-on-accent, var(--text-primary));
+}
+
+.relief-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.relief-notice { color: var(--text-secondary); }
+
+/* the height map: a foldable section at the top of the docked Relief column (it floated over the view's right) */
+.relief-map-group {
+  margin-bottom: var(--space-2);
+}
+
+.relief-map-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 0 0 var(--space-1);
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+
+.relief-map-toggle:hover {
+  color: var(--text-primary);
+}
+
+.relief-map-views {
+  align-self: flex-start;
+}
+
+.relief-map-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.relief-map {
+  display: block;
+  width: 260px;
+  border: 1px solid var(--border);
+  background: var(--surface-input);
+}
+
+.relief-section {
+  display: block;
+  width: 260px;
+  height: 64px;
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  --relief-section-fill: var(--accent);
+  --relief-section-line: var(--text-secondary);
+}
+
+.relief-section-caption {
+  margin-top: var(--space-1);
+}
+
+/* WO-2174: the palette grew (adjustments, step-downs) - its body scrolls inside the viewport */
+.relief-palette-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.relief-palette-shell .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.relief-histogram {
+  display: block;
+  width: 288px;
+  height: 44px;
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  --relief-hist-fill: var(--text-muted);
+}
+
+.relief-row-label-inline {
+  width: auto;
+  margin-left: var(--space-2);
+}
+
+/* the map's views sit in a row of their own above the map (five of them do not fit beside the title) */
+.relief-map-views {
+  align-self: stretch;
+  margin-left: 0;
+}
+
+.relief-map-views button {
+  flex: 1;
+  padding: 1px 4px;
+}
+
+/* the adjustment sliders leave room for their number and unit on one line */
+.relief-slider-compact {
+  min-width: 3rem;
+}

@@ -1,0 +1,10 @@
+[capture] starting branch server at http://127.0.0.1:4293/ (--strictPort)
+[capture:vite]
+  VITE v8.2.0  ready in 596 ms
+
+[capture:vite]   -> Local:   http://127.0.0.1:4293/
+[capture] branch server answered at http://127.0.0.1:4293/
+[capture] wrote initial.png (15917 bytes, sha256 1626934a081acf9aaa3811ffab94f1599f2cd753d393b280b372579ef2c4a16f)
+[proof] passing predicate wrote initial.png: 15917 bytes
+[capture] branch server stopped at http://127.0.0.1:4293/
+PROCESS EXIT CODE: 0

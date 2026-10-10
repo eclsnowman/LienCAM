@@ -1,0 +1,109 @@
+/*
+ * WO-1706 - MacroEditor's own stylesheet. Reuses the modal / control-actions
+ * rules app.css already ships (same look as MachineActionsModal's custom
+ * button editor); these are only the rules new to this component - the list
+ * layout, the M-code conflict banner, and the API reference beside the body.
+ */
+
+.macro-editor-modal {
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.macro-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.macro-editor-conflicts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-danger);
+  font-size: var(--font-size-sm);
+}
+
+.macro-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.macro-editor-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.macro-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.macro-editor-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.macro-editor-row .control-actions-default {
+  flex: 0 0 auto;
+  padding-top: 0;
+}
+
+.macro-editor-row .control-actions-rowbtns {
+  flex: 0 0 auto;
+}
+
+.macro-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.macro-editor-name-input {
+  flex: 1 1 auto;
+}
+
+.macro-editor-mcode-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.macro-editor-mcode-input {
+  width: 5em;
+}
+
+.macro-editor-code {
+  width: 100%;
+  min-height: 10em;
+  resize: vertical;
+}
+
+.macro-editor-api {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.macro-editor-api ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.macro-editor-item-new {
+  border-style: dashed;
+}

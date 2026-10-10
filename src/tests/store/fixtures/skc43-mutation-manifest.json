@@ -1,0 +1,54 @@
+{
+  "normalization": "CRLF and CR are normalized to LF before exact snippet comparison",
+  "mutations": [
+    {
+      "id": "M1-redo-no-op",
+      "file": "src/store/index.ts",
+      "namedTest": "redo restores the exact pre-undo project and sketch snapshots",
+      "preimage": "      redo: () => restoreSketchFromHistorySeam(set, get, 'redo'),",
+      "mutation": "      redo: () => {},"
+    },
+    {
+      "id": "M2-keep-redo-after-edit",
+      "file": "src/store/index.ts",
+      "namedTest": "a fresh edit clears the redo branch for project and sketch",
+      "preimage": "          projectFuture: [],\n          sketchFuture: [],",
+      "mutation": ""
+    },
+    {
+      "id": "M3-drop-sketch-restore",
+      "file": "src/store/index.ts",
+      "namedTest": "redo keeps interleaved project and sketch edits in lockstep",
+      "preimage": "    : {\n        project: restoredProject,\n        activeSketch: restoredSketch,\n        projectHistory: [...s.projectHistory.slice(-HISTORY_KEEP), s.project],\n        sketchHistory: [...s.sketchHistory.slice(-HISTORY_KEEP), s.activeSketch],\n        projectFuture: s.projectFuture.slice(0, -1),\n        sketchFuture: s.sketchFuture.slice(0, -1),\n        canUndo: true,\n        canRedo: s.projectFuture.length > 1,\n        workspace: restoredWorkspace,\n        activeModelItemId: restoredActiveModelItemId,\n        viewportRefreshTrigger: s.viewportRefreshTrigger + (projectChanged ? 1 : 0),\n      })",
+      "mutation": "    : {\n        project: restoredProject,\n        activeSketch: s.activeSketch,\n        projectHistory: [...s.projectHistory.slice(-HISTORY_KEEP), s.project],\n        sketchHistory: [...s.sketchHistory.slice(-HISTORY_KEEP), s.activeSketch],\n        projectFuture: s.projectFuture.slice(0, -1),\n        sketchFuture: s.sketchFuture.slice(0, -1),\n        canUndo: true,\n        canRedo: s.projectFuture.length > 1,\n        workspace: restoredWorkspace,\n        activeModelItemId: restoredActiveModelItemId,\n        viewportRefreshTrigger: s.viewportRefreshTrigger + (projectChanged ? 1 : 0),\n      })"
+    },
+    {
+      "id": "M4-drop-default-prevented-guard",
+      "file": "src/components/toolbar/TopToolbar.tsx",
+      "namedTest": "defaultPrevented redo chord is ignored while unclaimed Ctrl+Shift+Z is handled",
+      "preimage": "      if (e.defaultPrevented) return",
+      "mutation": ""
+    },
+    {
+      "id": "M5-construction-button-no-op",
+      "file": "src/components/panels/sketch/SketchToolbox.tsx",
+      "namedTest": "Construction selection action surfaces its entity flip in the notice",
+      "preimage": "                          onClick={toggleSketchConstruction}",
+      "mutation": "                          onClick={() => {}}"
+    },
+    {
+      "id": "M6-static-workbench-finish-title",
+      "file": "src/components/model3d/workbench/WorkbenchToolRail.tsx",
+      "namedTest": "workbench Finish uses the CAM state-aware tooltip for filled and empty sketches",
+      "preimage": "                hasEntities={sketch !== null && sketchHasUserContent(sketch)}",
+      "mutation": "                hasEntities={false}"
+    },
+    {
+      "id": "M7-fork-workbench-glyph-toggle",
+      "file": "src/components/model3d/workbench/WorkbenchToolRail.tsx",
+      "namedTest": "both sketchers render the shared glyph-toggle component and hit target",
+      "preimage": "              <RailSectionHeader title=\"Constraints\" right={<GlyphToggle />} sectionId=\"sketch-constraints\" collapsed={layout.isCollapsed('sketch-constraints')} onToggle={() => layout.toggleSection('sketch-constraints')} />",
+      "mutation": "              <RailSectionHeader title=\"Constraints\" sectionId=\"sketch-constraints\" collapsed={layout.isCollapsed('sketch-constraints')} onToggle={() => layout.toggleSection('sketch-constraints')} />"
+    }
+  ]
+}

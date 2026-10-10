@@ -1,0 +1,41 @@
+{
+  "format": "liencam-board-pins",
+  "schemaVersion": 1,
+  "name": "UC100",
+  "deviceType": 1,
+  "source": {
+    "document": "UC100 USB CNC motion controller user guide",
+    "pages": [7, 8],
+    "url": "https://www.cncdrive.com/MC/UC100%20datasheet/UC100%20users%20guide.pdf",
+    "apiDocument": "UC100API/UC100_wrapper.cs, version 2.096",
+    "apiUrl": "https://www.cncdrive.com/MC/UC_API/UC100API.zip",
+    "retrieved": "2026-09-20"
+  },
+  "documentedLimits": {
+    "axes": 6,
+    "maximumStepFrequencyHz": 100000,
+    "digitalOutputs": 12,
+    "digitalInputs": 5,
+    "outputCurrentMilliampMax": 20,
+    "inputPullupOhms": 4700
+  },
+  "pins": [
+    { "port": 1, "pin": 1, "ucPin": 1, "direction": "output" },
+    { "port": 1, "pin": 2, "ucPin": 2, "direction": "output" },
+    { "port": 1, "pin": 3, "ucPin": 3, "direction": "output" },
+    { "port": 1, "pin": 4, "ucPin": 4, "direction": "output" },
+    { "port": 1, "pin": 5, "ucPin": 5, "direction": "output" },
+    { "port": 1, "pin": 6, "ucPin": 6, "direction": "output" },
+    { "port": 1, "pin": 7, "ucPin": 7, "direction": "output" },
+    { "port": 1, "pin": 8, "ucPin": 8, "direction": "output" },
+    { "port": 1, "pin": 9, "ucPin": 9, "direction": "output" },
+    { "port": 1, "pin": 10, "ucPin": 10, "direction": "input" },
+    { "port": 1, "pin": 11, "ucPin": 11, "direction": "input" },
+    { "port": 1, "pin": 12, "ucPin": 12, "direction": "input" },
+    { "port": 1, "pin": 13, "ucPin": 13, "direction": "input" },
+    { "port": 1, "pin": 14, "ucPin": 14, "direction": "output" },
+    { "port": 1, "pin": 15, "ucPin": 15, "direction": "input" },
+    { "port": 1, "pin": 16, "ucPin": 16, "direction": "output" },
+    { "port": 1, "pin": 17, "ucPin": 17, "direction": "output" }
+  ]
+}

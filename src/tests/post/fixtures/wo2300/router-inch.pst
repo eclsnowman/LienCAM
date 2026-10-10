@@ -1,0 +1,19 @@
+# Hand-written manual-change radius fixture.
+# Post Name : WO-2300 Mastercam Inch
+met_tool : 0
+omitseq : yes
+arcoutput : 1
+fs2 2 0.5 0.4
+fs2 15 0.3 0.2
+fmt X 2 xabs
+fmt F 15 feed
+pheader
+  pbld, n$, "; PST INCH HEADER", e$
+  pbld, n$, "G90", "G20", e$
+ptlchg$
+  pbld, n$, "M0", e$
+peof$
+  pbld, n$, "M5", e$
+  pbld, n$, "M9", e$
+  pbld, n$, "; PST INCH FOOTER", e$
+  pbld, n$, "M30", e$

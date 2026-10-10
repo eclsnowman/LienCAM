@@ -1,0 +1,126 @@
+{
+  "schema": "ac-boundaries",
+  "name": "Sketch1 / Boomerang",
+  "source": "Boomerang_fixture.json",
+  "description": "L / boomerang ('7') — long thin arm tests narrow-channel ring termination. Tool params are defaults — set toolRadius/stepover to match the reference CAM tool before comparing. Seed is advisory (AC recomputes via findSeed).",
+  "params": {
+    "toolDiameter": 4,
+    "toolRadius": 2,
+    "stockToLeave": 0,
+    "offsetDistance": 2,
+    "arcTolerance": 0.01
+  },
+  "stock": [
+    {
+      "x": 0,
+      "y": 0
+    },
+    {
+      "x": 87.70669,
+      "y": 0
+    },
+    {
+      "x": 87.70669,
+      "y": 131.37906
+    },
+    {
+      "x": 0,
+      "y": 131.37906
+    }
+  ],
+  "pockets": [
+    {
+      "boundary": [
+        {
+          "x": 82.70669,
+          "y": 126.37906
+        },
+        {
+          "x": 5,
+          "y": 126.37906
+        },
+        {
+          "x": 5,
+          "y": 79.39362
+        },
+        {
+          "x": 51.38306,
+          "y": 79.39362
+        },
+        {
+          "x": 51.38306,
+          "y": 5
+        },
+        {
+          "x": 82.70669,
+          "y": 5
+        }
+      ],
+      "islands": [],
+      "offset": [
+        {
+          "isHole": false,
+          "area": 5201.89903,
+          "pts": [
+            {
+              "x": 80.7067,
+              "y": 7
+            },
+            {
+              "x": 80.7067,
+              "y": 124.3791
+            },
+            {
+              "x": 7,
+              "y": 124.3791
+            },
+            {
+              "x": 7,
+              "y": 81.3936
+            },
+            {
+              "x": 51.3831,
+              "y": 81.3936
+            },
+            {
+              "x": 51.7806,
+              "y": 81.3537
+            },
+            {
+              "x": 52.1622,
+              "y": 81.2356
+            },
+            {
+              "x": 52.5128,
+              "y": 81.044
+            },
+            {
+              "x": 52.8183,
+              "y": 80.7865
+            },
+            {
+              "x": 53.0665,
+              "y": 80.4735
+            },
+            {
+              "x": 53.2475,
+              "y": 80.1174
+            },
+            {
+              "x": 53.3542,
+              "y": 79.7324
+            },
+            {
+              "x": 53.3831,
+              "y": 79.3936
+            },
+            {
+              "x": 53.3831,
+              "y": 7
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "schema": "ac-boundaries",
+  "name": "Sketch1 / Bar",
+  "source": "Bar_fixture.json",
+  "description": "Tall rectangle — simple convex baseline (clean spiral, sanity check). Tool params are defaults — set toolRadius/stepover to match the reference CAM tool before comparing. Seed is advisory (AC recomputes via findSeed).",
+  "params": {
+    "toolDiameter": 4,
+    "toolRadius": 2,
+    "stockToLeave": 0,
+    "offsetDistance": 2,
+    "arcTolerance": 0.01
+  },
+  "stock": [
+    {
+      "x": 0,
+      "y": 0
+    },
+    {
+      "x": 36.39953,
+      "y": 0
+    },
+    {
+      "x": 36.39953,
+      "y": 77.93049
+    },
+    {
+      "x": 0,
+      "y": 77.93049
+    }
+  ],
+  "pockets": [
+    {
+      "boundary": [
+        {
+          "x": 31.39953,
+          "y": 72.93049
+        },
+        {
+          "x": 5,
+          "y": 72.93049
+        },
+        {
+          "x": 5,
+          "y": 5
+        },
+        {
+          "x": 31.39953,
+          "y": 5
+        }
+      ],
+      "islands": [],
+      "offset": [
+        {
+          "isHole": false,
+          "area": 1432.01123,
+          "pts": [
+            {
+              "x": 29.3995,
+              "y": 7
+            },
+            {
+              "x": 29.3995,
+              "y": 70.9305
+            },
+            {
+              "x": 7,
+              "y": 70.9305
+            },
+            {
+              "x": 7,
+              "y": 7
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

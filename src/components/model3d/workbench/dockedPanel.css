@@ -1,0 +1,87 @@
+/* A property palette docked beside the tool rail (DockedPanel.tsx): .panel-right gives the column. Tokens only. */
+
+.docked-panel .panel-header {
+  gap: var(--space-1);
+}
+
+.docked-panel .panel-header .panel-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docked-panel-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.docked-panel-body {
+  flex: 1;
+  min-height: 0;
+  /* scrolls only when its rows are taller than the panel (a small screen, a long palette); the bar is wide and light
+     enough to see on the dark panel (the app's 5 px dark thumb read as no scrollbar at all), and the gutter is kept
+     so the rows do not shift when it comes and goes */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+}
+
+.docked-panel-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.docked-panel-body::-webkit-scrollbar-track {
+  background: var(--bg-panel-alt);
+}
+
+.docked-panel-body::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border: 2px solid var(--bg-panel-alt);
+  border-radius: 5px;
+}
+
+.docked-panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.docked-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* folded: a slim strip at the side; the view has its whole width back */
+.docked-panel.is-folded {
+  width: 32px;
+  min-width: 32px;
+}
+
+.docked-panel-unfold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--space-2) 0;
+  background: var(--bg-panel-alt);
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.docked-panel-unfold:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.docked-panel-strip-title {
+  writing-mode: vertical-rl;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}

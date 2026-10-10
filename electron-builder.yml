@@ -1,0 +1,78 @@
+appId: com.liencam.desktop
+productName: LienCAM
+copyright: Copyright (c) LienCAM contributors
+
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - electron/main.cjs
+  - electron/preload.cjs
+  - package.json
+  # WO-2334: the app runs from the bundled dist/ and loads nothing from
+  # node_modules, so leave out native LGPL binaries it never uses: OpenCAMLib's
+  # Node builds (the app bundles its browser build) and sharp / libvips, which
+  # the npm closure can reach through manifold-3d's glTF tooling.
+  - "!**/node_modules/@opencamlib/opencamlib/build/**"
+  - "!**/node_modules/sharp/**"
+  - "!**/node_modules/@img/**"
+
+extraResources:
+  # WO-2334: the licence, the third-party licences and the source offer for
+  # our patched OCCT, as plain files in resources/ (dist/ carries them too).
+  - from: LICENSE
+    to: LICENSE
+  - from: THIRD_PARTY_LICENSES.md
+    to: THIRD_PARTY_LICENSES.md
+  - from: NOTICE-GEO9.md
+    to: NOTICE-GEO9.md
+  - from: patches
+    to: patches
+  - from: pendant
+    to: pendant
+    filter:
+      - "**/*"
+      - "!uccnc-bridge/bin/**/*"
+      - "!uccnc-bridge/**/*.exe"
+      - "!uccnc-bridge/**/*.dll"
+  # WO-2407: preserve the checkout-relative theme path used by the phone server.
+  # Copy the canonical tokens; do not maintain a separate pendant theme.
+  - from: src/theme/tokens.css
+    to: src/theme/tokens.css
+
+asar: true
+npmRebuild: false
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+win:
+  icon: build/icons/icon.ico
+  target:
+    - nsis
+    - portable
+
+nsis:
+  artifactName: "${productName}-${version}-${os}-${arch}-setup.${ext}"
+  oneClick: false
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LienCAM
+
+portable:
+  artifactName: "${productName}-${version}-${os}-${arch}-portable.${ext}"
+
+mac:
+  icon: build/icons/icon.icns
+  target:
+    - dmg
+    - zip
+  category: public.app-category.productivity
+
+linux:
+  icon: build/icons/png
+  target:
+    - AppImage
+    - tar.gz
+  category: Engineering
+  executableName: liencam

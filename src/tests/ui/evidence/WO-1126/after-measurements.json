@@ -1,0 +1,74 @@
+{
+  "label": "after",
+  "screenshot": "after-right-rail-1680x900.png",
+  "bytes": 50847,
+  "sha256": "826434f50a02d3237fd084405c7b93bf39559d85682c46595e7d21ee38ee75f0",
+  "sourceProvenance": {
+    "commit": "c6f90d56b0a6fc678199b1e8644f6686fc4bf9c2",
+    "workingTreeDirty": true,
+    "workingTreeScope": [
+      "src/components/machine",
+      "src/styles/app.css",
+      "src/theme/tokens.css"
+    ],
+    "sourceExcludes": [],
+    "sourceHash": "30f41dedff99f5d04a30db0cf1d303efc8c73523f00230da439ad37e23e8ad8a",
+    "sourceHashAlgorithm": "sha256-path-and-content-v1",
+    "sourceFileCount": 32
+  },
+  "pageErrors": [],
+  "viewport": {
+    "width": 1680,
+    "height": 900
+  },
+  "tokens": {
+    "identity": "#4a90d9",
+    "identityLight": "#7ec0ff",
+    "live": "#00e5ff",
+    "surfaceHover": "#1e2736"
+  },
+  "controls": {
+    "jogStep": {
+      "selector": ".control-jog-step-readout",
+      "text": "1 mm",
+      "color": "#7ec0ff",
+      "background": "#111418",
+      "border": "#2d3748"
+    },
+    "rapid100": {
+      "selector": "[data-testid=\"control-ovr-rapid-100\"]",
+      "text": "100%",
+      "color": "#7ec0ff",
+      "background": "#1e2736",
+      "border": "#4a90d9"
+    },
+    "overrideInput": {
+      "selector": "[data-testid=\"control-ovr-feed\"]",
+      "text": "",
+      "color": "#4a90d9",
+      "background": "#000000",
+      "border": "#4a90d9"
+    },
+    "spindleOff": {
+      "selector": "[data-testid=\"control-spindle-off\"]",
+      "text": "Off",
+      "color": "#7ec0ff",
+      "background": "#1c2230",
+      "border": "#4a90d9"
+    },
+    "activeWcs": {
+      "selector": "[data-testid=\"control-active-wcs\"]",
+      "text": "G54",
+      "color": "#7ec0ff",
+      "background": null,
+      "border": "#000000"
+    }
+  },
+  "panels": [
+    "Jog",
+    "Overrides",
+    "Spindle / Coolant",
+    "Macros"
+  ],
+  "controlTabActive": true
+}

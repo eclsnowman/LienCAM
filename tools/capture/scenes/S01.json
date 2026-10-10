@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "id": "S01",
+  "name": "hero-loop",
+  "project": "examples/05-name-sign/name-sign.camproject",
+  "baselineNote": "Architect re-shoot 4: name-sign lettering with production translucent toolpath reveal, stock-opacity fade and smooth top-to-three-quarter viewport orbit.",
+  "sketchGeometry": "lettering",
+  "simulationOperation": "V-carve 1",
+  "playbackSpeed": "50x",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "theme": "dark",
+  "uiScale": 1,
+  "fps": 24,
+  "stages": [
+    {
+      "id": "sketch",
+      "seconds": 1
+    },
+    {
+      "id": "generate",
+      "seconds": 2
+    },
+    {
+      "id": "simulate",
+      "seconds": 8
+    }
+  ],
+  "cameraMotion": "top-to-three-quarter-orbit",
+  "stockOpacityKeyframes": [
+    1,
+    0.15,
+    1
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "part": "lobed-knob",
+  "steps": [
+    {
+      "step": 1,
+      "text": "Click Form on the Model rail, then Start from: Cylinder."
+    },
+    {
+      "step": 2,
+      "text": "Symmetry: Circular, 4 copies. One lobe edited is four lobes edited."
+    },
+    {
+      "step": 3,
+      "text": "Click a middle-ring point, Shift+click the two above and below it. Drag the red X arrow out 10 mm."
+    },
+    {
+      "step": 4,
+      "text": "The column between two lobes: drag X in 6 mm, then Y in 6 mm. Finger valleys, all four at once."
+    },
+    {
+      "step": 5,
+      "text": "Left-drag down on empty space to look from above. Click the top face, drag Z down 8 mm: a lower crown."
+    },
+    {
+      "step": 6,
+      "text": "Left-drag up to orbit underneath. Click the bottom face, then Crease: the base comes out flat."
+    },
+    {
+      "step": 7,
+      "text": "Display: Smooth. Name it and Finish: Form writes an exact solid into the design tree."
+    },
+    {
+      "step": 8,
+      "text": "Standard modeling: sketch a 4 mm circle on XY, extrude it 10 mm down, joined to the knob."
+    },
+    {
+      "step": 9,
+      "text": "Hole: 3 mm, 12 deep, in the shaft end."
+    },
+    {
+      "step": 10,
+      "text": "Fillet 1.5 mm on the base rim: a standard fillet on an edge Form made."
+    },
+    {
+      "step": 11,
+      "text": "Orbit back over the top, Display Mode: Zebra. The stripes run on smoothly across every face."
+    }
+  ],
+  "result": {
+    "body": "RIMF",
+    "ok": true,
+    "volume": 20526.716883257115,
+    "faces": 25
+  }
+}

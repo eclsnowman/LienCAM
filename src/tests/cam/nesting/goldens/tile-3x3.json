@@ -1,0 +1,82 @@
+{
+  "placements": [
+    {
+      "partId": "tile",
+      "instanceId": "tile#0",
+      "x": 20,
+      "y": 0,
+      "rotationDeg": 90,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#1",
+      "x": 0,
+      "y": 20,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#2",
+      "x": 20,
+      "y": 40,
+      "rotationDeg": 90,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#3",
+      "x": 20,
+      "y": 0,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#5",
+      "x": 20,
+      "y": 20,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#4",
+      "x": 40,
+      "y": 60,
+      "rotationDeg": 180,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#6",
+      "x": 40,
+      "y": 0,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#8",
+      "x": 40,
+      "y": 20,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "tile",
+      "instanceId": "tile#7",
+      "x": 40,
+      "y": 60,
+      "rotationDeg": 270,
+      "depth": 0
+    }
+  ],
+  "unplaced": [],
+  "utilization": 0.87890625,
+  "sheetUsed": {
+    "width": 64,
+    "height": 64
+  }
+}

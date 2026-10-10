@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "viewport": { "width": 1920, "height": 1080 },
+  "theme": "dark",
+  "uiScale": 1,
+  "holdSeconds": 8,
+  "clips": [
+    {
+      "id": "V04",
+      "title": "STEP part to 3D toolpaths",
+      "project": "examples/06-knob-handwheel/knob-handwheel.camproject",
+      "wiki": "docs/wiki/Walkthrough-STEP-Part-to-3D-Toolpaths.md",
+      "steps": [
+        { "action": "open", "caption": "Open the completed knob kit: a STEP solid with roughing and two finishing operations." },
+        { "action": "new", "caption": "Practise STEP import in a separate empty project; keep the kit job as your reference." },
+        { "action": "import", "file": "examples/06-knob-handwheel/knob.step", "caption": "Import knob.step through Import geometry. The solid becomes a CAM part." },
+        { "action": "open", "caption": "Reopen the completed kit job to inspect its saved machining settings." },
+        { "action": "setup", "caption": "Inspect the sample GRBL router and the stock-top G54 origin before machining." },
+        { "action": "operation", "index": 0, "tab": "Passes", "caption": "Adaptive Rough (3D): 2 mm stepdown, 0.4 diameter stepover, clear all stock." },
+        { "action": "operation", "index": 1, "tab": "Passes", "caption": "Parallel Finish (3D): 0.6 mm stepover, 0 deg pass angle, 0.05 mm tolerance." },
+        { "action": "operation", "index": 2, "tab": "Passes", "caption": "Waterline Finish (3D): 0.5 mm stepdown, region by region. Inspect cutter reach." },
+        { "action": "toolpath", "caption": "Compute the real roughing and finishing paths in the app, in operation order." },
+        { "action": "simulation", "caption": "Scrub the knob simulation and inspect the cut before posting." },
+        { "action": "post", "caption": "Post Process: review GRBL, millimetres and the G54 program. Match your controller." }
+      ]
+    },
+    {
+      "id": "V05",
+      "title": "Sketch to finished part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "wiki": "docs/wiki/Walkthrough-Sketch-to-Finished-Part.md",
+      "steps": [
+        { "action": "open", "caption": "Open the native gear-pair sketches from the kit and inspect their saved CAM operations." },
+        { "action": "setup", "caption": "Inspect both setups, stock size and work origins. Confirm your blank placement before machining." },
+        { "action": "sketch", "caption": "Click Sketch and reopen the first stored parametric gear layer." },
+        { "action": "gear", "caption": "Gear tool: inspect teeth, module, pressure angle and root fillet for a variation." },
+        { "action": "finishSketch", "caption": "Finish the sketch to return its cutting geometry to CAM." },
+        { "action": "operation", "index": 0, "tab": "Tool", "caption": "Inspect Bore 1 and the embedded 3 mm flat end mill; use suitable feeds for your material." },
+        { "action": "toolpath", "caption": "Compute Bore, Pocket and Contour for both setups. The outside profiles have no tabs." },
+        { "action": "simulation", "caption": "Inspect the first setup simulation; retain each gear with suitable workholding." },
+        { "action": "post", "caption": "Review the GRBL preview. Export separate setup files and check each program's work origin." }
+      ]
+    },
+    {
+      "id": "V06",
+      "title": "V-carve a sign",
+      "project": "examples/05-name-sign/name-sign.camproject",
+      "wiki": "docs/wiki/Walkthrough-V-Carve-a-Sign.md",
+      "steps": [
+        { "action": "open", "caption": "Open the kit name sign: outlined lettering, a V-carve and an outside profile." },
+        { "action": "setup", "caption": "Inspect the 176 x 68 x 6 mm blank and G54 stock-top origin." },
+        { "action": "operation", "index": 0, "tab": "Geometry", "caption": "V-Carve uses closed lettering outlines. The shipped SVG needs no installed font." },
+        { "action": "operation", "index": 0, "tab": "Tool", "caption": "Tool: 6 mm V-bit, 60 deg included angle; 30 deg on each side of the axis." },
+        { "action": "operation", "index": 0, "tab": "Passes", "caption": "Flat depth 1 mm, clear with this bit, 0.3 mm floor stepover, 0.5 mm stepdown." },
+        { "action": "operation", "index": 1, "tab": "Passes", "caption": "Outside contour: 3 mm end mill, 0.5 mm stepdown, four 6 x 1.5 mm tabs." },
+        { "action": "toolpath", "caption": "Compute the V-carve before the profile. Narrow strokes and corners vary in depth." },
+        { "action": "simulation", "caption": "Scrub the sign simulation. Inspect the lettering, retained tabs and outside contour depth." },
+        { "action": "post", "caption": "Review the GRBL program and the V-bit to end-mill tool change before exporting." }
+      ]
+    }
+  ]
+}

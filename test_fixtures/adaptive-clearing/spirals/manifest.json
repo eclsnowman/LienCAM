@@ -1,0 +1,38 @@
+[
+  {
+    "file": "Bar.json",
+    "name": "Sketch1 / Bar"
+  },
+  {
+    "file": "Barbell.json",
+    "name": "Sketch1 / Barbell"
+  },
+  {
+    "file": "Boomerang.json",
+    "name": "Sketch1 / Boomerang"
+  },
+  {
+    "file": "BootL.json",
+    "name": "Sketch1 / BootL"
+  },
+  {
+    "file": "CommaSpiral.json",
+    "name": "Sketch1 / CommaSpiral"
+  },
+  {
+    "file": "Kidney.json",
+    "name": "Sketch1 / Kidney"
+  },
+  {
+    "file": "SquareIsland.json",
+    "name": "Sketch1 / SquareIsland"
+  },
+  {
+    "file": "Tee.json",
+    "name": "Sketch1 / Tee"
+  },
+  {
+    "file": "Triangle.json",
+    "name": "Sketch1 / Triangle"
+  }
+]

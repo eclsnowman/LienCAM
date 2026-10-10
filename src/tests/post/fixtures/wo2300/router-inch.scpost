@@ -1,0 +1,19 @@
+-- Hand-written fixture for a manual-change radius post.
+postName = "WO-2300 SheetCAM Inch"
+units = "inch"
+function OnInit()
+  post.SetCommentChars(";", "[]")
+  post.Text("; SCPOST INCH HEADER\nG90 G20\n")
+end
+function OnMove()
+  post.ModalText("G01")
+  post.ModalNumber(" X", endX * scale, "0.00000")
+  post.ModalNumber(" F", feedRate * scale, "0.000")
+end
+function OnArc()
+  if arcAngle < 0 then post.ModalText("G02") else post.ModalText("G03") end
+  post.ModalNumber(" R", arcRadius * scale, "0.00000")
+end
+function OnNewLine() post.Text("\n") end
+function OnToolChange() post.Text("M0\n") end
+function OnFinish() post.Text("M5\nM9\n; SCPOST INCH FOOTER\nM30\n") end

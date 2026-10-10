@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "id": "V06",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/05-name-sign/name-sign.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "setup"
+    },
+    {
+      "action": "operation",
+      "index": 0,
+      "tab": "Geometry"
+    },
+    {
+      "action": "operation",
+      "index": 0,
+      "tab": "Tool"
+    },
+    {
+      "action": "operation",
+      "index": 0,
+      "tab": "Passes"
+    },
+    {
+      "action": "operation",
+      "index": 1,
+      "tab": "Passes"
+    },
+    {
+      "action": "regen"
+    },
+    {
+      "action": "simulate"
+    },
+    {
+      "action": "post",
+      "definition": "GRBL"
+    },
+    {
+      "action": "hold"
+    }
+  ]
+}

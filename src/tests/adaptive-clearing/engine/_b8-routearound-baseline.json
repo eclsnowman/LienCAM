@@ -1,0 +1,72 @@
+{
+  "fix0": {
+    "name": "CommaSpiral",
+    "b8Rejections": 0,
+    "routedAround": 0,
+    "lifts": 0,
+    "wallfollows": 304
+  },
+  "fix1": {
+    "name": "Kidney",
+    "b8Rejections": 0,
+    "routedAround": 0,
+    "lifts": 0,
+    "wallfollows": 367
+  },
+  "fix2": {
+    "name": "SquareIsland",
+    "b8Rejections": 15,
+    "routedAround": 0,
+    "lifts": 16,
+    "wallfollows": 478
+  },
+  "fix3": {
+    "name": "Tee",
+    "b8Rejections": 0,
+    "routedAround": 0,
+    "lifts": 0,
+    "wallfollows": 270
+  },
+  "fix4": {
+    "name": "Bar",
+    "b8Rejections": 2,
+    "routedAround": 0,
+    "lifts": 2,
+    "wallfollows": 169
+  },
+  "fix5": {
+    "name": "BootL",
+    "b8Rejections": 8,
+    "routedAround": 0,
+    "lifts": 12,
+    "wallfollows": 375
+  },
+  "fix6": {
+    "name": "Triangle",
+    "b8Rejections": 0,
+    "routedAround": 0,
+    "lifts": 0,
+    "wallfollows": 284
+  },
+  "fix7": {
+    "name": "Barbell",
+    "b8Rejections": 1,
+    "routedAround": 0,
+    "lifts": 1,
+    "wallfollows": 256
+  },
+  "fix8": {
+    "name": "Boomerang",
+    "b8Rejections": 0,
+    "routedAround": 0,
+    "lifts": 0,
+    "wallfollows": 384
+  },
+  "island": {
+    "name": "B8 island repro (120x120 + r20)",
+    "b8Rejections": 10,
+    "routedAround": 0,
+    "lifts": 10,
+    "wallfollows": 318
+  }
+}

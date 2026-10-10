@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Where LienCAM is today, where it is going, and the status of every future capability.">
+  <title>LienCAM - Roadmap</title>
+  <link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
+  <link rel="stylesheet" href="/styles/site.css">
+  <style>
+    .roadmap-table { width: 100%; border-collapse: collapse; font-size: 16px; }
+    .roadmap-table th, .roadmap-table td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+    .roadmap-table thead { background: var(--surface-1); }
+    .roadmap-table .item { font-weight: 600; }
+    .roadmap-table .status-word { font-weight: 700; }
+    .roadmap-table [data-status="alpha"] .status-word, .roadmap-table [data-status="done"] .status-word { color: var(--text-active); }
+    .roadmap-table [data-status="experimental"] .status-word, .roadmap-table [data-status="idea"] .status-word { color: var(--text-secondary); }
+    .roadmap-table .note { display: block; color: var(--text-secondary); font-size: 14px; }
+    .roadmap-key { color: var(--text-secondary); font-size: 15px; }
+    @media (max-width: 600px) {
+      .roadmap-table thead { position: absolute; left: -9999px; }
+      .roadmap-table, .roadmap-table tbody, .roadmap-table tr, .roadmap-table td { display: block; }
+      .roadmap-table tr { padding-block: 14px; border-bottom: 1px solid var(--border-subtle); }
+      .roadmap-table td { padding: 3px 0; border: 0; overflow-wrap: anywhere; }
+      .roadmap-table td[data-label]::before { content: attr(data-label) ": "; color: var(--text-secondary); font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- partial:header -->
+  <main id="main">
+    <!-- generated from docs/roadmap/roadmap.json - edit that file (tools/release/roadmap.mjs) -->
+    <section aria-labelledby="roadmap-heading">
+      <h1 id="roadmap-heading">Roadmap</h1>
+      <h2>Where we are</h2>
+      <p>LienCAM combines design, CAM, simulation and machine control. Flat machining and control on one UCCNC machine are established; Form, relief, 3D finishing and probing remain alpha. GRBL, grblHAL and LinuxCNC control are simulator-tested only.</p>
+      <h2>Where we are aiming</h2>
+      <p>First, stabilize alpha features and prove more controllers on real machines, starting with GRBL. Next come German translation and AI-assisted CAM, followed by rotary machining and better job checks. Requests help set priorities; follow each item below.</p>
+      <h2>How to read this</h2>
+      <p class="roadmap-key"><strong>Status:</strong></p>
+      <ul class="roadmap-key"><li><strong>Idea</strong> - Suggested; nobody has decided to build it yet.</li><li><strong>Planned</strong> - We intend to build it; work has not started or is only partly there.</li><li><strong>In progress</strong> - Being built now.</li><li><strong>Alpha</strong> - Works, still being proven on real parts and machines.</li><li><strong>Experimental</strong> - Tried on simulators or in early form; not yet proven in real use.</li><li><strong>Done</strong> - Built and shipped.</li><li><strong>Declined</strong> - Considered and not planned; the reason stays in the row.</li></ul>
+      <p class="roadmap-key"><strong>Priority:</strong></p>
+      <ul class="roadmap-key"><li><strong>Next</strong> - Next after the alpha release.</li><li><strong>After that</strong> - After the Next items.</li><li><strong>Later</strong> - Later, or on demand.</li></ul>
+      <p>Have a request? Open an idea in <a href="{{route:community}}">Discussions</a>; it gets a number and a row here. The same list is in <a href="https://github.com/eclsnowman/LienCAM/blob/main/ROADMAP.md">ROADMAP.md</a>.</p>
+    </section>
+    <section id="theme-multi-axis-4th-axis-wrap-projection" aria-labelledby="theme-multi-axis-4th-axis-wrap-projection-heading">
+      <h2 id="theme-multi-axis-4th-axis-wrap-projection-heading">Multi-axis (4th axis, wrap, projection)</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-001" data-status="planned">
+            <td class="item" data-label="Item">Indexed rotary setups <span class="note">R-001</span></td>
+            <td data-label="Goal">Cut several faces by turning a rotary table between setups; post one program</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">CAM and posting not started; rotary machine controls exist</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-002" data-status="planned">
+            <td class="item" data-label="Item">Rotary centreline in the machine record <span class="note">R-002</span></td>
+            <td data-label="Goal">Tell the app where the rotary axis sits so CAM can use it</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Rotary position not yet stored</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-003" data-status="planned">
+            <td class="item" data-label="Item">Simulate and clear-check turned setups <span class="note">R-003</span></td>
+            <td data-label="Goal">Preview and holder/vise checks that follow the part as it turns</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-004" data-status="planned">
+            <td class="item" data-label="Item">Cut on a tilted face (3+2) <span class="note">R-004</span></td>
+            <td data-label="Goal">Machine a face that is tilted or flipped, not just flat-up</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Tilted setups not yet supported</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-005" data-status="planned">
+            <td class="item" data-label="Item">Wrapped 4th-axis cutting <span class="note">R-005</span></td>
+            <td data-label="Goal">Cut while the rotary turns (cylindrical engraving, flutes)</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-006" data-status="planned">
+            <td class="item" data-label="Item">Wrap a picture or text around a round part <span class="note">R-006</span></td>
+            <td data-label="Goal">Wrap lettering or patterns around a cylinder without a seam</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-007" data-status="planned">
+            <td class="item" data-label="Item">Project a picture onto curved faces <span class="note">R-007</span></td>
+            <td data-label="Goal">Lay a picture or sketch onto a freeform surface along a chosen direction</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-008" data-status="planned">
+            <td class="item" data-label="Item">Rotary on plain GRBL <span class="note">R-008</span></td>
+            <td data-label="Goal">Use a rotary table on a GRBL board by standing it in for an axis</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; firmware changes need approval</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-machining-strategies" aria-labelledby="theme-machining-strategies-heading">
+      <h2 id="theme-machining-strategies-heading">Machining strategies</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-010" data-status="planned">
+            <td class="item" data-label="Item">Trochoidal transitions and terrace cleanup in 3D roughing <span class="note">R-010</span></td>
+            <td data-label="Goal">Handle heavy 3D roughing cuts and remove stepped terraces</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">2D trochoidal cutting exists; heavy 3D side entries remain unsupported</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-011" data-status="done">
+            <td class="item" data-label="Item">Leftover-stock export <span class="note">R-011</span></td>
+            <td data-label="Goal">Save the shape left after cutting as an STL</td>
+            <td data-label="Status"><span class="status-word">Done</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-012" data-status="planned">
+            <td class="item" data-label="Item">Compare cut result with the model <span class="note">R-012</span></td>
+            <td data-label="Goal">Colour the stock by how far it is from the part (corners left, gouges)</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; stock export exists</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-013" data-status="planned">
+            <td class="item" data-label="Item">Automatic pockets, bosses and side holes <span class="note">R-013</span></td>
+            <td data-label="Goal">One button finds the features and offers them</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Top-down holes detected; side holes, pockets and bosses pending</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-014" data-status="planned">
+            <td class="item" data-label="Item">One-click machining plan <span class="note">R-014</span></td>
+            <td data-label="Goal">Recognise features, pick tools from your library, rough and finish them</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; saved recipes and hole detection exist</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-015" data-status="planned">
+            <td class="item" data-label="Item">Smooth pocket corners and links <span class="note">R-015</span></td>
+            <td data-label="Goal">Offset pockets with rounded ring corners and tangent links, no dwell marks</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-016" data-status="planned">
+            <td class="item" data-label="Item">Better tabs: auto-placed, and a clean-up pass for tab marks <span class="note">R-016</span></td>
+            <td data-label="Goal">Place tabs automatically away from short spans; optionally clean up their marks</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Evenly spaced box and ramped tabs exist</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-017" data-status="planned">
+            <td class="item" data-label="Item">Inward spiral for facing <span class="note">R-017</span></td>
+            <td data-label="Goal">One continuous spiral instead of passes</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-018" data-status="planned">
+            <td class="item" data-label="Item">Rest boundary for Face <span class="note">R-018</span></td>
+            <td data-label="Goal">Face only what earlier cutters left</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">3D rest exists; Face rest unavailable</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-019" data-status="planned">
+            <td class="item" data-label="Item">Hollow tube and round-bar awareness <span class="note">R-019</span></td>
+            <td data-label="Goal">Round and tube stock treated as real shapes in 3D clearing</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Round stock exists; tube and roughing behavior unverified</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-modeling-and-sketching" aria-labelledby="theme-modeling-and-sketching-heading">
+      <h2 id="theme-modeling-and-sketching-heading">Modeling and sketching</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-030" data-status="planned">
+            <td class="item" data-label="Item">Variable-radius fillets <span class="note">R-030</span></td>
+            <td data-label="Goal">Fillets whose radius changes along an edge</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-031" data-status="planned">
+            <td class="item" data-label="Item">Thin-wall and surface extrude <span class="note">R-031</span></td>
+            <td data-label="Goal">Extrude a profile as a thin shell</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-032" data-status="planned">
+            <td class="item" data-label="Item">Tapered-wall re-sectioning <span class="note">R-032</span></td>
+            <td data-label="Goal">Slice solids with tapered walls at depth</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; awaiting approval</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-033" data-status="planned">
+            <td class="item" data-label="Item">More curve and constraint kinds <span class="note">R-033</span></td>
+            <td data-label="Goal">Bezier, conic, curvature-continuous and pierce constraints, links to model edges</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; status not re-verified</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-034" data-status="planned">
+            <td class="item" data-label="Item">Linked sketch features <span class="note">R-034</span></td>
+            <td data-label="Goal">Offsets and derived sketches that stay linked to their source</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; status not re-verified</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-035" data-status="done">
+            <td class="item" data-label="Item">Everything exports in a standard format <span class="note">R-035</span></td>
+            <td data-label="Goal">Export every kind of user data in an open format</td>
+            <td data-label="Status"><span class="status-word">Done</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-036" data-status="planned">
+            <td class="item" data-label="Item">Full DXF block support <span class="note">R-036</span></td>
+            <td data-label="Goal">Nested, scaled and mirrored blocks import correctly</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Partial: blocks read; some are skipped with a note</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-037" data-status="planned">
+            <td class="item" data-label="Item">Photo to relief with AI help <span class="note">R-037</span></td>
+            <td data-label="Goal">Turn a photo into a good relief</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-038" data-status="planned">
+            <td class="item" data-label="Item">Locating parts, stock and workholding by mates <span class="note">R-038</span></td>
+            <td data-label="Goal">Snap models, stock and clamps together by faces</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Proposal only</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-setup-stock-and-tools" aria-labelledby="theme-setup-stock-and-tools-heading">
+      <h2 id="theme-setup-stock-and-tools-heading">Setup, stock and tools</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-040" data-status="planned">
+            <td class="item" data-label="Item">Project vs shared tool library <span class="note">R-040</span></td>
+            <td data-label="Goal">Keep tools with a project or in a shared library, clearly</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Explored; not built</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-041" data-status="planned">
+            <td class="item" data-label="Item">Ready-made definitions for the 10 most common hobby machines <span class="note">R-041</span></td>
+            <td data-label="Goal">Pick your machine from a list, no typing numbers</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Sample machines exist; definitions need checking against manuals</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-042" data-status="planned">
+            <td class="item" data-label="Item">First-run wizard <span class="note">R-042</span></td>
+            <td data-label="Goal">A guided first start: machine, units, tool library</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-114" data-status="planned">
+            <td class="item" data-label="Item">Beds: several table loads in one project <span class="note">R-114</span></td>
+            <td data-label="Goal">Arrange several machine loads in one project. Each Bed has its own parts, stock, workholding, setups, program and job sheet. Share designs, tools and machine settings; move parts and machining between Beds.</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; after the alpha</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-machine-control" aria-labelledby="theme-machine-control-heading">
+      <h2 id="theme-machine-control-heading">Machine control</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-050" data-status="planned">
+            <td class="item" data-label="Item">Keyboard shortcut editor and printable map <span class="note">R-050</span></td>
+            <td data-label="Goal">See and change every shortcut, conflicts flagged</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">A few fixed shortcuts exist; editor not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-051" data-status="planned">
+            <td class="item" data-label="Item">Gamepad jogging <span class="note">R-051</span></td>
+            <td data-label="Goal">Jog with a handheld pad, with a dead-man safety</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-052" data-status="planned">
+            <td class="item" data-label="Item">Diagonal jog and safe-height go-tos <span class="note">R-052</span></td>
+            <td data-label="Goal">Move XY diagonally and travel with automatic safe Z</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-053" data-status="planned">
+            <td class="item" data-label="Item">Macros with variables and shortcuts <span class="note">R-053</span></td>
+            <td data-label="Goal">Macro buttons with named values and keys</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Partial: macros exist, one variable</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-054" data-status="planned">
+            <td class="item" data-label="Item">File insight on load <span class="note">R-054</span></td>
+            <td data-label="Goal">Feed range, spindle range, tools used and time shown when a program loads</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Partial: tools and bounds shown, no feed/spindle range</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-056" data-status="planned">
+            <td class="item" data-label="Item">Auto-detect firmware and auto-reconnect <span class="note">R-056</span></td>
+            <td data-label="Goal">Plug in and the app knows the board</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-057" data-status="planned">
+            <td class="item" data-label="Item">Laser profile <span class="note">R-057</span></td>
+            <td data-label="Goal">Laser machines with test-fire safety</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; awaiting approval</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-058" data-status="planned">
+            <td class="item" data-label="Item">Low-resource mode <span class="note">R-058</span></td>
+            <td data-label="Goal">A lighter Control screen for small PCs</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-059" data-status="planned">
+            <td class="item" data-label="Item">Machine-side tool change on more boards <span class="note">R-059</span></td>
+            <td data-label="Goal">Guided or automatic tool change on each supported controller</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Partial: guided M6 on UCCNC and GRBL</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-alpha-to-stable" aria-labelledby="theme-alpha-to-stable-heading">
+      <h2 id="theme-alpha-to-stable-heading">Alpha to stable</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-060" data-status="alpha">
+            <td class="item" data-label="Item">3D machining to stable <span class="note">R-060</span></td>
+            <td data-label="Goal">Adaptive rough, parallel, waterline, scallop, steep/shallow and pencil you can trust on real parts</td>
+            <td data-label="Status"><span class="status-word">Alpha</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-061" data-status="alpha">
+            <td class="item" data-label="Item">Form (SubD modelling) to stable <span class="note">R-061</span></td>
+            <td data-label="Goal">Organic modelling with exact results, fully documented</td>
+            <td data-label="Status"><span class="status-word">Alpha</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-062" data-status="alpha">
+            <td class="item" data-label="Item">Relief from an image to stable <span class="note">R-062</span></td>
+            <td data-label="Goal">Raise, emboss and engrave from a picture, predictable results</td>
+            <td data-label="Status"><span class="status-word">Alpha</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-063" data-status="alpha">
+            <td class="item" data-label="Item">UCCNC on more machines <span class="note">R-063</span></td>
+            <td data-label="Goal">Control proven on several UC100/AXBB-E machines, not one</td>
+            <td data-label="Status"><span class="status-word">Alpha</span><span class="note">One machine proven</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-064" data-status="experimental">
+            <td class="item" data-label="Item">GRBL control on real hardware <span class="note">R-064</span></td>
+            <td data-label="Goal">Run jobs from LienCAM on real GRBL boards</td>
+            <td data-label="Status"><span class="status-word">Experimental</span><span class="note">Simulator only</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-065" data-status="experimental">
+            <td class="item" data-label="Item">grblHAL control on real hardware <span class="note">R-065</span></td>
+            <td data-label="Goal">Run jobs on grblHAL hardware, including multiple probe inputs and settings</td>
+            <td data-label="Status"><span class="status-word">Experimental</span><span class="note">Not hardware-verified</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-066" data-status="experimental">
+            <td class="item" data-label="Item">LinuxCNC control on a real machine <span class="note">R-066</span></td>
+            <td data-label="Goal">Run jobs on a LinuxCNC machine</td>
+            <td data-label="Status"><span class="status-word">Experimental</span><span class="note">Simulator only</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-067" data-status="alpha">
+            <td class="item" data-label="Item">Probing and tool setter to stable <span class="note">R-067</span></td>
+            <td data-label="Goal">Probe and set tools with confidence on several machines</td>
+            <td data-label="Status"><span class="status-word">Alpha</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-068" data-status="alpha">
+            <td class="item" data-label="Item">Rotated work offsets and Z surface map to stable <span class="note">R-068</span></td>
+            <td data-label="Goal">Angle and warp correction proven on hardware</td>
+            <td data-label="Status"><span class="status-word">Alpha</span><span class="note">Rotation simulator-tested only</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-069" data-status="experimental">
+            <td class="item" data-label="Item">Mesh lab to stable <span class="note">R-069</span></td>
+            <td data-label="Goal">Edit and combine STL/OBJ/3MF reliably</td>
+            <td data-label="Status"><span class="status-word">Experimental</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-070" data-status="experimental">
+            <td class="item" data-label="Item">Nesting to stable <span class="note">R-070</span></td>
+            <td data-label="Goal">Nest parts on sheets with trusted results</td>
+            <td data-label="Status"><span class="status-word">Experimental</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-071" data-status="alpha">
+            <td class="item" data-label="Item">Phone pendant to stable <span class="note">R-071</span></td>
+            <td data-label="Goal">Jog and run from a phone, proven on more machines</td>
+            <td data-label="Status"><span class="status-word">Alpha</span><span class="note">Tested on one machine</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-output-and-post-processing" aria-labelledby="theme-output-and-post-processing-heading">
+      <h2 id="theme-output-and-post-processing-heading">Output and post-processing</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-080" data-status="planned">
+            <td class="item" data-label="Item">More post dialects on request <span class="note">R-080</span></td>
+            <td data-label="Goal">Posts for more controller families users ask for</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Five dialects and vendor post import exist</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-081" data-status="planned">
+            <td class="item" data-label="Item">User G-code at start, end, pause <span class="note">R-081</span></td>
+            <td data-label="Goal">Add your own lines at job events</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; awaiting approval</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-082" data-status="planned">
+            <td class="item" data-label="Item">Post scripting <span class="note">R-082</span></td>
+            <td data-label="Goal">Express output the settings form cannot</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; settings form takes priority</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-platform-and-ai" aria-labelledby="theme-platform-and-ai-heading">
+      <h2 id="theme-platform-and-ai-heading">Platform and AI</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-090" data-status="done">
+            <td class="item" data-label="Item">Agent read commands <span class="note">R-090</span></td>
+            <td data-label="Goal">An AI agent can read the project</td>
+            <td data-label="Status"><span class="status-word">Done</span></td>
+            <td data-label="Priority">-</td>
+          </tr>
+          <tr id="r-091" data-status="planned">
+            <td class="item" data-label="Item">MCP server, CAM planning first <span class="note">R-091</span></td>
+            <td data-label="Goal">An AI agent plans CAM in the project tree, with undo; desktop only, no machine motion</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Designed; to be built after the alpha</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-092" data-status="planned">
+            <td class="item" data-label="Item">MCP server, modeling tools <span class="note">R-092</span></td>
+            <td data-label="Goal">The same agent models parts</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Designed, follows R-091</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-093" data-status="planned">
+            <td class="item" data-label="Item">Update check in the desktop app <span class="note">R-093</span></td>
+            <td data-label="Goal">Tell the user when a new version exists</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+          <tr id="r-094" data-status="planned">
+            <td class="item" data-label="Item">Graphics fallback <span class="note">R-094</span></td>
+            <td data-label="Goal">Recover cleanly when the graphics card resets</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-095" data-status="planned">
+            <td class="item" data-label="Item">Newest-build channel for the web app <span class="note">R-095</span></td>
+            <td data-label="Goal">A preview build for contributors</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; depends on contributor interest</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-096" data-status="planned">
+            <td class="item" data-label="Item">Accessibility: text size <span class="note">R-096</span></td>
+            <td data-label="Goal">Larger text without breaking layouts</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+          <tr id="r-097" data-status="planned">
+            <td class="item" data-label="Item">Custom layouts <span class="note">R-097</span></td>
+            <td data-label="Goal">Move, dock and save panel layouts</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Main panels resize and collapse; consistent layouts in progress</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-languages" aria-labelledby="theme-languages-heading">
+      <h2 id="theme-languages-heading">Languages</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-100" data-status="planned">
+            <td class="item" data-label="Item">Language plumbing and picker <span class="note">R-100</span></td>
+            <td data-label="Goal">Choose a language in Settings; English output unchanged</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Waiting for the first public release</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-101" data-status="planned">
+            <td class="item" data-label="Item">Translate every screen <span class="note">R-101</span></td>
+            <td data-label="Goal">Translate all menus, panels, dialogs and messages, including probing</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Waiting for the first public release</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-102" data-status="planned">
+            <td class="item" data-label="Item">Translatable Help <span class="note">R-102</span></td>
+            <td data-label="Goal">The 15 Help topics ready for translation</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Waiting for the first public release</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-103" data-status="planned">
+            <td class="item" data-label="Item">New-text guard <span class="note">R-103</span></td>
+            <td data-label="Goal">Keep new interface text translatable</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Waiting for the first public release</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-104" data-status="planned">
+            <td class="item" data-label="Item">CNC glossary and German pilot <span class="note">R-104</span></td>
+            <td data-label="Goal">Sourced CNC terms; German labelled machine-translated, corrections welcome</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Waiting for the first public release</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-105" data-status="planned">
+            <td class="item" data-label="Item">German layout check <span class="note">R-105</span></td>
+            <td data-label="Goal">Check that German text fits desktop layouts</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Waiting for the first public release</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-106" data-status="planned">
+            <td class="item" data-label="Item">More languages and community language packs <span class="note">R-106</span></td>
+            <td data-label="Goal">Spanish, French, Chinese and others; users can contribute</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; follows German pilot</span></td>
+            <td data-label="Priority">After that</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-community-and-public-site" aria-labelledby="theme-community-and-public-site-heading">
+      <h2 id="theme-community-and-public-site-heading">Community and public site</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-110" data-status="done">
+            <td class="item" data-label="Item">Public roadmap kept current <span class="note">R-110</span></td>
+            <td data-label="Goal">Everyone sees goals and status of each future item</td>
+            <td data-label="Status"><span class="status-word">Done</span><span class="note">Published with the alpha</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-111" data-status="planned">
+            <td class="item" data-label="Item">Feature-request intake <span class="note">R-111</span></td>
+            <td data-label="Goal">Ideas and issues get an R-number and a status</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Intake forms in progress</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-112" data-status="planned">
+            <td class="item" data-label="Item">Promote machine families on user reports <span class="note">R-112</span></td>
+            <td data-label="Goal">A machine family moves to supported after independent successful runs</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Rule written</span></td>
+            <td data-label="Priority">Next</td>
+          </tr>
+          <tr id="r-113" data-status="planned">
+            <td class="item" data-label="Item">Custom web address <span class="note">R-113</span></td>
+            <td data-label="Goal">A short domain for the site</td>
+            <td data-label="Status"><span class="status-word">Planned</span><span class="note">Not started; GitHub Pages first</span></td>
+            <td data-label="Priority">Later</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="theme-ideas" aria-labelledby="theme-ideas-heading">
+      <h2 id="theme-ideas-heading">Ideas</h2>
+      <table class="roadmap-table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Goal</th><th scope="col">Status</th><th scope="col">Priority</th></tr></thead>
+        <tbody>
+          <tr id="r-020" data-status="idea">
+            <td class="item" data-label="Item">Tool-holder and shank check to full fixtures <span class="note">R-020</span></td>
+            <td data-label="Goal">Warn about the holder hitting clamps and fixtures, not just the vise</td>
+            <td data-label="Status"><span class="status-word">Idea</span><span class="note">Holder/vise checks exist; general fixtures pending</span></td>
+            <td data-label="Priority">Idea</td>
+          </tr>
+          <tr id="r-021" data-status="idea">
+            <td class="item" data-label="Item">Job preflight: fits the machine, no rapid into stock <span class="note">R-021</span></td>
+            <td data-label="Goal">Before posting or running, say if the job exceeds travel or a rapid enters stock</td>
+            <td data-label="Status"><span class="status-word">Idea</span><span class="note">Travel and material-fit checks exist; combined preflight unverified</span></td>
+            <td data-label="Priority">Idea</td>
+          </tr>
+          <tr id="r-055" data-status="idea">
+            <td class="item" data-label="Item">Touch-test before probing <span class="note">R-055</span></td>
+            <td data-label="Goal">Check the probe circuit before every probe routine</td>
+            <td data-label="Status"><span class="status-word">Idea</span><span class="note">Not started; awaiting approval</span></td>
+            <td data-label="Priority">Idea</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <!-- partial:footer -->
+</body>
+</html>

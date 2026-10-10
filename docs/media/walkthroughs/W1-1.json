@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W1-1.png": {
+      "commit": "9001bd825c02d7e76028d42feade68b8aee44a76",
+      "workingTreeDirty": false,
+      "workingTreeScope": [
+        "examples/02-toe-clamps/toe-clamps.camproject",
+        "src",
+        "tools/capture/scenes.json",
+        "tools/capture/scenes.mjs"
+      ],
+      "sourceExcludes": [
+        "src/tests/evidence"
+      ],
+      "sourceHash": "62d2887bee17f09a1844e354fc84b4f0bb86359dbe1b6140e06ffbc65d9b995c",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 4269,
+      "screenshotBytes": 186388,
+      "screenshotSha256": "d8aaf4556ac823f46807b665e4d44ba6c615553fee6b7b719b7dfe73819c42e7"
+    }
+  }
+}

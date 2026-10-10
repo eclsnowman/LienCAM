@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "id": "V07",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/01-fixture-plate/fixture-plate.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "simulator"
+    },
+    {
+      "action": "probe",
+      "kind": "outsideCorner"
+    },
+    {
+      "action": "probeNext"
+    },
+    {
+      "action": "probe",
+      "kind": "bore"
+    },
+    {
+      "action": "probe",
+      "kind": "workZero"
+    },
+    {
+      "action": "probeZero"
+    },
+    {
+      "action": "probe",
+      "kind": "zSurface"
+    },
+    {
+      "action": "probe",
+      "kind": "toolZ"
+    },
+    {
+      "action": "hold"
+    }
+  ]
+}

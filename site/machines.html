@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Which controllers LienCAM works with, how well each is proven, the post dialects, and the example machines.">
+  <title>LienCAM - Machines and controllers</title>
+  <link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
+  <link rel="stylesheet" href="/styles/site.css">
+</head>
+<body>
+  <!-- partial:header -->
+  <main id="main">
+    <section aria-labelledby="machines-heading">
+      <h1 id="machines-heading">Machines and controllers</h1>
+      <p>LienCAM is in alpha. This is what works today, said plainly.</p>
+      <table class="status-table controllers">
+        <caption>Supported: part of the release journey. Alpha: early, with limited proof. Experimental: still being explored.</caption>
+        <thead><tr><th scope="col">Controller</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          <tr data-status="supported"><th scope="row"><span class="name">Built-in simulator</span><br><small>Run the whole program on screen without a machine.</small></th><td>SUPPORTED</td></tr>
+          <tr data-status="alpha"><th scope="row"><span class="name">UCCNC with UC100 / AXBB-E</span><br><small>Windows bridge; needs the controller's own software installed for its DLL.</small></th><td>ALPHA - one machine proven</td></tr>
+          <tr data-status="experimental"><th scope="row"><span class="name">GRBL and grblHAL over Web Serial</span><br><small>Works in Chrome and Edge.</small></th><td>EXPERIMENTAL - not hardware-verified</td></tr>
+          <tr data-status="experimental"><th scope="row"><span class="name">LinuxCNC</span><br><small>Through the LinuxCNC gateway.</small></th><td>EXPERIMENTAL - simulator only</td></tr>
+        </tbody>
+      </table>
+      <blockquote class="caveat"><p><strong>What has been tested on real hardware.</strong> I've tested LienCAM on my own router, which runs UCCNC with an AXBB-E controller. I don't own a GRBL, grblHAL or LinuxCNC machine, so those routes have only been tested against simulators (grbl-sim and the LinuxCNC simulator), not on real hardware yet. If you run one of those machines, your test reports are exactly what we need - and once people have confirmed them on real machines, this note comes off.</p></blockquote>
+    </section>
+    <section id="dialects" aria-labelledby="dialects-heading">
+      <h2 id="dialects-heading">Post dialects</h2>
+      <p>LienCAM posts G-code in five dialects:</p>
+      <ul class="dialects">
+        <li>UCCNC</li>
+        <li>GRBL</li>
+        <li>grblHAL</li>
+        <li>LinuxCNC</li>
+        <li>Generic</li>
+      </ul>
+    </section>
+    <section id="examples" aria-labelledby="examples-heading">
+      <h2 id="examples-heading">Example machines</h2>
+      <p>Ten example machines are built in, made from published specifications. Check each against your own machine and edit it as needed. None of them sets up a controller connection.</p>
+      <ul class="example-machines">
+        <li>Shapeoko 5 Pro / 4 Standard</li>
+        <li>Genmitsu 3018-PROVer V2</li>
+        <li>Onefinity Woodworker</li>
+        <li>Sienci LongMill MK2 30x30</li>
+        <li>OpenBuilds LEAD 1010</li>
+        <li>FoxAlien Masuter Pro</li>
+        <li>Genmitsu PROVerXL 4030</li>
+        <li>6040-class Chinese gantry</li>
+        <li>X-Carve 1000</li>
+        <li>PCNC 440</li>
+      </ul>
+      <p>Or start from the generic starter, <span class="generic-starter">Sample hobby router (GRBL)</span>, and change it to match yours.</p>
+      <figure data-scene="S14">{{scene:S14}}</figure>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Set-Up-Your-Machine">Set up your machine</a></p>
+    </section>
+  </main>
+  <!-- partial:footer -->
+</body>
+</html>

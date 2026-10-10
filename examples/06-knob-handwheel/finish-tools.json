@@ -1,0 +1,60 @@
+[
+  {
+    "id": "wo2548-ball-3",
+    "name": "3 mm ball end mill",
+    "type": "ball_end_mill",
+    "diameter": 3,
+    "shankDiameter": 3,
+    "overallLength": 50,
+    "fluteLength": 18,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 1.5,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 5,
+    "cutHand": "right",
+    "notes": "Finishing cutter: 3 mm diameter, 18 mm cutting reach, 0.2 mm stepover/stepdown. Confirm the physical cutter and feeds before machining.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 450,
+        "plungeRate": 100,
+        "depthOfCut": 0.5,
+        "stepover": 0.2,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  },
+  {
+    "id": "wo2548-wall-3",
+    "name": "3 mm wall-finishing end mill",
+    "type": "flat_end_mill",
+    "diameter": 3,
+    "shankDiameter": 3,
+    "overallLength": 50,
+    "fluteLength": 18,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 6,
+    "cutHand": "right",
+    "notes": "Flat-ended wall finisher: 3 mm diameter and shank, 18 mm cutting reach. Waterline at 0.2 mm stepdown clears the grip wall to the floor without a ball-nose roll-off.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 450,
+        "plungeRate": 100,
+        "depthOfCut": 0.5,
+        "stepover": 0.2,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  }
+]

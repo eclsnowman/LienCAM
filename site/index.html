@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sketch, model, toolpath, simulate, post and run your CNC. LienCAM is free, open source and runs locally, with no account and no cloud.">
+  <title>LienCAM - From sketch to CNC</title>
+  <link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
+  <link rel="stylesheet" href="/styles/site.css">
+</head>
+<body>
+  <!-- partial:header -->
+  <main id="main">
+    <section class="hero" aria-labelledby="home-heading">
+      <div>
+        <img class="hero-wordmark" src="/media/wordmark.svg" alt="LienCAM" width="560" height="160">
+        <h1 id="home-heading">Sketch, model, toolpath, simulate, post and run your CNC - one free program, on your own computer.</h1>
+        <div class="actions">
+          <a class="button primary" href="{{route:download}}">Download</a>
+          <a class="button" href="{{route:demo}}">Try in browser</a>
+          <a class="button" href="{{route:github}}">Source on GitHub</a>
+        </div>
+        <p class="local-note">Runs locally. No account. No cloud. Your files stay yours.</p>
+      </div>
+      <img class="hero-mark" src="/media/mark.svg" alt="LIEN steel mark" width="420" height="420">
+    </section>
+    <section aria-labelledby="pipeline-heading">
+      <h2 id="pipeline-heading">From the first line to the finished cut</h2>
+      <p>Stay with your part through every step, in one program.</p>
+      <ol class="pipeline">
+        <li><a data-scene="S02" href="https://github.com/eclsnowman/LienCAM/wiki/Sketch"><span class="scene">{{scene:S02}}</span><span class="step-name">Sketch</span></a></li>
+        <li><a data-scene="S03" href="https://github.com/eclsnowman/LienCAM/wiki/Model"><span class="scene">{{scene:S03}}</span><span class="step-name">Model</span></a></li>
+        <li><a data-scene="S04" href="https://github.com/eclsnowman/LienCAM/wiki/Toolpaths-2.5D"><span class="scene">{{scene:S04}}</span><span class="step-name">Toolpath</span></a></li>
+        <li><a data-scene="S05" href="https://github.com/eclsnowman/LienCAM/wiki/Simulate"><span class="scene">{{scene:S05}}</span><span class="step-name">Simulate</span></a></li>
+        <li><a data-scene="S06" href="https://github.com/eclsnowman/LienCAM/wiki/Post-Process"><span class="scene">{{scene:S06}}</span><span class="step-name">Post</span></a></li>
+        <li><a data-scene="S07" href="https://github.com/eclsnowman/LienCAM/wiki/Control"><span class="scene">{{scene:S07}}</span><span class="step-name">Control</span></a></li>
+      </ol>
+    </section>
+    <section aria-labelledby="status-heading">
+      <h2 id="status-heading">What works today</h2>
+      <p class="alpha-note">LienCAM is in alpha. It works, and it has rough edges. Simulate your toolpaths and keep a hand near the E-STOP when running a machine.</p>
+      <table class="status-table">
+        <caption>Supported: part of the release journey. Alpha: early, with limited proof. Experimental: still being explored. Hardware limits are stated below.</caption>
+        <thead><tr><th scope="col">Capability</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          <tr data-status="supported"><th scope="row">Sketch (constraints, dimensions, text, SVG/DXF import)</th><td>SUPPORTED</td></tr>
+          <tr data-status="supported"><th scope="row">Model: extrude, revolve, sweep, loft, fillet, chamfer, shell, draft, hole, booleans; STEP/IGES/STL import; STEP/STL export</th><td>SUPPORTED</td></tr>
+          <tr data-status="alpha"><th scope="row">Form (SubD organic modelling)</th><td>ALPHA</td></tr>
+          <tr data-status="alpha"><th scope="row">Relief from an image (raise / emboss / engrave)</th><td>ALPHA</td></tr>
+          <tr data-status="experimental"><th scope="row">Mesh lab (STL/OBJ/3MF edit, mesh booleans)</th><td>EXPERIMENTAL</td></tr>
+          <tr data-status="supported"><th scope="row">2.5D ops: face, contour, pocket, adaptive, drill, bore, thread mill, engrave, V-carve, chamfer</th><td>SUPPORTED</td></tr>
+          <tr data-status="alpha"><th scope="row">3D ops: adaptive rough, parallel, waterline, scallop, steep/shallow, pencil</th><td>ALPHA</td></tr>
+          <tr data-status="experimental"><th scope="row">Nesting</th><td>EXPERIMENTAL</td></tr>
+          <tr data-status="supported"><th scope="row">Simulate (stock removal)</th><td>SUPPORTED</td></tr>
+          <tr data-status="supported"><th scope="row">Post: UCCNC, GRBL, grblHAL, LinuxCNC and Generic dialects</th><td>SUPPORTED</td></tr>
+          <tr data-status="supported"><th scope="row">Control on the built-in simulator</th><td>SUPPORTED</td></tr>
+          <tr data-status="alpha"><th scope="row">Control on AXBB-E / UC100 (Windows bridge; needs the controller's own software installed for its DLL)</th><td>ALPHA - one machine proven</td></tr>
+          <tr data-status="experimental"><th scope="row">Control on LinuxCNC (gateway)</th><td>EXPERIMENTAL - simulator only</td></tr>
+          <tr data-status="experimental"><th scope="row">Control on GRBL / grblHAL (Web Serial)</th><td>EXPERIMENTAL - not hardware-verified</td></tr>
+          <tr data-status="alpha"><th scope="row">Probing routines, tool setter, guided M6, Z surface map, rotated work offsets, pause-move-resume</th><td>ALPHA</td></tr>
+          <tr data-status="alpha"><th scope="row">Phone pendant</th><td>ALPHA - tested on one machine</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="open-by-design" aria-labelledby="open-heading">
+      <h2 id="open-heading">Open by design</h2>
+      <p><strong>Open by design.</strong> Everything you make in LienCAM is yours, and it leaves with you. Models export as STEP and STL, sketches as DXF and SVG, programs as plain G-code, and your tools, machines, post-processors, macros, settings and projects as documented JSON. Inside, LienCAM uses whatever formats work best for it - but the way out is always an open, standard format that other software can read. No account, no cloud, no lock-in.</p>
+    </section>
+    {{part-photo}}
+    <section class="why" aria-labelledby="why-heading">
+      <h2 id="why-heading">Why I built this</h2>
+      <div>
+        <p>I'm a hobbyist. I've been designing and building 3D printers and CNC machines since 2013 - never for money, just because I love building things and sharing them with other people.</p>
+        <p>LienCAM started the same way. I wanted software for my machine that I actually own, from the sketch to the G-code to running the job - where no company can later decide that features I rely on, like rapid moves or a multi-tool job posted as one program, aren't mine to use anymore. I've been working on it since the end of April 2026 - well over 1,000 hours of my own time - and I held the first release back until I could run real jobs with it on my own machine, because I wanted it to be genuinely useful to you from day one.</p>
+        <p>I'm sharing it under the Apache-2.0 licence, so anyone can use it, change it, fork it and make it fit their own machine - the same way I've always shared my printer and CNC designs, native source files included.</p>
+        <p>It was built with a lot of help from AI coding assistants. I set the direction, made the design decisions, judged the results and tested it on real hardware; the AI wrote much of the code.</p>
+        <p>This is a passion project. I have a day job and a family, so I can't be a full-time developer on it. If it turns out to be as useful to you as I hope, and you're able to help, I'd love to build it with you.</p>
+        <a href="{{route:about}}">More about LienCAM</a>
+      </div>
+    </section>
+  </main>
+  <!-- partial:footer -->
+</body>
+</html>

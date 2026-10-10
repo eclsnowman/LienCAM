@@ -1,0 +1,66 @@
+{
+  "name": "Sketch1 / Tee",
+  "description": "T shape \u2014 two perpendicular bars meeting; junction fill behaviour. Tool params are defaults \u2014 set toolRadius/stepover to match the reference CAM tool before comparing. Seed is advisory (AC recomputes via findSeed).",
+  "toolRadius": 3.0,
+  "stepover": 1.5,
+  "cellSize": 0.5,
+  "firstLevel": 3.0,
+  "marginRevolutions": 0,
+  "stock": [
+    {
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "x": 70.0,
+      "y": 0.0
+    },
+    {
+      "x": 70.0,
+      "y": 85.74362
+    },
+    {
+      "x": 0.0,
+      "y": 85.74362
+    }
+  ],
+  "boundary": [
+    {
+      "x": 65.0,
+      "y": 35.0
+    },
+    {
+      "x": 46.13602,
+      "y": 35.0
+    },
+    {
+      "x": 46.13602,
+      "y": 80.74362
+    },
+    {
+      "x": 23.12092,
+      "y": 80.74362
+    },
+    {
+      "x": 23.12092,
+      "y": 35.0
+    },
+    {
+      "x": 5.0,
+      "y": 35.0
+    },
+    {
+      "x": 5.0,
+      "y": 5.0
+    },
+    {
+      "x": 65.0,
+      "y": 5.0
+    }
+  ],
+  "islands": [],
+  "seed": {
+    "x": 34.625,
+    "y": 22.16731
+  }
+}

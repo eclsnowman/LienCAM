@@ -1,0 +1,49 @@
+LienCAM Setup Sheet
+Program: "07_Relief_medallion.gcode"
+Units: mm
+
+Setup: "Setup 1" (G54)
+  Work offset origin: X-10 Y-10 Z8 mm
+  Stock: "Stock 1" size 90 x 90 x 8 mm
+  Origin offset from stock min corner: X0 Y0 Z8 mm
+  Workholding:
+    Method: Screws
+    Note: "Start: hold the 90 x 90 x 8 mm hardwood blank with the two example 02 toe clamps on the left and right side midpoints, toes 5 mm onto the blank, 8 mm packing under their outer ends."
+    Note: "Operation 1 drills 4 screw holes, 4 mm through, one in each corner of the frame, 8 mm in from both edges."
+    Note: "Then the program retracts and stops at the operator stop (and parks there when the machine has an Operator stop park): Drive 4 screws, remove the 2 clamps, then press Cycle Start. Use 4 mm wood screws (head 8 mm or less) into the spoilboard."
+    Note: "The relief is cut next, and the outline last with 4 triangular tabs that leave bridges about 5 mm wide and 1.5 mm high, so the disc stays joined to the screwed-down frame."
+    Note: "After the program: cut the 4 tabs, sand the stubs, then unscrew the frame."
+    Clamp: "example-02-toe-clamp" x 2
+    Tabs, operation 4 "Contour 4": 4 tabs per contour, 11mm wide x 1.5mm high, triangular
+
+1. "Drill 1"
+   Tool: T3 "4 mm drill - screw clearance" dia 4mm flute length 20mm
+   Spindle: 10000 RPM
+   Feed: cutting 180mm/min, plunge 150mm/min
+   Z range: -9.5 to 15 mm
+   NC lines: 4-23
+
+2. "3D Rough 2"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -2 to 15 mm
+   NC lines: 30-563
+
+3. "3D Finish 3"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -1.999 to 15 mm
+   NC lines: 564-2756
+
+4. "Contour 4"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -8.2 to 15 mm
+   NC lines: 2757-3995
+
+File: "07_Relief_medallion.gcode"
+Bytes: 66271
+SHA-256: ad3ec77e75b281ae44494bc501dc1121d882f8ae62d4f190c7ef39f8452c3b74

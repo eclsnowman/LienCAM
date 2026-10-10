@@ -1,0 +1,52 @@
+[
+  {
+    "file": "prepared/Bar.json",
+    "name": "Sketch1 / Bar",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/Barbell.json",
+    "name": "Sketch1 / Barbell",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/Boomerang.json",
+    "name": "Sketch1 / Boomerang",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/BootL.json",
+    "name": "Sketch1 / BootL",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/CommaSpiral.json",
+    "name": "Sketch1 / CommaSpiral",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/Kidney.json",
+    "name": "Sketch1 / Kidney",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/Sketch1_multiregion.json",
+    "name": "Sketch1 — multi-region fixture",
+    "pockets": 9
+  },
+  {
+    "file": "prepared/SquareIsland.json",
+    "name": "Sketch1 / SquareIsland",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/Tee.json",
+    "name": "Sketch1 / Tee",
+    "pockets": 1
+  },
+  {
+    "file": "prepared/Triangle.json",
+    "name": "Sketch1 / Triangle",
+    "pockets": 1
+  }
+]

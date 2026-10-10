@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "V05",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/08-gear-pair/gear-pair.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "setup"
+    },
+    {
+      "action": "sketch"
+    },
+    {
+      "action": "gear"
+    },
+    {
+      "action": "finishSketch"
+    },
+    {
+      "action": "operation",
+      "index": 0,
+      "tab": "Tool"
+    },
+    {
+      "action": "regen"
+    },
+    {
+      "action": "simulate"
+    },
+    {
+      "action": "simulate",
+      "index": 1
+    },
+    {
+      "action": "post",
+      "definition": "GRBL",
+      "separate": true
+    },
+    {
+      "action": "hold"
+    }
+  ]
+}

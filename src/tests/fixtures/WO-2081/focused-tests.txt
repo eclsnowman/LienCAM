@@ -1,0 +1,18 @@
+
+ RUN  v3.2.7 ./LienCAM-worktrees/WO-2081
+
+ ✓ src/tests/mesh/meshEdgeBlendEdit.wo1848.test.ts (33 tests) 581ms
+   ✓ WO-1848: a blend between a flat face and a round one > it is not listed as a blend this part proves  399ms
+ ✓ src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts (9 tests) 3540ms
+   ✓ WO-2081: imported pocket corner fillets > lists all four complete corner bands in the Model screen  470ms
+   ✓ WO-2081: imported pocket corner fillets > changes corner 0 to 3 mm through the Model tool and journal  531ms
+   ✓ WO-2081: imported pocket corner fillets > changes corner 1 to 3 mm through the Model tool and journal  471ms
+   ✓ WO-2081: imported pocket corner fillets > changes corner 2 to 3 mm through the Model tool and journal  460ms
+   ✓ WO-2081: imported pocket corner fillets > changes corner 3 to 3 mm through the Model tool and journal  440ms
+   ✓ WO-2081: imported pocket corner fillets > removes corner 0 through Defeature and journal  307ms
+   ✓ WO-2081: imported pocket corner fillets > removes corner 1 through Defeature and journal  306ms
+
+ Test Files  2 passed (2)
+      Tests  42 passed (42)
+   Start at  16:32:56
+   Duration  4.89s (transform 1.77s, setup 197ms, collect 3.73s, tests 4.12s, environment 1ms, prepare 244ms)

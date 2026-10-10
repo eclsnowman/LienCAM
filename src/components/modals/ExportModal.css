@@ -1,0 +1,50 @@
+/* WO-2448: the Export window - layout only; colours are the existing theme tokens. */
+.export-modal {
+  width: min(34rem, calc(100vw - 2rem));
+}
+
+.export-modal .modal-body {
+  max-height: min(70vh, 40rem);
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
+/* Visible scrollbar (Operator 4:28 PM): same look as the docked panels' lists, so more-below is obvious. */
+.export-modal .modal-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.export-modal .modal-body::-webkit-scrollbar-track {
+  background: var(--bg-panel-alt);
+}
+
+.export-modal .modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border: 2px solid var(--bg-panel-alt);
+  border-radius: 5px;
+}
+
+.export-modal .modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.export-row {
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.export-row-picked {
+  background: var(--surface-selected);
+}
+
+.export-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-row-format {
+  flex: 0 0 8rem;
+}

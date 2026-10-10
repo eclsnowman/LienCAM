@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LienCAM</title>
+    <meta name="description" content="LienCAM - open-source browser-based CAM software for CNC routers and mills" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <!-- Splash fonts (Space Grotesk wordmark + IBM Plex Mono readout). WO-281:
+         these were a render-blocking <link> to the Google font server, so the
+         first paint waited on a third-party round trip and an offline shop got
+         the fallback stack. The files now live in public/fonts/ (provenance +
+         byte table: src/tests/evidence/WO-281/) and the @font-face rules are
+         inline below, so no stylesheet request stands between parse and paint.
+         Preload ONLY the two files the splash actually paints - Space Grotesk
+         (one variable file covers 400..700, and .wm is 700) and IBM Plex Mono
+         500 (.status and .pct; the bar has no text). latin-ext and the 400
+         weight of the mono are declared but not preloaded: unicode-range keeps
+         latin-ext off the wire until a latin-ext character is painted.
+         `crossorigin` is required on font preloads even same-origin - without it
+         the preload is a second, uncredited fetch and warms nothing. -->
+    <link rel="preload" href="/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/ibm-plex-mono-500-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <!-- App-shell splash styles. Apart from the @font-face block below (which is
+         a font declaration, not a selector, and so is global by nature), EVERY
+         rule is scoped under #liencam-splash so nothing leaks into #root: the
+         overlay carries its own background + overflow + grid-centering and the
+         universal box-sizing reset is scoped to #liencam-splash *. No global
+         body{} style is set here. -->
+    <style>
+      /* WO-281: self-hosted splash faces. Descriptors are Google's own, copied
+         verbatim by src/tests/evidence/WO-281/fetch-fonts.mjs, so matching and
+         rendering are unchanged - only the origin moved. Space Grotesk is a
+         VARIABLE font: one file carries 400..700 and the weight range replaces
+         the four identical per-weight blocks css2 emits. IBM Plex Mono is
+         static, so 400 and 500 really are separate files. latin-ext is declared
+         first and latin last, as css2 orders them - the two overlap on the
+         combining marks U+0304/0308/0329 and the later rule wins there. */
+      @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400 700;font-display:swap;
+        src:url('/fonts/space-grotesk-latin-ext.woff2') format('woff2');
+        unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+      @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400 700;font-display:swap;
+        src:url('/fonts/space-grotesk-latin.woff2') format('woff2');
+        unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+      @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;
+        src:url('/fonts/ibm-plex-mono-400-latin-ext.woff2') format('woff2');
+        unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+      @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;
+        src:url('/fonts/ibm-plex-mono-400-latin.woff2') format('woff2');
+        unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+      @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;
+        src:url('/fonts/ibm-plex-mono-500-latin-ext.woff2') format('woff2');
+        unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+      @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;
+        src:url('/fonts/ibm-plex-mono-500-latin.woff2') format('woff2');
+        unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+
+      /* WO-282: the percentage readout is painted from this counter, not from a
+         per-frame textContent write. Registering it as an <integer> is what makes
+         it animatable at all - an unregistered custom property would flip 0 -> 100
+         at the halfway mark. A plain `--lcs-pct:0` is declared on the overlay too,
+         so the readout still renders "0%" in an engine that ignores @property. */
+      @property --lcs-pct{ syntax:'<integer>'; inherits:true; initial-value:0 }
+
+      #liencam-splash{
+        --lcs-pct:0;
+        --bed:#13161a; --bed-2:#191d23; --line:#262b32;
+        --steel-top:#cfd5db; --steel-left:#9097a0; --steel-right:#565d66; --steel-floor:#2f353d;
+        --edge:#1c2127;
+        --cut:#2fd4e6; --cut-hot:#bff4fb; --cool:#5fb3c7;
+        --ink:#e7ebf0; --ink-dim:#7d858f;
+        --display:'Space Grotesk',system-ui,sans-serif;
+        --mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+        /* fixed full-viewport overlay; carries the background + centering itself */
+        position:fixed; inset:0; z-index:9999;
+        background:
+          radial-gradient(120% 90% at 50% 38%, #1b2026 0%, var(--bed) 58%, #0d0f12 100%);
+        color:var(--ink); font-family:var(--display);
+        display:grid; place-items:center; overflow:hidden;
+        -webkit-font-smoothing:antialiased;
+        transition:opacity .4s ease;
+      }
+      #liencam-splash.lcs-dismissing{ opacity:0; pointer-events:none; }
+      #liencam-splash *{ box-sizing:border-box }
+
+      #liencam-splash .stage{ position:relative; width:min(92vw,560px); padding:8px 8px 0;
+        display:flex; flex-direction:column; align-items:center; gap:6px; }
+
+      /* The logo box is reserved BEFORE the art exists. #lcs-art is filled by the
+         boot script below (appendChild of the built <svg>); with width alone it was
+         0px tall until that ran, so the grid-centred stage recentred the instant the
+         art landed and everything under it dropped ~208px (WO-271 measured it). The
+         ratio is LOGO's own W / H (see `const LOGO=` further down) written as a
+         ratio, not a decimal, so it cannot silently drift from the artwork - if LOGO
+         ever changes shape, change these two numbers with it. The inserted svg is
+         width:100% + height:auto off the same viewBox, so it fills this box exactly
+         and inserting it now changes no layout in any timing order. */
+      #liencam-splash .art{ width:100%; aspect-ratio: 988 / 755; }
+      #liencam-splash svg{ width:100%; height:auto; display:block; overflow:visible; }
+
+      /* --- bed grid --- */
+      #liencam-splash #lcs-grid{ opacity:0; transition:opacity .8s ease .1s }
+      #liencam-splash .stage.run #lcs-grid{ opacity:0.95 }
+
+      /* --- toolpath trace (revealed in cutting order; per-line CSS animations
+             are generated by the boot script from the same time budget the old
+             requestAnimationFrame loop used) --- */
+      #liencam-splash .stage.run #lcs-trace{ animation:lcsCyanOut .6s ease 3s forwards }
+      @keyframes lcsCyanOut{ to{ opacity:0 } }
+      #liencam-splash .trace{ fill:none; stroke:var(--cut); stroke-width:1.7; stroke-linecap:round;
+        stroke-linejoin:round; filter:url(#lcs-glow);
+        stroke-dasharray:1; stroke-dashoffset:1; opacity:.95; }
+      @keyframes lcsCut{ to{ stroke-dashoffset:0 } }
+
+      /* travelling tool reticle (rides @keyframes lcsTool, generated below) */
+      #liencam-splash #lcs-tool{ opacity:0; }
+
+      /* --- steel solid: fades in beneath the cyan --- */
+      #liencam-splash .face{ opacity:0; stroke:var(--edge); stroke-width:1; vector-effect:non-scaling-stroke; stroke-linejoin:round; }
+      #liencam-splash .stage.run .face{ animation:lcsVFade 1.05s ease 1.75s both }
+      #liencam-splash #lcs-faces{ filter: drop-shadow(0 10px 14px rgba(0,0,0,.55)); }
+      @keyframes lcsVFade{ to{ opacity:1 } }
+
+      /* --- wordmark + readout --- */
+      #liencam-splash .meta{ width:100%; display:flex; flex-direction:column; align-items:center; gap:16px;
+        margin-top:14px; }
+      #liencam-splash .wordmark{ display:flex; align-items:baseline; gap:.5px; opacity:0;
+        transform:translateY(8px); }
+      /* lcsUp is the flourish and is unchanged. lcsSettle paints nothing at all
+         (opacity 1 -> 1); it exists so that "the splash has finished" is an event
+         on the CSS clock rather than a number on the JavaScript clock. 2.6s delay
+         + 0.5s rise + 0.25s hold = the 3350ms that used to be `DONE`, and its
+         animationend is what releases the dismissal (see the boot script). WO-271
+         measured the two clocks 1.24s apart on a cold boot, which tore the splash
+         down before the wordmark had appeared at all. */
+      #liencam-splash .stage.run .wordmark{
+        animation:lcsUp .5s cubic-bezier(.2,.7,.2,1) 2.6s forwards,
+                  lcsSettle .25s linear 3.1s forwards }
+      @keyframes lcsUp{ to{opacity:1; transform:none} }
+      @keyframes lcsSettle{ from{opacity:1} to{opacity:1} }
+      #liencam-splash .wm{ font-weight:700; font-size:clamp(80px,19vw,132px); letter-spacing:-3.8px;
+        line-height:1; color:var(--ink); }
+      #liencam-splash .wm .cnc{ color:var(--cut); }
+
+      #liencam-splash .dro{ width:100%; max-width:560px; display:flex; align-items:center; gap:16px;
+        font-family:var(--mono); font-size:17px; }
+      #liencam-splash .status{ flex:0 0 110px; text-align:right; white-space:nowrap; color:var(--cut);
+        font-weight:500; letter-spacing:.5px; }
+      #liencam-splash .bar{ position:relative; height:16px; flex:1; border-radius:10px;
+        background:var(--line); overflow:hidden; }
+      /* WO-282: the fill is a full-width layer SQUASHED with transform, not a box
+         GROWN with `inset`. Only transform and opacity animate on the compositor;
+         `inset` is layout, so it ran on the main thread and stopped dead for the
+         whole 1.8-2.1s the app spends inside `new THREE.WebGLRenderer(...)`. The
+         gradient is painted across the element's own box and the box is scaled
+         uniformly, so every pixel of the fill keeps the colour it had at the same
+         fill fraction; the only rendering difference is the leading edge's corner
+         radius, which is squashed with the box (8px -> 8px x fill horizontally).
+         will-change is not decoration here - it is what guarantees the layer
+         exists before the main thread is taken away. */
+      #liencam-splash .bar i{ position:absolute; inset:0; border-radius:10px;
+        background:linear-gradient(90deg,var(--cut),var(--cut-hot));
+        transform:scaleX(0); transform-origin:0 50%; will-change:transform; }
+      #liencam-splash .stage.run .bar i{ animation:lcsFill 3s linear 0s forwards }
+      @keyframes lcsFill{ to{ transform:scaleX(1) } }
+      #liencam-splash .pct{ flex:0 0 110px; text-align:left; font-variant-numeric:tabular-nums;
+        font-size:18px; font-weight:500; color:var(--ink) }
+      /* The number shares the bar's clock instead of running beside it: both are
+         CSS animations of the same 3s, so the readout cannot say "100%" next to a
+         58%-full bar the way WO-271 photographed it doing. counter-reset takes the
+         animated integer and content prints it - text can never be composited, so
+         this is about the two halves agreeing, not about surviving a block. */
+      #liencam-splash .pct::after{ counter-reset:lcsPct var(--lcs-pct); content:counter(lcsPct) '%' }
+      #liencam-splash .stage.run .pct{ animation:lcsPct 3s linear 0s forwards }
+      @keyframes lcsPct{ to{ --lcs-pct:100 } }
+
+      @media (prefers-reduced-motion: reduce){
+        #liencam-splash .stage *{ animation:none!important; transition:none!important }
+        #liencam-splash .face{opacity:1!important} #liencam-splash .wordmark,#liencam-splash .dro{opacity:1;transform:none}
+        #liencam-splash #lcs-grid{opacity:0.95} #liencam-splash #lcs-trace{opacity:0}
+        /* the finished states of the two animations this order rewrote */
+        #liencam-splash .bar i{transform:none} #liencam-splash .pct{--lcs-pct:100}
+      }
+    </style>
+  </head>
+  <body>
+    <!-- CVU-2: REGIME 2 ownership marker (see src/components/ui/DisclosureSection.tsx
+         for the pattern) -- the boot splash, fixed over the viewport by design until
+         it dismisses; covers its own descendants (the DRO progress bar etc.). -->
+    <div id="liencam-splash" data-ui78-sanctioned="">
+      <div class="stage" id="lcs-stage">
+        <div class="art" id="lcs-art"></div>
+        <div class="meta">
+          <div class="wordmark">
+            <span class="wm">Lien<span class="cnc">CAM</span></span>
+          </div>
+          <div class="dro">
+            <span class="status" id="lcs-status">Initializing</span>
+            <span class="bar"><i></i></span>
+            <!-- empty on purpose: .pct::after prints the counter, and --lcs-pct
+                 starts at 0, so this still reads "0%" on the very first paint. -->
+            <span class="pct" id="lcs-pct"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="root"></div>
+
+    <script>
+    (function(){
+      // --- boot-flag read (synchronous, before React mounts) -------------------
+      // Default to SHOWING the splash. Only an explicit stored `false` disables it.
+      // Absent / unparseable / brand-new user -> show. try/catch so a corrupt
+      // localStorage blob can never block boot (falls open to showing). OPFS is
+      // async, so the durable store mirrors this one boot-only preference.
+      var showSplash = true;
+      try {
+        var bootPreferences = JSON.parse(localStorage.getItem('liencam-boot-preferences') || 'null');
+        var persisted = JSON.parse(localStorage.getItem('cnc-cam-project') || 'null');
+        if (bootPreferences && bootPreferences.showSplash === false) {
+          showSplash = false;
+        }
+        if (persisted && persisted.state && persisted.state.appSettings &&
+            persisted.state.appSettings.showSplash === false) {
+          showSplash = false;
+        }
+      } catch (e) { /* corrupt blob -> fall open to showing the splash */ }
+
+      var root = document.getElementById('liencam-splash');
+      if (!showSplash) {
+        if (root) root.remove();        // never animate, never paint
+        return;
+      }
+
+      // --- dismiss logic -------------------------------------------------------
+      // The full ~3.35s animation is a MINIMUM display time. Dismiss (fade ~400ms
+      // then remove the node) when BOTH the animation has completed AND ready()
+      // has been called — whichever is LATER. Safety net: auto-dismiss after 8s
+      // even if ready() never fires. One-shot/idempotent (StrictMode double-invokes
+      // ready() in dev, and the 8s timer may also race the normal path).
+      //
+      // WO-282: `animDone` is now set by the wordmark's own animationend, not by a
+      // setTimeout(3350). Those were different clocks: the CSS animations do not
+      // start until the first rendering opportunity after they are created, and a
+      // boot captured for this order had that land 1.24s after the boot script ran
+      // — so the JavaScript timer fired while the wordmark had not begun to rise,
+      // and the splash faded out having never shown "LienCAM" at all. The 8s net
+      // below is what still bounds the wait if animationend never arrives.
+      var animDone = false, appReady = false, dismissed = false, manualLabel = false;
+      function maybeDismiss(){
+        if (dismissed || !animDone || !appReady) return;
+        dismiss();
+      }
+      function dismiss(){
+        if (dismissed) return;
+        dismissed = true;
+        if (!root) return;
+        root.classList.add('lcs-dismissing');
+        var node = root;
+        setTimeout(function(){ if (node && node.parentNode) node.parentNode.removeChild(node); }, 450);
+      }
+      // Safety net: tear the splash down after 8s no matter what.
+      setTimeout(dismiss, 8000);
+
+      // --- typed window API the React app calls --------------------------------
+      window.LienSplash = {
+        ready: function(){ appReady = true; maybeDismiss(); },
+        // Hook left available for real progress later; NOT wired — the bar runs
+        // its own timed 3s fill by default. Updates the readout if called.
+        setProgress: function(pct, label){
+          if (dismissed) return;
+          var p = Math.max(0, Math.min(100, Math.round(pct)));
+          // The readout is a CSS counter now, so a real progress feed sets the
+          // variable the counter reads and cancels the timed animation. Writing
+          // textContent would put a second number beside the generated one.
+          if (pctEl) { pctEl.style.animation = 'none'; pctEl.style.setProperty('--lcs-pct', p); }
+          if (label != null && statusEl) { manualLabel = true; statusEl.textContent = label; }
+        }
+      };
+
+      // === splash build (vanilla SVG, scoped to #liencam-splash) ================
+      const LOGO={"W": 988, "H": 755, "shades": [{"v": "var(--steel-floor)", "c": "#2f353d", "d": "M537.0,93.5 L539.5,90.0 L539.5,38.0 L528.5,42.0 L540.0,34.5 L541.5,91.0 L537.0,93.5 Z M632.0,149.5 L635.5,146.0 L635.5,93.0 L623.5,98.0 L636.0,90.5 L637.5,146.0 L632.0,149.5 Z M674.0,291.5 L683.5,284.0 L683.5,176.0 L666.5,184.0 L685.0,173.5 L686.5,284.0 L674.0,291.5 Z M771.0,235.5 L779.5,229.0 L779.5,176.0 L762.5,184.0 L780.0,173.5 L780.5,228.0 L783.5,228.0 L771.0,235.5 Z M733.0,257.5 L730.5,201.0 L736.0,199.5 L733.5,202.0 L733.5,255.0 L736.5,255.0 L733.0,257.5 Z M740.0,362.5 L876.5,230.0 L877.0,283.5 L740.0,362.5 Z M596.0,336.5 L612.5,325.0 L612.5,273.0 L607.0,274.5 L611.5,270.0 L595.0,259.5 L614.5,271.0 L614.5,323.0 L620.5,322.0 L596.0,336.5 Z M499.0,392.5 L516.5,381.0 L516.5,273.0 L491.5,285.0 L519.0,270.5 L518.5,381.0 L499.0,392.5 Z M206.0,339.5 L194.5,333.0 L205.5,337.0 L205.5,284.0 L218.0,276.5 L206.5,286.0 L206.0,339.5 Z M14.0,468.5 L13.5,284.0 L16.0,282.5 L14.0,468.5 Z M565.0,354.5 L562.5,297.0 L587.0,285.5 L566.5,299.0 L568.5,352.0 L565.0,354.5 Z M968.0,470.5 L970.5,467.0 L971.0,285.5 L971.5,468.0 L968.0,470.5 Z M265.0,373.5 L251.5,366.0 L254.0,311.5 L254.5,366.0 L265.0,373.5 Z M405.0,343.5 L397.5,339.0 L420.0,326.5 L400.5,339.0 L405.0,343.5 Z M407.0,455.5 L396.5,450.0 L397.5,395.0 L412.0,386.5 L398.5,396.0 L398.5,449.0 L407.0,455.5 Z M511.0,515.5 L490.5,504.0 L493.5,504.0 L492.5,450.0 L506.0,442.5 L494.5,451.0 L494.5,505.0 L511.0,515.5 Z M528.0,724.5 L539.5,716.0 L539.5,535.0 L535.5,535.0 L539.5,530.0 L540.0,477.5 L540.5,717.0 L528.0,724.5 Z M589.0,689.5 L586.5,688.0 L586.5,504.0 L606.0,494.5 L589.5,505.0 L589.5,687.0 L597.5,684.0 L589.0,689.5 Z M494.0,744.5 L489.5,743.0 L492.5,742.0 L491.5,560.0 L509.0,550.5 L493.5,561.0 L493.5,742.0 L500.5,740.0 L494.0,744.5 Z"}, {"v": "var(--steel-right)", "c": "#565d66", "d": "M205.0,337.5 L111.5,284.0 L539.5,38.0 L538.0,91.5 L208.0,281.5 L205.5,284.0 L205.0,337.5 Z M301.0,393.5 L254.5,366.0 L255.0,311.5 L635.5,93.0 L635.0,146.5 L303.0,337.5 L301.0,393.5 Z M616.0,323.5 L614.5,271.0 L567.5,243.0 L683.0,175.5 L683.5,284.0 L616.0,323.5 Z M734.0,255.5 L733.5,202.0 L779.0,175.5 L779.5,229.0 L734.0,255.5 Z M448.0,420.5 L446.5,367.0 L400.5,339.0 L516.0,272.5 L516.5,381.0 L448.0,420.5 Z M568.0,351.5 L566.5,299.0 L612.0,272.5 L612.5,325.0 L568.0,351.5 Z M590.0,687.5 L589.5,505.0 L970.0,285.5 L970.5,467.0 L590.0,687.5 Z M539.0,530.5 L494.5,505.0 L494.5,451.0 L669.0,350.5 L540.5,476.0 L539.0,530.5 Z M445.0,476.5 L398.5,449.0 L398.5,396.0 L445.0,368.5 L445.0,476.5 Z M494.0,742.5 L493.5,561.0 L539.0,534.5 L539.5,716.0 L494.0,742.5 Z"}, {"v": "var(--steel-left)", "c": "#9097a0", "d": "M687.0,282.5 L686.0,175.5 L731.5,202.0 L731.5,256.0 L687.0,282.5 Z M519.0,379.5 L519.0,272.5 L564.5,299.0 L564.5,353.0 L519.0,379.5 Z M491.0,742.5 L16.0,468.5 L14.5,286.0 L490.0,559.5 L491.0,742.5 Z M253.0,365.5 L206.5,338.0 L207.0,285.5 L253.5,312.0 L253.0,365.5 Z M397.0,448.5 L302.5,394.0 L303.0,340.5 L397.5,396.0 L397.0,448.5 Z M493.0,504.5 L446.5,477.0 L447.0,423.5 L493.5,451.0 L493.0,504.5 Z M587.0,687.5 L541.5,661.0 L542.0,478.5 L587.5,505.0 L587.0,687.5 Z"}, {"v": "var(--steel-top)", "c": "#cfd5db", "d": "M494.0,558.5 L16.5,284.0 L487.0,11.5 L494.0,9.5 L505.0,15.5 L537.5,36.0 L109.5,283.0 L537.5,532.0 L494.0,558.5 Z M254.0,310.5 L208.5,284.0 L588.0,64.5 L634.5,91.0 L254.0,310.5 Z M399.0,393.5 L304.5,339.0 L684.0,119.5 L778.5,174.0 L732.0,200.5 L683.0,173.5 L564.5,243.0 L610.5,270.0 L574.0,292.5 L565.0,297.5 L517.0,269.5 L414.0,328.5 L397.5,340.0 L444.5,367.0 L399.0,393.5 Z M589.0,503.5 L542.5,476.0 L658.0,365.5 L678.0,342.5 L494.0,449.5 L448.5,422.0 L828.0,202.5 L874.5,230.0 L739.0,363.5 L922.0,257.5 L968.5,284.0 L589.0,503.5 Z"}], "top": [[[494.0, 558.5], [16.5, 284.0], [487.0, 11.5], [494.0, 9.5], [505.0, 15.5], [537.5, 36.0], [109.5, 283.0], [537.5, 532.0], [494.0, 558.5]], [[254.0, 310.5], [208.5, 284.0], [588.0, 64.5], [634.5, 91.0], [254.0, 310.5]], [[399.0, 393.5], [304.5, 339.0], [684.0, 119.5], [778.5, 174.0], [732.0, 200.5], [683.0, 173.5], [564.5, 243.0], [610.5, 270.0], [574.0, 292.5], [565.0, 297.5], [517.0, 269.5], [414.0, 328.5], [397.5, 340.0], [444.5, 367.0], [399.0, 393.5]], [[589.0, 503.5], [542.5, 476.0], [678.0, 342.5], [494.0, 449.5], [448.5, 422.0], [828.0, 202.5], [874.5, 230.0], [739.0, 363.5], [922.0, 257.5], [968.5, 284.0], [589.0, 503.5]]]};
+      const D={W:LOGO.W,H:LOGO.H};
+      const NS="http://www.w3.org/2000/svg";
+      function el(n,a){const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e;}
+
+      const svg=el("svg",{viewBox:`0 0 ${D.W} ${D.H}`,role:"img","aria-label":"LienCAM logo"});
+
+      // defs: glow + sweep gradient + face mask
+      const defs=el("defs",{});
+      defs.innerHTML=`
+        <filter id="lcs-glow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="2.4" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <linearGradient id="lcs-spec" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+          <stop offset="0.45" stop-color="#fff" stop-opacity="0.0"/>
+          <stop offset="0.5" stop-color="#fff" stop-opacity="0.9"/>
+          <stop offset="0.55" stop-color="#fff" stop-opacity="0.0"/>
+          <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        </linearGradient>`;
+      svg.appendChild(defs);
+
+      // --- bed grid ---
+      const grid=el("g",{id:"lcs-grid"});
+      const gstep=53, GW=D.W, GH=D.H, GL=Math.hypot(GW,GH)*1.2;
+      function fam(deg,color){
+        const a=deg*Math.PI/180, dx=Math.cos(a), dy=Math.sin(a), px=-dy, py=dx;
+        const cx=GW/2, cy=GH/2, n=Math.ceil(GL/gstep)+2;
+        for(let k=-n;k<=n;k++){
+          const bx=cx+px*k*gstep, by=cy+py*k*gstep;
+          grid.appendChild(el("line",{x1:bx-dx*GL,y1:by-dy*GL,x2:bx+dx*GL,y2:by+dy*GL,
+            stroke:color,"stroke-width":.75}));
+        }
+      }
+      fam(30,"#4a5462"); fam(-30,"#4a5462");
+      // soft radial fade -> no harsh edge where the grid ends
+      const gfade=el("radialGradient",{id:"lcs-gridfade",cx:"50%",cy:"47%",r:"74%"});
+      [["0","1"],["0.66","1"],["1","0"]].forEach(([o,op])=>
+        gfade.appendChild(el("stop",{offset:o,"stop-color":"#fff","stop-opacity":op})));
+      defs.appendChild(gfade);
+      const gmask=el("mask",{id:"lcs-gridmask"});
+      gmask.appendChild(el("rect",{x:0,y:0,width:GW,height:GH,fill:"url(#lcs-gridfade)"}));
+      defs.appendChild(gmask);
+      grid.setAttribute("mask","url(#lcs-gridmask)");
+      svg.appendChild(grid);
+
+      // --- faces: full 3D solid; fades in beneath the cyan (style chosen per variant) ---
+      const faceG=el("g",{id:"lcs-faces"});
+      const allFaces=[];
+      // metallic sheen: a vertical gradient per shade (lighter up top, darker below)
+      function shade(hex,f){ const n=parseInt(hex.slice(1),16); const c=[(n>>16)&255,(n>>8)&255,n&255];
+        const adj=v=>Math.max(0,Math.min(255,Math.round(v+(f>0?(255-v)*f:v*f))));
+        return "#"+c.map(v=>adj(v).toString(16).padStart(2,"0")).join(""); }
+      LOGO.shades.forEach((sh,i)=>{
+        const gid="lcs-sg"+i;
+        const lg=el("linearGradient",{id:gid,gradientUnits:"userSpaceOnUse",x1:0,y1:0,x2:0,y2:LOGO.H});
+        lg.appendChild(el("stop",{offset:"0","stop-color":shade(sh.c,0.18)}));
+        lg.appendChild(el("stop",{offset:"0.5","stop-color":shade(sh.c,0.02)}));
+        lg.appendChild(el("stop",{offset:"1","stop-color":shade(sh.c,-0.2)}));
+        defs.appendChild(lg);
+        const p=el("path",{d:sh.d,fill:`url(#${gid})`,"fill-rule":"evenodd",class:"face"});
+        faceG.appendChild(p); allFaces.push({p});
+      });
+      svg.appendChild(faceG);
+
+      // --- build a connected toolpath traversal from the edges ---
+      const traceG=el("g",{id:"lcs-trace"});
+      const TOL=2.2;
+      const nkey=(x,y)=>Math.round(x/TOL)+","+Math.round(y/TOL);
+      const nodes=new Map();
+      // trace ONLY the top surface: edges from the light-shade (top) contours
+      const topEdges=[], seenE=new Set();
+      LOGO.top.forEach(pts=>{
+        for(let i=0;i<pts.length;i++){ const a=pts[i], b=pts[(i+1)%pts.length];
+          if(Math.hypot(b[0]-a[0],b[1]-a[1])<0.6) continue;           // skip closing dup
+          const ka=`${Math.round(a[0])},${Math.round(a[1])}`, kb=`${Math.round(b[0])},${Math.round(b[1])}`;
+          const k=ka<kb?ka+"|"+kb:kb+"|"+ka;
+          if(seenE.has(k))continue; seenE.add(k);
+          topEdges.push([a[0],a[1],b[0],b[1]]); } });
+      const segArr=topEdges.map(e=>({a:[e[0],e[1]],b:[e[2],e[3]],used:false}));
+      function node(x,y){const k=nkey(x,y); if(!nodes.has(k))nodes.set(k,{inc:[]}); return nodes.get(k);}
+      segArr.forEach(s=>{ node(...s.a).inc.push(s); node(...s.b).inc.push(s); });
+      const near=(p,q)=>Math.abs(p[0]-q[0])<TOL && Math.abs(p[1]-q[1])<TOL;
+      const dlen=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
+      function unit(a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy)||1;return[dx/l,dy/l];}
+
+      const moves=[];                 // ordered {a,b,rapid,cut?}
+      let cur = segArr.reduce((m,s)=> (s.a[0]+s.a[1])<(m.a[0]+m.a[1])?s:m, segArr[0]).a.slice();
+      let lastDir=[0.7,0.7];
+      while(segArr.some(s=>!s.used)){
+        const nd=nodes.get(nkey(cur[0],cur[1]));
+        let pick=null,bestDot=-2;
+        if(nd) for(const s of nd.inc){ if(s.used)continue;
+          const other = near(s.a,cur)? s.b : s.a;
+          const d=unit(cur,other), dot=d[0]*lastDir[0]+d[1]*lastDir[1];
+          if(dot>bestDot){bestDot=dot;pick={s,other};}
+        }
+        if(pick){
+          moves.push({a:cur.slice(),b:pick.other.slice(),rapid:false,seg:pick.s});
+          pick.s.used=true; lastDir=unit(cur,pick.other); cur=pick.other.slice();
+        } else {
+          // rapid to nearest unused endpoint
+          let best=null,bd=1e9,bstart=null,bend=null;
+          for(const s of segArr){ if(s.used)continue;
+            const da=dlen(cur,s.a), db=dlen(cur,s.b);
+            if(da<bd){bd=da;best=s;bstart=s.a;bend=s.b;}
+            if(db<bd){bd=db;best=s;bstart=s.b;bend=s.a;}
+          }
+          if(!best)break;
+          if(bd>TOL) moves.push({a:cur.slice(),b:bstart.slice(),rapid:true});
+          moves.push({a:bstart.slice(),b:bend.slice(),rapid:false,seg:best});
+          best.used=true; lastDir=unit(bstart,bend); cur=bend.slice();
+        }
+      }
+
+      // create the bright trace lines in cutting order; time-budget each move
+      const CUT=1, RAPID=3.4; let acc=0;
+      moves.forEach(m=>{
+        const L=dlen(m.a,m.b);
+        m.t0=acc; acc += Math.max(m.rapid? L/RAPID : L/CUT, 1e-4); m.t1=acc;
+        if(!m.rapid){
+          m.ln=el("line",{x1:m.a[0],y1:m.a[1],x2:m.b[0],y2:m.b[1],class:"trace",pathLength:1});
+          traceG.appendChild(m.ln);          // .trace already parks dashoffset at 1
+        }
+      });
+      const TOTAL=acc;
+      svg.appendChild(traceG);
+
+      // --- travelling tool reticle (rides @keyframes lcsTool, generated below) ---
+      const tool=el("g",{id:"lcs-tool"});
+      tool.innerHTML=`<circle r="10" fill="none" stroke="var(--cut)" stroke-width="1.2" opacity=".7"/>
+        <circle r="2.4" fill="var(--cut-hot)"/>
+        <line x1="-15" y1="0" x2="-5" y2="0" stroke="var(--cut)" stroke-width="1"/>
+        <line x1="5" y1="0" x2="15" y2="0" stroke="var(--cut)" stroke-width="1"/>
+        <line x1="0" y1="-15" x2="0" y2="-5" stroke="var(--cut)" stroke-width="1"/>
+        <line x1="0" y1="5" x2="0" y2="15" stroke="var(--cut)" stroke-width="1"/>`;
+      svg.appendChild(tool);
+
+      // --- the toolpath animation, expressed as CSS ----------------------------
+      // WO-282. What used to be a requestAnimationFrame loop writing a
+      // strokeDashoffset on every trace line and a transform on the reticle, once
+      // per frame, is one generated stylesheet instead. Same geometry and the same
+      // clock arithmetic - each move's t0/t1 share of TOTAL, stretched over
+      // TRACE_MS after TRACE_DELAY - but the browser owns the playback, so the
+      // drawing no longer queues behind whatever the app is doing on the main
+      // thread. WO-271 measured that queue at 1.8-2.1s, spent inside
+      // `new THREE.WebGLRenderer(...)` (which this order deliberately does not
+      // touch: see src/lib/viewport/CNCViewport.ts:1052 and the work order).
+      const TRACE_DELAY=300, TRACE_MS=1500, TOOL_FADE=250;
+      const at=(u)=>u/TOTAL;             // 0..1 along the cutting-order time budget
+      // One stop per move boundary. CSS interpolates linearly between two stops,
+      // which is exactly what setTrace() did between the same two endpoints.
+      let stops="";
+      moves.forEach(m=>{ stops+=`${(at(m.t0)*100).toFixed(4)}%{transform:translate(${m.a[0]}px,${m.a[1]}px)}`; });
+      const endPt=moves[moves.length-1].b;
+      stops+=`100%{transform:translate(${endPt[0]}px,${endPt[1]}px)}`;
+      // The reticle used to fade through a .25s opacity transition on a class the
+      // rAF loop added at TRACE_DELAY and removed at the end. Same two ramps, same
+      // easing, as keyframes - so its window runs TOOL_FADE past the trace.
+      const FADE_MS=TRACE_MS+TOOL_FADE;
+      const upAt=(TOOL_FADE/FADE_MS*100).toFixed(4), downAt=(TRACE_MS/FADE_MS*100).toFixed(4);
+      const sheet=document.createElement("style");
+      sheet.textContent=
+        `@keyframes lcsTool{${stops}}`+
+        `@keyframes lcsToolFade{0%{opacity:0;animation-timing-function:ease}`+
+        `${upAt}%{opacity:1}${downAt}%{opacity:1;animation-timing-function:ease}100%{opacity:0}}`;
+      document.head.appendChild(sheet);
+
+      function traceAnimations(on){
+        moves.forEach(m=>{
+          if(!m.ln) return;
+          if(!on){ m.ln.style.animation="none"; return; }
+          const delay=TRACE_DELAY+at(m.t0)*TRACE_MS, ms=(at(m.t1)-at(m.t0))*TRACE_MS;
+          m.ln.style.animation=`lcsCut ${ms.toFixed(3)}ms linear ${delay.toFixed(3)}ms both`;
+        });
+        tool.style.animation = on
+          ? `lcsTool ${TRACE_MS}ms linear ${TRACE_DELAY}ms both, lcsToolFade ${FADE_MS}ms linear ${TRACE_DELAY}ms both`
+          : "none";
+      }
+
+      document.getElementById("lcs-art").appendChild(svg);
+
+      // --- orchestration ---
+      const stage=document.getElementById("lcs-stage");
+      const statusEl=document.getElementById("lcs-status");
+      const pctEl=document.getElementById("lcs-pct");
+      const barFill=root.querySelector(".bar i");
+      const wordmark=root.querySelector(".wordmark");
+      let statusTimer=0;
+
+      const steps=[
+        [0,"Loading"],
+        [300,"Mounting"],
+        [1200,"Generating"],
+        [2100,"Verifying"],
+        [3000,"Ready"],
+      ];
+      // The four words are labels, not motion - text can never be composited, and
+      // a word that arrives late reads as a late word, not as a stutter - so they
+      // stay on setTimeout. WHICH word gets printed is read off the bar
+      // animation's own currentTime, so a timer that fires late can no longer
+      // print "Ready" beside a half-full bar; WO-271 photographed exactly that
+      // ("Ready 100%" over a bar at 58%, frames/05-*.jpg).
+      const bootAt=performance.now();
+      function barClock(){
+        const anim=barFill && barFill.getAnimations
+          ? barFill.getAnimations().find(a=>a.animationName==="lcsFill") : null;
+        if(!anim) return performance.now()-bootAt;   // no Web Animations: own clock
+        // A pending animation has no start time yet: the CSS clock has not begun,
+        // so neither has the ladder.
+        return anim.startTime==null ? null : (anim.currentTime||0);
+      }
+      // One timer at a time, re-aimed from the bar's own clock every time it
+      // fires: a timer that fires late simply prints the word that is true now,
+      // and while the CSS clock is still pending the ladder waits instead of
+      // running ahead of the picture.
+      function syncStatus(){
+        if(manualLabel) return;
+        clearTimeout(statusTimer);
+        const t=barClock();
+        let word=steps[0][1];
+        if(t!=null) for(const s of steps) if(t>=s[0]) word=s[1];
+        statusEl.textContent=word;
+        if(t==null){ statusTimer=setTimeout(syncStatus,50); return; }
+        const next=steps.find(s=>s[0]>t);
+        if(next) statusTimer=setTimeout(syncStatus,Math.max(16,next[0]-t));
+      }
+
+      // "The animation finished" is now the wordmark's own animationend, not a
+      // number on a different clock. lcsSettle ends 3350ms after the CSS clock
+      // starts - the same total the old DONE constant encoded. The 8s safety net
+      // set up above still bounds the wait if the event never arrives.
+      if(wordmark) wordmark.addEventListener("animationend",function(e){
+        if(e.animationName!=="lcsSettle") return;
+        animDone=true; maybeDismiss();
+      });
+
+      function run(){
+        clearTimeout(statusTimer);
+        traceAnimations(false);
+        stage.classList.remove("run"); void stage.offsetWidth;   // reflow so animations restart
+        statusEl.textContent=steps[0][1];
+        stage.classList.add("run");
+        traceAnimations(true);
+        syncStatus();
+      }
+
+      if(matchMedia("(prefers-reduced-motion: reduce)").matches){
+        // Every animation is off in this mode and the media query already paints
+        // the finished frame (full bar, 100%, solid up), so there is nothing to
+        // wait for and no animationend to wait on.
+        stage.classList.add("run");
+        allFaces.forEach(o=>o.p.style.opacity=1);
+        statusEl.textContent="Ready";
+        animDone=true; maybeDismiss();
+      }else{ run(); }
+    })();
+    </script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

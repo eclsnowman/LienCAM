@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "V03",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "setup"
+    },
+    {
+      "action": "secondSide"
+    },
+    {
+      "action": "setup",
+      "index": 1
+    },
+    {
+      "action": "regen"
+    },
+    {
+      "action": "simulate"
+    },
+    {
+      "action": "simulate",
+      "index": 1
+    },
+    {
+      "action": "post",
+      "pause": true
+    },
+    {
+      "action": "export"
+    },
+    {
+      "action": "hold"
+    }
+  ]
+}

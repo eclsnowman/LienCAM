@@ -1,0 +1,2 @@
+# Walkthrough programs are byte-compared on Windows and Linux.
+*.nc text eol=lf

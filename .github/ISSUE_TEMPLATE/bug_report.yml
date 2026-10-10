@@ -1,0 +1,102 @@
+name: Report a bug
+description: Something in LienCAM does not work the way the help says it should.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. LienCAM is an ALPHA, so bugs are expected and useful.
+
+        **If the machine moved when it should not have, press your E-STOP first.**
+        Then fill this in. The more of it you can fill, the faster it gets fixed.
+
+        Questions and ideas belong in Discussions, not here. Please do not paste passwords,
+        license keys or personal data; project files and G-code are fine.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - The machine moved wrongly or the cut came out wrong (G-code or live control)
+        - The toolpath looks wrong or gouges the part
+        - The app crashes, hangs or will not start
+        - A screen, button or setting does not work
+        - Wording, help text or looks
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LienCAM version
+      description: Help > About LienCAM shows it. Example "Version 0.35.0".
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+      description: Example Windows 11 23H2. Say if it is not Windows.
+    validations:
+      required: true
+  - type: dropdown
+    id: controller
+    attributes:
+      label: Controller you were using
+      options:
+        - None (simulator or just making toolpaths)
+        - UCCNC with UC100
+        - Other (name it in the steps below)
+    validations:
+      required: true
+  - type: dropdown
+    id: ran-on-machine
+    attributes:
+      label: Did this happen with the cutter on a real machine?
+      options:
+        - No, on screen only
+        - Yes, in the air (no stock)
+        - Yes, cutting
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered, starting from a fresh start of the app if you can.
+      placeholder: |
+        1. Open the attached project
+        2. Go to the CAM tab, press Generate on operation 2
+        3. See the problem
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: >
+        Drag in your project file (.camproject), the posted G-code, and screenshots.
+        Zip them if GitHub refuses the type. A project file is the single most useful
+        thing you can attach.
+  - type: textarea
+    id: console
+    attributes:
+      label: Error text or console log
+      description: Paste any error message you saw.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and Discussions and did not find this.
+          required: true
+        - label: I understand LienCAM is an alpha and I run machine output at my own risk (Apache-2.0, no warranty).
+          required: true

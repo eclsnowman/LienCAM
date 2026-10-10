@@ -1,0 +1,50 @@
+{
+  "placements": [
+    {
+      "partId": "lock",
+      "instanceId": "lock#0",
+      "x": 0,
+      "y": 0,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "lock",
+      "instanceId": "lock#1",
+      "x": 0,
+      "y": 8,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "lock",
+      "instanceId": "lock#2",
+      "x": 0,
+      "y": 16,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "lock",
+      "instanceId": "lock#3",
+      "x": 0,
+      "y": 24,
+      "rotationDeg": 0,
+      "depth": 0
+    },
+    {
+      "partId": "lock",
+      "instanceId": "lock#4",
+      "x": 0,
+      "y": 32,
+      "rotationDeg": 0,
+      "depth": 0
+    }
+  ],
+  "unplaced": [],
+  "utilization": 0.08,
+  "sheetUsed": {
+    "width": 100,
+    "height": 100
+  }
+}

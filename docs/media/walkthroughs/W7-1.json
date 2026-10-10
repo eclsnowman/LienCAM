@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W7-1.png": {
+      "commit": "2dccb168025ebf1b3afef2bff44bdf15023b9e56",
+      "workingTreeDirty": true,
+      "workingTreeScope": [
+        "examples/06-knob-handwheel/lobed-knob-source.camproject",
+        "src",
+        "tools/capture/scenes.json",
+        "tools/capture/scenes.mjs"
+      ],
+      "sourceExcludes": [
+        "src/tests/evidence"
+      ],
+      "sourceHash": "5a2972d21222a2a47c4a2ec0178c3f20305340ee5cba863066b2c805f932dbe0",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 4348,
+      "screenshotBytes": 301039,
+      "screenshotSha256": "08d7d4266344404ebdcc153a177d1a26c2c461e2ad047f97f4d3652219a0b90c"
+    }
+  }
+}

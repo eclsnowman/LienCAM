@@ -1,0 +1,38 @@
+name: Issue intake
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+# Serialize reruns so a saved reply is posted only once per issue.
+concurrency:
+  group: issue-intake-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      # This ships in the public tree. Anonymous checkout keeps the token at
+      # issues: write without adding contents permission or persisting credentials.
+      - name: Read this public repository at the event commit
+        shell: bash
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git sparse-checkout set .github
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Label and reply
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { join } = require('node:path');
+            const { runIntake } = await import(pathToFileURL(join(process.env.GITHUB_WORKSPACE, '.github/scripts/issue-intake.mjs')).href);
+            await runIntake({ github, context });

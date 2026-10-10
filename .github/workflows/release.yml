@@ -1,0 +1,149 @@
+name: Build draft alpha release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_TAG: ${{ github.ref_name }}
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci
+      - name: Stamp tag version
+        run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
+      - name: Build renderer
+        run: npm run build
+      - name: Package unsigned Windows installer and portable
+        run: npx electron-builder --win nsis portable --x64 --publish never
+      - name: Save Windows installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installers-windows
+          path: release/*.exe
+          if-no-files-found: error
+          compression-level: 0
+
+  linux:
+    # Linux builds are untested and unsigned.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci
+      - name: Stamp tag version
+        run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
+      - name: Build renderer
+        run: npm run build
+      - name: Package untested unsigned Linux AppImage and archive
+        run: npx electron-builder --linux AppImage tar.gz --x64 --publish never
+      - name: Save Linux installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installers-linux
+          path: |
+            release/*.AppImage
+            release/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  macos:
+    # macOS builds are untested and unsigned. Journey testing is a later order.
+    runs-on: macos-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci
+      - name: Stamp tag version
+        run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
+      - name: Build renderer
+        run: npm run build
+      - name: Package untested unsigned macOS dmg
+        run: npx electron-builder --mac dmg --arm64 --publish never
+      - name: Save macOS installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installers-macos
+          path: release/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+      - name: Collect all platform installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: installers-*
+          path: release-assets
+          merge-multiple: true
+      - name: Include the LinuxCNC gateway as its own download
+        run: cp pendant/linuxcnc-gateway/gateway.py release-assets/gateway.py
+      - name: Write and verify checksums and Download data
+        run: |
+          node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all
+          node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all --verify
+      - name: Create draft pre-release for owner review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > release-notes.txt <<'NOTES'
+          Alpha release. All installers are unsigned.
+          Linux and macOS builds are untested and unsigned.
+          Review the installers before publishing this draft.
+          Copy gateway.py to your LinuxCNC PC; it is a separate release download.
+          SHA256SUMS.txt and releases.json describe the attached files.
+          NOTES
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --prerelease --title "LienCAM $RELEASE_TAG" --notes-file release-notes.txt

@@ -1,0 +1,201 @@
+diff --git a/xtask/src/build.rs b/xtask/src/build.rs
+--- a/xtask/src/build.rs
++++ b/xtask/src/build.rs
+@@ -151,8 +151,11 @@
+ 
+ /// OCCT static libraries not used by the facade — excluded from linking.
+ const EXCLUDED_LIBS: &[&str] = &[
+-    // IGES exchange (deliberately excluded — STEP is the modern standard, saves ~1-2 MB)
+-    "libTKDEIGES.a",
++    // WO-1824: libTKDEIGES.a is NOT excluded. It was, on the grounds that "STEP
++    // is the modern standard"; LienCAM imports IGES because the older CAD and
++    // legacy-parts sites its users buy from still ship it. importIges /
++    // exportIges resolve IGESControl_Reader and IGESControl_Writer out of this
++    // library, so excluding it fails the link on undefined symbols.
+     // Persistence / serialization
+     "libTKStd.a",
+     "libTKStdL.a",
+diff --git a/xtask/src/codegen/config.rs b/xtask/src/codegen/config.rs
+--- a/xtask/src/codegen/config.rs
++++ b/xtask/src/codegen/config.rs
+@@ -3669,6 +3669,92 @@
+         category: "io",
+         return_type: ReturnType::ShapeId,
+     },
++    // WO-1824: IGES read, on the same kernel and the same virtual-FS pattern as
++    // importStep above. IGESControl_Reader reads BOTH the solid (MSBO / entity
++    // 186) files and the surface- or wireframe-only files that make up most of
++    // what older CAD actually emits. It is deliberately NOT restricted to
++    // solids: what OneShape() returns is whatever the file held, and the caller
++    // labels it honestly rather than refusing it (LIENCAM.md rule 11).
++    MethodSpec {
++        name: "importIges",
++        kind: MethodKind::CustomBody,
++        params: &[FacadeParam::String("data")],
++        occt_class: "",
++        ctor_args: "",
++        setup_code: "\
++// IGESControl_Reader needs a file path — write to virtual FS
++{
++    FILE* f = fopen(\"/tmp/import.iges\", \"w\");
++    if (!f) {
++        throw std::runtime_error(\"importIges: cannot create temp file\");
++    }
++    fwrite(data.c_str(), 1, data.size(), f);
++    fclose(f);
++}
++
++// Constructing the reader runs IGESControl_Controller::Init(), which is what
++// registers the IGES norm; there is no separate init call to forget.
++IGESControl_Reader reader;
++IFSelect_ReturnStatus status = reader.ReadFile(\"/tmp/import.iges\");
++if (status != IFSelect_RetDone) {
++    throw std::runtime_error(\"importIges: failed to read IGES data\");
++}
++
++reader.TransferRoots();
++if (reader.NbShapes() == 0) {
++    throw std::runtime_error(\"importIges: no shapes found in IGES data\");
++}
++
++return store(reader.OneShape());",
++        includes: &["IFSelect_ReturnStatus.hxx", "IGESControl_Reader.hxx"],
++        category: "io",
++        return_type: ReturnType::ShapeId,
++    },
++    // WO-1824: IGES write. LienCAM ships no IGES export UI and this order does
++    // not add one — the binding exists because the IGES import fixtures have to
++    // come from somewhere, and generating them from a known solid on this
++    // kernel is the only source that is both license-clean and reproducible
++    // from this repository. `brepMode` is IGESControl_Writer's modecr: true
++    // writes solid BRep entities (186), false writes trimmed surfaces (144),
++    // which is exactly the surface-only shape of file this importer must handle
++    // without refusing.
++    MethodSpec {
++        name: "exportIges",
++        kind: MethodKind::CustomBody,
++        params: &[FacadeParam::ShapeId("id"), FacadeParam::Bool("brepMode")],
++        occt_class: "",
++        ctor_args: "",
++        setup_code: "\
++const auto& shape = get(id);
++
++IGESControl_Writer writer(\"MM\", brepMode ? 1 : 0);
++if (!writer.AddShape(shape)) {
++    throw std::runtime_error(\"exportIges: transfer failed\");
++}
++writer.ComputeModel();
++
++const char* tmpPath = \"/tmp/export.iges\";
++if (!writer.Write(tmpPath)) {
++    throw std::runtime_error(\"exportIges: write failed\");
++}
++
++FILE* f = fopen(tmpPath, \"r\");
++if (!f) {
++    throw std::runtime_error(\"exportIges: cannot read temp file\");
++}
++fseek(f, 0, SEEK_END);
++long size = ftell(f);
++fseek(f, 0, SEEK_SET);
++std::string result(size, '\\0');
++size_t got = fread(&result[0], 1, size, f);
++result.resize(got);
++fclose(f);
++
++return result;",
++        includes: &["IGESControl_Writer.hxx"],
++        category: "io",
++        return_type: ReturnType::String,
++    },
+     MethodSpec {
+         name: "exportStep",
+         kind: MethodKind::CustomBody,
+diff --git a/facade/include/occt_kernel.h b/facade/include/occt_kernel.h
+--- a/facade/include/occt_kernel.h
++++ b/facade/include/occt_kernel.h
+@@ -272,6 +272,8 @@
+     // --- I/O ---
+     uint32_t importStep(const std::string& data);
+     std::string exportStep(uint32_t id);
++    uint32_t importIges(const std::string& data);
++    std::string exportIges(uint32_t id, bool brepMode);
+     uint32_t importStl(const std::string& data);
+     std::string exportStl(uint32_t id, double linearDeflection, bool ascii);
+     std::string toBREP(uint32_t id);
+diff --git a/ts/src/raw-types.ts b/ts/src/raw-types.ts
+--- a/ts/src/raw-types.ts
++++ b/ts/src/raw-types.ts
+@@ -255,6 +255,8 @@
+     // I/O
+     importStep(data: string): number;
+     exportStep(id: number): string;
++    importIges(data: string): number;
++    exportIges(id: number, brepMode: boolean): string;
+     importStl(data: string): number;
+     exportStl(id: number, linearDeflection: number, ascii: boolean): string;
+     toBREP(id: number): string;
+diff --git a/ts/src/index.ts b/ts/src/index.ts
+--- a/ts/src/index.ts
++++ b/ts/src/index.ts
+@@ -1137,6 +1137,27 @@
+         return wrap("exportStep", () => this.#raw.exportStep(shape));
+     }
+ 
++    /**
++     * Read an IGES file. The result is whatever the file held — a solid, a
++     * shell, a pile of trimmed surfaces or bare wireframe curves — not
++     * necessarily a solid. Inspect it with {@link isSolid} / {@link getSubShapes}
++     * rather than assuming.
++     */
++    importIges(data: string | ArrayBuffer): ShapeHandle {
++        return wrap("importIges", () => {
++            const str = typeof data === "string" ? data : new TextDecoder().decode(data);
++            return handle(this.#raw.importIges(str));
++        });
++    }
++
++    /**
++     * Write an IGES file. `brepMode` true emits solid BRep entities (type 186);
++     * false emits trimmed surfaces (type 144).
++     */
++    exportIges(shape: ShapeHandle, brepMode = true): string {
++        return wrap("exportIges", () => this.#raw.exportIges(shape, brepMode));
++    }
++
+     importStl(data: string | ArrayBuffer): ShapeHandle {
+         return wrap("importStl", () => {
+             const str = typeof data === "string" ? data : new TextDecoder().decode(data);
+diff --git a/ts/src/types.ts b/ts/src/types.ts
+--- a/ts/src/types.ts
++++ b/ts/src/types.ts
+@@ -388,7 +388,7 @@
+ /** Operation categories used to infer error codes from context. */
+ const BOOLEAN_OPS = new Set(["fuse", "cut", "common", "intersect", "section", "fuseAll", "cutAll", "split", "booleanPipeline", "fuseWithHistory", "cutWithHistory", "intersectWithHistory"]);
+ const TESSELLATION_OPS = new Set(["tessellate", "wireframe", "meshShape", "meshBatch"]);
+-const IO_OPS = new Set(["importStep", "exportStep", "importStl", "exportStl", "toBREP", "fromBREP", "xcafExportSTEP", "xcafImportSTEP", "xcafExportGLTF"]);
++const IO_OPS = new Set(["importStep", "exportStep", "importIges", "exportIges", "importStl", "exportStl", "toBREP", "fromBREP", "xcafExportSTEP", "xcafImportSTEP", "xcafExportGLTF"]);
+ const HEALING_OPS = new Set(["fixShape", "unifySameDomain", "healSolid", "healFace", "healWire", "fixFaceOrientations", "removeDegenerateEdges", "fixWireOnFace", "buildCurves3d"]);
+ 
+ /**
+diff --git a/ts/src/worker.ts b/ts/src/worker.ts
+--- a/ts/src/worker.ts
++++ b/ts/src/worker.ts
+@@ -111,6 +111,8 @@
+     // I/O
+     importStep(data: string | ArrayBuffer): Promise<ShapeHandle>;
+     exportStep(shape: ShapeHandle): Promise<string>;
++    importIges(data: string | ArrayBuffer): Promise<ShapeHandle>;
++    exportIges(shape: ShapeHandle, brepMode?: boolean): Promise<string>;
+     importStl(data: string | ArrayBuffer): Promise<ShapeHandle>;
+     exportStl(shape: ShapeHandle, linearDeflection?: number, ascii?: boolean): Promise<string>;
+     toBREP(shape: ShapeHandle): Promise<string>;
+@@ -236,6 +238,8 @@
+     rotate(shape: ShapeHandle, axis: { point: Vec3; direction: Vec3 }, angleRad: number) { return this.#proxy.rotate(shape, axis, angleRad); }
+     importStep(data: string | ArrayBuffer) { return this.#proxy.importStep(data); }
+     exportStep(shape: ShapeHandle) { return this.#proxy.exportStep(shape); }
++    importIges(data: string | ArrayBuffer) { return this.#proxy.importIges(data); }
++    exportIges(shape: ShapeHandle, brepMode?: boolean) { return this.#proxy.exportIges(shape, brepMode); }
+     cacheStep(data: string | ArrayBuffer) { return this.#proxy.cacheStep(data); }
+     loadCached(brep: string) { return this.#proxy.loadCached(brep); }
+     getBoundingBox(shape: ShapeHandle, useTriangulation: boolean) { return this.#proxy.getBoundingBox(shape, useTriangulation); }

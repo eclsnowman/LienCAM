@@ -1,0 +1,50 @@
+LienCAM Setup Sheet
+Program: "01_Fixture_plate_-_M6_x_1.ngc"
+Units: mm
+
+Setup: "Setup 1" (G54)
+  Work offset origin: X-62.5 Y-45 Z0 mm
+  Stock: "Stock 1" size 125 x 90 x 8 mm
+  Origin offset from stock min corner: X0 Y0 Z8 mm
+  Workholding:
+    Method: Tape and glue
+    Note: "Apply masking tape to the spoilboard and the underside of the whole plate blank. Apply superglue between the taped faces, glue the blank down, and press one minute. Keep the plate and offcuts bonded through all operations; pry off with a putty knife after the program ends."
+
+1. "Face 1"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -0.5 to 15 mm
+   NC lines: 4-59
+
+2. "Drill 2"
+   Tool: T3 "5 mm drill - M6 pilot" dia 5mm flute length 20mm
+   Spindle: 10000 RPM
+   Feed: cutting 180mm/min, plunge 150mm/min
+   Z range: -10.002 to 15 mm
+   NC lines: 60-83
+
+3. "Thread Mill 3"
+   Tool: T4 "3 mm single-point thread mill - 8 mm neck" dia 3mm flute length 6mm
+   Spindle: 10000 RPM
+   Feed: cutting 300mm/min, plunge 150mm/min
+   Z range: -8 to 15 mm
+   NC lines: 84-4976
+
+4. "Contour 4"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -8.2 to 15 mm
+   NC lines: 4977-5471
+
+5. "Chamfer 5"
+   Tool: T6 "6 mm 90 deg chamfer mill" dia 6mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 400mm/min, plunge 150mm/min
+   Z range: -0.8 to 15 mm
+   NC lines: 5472-8505
+
+File: "01_Fixture_plate_-_M6_x_1.ngc"
+Bytes: 195002
+SHA-256: 7449ca3476ba642681c08e094d1d699b35a7216df68923a52400f918bc145efa

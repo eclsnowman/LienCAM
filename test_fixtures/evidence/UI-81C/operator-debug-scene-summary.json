@@ -1,0 +1,80 @@
+{
+  "source": {
+    "kind": "the operator Model-workspace debug export",
+    "exportedAt": "2026-07-18T22:14:25.364Z",
+    "appVersion": "0.16.1",
+    "gitCommit": "cfde2499a",
+    "gitBranch": "main",
+    "privacyDisposition": "Scrubbed summary contains no personal path, username, email, URL, or machine identifier. The raw Downloads file stays outside the repo and must not be sent to a remote session."
+  },
+  "scene": {
+    "featureOrder": [
+      "origin",
+      "datum:XY",
+      "datum:XZ",
+      "datum:YZ",
+      "sketch3d:SK1"
+    ],
+    "visibleDatumPlane": "datum:XY",
+    "hiddenDatumPlanes": [
+      "datum:XZ",
+      "datum:YZ"
+    ],
+    "bodyCount": 0,
+    "sketchCount": 1,
+    "sketchPlane": "XY",
+    "dimensions": 0,
+    "profileBounds": {
+      "minX": -76.51810972294606,
+      "maxX": 76.51810972294606,
+      "minY": -58.69882349708385,
+      "maxY": 58.69882349708385,
+      "z": 0
+    },
+    "constructionGeometry": "One diagonal construction line plus one construction center point."
+  },
+  "camera": {
+    "projection": "orthographic",
+    "position": {
+      "x": 8.438424574055725,
+      "y": -22.018077385480012,
+      "z": 18.54716309721352
+    },
+    "target": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "distanceToTarget": 29.999999999994213,
+    "zoom": 0.6634204312890623,
+    "near": 0.1,
+    "far": 2000,
+    "visibleWorldWidth": 289.30134634976866,
+    "visibleWorldHeight": 170.6458666150085
+  },
+  "independentProjectionCheck": {
+    "library": "three from the repository dependency set",
+    "result": "The profile fits the orthographic X/Y window, but one real profile corner is behind the camera and outside the near plane.",
+    "clippedCorner": {
+      "world": [
+        76.51810972294606,
+        -58.69882349708385,
+        0
+      ],
+      "cameraSpaceZ": 34.60425118807907,
+      "depth": -34.60425118807907,
+      "ndc": {
+        "x": 0.4242610140356775,
+        "y": -0.4323190566408488,
+        "z": -1.0347059864874033
+      },
+      "clipOwner": "near plane / object behind the orthographic camera"
+    },
+    "otherCornerDepths": [
+      51.55809802496583,
+      94.60425118806748,
+      8.441901975022589
+    ],
+    "inference": "Increasing far above 2000 cannot repair this scene. Because orthographic scale is independent of camera distance, the production policy can move the camera backward along its view direction and refit an owned near/far slab to contain the full visible depth interval without changing the apparent X/Y scale or adding work proportional to empty space."
+  }
+}

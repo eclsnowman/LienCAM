@@ -1,0 +1,8 @@
+[capture] wrote proof.png (1200 bytes, sha256 1ea6240b6ae51b736e6de35a4550fef9a266b7dce57c8376e81996a8d05e7068)
+[capture] wrote proof.png (1200 bytes, sha256 1ea6240b6ae51b736e6de35a4550fef9a266b7dce57c8376e81996a8d05e7068)
+[proof] capture boundary calls persisted: 2
+[proof] legacy commit-only records identical: true
+[proof] before/after dirty: false/true
+[proof] source hashes distinct: true
+[proof] screenshot hashes agree: true
+PROCESS EXIT CODE: 0

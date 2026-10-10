@@ -1,0 +1,461 @@
+{
+  "generatedBy": "coordination/evidence/INT-13C/census/key-listener-census.mjs",
+  "derivation": "grep -rnE \"addEventListener\\(['\\\"]key\" src/ minus tests",
+  "listeners": [
+    {
+      "file": "src/components/modals/NewOperationModal.tsx",
+      "line": 491,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape ENDS A PER-HOLE \"review in viewport\" (stopHoleReview) -- NOT modal close. Registered only while reviewingHoleLoopId is set. NOTE (preflight amendment 4): CAM root-level modals mount OUTSIDE either host's suspend boundary (App.tsx:296-304), so a CAM modal left open across a workspace switch keeps its listeners live while the Model workspace is active. Interleave-tested as a named case. It claims only Escape, which no workspace history owner claims, so it cannot misroute an undo chord."
+    },
+    {
+      "file": "src/components/modals/PostProcessModal.tsx",
+      "line": 1488,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape closes the g-code FLYOUT inside the Post Processor modal (a nested onClose), NOT the modal itself. Registered only while that flyout is mounted. Same root-mounted, Escape-only shape as NewOperationModal#0."
+    },
+    {
+      "file": "src/components/modals/SetupModal.tsx",
+      "line": 242,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape cancels the VERTEX PICK inside the Setup modal, NOT modal close. Registered only while isPickingVertex. Same root-mounted, Escape-only shape as NewOperationModal#0."
+    },
+    {
+      "file": "src/components/modals/SketchEntryModal.tsx",
+      "line": 36,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape closes the Sketch Entry modal -- the only one of these four that IS a modal-close handler. Registered only while activeModal === \"sketch-entry\". Root-mounted, Escape-only."
+    },
+    {
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "line": 4446,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "handleKeyDown",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|ne|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "part-only",
+      "why": "Escape cancels the resize-hole pick. Registered only while resizeHolePickMode is armed; INT-13B suspend step 1 (disarmActiveTool) clears that state, so suspend removes this listener via the effect's own dependency. Already active-scoped by construction."
+    },
+    {
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "line": 4545,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "handleKeyDown",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 1,
+      "disposition": "part-only",
+      "why": "Escape cancels the sketch base-plane pick. Registered only while sketchMode.kind === \"pick-base-plane\"; cleared by INT-13B suspend step 1. Already active-scoped by construction."
+    },
+    {
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "line": 4594,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "handleKeyDown",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "key|ne|n",
+          "key|ne|n",
+          "mod:altKey:+",
+          "mod:ctrlKey:+",
+          "mod:metaKey:+"
+        ]
+      },
+      "ordinal": 2,
+      "disposition": "part-only",
+      "why": "Bare N arms the workbench N-pick (UI-23). THE COLLISION P2 names: identical bare key to useGlobalShortcuts' N (new CAM operation), both bubble, both unconditional. INT-13C resolves it on the CAM side (that hook is now cam-only) rather than here, because this listener is already correct: it is the Part workspace's owner of N and it refuses while any other pick/tool/dialog is active or focus is in a text field."
+    },
+    {
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "line": 4609,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "handleKeyDown",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 3,
+      "disposition": "part-only",
+      "why": "Escape cancels the armed N-pick. Registered only while nPickArmed; cleared by INT-13B suspend step 1."
+    },
+    {
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "line": 4948,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "handleKeyDown",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 4,
+      "disposition": "part-only",
+      "why": "Escape cancels an in-progress push/pull. Registered only while pushPullMode.kind !== \"none\"; cleared by INT-13B suspend step 1."
+    },
+    {
+      "file": "src/components/model3d/SolidsWorkbenchPage.tsx",
+      "line": 5835,
+      "event": "keydown",
+      "phase": "capture",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "k|eq|y",
+          "k|eq|z",
+          "k|eq|z",
+          "mod:ctrlKey:-",
+          "mod:metaKey:-",
+          "mod:shiftKey:+",
+          "mod:shiftKey:-"
+        ]
+      },
+      "ordinal": 5,
+      "disposition": "part-only",
+      "why": "D5.3 rule 2. The Part workspace history owner (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, CAPTURE phase). INT-13C re-scopes it from mounted to ACTIVE: registered by acquireKeyboardOwnership only while the host is not suspended, removed by releaseKeyboardOwnership (the INT-13B seam) on suspend, so a suspended host has NO listener rather than a listener that checks a flag (spec D5.2). Face (b) of the mirror defect is this row left mount-scoped: it would hijack Ctrl+Z in the CAM workspace and CAM undo would become keyboard-unreachable for the rest of the session."
+    },
+    {
+      "file": "src/components/model3d/dialogs/DialogShell.tsx",
+      "line": 41,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape closes whichever workbench dialog is open (the shell every Part-workspace dialog reuses). Mounts inside the Part host, and INT-13B suspend step 2 clears the workbench's own dialog state, so a switch unmounts it. Claims Escape only."
+    },
+    {
+      "file": "src/components/panels/DesignTree.tsx",
+      "line": 367,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "key|ne|f2"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "cam-only",
+      "why": "F2 renames the selected CAM tree item (geometry / op / setup). DISCLOSED CENSUS FINDING, NOT FIXED HERE: this is a window listener registered unconditionally by DesignTree, and the CAM host suspends via display:none (App.tsx:220) WITHOUT unmounting -- so the listener survives and F2 pressed in the Model workspace still opens a rename editor on a CAM tree item. It is invisible (the host is hidden), so the operator sees nothing and finds the CAM tree in rename mode on return. Real but minor, and src/components/panels/DesignTree.tsx is NOT in INT-13C's ownership manifest -- disclosed in the report for a follow-up WO rather than smuggled in. The census RECORDS the intended disposition (cam-only), so the gap is visible rather than forgotten."
+    },
+    {
+      "file": "src/components/panels/TreeContextMenu.tsx",
+      "line": 34,
+      "event": "keydown",
+      "phase": "capture",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape closes the CAM tree context menu, CAPTURE phase deliberately (it must run before the tree key handlers underneath). Mounted only while the menu is open, which requires a CAM-host right-click."
+    },
+    {
+      "file": "src/components/sketch3dlab/Sketch3dLabPage.tsx",
+      "line": 240,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKeyDown",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "both/global",
+      "why": "Escape on the STANDALONE ?sketch3dlab=1 route. Out of the workspace routing contract by construction, not by scoping: App.tsx:58 early-returns this page INSTEAD of CamApp, so neither workspace, neither history owner, and no other listener in this census exists on that route. Recorded as both/global because the closed disposition set has no \"standalone route\" value and global-to-its-route is the truthful reading; the census asserts it so a future edit that mounts this page inside the workspace axis has to revisit it."
+    },
+    {
+      "file": "src/components/toolbar/TopToolbar.tsx",
+      "line": 86,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "key|eq|y",
+          "key|eq|z",
+          "key|eq|z",
+          "mod:ctrlKey:+",
+          "mod:ctrlKey:+",
+          "mod:metaKey:+",
+          "mod:metaKey:+",
+          "mod:shiftKey:+",
+          "mod:shiftKey:-",
+          "mod:shiftKey:-"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "cam-only",
+      "why": "D5.3 rule 3, last resort. Fires CAM project undo/redo on the bubble phase, and ONLY while workspace === \"cam\" (the guard INT-13C adds). Face (a) of the mirror defect is this row left unguarded: with the Part capture listener correctly removed on suspend, nothing else would stop this one firing CAM undo while the operator is in the Model workspace. Still yields to defaultPrevented as a second, order-independent net."
+    },
+    {
+      "file": "src/components/viewport/Viewport.tsx",
+      "line": 288,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "cam-only",
+      "why": "Escape exits the CAM face-selection modes (lay-on-face, project-plane). DISCLOSED CENSUS FINDING, NOT FIXED HERE: same shape as DesignTree#0 -- registered while interactionMode is set, and INT-13B's CAM-side suspend drives render only, not this listener, so Escape pressed in the Model workspace also cancels a CAM face-select mode left armed underneath. src/components/viewport/Viewport.tsx is NOT in INT-13C's ownership manifest; disclosed for a follow-up WO."
+    },
+    {
+      "file": "src/hooks/useGlobalShortcuts.ts",
+      "line": 145,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "key|eq|backspace",
+          "key|eq|delete",
+          "key|eq|g",
+          "key|eq|g",
+          "key|eq|n",
+          "key|eq|n",
+          "mod:altKey:+",
+          "mod:ctrlKey:+",
+          "mod:metaKey:+",
+          "mod:shiftKey:+",
+          "mod:shiftKey:-"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "cam-only",
+      "why": "P2. G / Shift+G (regenerate op, generate all), N (new operation), Delete/Backspace (delete the selected CAM tree item). INT-13C scopes the whole hook to workspace === \"cam\". Every action it fires is a CAM project mutation, so none of them has any meaning in the Model workspace -- and N was a REAL, live collision with the workbench N-pick (SolidsWorkbenchPage.tsx#2, same bare key, both bubble, both unconditional): pressing N in the Model workspace armed the N-pick AND opened CAM's New Operation modal on top of it. G collided the same way with the sketcher's text tool (SKETCH_TOOL_SHORTCUTS.g) whenever a workbench sketch was open, because this hook's sketch guard reads CAM's viewer.mode and cannot see a Part-workspace sketch."
+    },
+    {
+      "file": "src/lib/sketch/sketcher/overlays/SketchContextMenu.tsx",
+      "line": 50,
+      "event": "keydown",
+      "phase": "capture",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "modal-transient",
+      "why": "Escape closes the sketcher context menu, capture phase for the same reason as TreeContextMenu#0. Mounted only while that menu is open, in whichever workspace hosts the sketch."
+    },
+    {
+      "file": "src/lib/sketch/sketcher/overlays/SketchDrawValueInput.tsx",
+      "line": 191,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "onKey",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "pred:isNumericEntryKey"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "text-input-native",
+      "why": "D5.3 rule 1. Seeds the sketch draw-value numeric entry from a bare number/decimal keypress (isNumericEntryKey), then hands the keystroke to a real focused <input>. Claims no chord and no modifier; it is the entry point to native text editing, which wins in BOTH workspaces regardless of which one is active. A rewrite that dropped it changes this row's predicate fingerprint and turns the census RED -- which is exactly what the WO asks of rule 1 (\"MUST survive both rewrites unchanged\")."
+    },
+    {
+      "file": "src/lib/sketch/sketcher/sketchInteraction.ts",
+      "line": 425,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "this.keyHandler",
+      "anchor": "alias->method-below",
+      "chords": {
+        "atoms": [
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:&&",
+          "bool:||",
+          "bool:||",
+          "bool:||",
+          "key|eq|backspace",
+          "key|eq|delete",
+          "key|eq|enter",
+          "key|eq|escape",
+          "key|eq|escape",
+          "key|eq|escape",
+          "key|eq|q",
+          "key|eq|q",
+          "key|eq|tab",
+          "key|eq|tab",
+          "mod:altKey:+",
+          "mod:altKey:+",
+          "mod:ctrlKey:+",
+          "mod:ctrlKey:+",
+          "mod:metaKey:+",
+          "mod:metaKey:+",
+          "pred:shortcutToolForKeyEvent"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "both/global",
+      "why": "The sketcher's own key surface (Escape/Enter/Tab/Delete/Backspace/q + the single-key tool shortcuts via shortcutToolForKeyEvent). CORRECTLY global: the sketcher is the ONE component hosting sketches in BOTH workspaces (feedback_sketcher_parity_part_cam -- full parity is a standing directive), and this listener is attached on enterSketchView and removed on exit, so it is scoped by the ACTIVE SKETCH rather than by workspace. That is the right axis: whichever workspace owns the open sketch owns these chords, which is what WO Work item 3's sketch-mode-in-both-workspaces interleave case asserts. It ignores Ctrl/Alt/Meta chords entirely (shortcuts.ts:70), so it never contends for either history owner's Ctrl+Z."
+    },
+    {
+      "file": "src/lib/viewport/CNCViewport.ts",
+      "line": 5169,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "(inline arrow)",
+      "anchor": "inline-arrow",
+      "chords": {
+        "atoms": [
+          "bool:||",
+          "bool:||",
+          "key|eq|arrowdown",
+          "key|eq|arrowup",
+          "key|eq|arrowup",
+          "key|eq|enter",
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 0,
+      "disposition": "text-input-native",
+      "why": "Element-scoped (zInput.addEventListener, not window): Enter/Escape/ArrowUp/ArrowDown inside the slice-plane Z number input. Cannot fire unless that input has focus, so it is out of the workspace routing contract by construction -- rule 1 territory, and the reason the census derivation is deliberately broader than its \"window- or document-level\" header (it nets element-scoped hits too, which is free coverage)."
+    },
+    {
+      "file": "src/lib/viewport/CNCViewport.ts",
+      "line": 5208,
+      "event": "keydown",
+      "phase": "bubble",
+      "handler": "this.slicePlaneKeyHandler",
+      "anchor": "declaration",
+      "chords": {
+        "atoms": [
+          "key|eq|enter",
+          "key|eq|escape"
+        ]
+      },
+      "ordinal": 1,
+      "disposition": "cam-only",
+      "why": "Enter/Escape commit or cancel the CAM slice-plane Z edit. Registered only while that edit is open. Same disclosed shape as Viewport#0 (CNCViewport.ts is not in the manifest); narrower, since the edit is opened by a CAM gesture the operator cannot reach from the Model workspace."
+    }
+  ]
+}

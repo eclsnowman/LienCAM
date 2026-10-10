@@ -1,0 +1,235 @@
+/*
+ * WO-1798 - ToolsProbePanel's own stylesheet.
+ *
+ * Operator approved the Tools/Probe layout in after-1440.png/after-900.png/
+ * after-560.png (.planning/ui-1798-layout/VERDICT.md): one settings row
+ * (Fast/Fine/Retract/Max travel), a pad row, the PROBE/PROBING lamps on
+ * their own line, labeled explanation rows ("Pad compensation", "Z search")
+ * instead of a cramped monospace line, and a stable action bar below.
+ *
+ * All rules below are scoped under .control-tools-body so the shared
+ * .control-probe-cfg/.control-probe-actions classes app.css defines keep
+ * their existing behavior everywhere else that reuses them (the Probing
+ * tab) - the shared sheet stays untouched, the same pattern
+ * MachineDefinitionPanel.css and MacroEditor.css already use for a panel
+ * owning rules only it renders.
+ */
+
+.control-tools-workspace {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.control-tools-workspace > .control-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Keep Main's rail width and density, with the jog panel at the top of the
+   right column (WO-2429), level with the Tools panel, as on Main and Probing.
+   The rail scrolls at short heights rather than clipping motion controls. */
+.control-tools-jog {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 17.5rem;
+  min-width: 15rem;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.control-tools-jog > .control-col-scroll {
+  flex: 0 1 auto;
+}
+
+.control-tools-body {
+  container: tools-probe / inline-size;
+}
+
+.control-tools-body .control-probe-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 960px;
+}
+
+.control-tools-body .control-probe-cfg {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.control-tools-body .control-probe-pad-config {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+  gap: 16px;
+}
+
+.control-tools-body .control-probe-pad-config label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--font-size-md);
+  line-height: 1.25;
+  color: var(--text-secondary);
+}
+
+.control-tools-body .control-probe-pad-config .mform-input,
+.control-tools-body .control-probe-pad-config .control-offset-input {
+  min-height: 36px;
+  width: 100%;
+  min-width: 0;
+}
+
+.control-tools-body .control-probe-pad-choice {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.control-tools-body .control-probe-pad-choice label { flex: 1; }
+
+.control-tools-body .control-probe-pad-choice select {
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--surface-2);
+  text-align: left;
+  padding: 0 10px;
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.control-tools-body .control-probe-pad-choice button {
+  min-height: 36px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.control-tools-body .control-probe-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+}
+
+.control-tools-body .probe-lamp-group { gap: 8px; }
+.control-tools-body .probe-lamp { padding: 4px 9px; line-height: 1.25; }
+.control-tools-body .probe-lamp-off,
+.control-tools-body .probe-lamp-unavailable { color: var(--text-secondary); opacity: 1; }
+
+.control-tools-body .control-probe-summary { display: grid; gap: 8px; }
+
+.control-tools-body .control-probe-summary-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+}
+
+.control-tools-body .control-probe-summary-label { color: var(--text-secondary); font-weight: 500; }
+
+.control-tools-body .control-probe-summary .control-offsets-meta {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--text-primary);
+  overflow-wrap: normal;
+  min-width: 0;
+}
+
+.control-tools-body .control-probe-feedback .control-probe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.control-tools-body .control-probe-feedback .control-probe-actions .control-probe-btn {
+  flex: 0 0 auto;
+  min-width: 160px;
+  min-height: 42px;
+  padding: 10px 16px;
+  white-space: nowrap;
+  gap: 8px;
+  line-height: 1.2;
+}
+
+.control-tools-body .control-probe-feedback .control-probe-actions .control-probe-btn:disabled {
+  opacity: 1;
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+}
+
+.control-tools-body > [data-testid="control-tools-probing-pointer"] {
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+@container tools-probe (max-width: 680px) {
+  .control-tools-body .control-probe-cfg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .control-tools-body .control-probe-pad-config { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .control-tools-body .control-probe-summary-row { grid-template-columns: 116px minmax(0, 1fr); gap: 12px; }
+}
+
+@container tools-probe (max-width: 420px) {
+  .control-tools-body .control-probe-pad-config { grid-template-columns: 1fr; }
+  .control-tools-body .control-probe-summary-row { grid-template-columns: 1fr; gap: 2px; }
+  .control-tools-body .control-probe-feedback .control-probe-actions .control-probe-btn { flex: 1 0 160px; }
+}
+
+/* WO-2430: the workspace is the shared ResizableSplit. Its 8px drag bar takes
+   the place of the old 8px gap, so no panel edge moves at the default size,
+   and the jog rail's width now comes from the split (default = Main's rail
+   width, bounds = Main's rail bounds) instead of the fixed width above. */
+.control-tools-workspace.resizable-split {
+  gap: 0;
+}
+
+.resizable-split-pane > .control-tools-jog {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.resizable-split-pane > .control-panel {
+  flex: 1 1 auto;
+}
+
+/* WO-2429: the Probe card and the stop cluster sit under the jog in the
+   right rail, stacked, like Control > Probing's command cluster. */
+.control-tools-jog .control-tools-probe-card {
+  flex: 0 0 auto;
+}
+
+.control-tools-jog .control-tools-probe-card .control-probe-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.control-tools-jog .control-aux-authority {
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+
+/* The rail is narrow: the three stop buttons wrap rather than clip. */
+.control-tools-jog .control-aux-authority,
+.control-tools-jog .control-aux-authority .control-transport-compact,
+.control-tools-jog .control-aux-authority .control-safety-bar {
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}

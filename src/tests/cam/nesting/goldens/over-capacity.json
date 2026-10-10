@@ -1,0 +1,23 @@
+{
+  "placements": [
+    {
+      "partId": "big",
+      "instanceId": "big#0",
+      "x": 40,
+      "y": 0,
+      "rotationDeg": 90,
+      "depth": 0
+    }
+  ],
+  "unplaced": [
+    {
+      "partId": "big",
+      "count": 2
+    }
+  ],
+  "utilization": 0.64,
+  "sheetUsed": {
+    "width": 50,
+    "height": 50
+  }
+}

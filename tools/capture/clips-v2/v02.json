@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "id": "V02",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/01-fixture-plate/fixture-plate.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "setup"
+    },
+    {
+      "action": "tools"
+    },
+    {
+      "action": "operation",
+      "index": 0,
+      "tab": "Heights"
+    },
+    {
+      "action": "operation",
+      "index": 1,
+      "tab": "Geometry"
+    },
+    {
+      "action": "operation",
+      "index": 2,
+      "tab": "Geometry"
+    },
+    {
+      "action": "regen"
+    },
+    {
+      "action": "simulate"
+    },
+    {
+      "action": "post",
+      "tools": [
+        "T2",
+        "T3",
+        "T4",
+        "T6"
+      ]
+    },
+    {
+      "action": "export"
+    },
+    {
+      "action": "hold"
+    }
+  ]
+}

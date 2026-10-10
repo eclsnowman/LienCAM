@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "viewport": { "width": 1920, "height": 1080 },
+  "uiScale": 1,
+  "theme": "dark",
+  "clips": [
+    {
+      "id": "V01", "name": "DXF to pocket and profile",
+      "project": "examples/02-toe-clamps/toe-clamps.camproject",
+      "drawing": "examples/02-toe-clamps/toe-clamps.dxf",
+      "steps": [
+        { "action": "import", "caption": "Import toe-clamps.dxf: six closed loops on three named layers." },
+        { "action": "open", "caption": "Open the complete toe-clamp recipe to inspect stock, tools and operations." },
+        { "action": "stock", "caption": "Stock is 76 x 70 x 8 mm, centred in XY with its top at Z0." },
+        { "action": "setup", "caption": "G54 zero is the top front-left stock corner: X-38 Y-35 Z0." },
+        { "action": "operation", "index": 0, "tab": "Geometry", "caption": "Pocket only the two TOE_RECESS loops with the 3 mm end mill." },
+        { "action": "operation", "index": 0, "tab": "Heights", "caption": "The pocket bottom is 2 mm below stock top." },
+        { "action": "operation", "index": 1, "tab": "Geometry", "caption": "Drill only the two SCREW_HOLE circles with the 3 mm drill." },
+        { "action": "operation", "index": 2, "tab": "Linking", "caption": "Profile the outlines with four triangular tabs per clamp." },
+        { "action": "regen", "caption": "Regenerate all three toolpaths. This practice profile is 5 mm deep, not a through-cut." },
+        { "action": "simulate", "caption": "Simulate the whole setup; inspect the recesses and material beneath the profiles." },
+        { "action": "post", "caption": "Post all operations to one UCCNC program in millimetres." },
+        { "action": "export", "caption": "Export the G-code after reviewing the preview and diagnostics." }
+      ]
+    },
+    {
+      "id": "V02", "name": "Multi-tool job in one program",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "steps": [
+        { "action": "open", "caption": "Open the fixture plate: one setup, five operations and four tools." },
+        { "action": "setup", "caption": "Check the 125 x 90 x 8 mm stock and the G54 top front-left zero." },
+        { "action": "tools", "caption": "T2: 6 mm end mill. T3: 5 mm drill. T4: thread mill. T6: chamfer mill." },
+        { "action": "operation", "index": 0, "tab": "Heights", "caption": "Face 1 removes 0.5 mm. Face and Contour share T2." },
+        { "action": "operation", "index": 1, "tab": "Geometry", "caption": "Drill fourteen holes; the two locating-pin seats stay unthreaded." },
+        { "action": "operation", "index": 2, "tab": "Geometry", "caption": "Thread Mill selects only the twelve M6 x 1 pilot holes." },
+        { "action": "regen", "caption": "Keep the shipped order: Face, Drill, Thread Mill, Contour, Chamfer." },
+        { "action": "simulate", "caption": "Simulate the complete setup and inspect the face, holes, threads and chamfers." },
+        { "action": "post", "caption": "Choose UCCNC, All operations and Combined (one file)." },
+        { "action": "export", "caption": "One program: T2, T3, T4, T6. Later tool changes use M6 and an M0 pause." },
+        { "action": "hold", "caption": "On a configured machine, follow the guided M6 card. This clip performs no machine motion." }
+      ]
+    },
+    {
+      "id": "V03", "name": "Two-sided part with a flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "steps": [
+        { "action": "open", "caption": "Open the tool-storage bar: two sides of one 160 x 50 x 12 mm stock." },
+        { "action": "setup", "caption": "Top - G54 uses the top front-left stock corner." },
+        { "action": "secondSide", "caption": "New Setup: Second side of Top - G54, Turned about Y. Cancel: the recipe already has both sides." },
+        { "action": "setup", "setup": 1, "caption": "The saved bottom setup uses G55. Imported bottom.svg supplies the mirrored hole positions." },
+        { "action": "regen", "caption": "Regenerate both setups. Each side drills, bores and chamfers its own three holes." },
+        { "action": "simulate", "caption": "Simulate Top - G54 separately; simulation covers the active setup." },
+        { "action": "simulate", "setup": 1, "caption": "Now simulate Bottom - flip about Y - G55. Simulation does not animate a physical flip." },
+        { "action": "post", "pause": true, "caption": "Combine all operations in UCCNC and enable Pause between setups (M0)." },
+        { "action": "export", "caption": "Review G54, the spindle stop and M0, then G55. Export the combined program." },
+        { "action": "hold", "caption": "At the real pause: turn 180 deg about Y, secure the part and establish physical G55 zero." }
+      ]
+    }
+  ]
+}

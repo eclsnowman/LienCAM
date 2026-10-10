@@ -1,0 +1,176 @@
+[
+  {
+    "id": "carmex-mti-0604-c12-a60-mt11",
+    "name": "Carmex MTI 0604 C12 A60 (MT11)",
+    "type": "thread_mill",
+    "diameter": 4.0,
+    "fluteLength": 12.5,
+    "shankDiameter": 6.0,
+    "overallLength": 58,
+    "numberOfFlutes": 3,
+    "material": "carbide",
+    "coating": "tialn",
+    "vendor": "Carmex",
+    "productId": "MTI 0604 C12 A60 MT11",
+    "threadPitch": 1.0,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 13,
+    "notes": "Carmex Mini Mill-Thread, partial-profile 60deg, internal + external. Real pitch range 0.5-1.0 mm (representative pitch 1.0 used for tooth drawing). Multi-tooth over the full 12.5 mm cutting body, no relieved neck. Test thread: M6x1.0 internal (cutter 4.0 < 5.0 mm bore; reach 12.5 mm > 10 mm hole depth). Grade MT11 PVD coating.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 8000,
+        "feedRate": 150,
+        "plungeRate": 60,
+        "depthOfCut": 1.0,
+        "stepover": 1.0,
+        "coolant": "flood"
+      }
+    }
+  },
+  {
+    "id": "carmex-mti-1212-e39-a60-mt8",
+    "name": "Carmex MTI 1212 E39 A60 (MT8)",
+    "type": "thread_mill",
+    "diameter": 8.0,
+    "fluteLength": 30,
+    "shankDiameter": 12.0,
+    "overallLength": 64,
+    "numberOfFlutes": 4,
+    "material": "carbide",
+    "coating": "tialn",
+    "vendor": "Carmex",
+    "productId": "MTI 1212 E39 A60 MT8",
+    "threadPitch": 1.5,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 20,
+    "notes": "Carmex Mill-Thread, partial-profile 60deg, internal + external. Real pitch range internal 1.0-1.75 / external 0.8-1.5 mm (representative pitch 1.5 used for tooth drawing). Multi-tooth over the full 30 mm cutting body, no relieved neck. Test threads: M10x1.5 internal, M12x1.75 internal, M8x1.25 external. Reach 30 mm covers all; M10 bore 8.5 mm vs 8.0 mm cutter is tight but valid. Grade MT8 PVD coating.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 6000,
+        "feedRate": 180,
+        "plungeRate": 70,
+        "depthOfCut": 1.5,
+        "stepover": 1.5,
+        "coolant": "flood"
+      }
+    }
+  },
+  {
+    "id": "carmex-mti-1616-e50-a60-mt8",
+    "name": "Carmex MTI 1616 E50 A60 (MT8)",
+    "type": "thread_mill",
+    "diameter": 12.0,
+    "fluteLength": 40,
+    "shankDiameter": 16.0,
+    "overallLength": 84,
+    "numberOfFlutes": 5,
+    "material": "carbide",
+    "coating": "tialn",
+    "vendor": "Carmex",
+    "productId": "MTI 1616 E50 A60 MT8",
+    "threadPitch": 2.5,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 16,
+    "notes": "Carmex Mill-Thread, partial-profile 60deg, internal + external. Real pitch range internal 2.0-3.0 / external 1.75-2.5 mm (representative pitch 2.5 used for tooth drawing). Multi-tooth over the full 40 mm cutting body, no relieved neck. Test threads: M16x2.0 external, M20x2.5 external. Reach 40 mm covers both. Grade MT8 PVD coating.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 4500,
+        "feedRate": 200,
+        "plungeRate": 80,
+        "depthOfCut": 2.5,
+        "stepover": 2.5,
+        "coolant": "flood"
+      }
+    }
+  },
+  {
+    "id": "carmex-mts-06047-c20-1p0-iso",
+    "name": "Carmex MTS 06047 C20 1.0 ISO",
+    "type": "thread_mill",
+    "diameter": 3.8,
+    "fluteLength": 16,
+    "shankDiameter": 6.0,
+    "overallLength": 58,
+    "numberOfFlutes": 3,
+    "material": "carbide",
+    "coating": "tialn",
+    "vendor": "Carmex",
+    "productId": "MTS 06047 C20 1.0 ISO",
+    "threadPitch": 1.0,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 16,
+    "notes": "Carmex full-profile, pitch-specific 1.0 mm ISO (60deg), internal + external. Fixed pitch 1.0 (full-form crests cut the complete thread profile). Multi-tooth over the full 16 mm cutting body, no relieved neck. Test thread: DEEP M6x1.0 internal (reach 16 mm for deeper M6 holes; spare for the partial-profile MTI 0604). Grade ISO PVD coating.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 8500,
+        "feedRate": 140,
+        "plungeRate": 55,
+        "depthOfCut": 1.0,
+        "stepover": 1.0,
+        "coolant": "flood"
+      }
+    }
+  },
+  {
+    "id": "harvey-890330-c3",
+    "name": "Harvey Tool 890330-C3 single-form",
+    "type": "thread_mill",
+    "diameter": 4.8,
+    "fluteLength": 1.109,
+    "shankDiameter": 6.0,
+    "overallLength": 50,
+    "numberOfFlutes": 4,
+    "material": "carbide",
+    "coating": "tialn",
+    "vendor": "Harvey Tool",
+    "productId": "890330-C3",
+    "threadPitch": 1.0,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 1,
+    "neckDiameter": 2.88,
+    "shoulderLength": 7.391,
+    "neckTransitionAngleDeg": 30,
+    "notes": "Harvey Tool single-FORM metric thread mill (one 60deg tooth, pitch-independent), internal + external. Cuts any metric pitch; representative pitch 1.0 (designed around M6) used only for tooth drawing. Single tooth (LOC 1.109 mm) on a relieved 2.88 mm neck giving the reach to max thread depth 8.5 mm (shoulderLength = 8.5 - 1.109 = 7.391 mm). Test thread: M6x1.0 internal alternative (shallow, depth <= 8.5 mm; reach 8.5 mm covers it). AlTiN (-C3) coating.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 7500,
+        "feedRate": 150,
+        "plungeRate": 60,
+        "depthOfCut": 1.0,
+        "stepover": 1.0,
+        "coolant": "flood"
+      }
+    }
+  },
+  {
+    "id": "harvey-890339",
+    "name": "Harvey Tool 890339 single-form",
+    "type": "thread_mill",
+    "diameter": 13.7,
+    "fluteLength": 3.164,
+    "shankDiameter": 14.0,
+    "overallLength": 75,
+    "numberOfFlutes": 6,
+    "material": "carbide",
+    "coating": "tialn",
+    "vendor": "Harvey Tool",
+    "productId": "890339",
+    "threadPitch": 2.0,
+    "threadFormAngleDeg": 60,
+    "threadTeethCount": 1,
+    "neckDiameter": 8.22,
+    "shoulderLength": 21.836,
+    "neckTransitionAngleDeg": 30,
+    "notes": "Harvey Tool single-FORM metric thread mill (one 60deg tooth, pitch-independent), internal + external. Cuts any metric pitch; representative pitch 2.0 (designed around M16) used only for tooth drawing. Single tooth (LOC 3.164 mm) on a relieved 8.22 mm neck giving the reach to max thread depth 25 mm (shoulderLength = 25 - 3.164 = 21.836 mm). Test thread: M16x2.0 external alternative (boss 18 mm < 25 mm reach). AlTiN coating.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 4000,
+        "feedRate": 220,
+        "plungeRate": 85,
+        "depthOfCut": 2.0,
+        "stepover": 2.0,
+        "coolant": "flood"
+      }
+    }
+  }
+]

@@ -1,0 +1,62 @@
+diff --git a/xtask/src/codegen/config.rs b/xtask/src/codegen/config.rs
+--- a/xtask/src/codegen/config.rs
++++ b/xtask/src/codegen/config.rs
+@@ -667,18 +667,52 @@
+         occt_class: "",
+         ctor_args: "",
+         setup_code: "\
++// GEO-9 (BK-65): real OCCT feature removal via BRepAlgoAPI_Defeaturing
++// (which drives BOPAlgo_RemoveFeatures), replacing the stock zero-thickness
++// thick-solid shell path (MakeThickSolidByJoin(..., 0.0, tolerance)) that
++// threw a WebAssembly.Exception on real inputs. Public signature preserved.
++// `tolerance` is compatibility-only: OCCT defeaturing exposes no per-call
++// tolerance knob; when > 0 it is forwarded as the fuzzy value of the
++// underlying boolean sub-operations, NOT as a defeaturing parameter.
+ NCollection_List<TopoDS_Shape> facesToRemove;
+ for (uint32_t fid : faceIds) {
+     facesToRemove.Append(get(fid));
+ }
+-BRepOffsetAPI_MakeThickSolid maker;
+-maker.MakeThickSolidByJoin(get(shapeId), facesToRemove, 0.0, tolerance);
+-maker.Build();
+-if (!maker.IsDone()) {
++BRepAlgoAPI_Defeaturing df;
++df.SetShape(get(shapeId));
++df.AddFacesToRemove(facesToRemove);
++df.SetRunParallel(false);
++df.SetToFillHistory(false);
++if (tolerance > 0.0) {
++    df.SetFuzzyValue(tolerance);
++}
++df.Build();
++if (df.HasErrors()) {
+     throw std::runtime_error(\"defeature: operation failed\");
+ }
+-return store(maker.Shape());",
+-        includes: &["BRepOffsetAPI_MakeThickSolid.hxx", "NCollection_List.hxx"],
++TopoDS_Shape result = df.Shape();
++if (result.IsNull()) {
++    throw std::runtime_error(\"defeature: null result\");
++}
++// GEO-9 REQUIRED unwrap: BRepAlgoAPI_Defeaturing returns a single-solid
++// COMPOUND in the tractable removal case; without unwrapping it to the bare
++// solid, isSolid()/watertight() report false on a geometrically-correct
++// result. Only unwrap when the compound holds exactly one solid.
++if (result.ShapeType() == TopAbs_COMPOUND) {
++    TopoDS_Shape single;
++    int solidCount = 0;
++    for (TopExp_Explorer exp(result, TopAbs_SOLID); exp.More(); exp.Next()) {
++        single = exp.Current();
++        if (++solidCount > 1) {
++            break;
++        }
++    }
++    if (solidCount == 1) {
++        result = single;
++    }
++}
++return store(result);",
++        includes: &["BRepAlgoAPI_Defeaturing.hxx", "NCollection_List.hxx", "TopExp_Explorer.hxx", "TopAbs_ShapeEnum.hxx"],
+         category: "modeling",
+         return_type: ReturnType::ShapeId,
+     },

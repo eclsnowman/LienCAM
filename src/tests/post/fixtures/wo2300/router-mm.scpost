@@ -1,0 +1,42 @@
+-- Hand-written static-import fixture, no vendor file content.
+postName = "WO-2300 SheetCAM MM"
+units = "mm"
+function OnInit()
+  post.SetCommentChars("()", "[]")
+  post.Text("(SCPOST HEADER)\nG90 G21\n")
+  if tool > 0 then
+    post.Text("CONDITIONAL MUST NOT LEAK\n")
+  end
+end
+function OnMove()
+  post.ModalText("G01")
+  post.ModalNumber(" X", endX * scale, "0.0000")
+  post.ModalNumber(" F", feedRate * scale, "0.00")
+end
+function OnArc()
+  if arcAngle < 0 then post.ModalText("G02") else post.ModalText("G03") end
+  post.ModalNumber(" I", arcCentreX - currentX, "0.0000")
+  post.ModalNumber(" J", arcCentreY - currentY, "0.0000")
+end
+function OnNewLine()
+  post.Text("N")
+  post.Number(lineNumber, "0")
+  lineNumber = lineNumber + 7
+end
+function OnToolChange()
+  post.Text("M6 T")
+  post.Number(tool, "0")
+  post.Eol()
+end
+function OnSpindleCW() post.Text("M13 S") post.Number(spindleSpeed, "0") end
+function OnSpindleCCW() post.Text("M14 S") post.Number(spindleSpeed, "0") end
+function OnSpindleOff() post.Text("M15\n") end
+function OnFloodOn() post.Text("M18\n") end
+function OnMistOn() post.Text("M17\n") end
+function OnCoolantOff() post.Text("M19\n") end
+function OnPenDown() post.Text("M62 P3\n") end
+function OnFinish() post.Text("M15\nM19\n(SCPOST FOOTER)\nM2\n") end
+-- Side effects must never run, whether Lua or JavaScript-looking text.
+os.execute("WO2300_SIDE_EFFECT")
+sideEffect("WO2300_SIDE_EFFECT")
+globalThis.WO2300Executed = true

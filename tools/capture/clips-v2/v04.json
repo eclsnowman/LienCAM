@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "V04",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/06-knob-handwheel/knob-handwheel.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "importSTEP"
+    },
+    {
+      "action": "open"
+    },
+    {
+      "action": "setup"
+    },
+    {
+      "action": "operation",
+      "index": 0,
+      "tab": "Passes"
+    },
+    {
+      "action": "operation",
+      "index": 1,
+      "tab": "Passes"
+    },
+    {
+      "action": "operation",
+      "index": 2,
+      "tab": "Passes"
+    },
+    {
+      "action": "regen"
+    },
+    {
+      "action": "simulate"
+    },
+    {
+      "action": "post",
+      "definition": "GRBL"
+    },
+    {
+      "action": "hold"
+    }
+  ],
+  "regenTimeoutMs": 600000
+}

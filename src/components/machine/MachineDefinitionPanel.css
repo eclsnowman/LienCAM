@@ -1,0 +1,230 @@
+/*
+ * WO-1122 - MachineDefinitionPanel's own stylesheet.
+ *
+ * The grant note is explicit that these are all NEW rules: the toggle row, the
+ * count line an all-empty section collapses to, and the three hide rules the
+ * toggle drives. Nothing here overrides an existing app.css rule - the shared
+ * sheet stays untouched. The panel imports this file itself, the way the
+ * model3d components import theirs (App.tsx loads the shared sheets; a
+ * component owning a rule only it renders is already this app's pattern).
+ *
+ * THE HIDING IS CSS ON PURPOSE, and it is the whole reason the toggle can
+ * default to ON without moving a single DOM node: the boxes, their testids
+ * and their provenance markers all stay exactly where they are, and
+ * `display: none` is what the toggle state adds. Toggling OFF removes one
+ * attribute from the section and the page is today's page - same nodes, same
+ * order, same count. The coverage suites that count what this page exposes
+ * (WO-947's provenance totality, WO-1039's 1489 editable controls) read the
+ * DOM, and the DOM does not change with the toggle.
+ */
+
+/* WO-1713 - THE COMPACT ROW: the bar (Kind, Controller, Find any setting,
+ * Apply, and the source tag) and the seven-plus-Legacy area tabs together,
+ * so the page reaches its first card several rows higher than it used to
+ * (Operator ruling 2026-09-19: "Need to use better vertical space real estate").
+ * `.machine-def-bar` and `.control-strip-nav` (the tab strip) keep their
+ * own internal wrapping - each is one flex item here, so at desktop width
+ * they share this row, and on a phone each wraps to its own line rather
+ * than clipping, overflowing, or overlapping the other. */
+.machine-def-compact-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+/* WO-1687 - THE BAR: Kind, Controller, Find any setting, Apply to machine.
+ * v2/SLICES.md T4. One row, wrapping on a narrow viewport rather than
+ * clipping - the same posture as `.machine-def-hide-empty-row` below it. */
+.machine-def-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  flex: 1 1 auto;
+}
+
+/* WO-1713 fix round: each label+select pair is one atomic flex item, so
+ * wrapping a narrow bar never splits a label from its own select onto
+ * separate lines. */
+.machine-def-bar-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* WO-1713 fix round: the shared `.mform-label` rule reserves 128px - built
+   for a vertical label-left settings form, not this inline bar. That
+   reservation alone was over half of what forced Kind onto its own line
+   away from Controller on a phone. "Kind"/"Controller" need only their own
+   word's width here. */
+.machine-def-bar-field .mform-label {
+  min-width: 0;
+}
+
+.machine-def-bar .mform-select {
+  width: auto;
+  /* WO-1713 fix round: the shared `.mform-select` rule sets `min-width: 0`
+     so a form field can shrink in a narrow column - here that let Kind and
+     Controller shrink below their own option text ("Router" / "UCCN...").
+     `max-content` is the fix everywhere else on this row already uses
+     (nothing shrinks below its content; the row wraps instead, which is
+     what `.machine-def-bar`'s own `flex-wrap: wrap` is for). */
+  flex: 0 1 auto;
+  min-width: max-content;
+}
+
+/* WO-1713 fix round: THE TAB STRIP WRAPS INSTEAD OF RUNNING OFF THE EDGE.
+ * `.control-strip-nav` (the shared class every tab strip uses) is
+ * deliberately `flex: 0 0 auto` with no wrap of its own, which is fine
+ * where it always fits; on this panel's phone width the eight-tab strip
+ * (seven areas + Legacy) did not fit and, with no wrap, simply overflowed
+ * off the right edge of the screen instead - a control genuinely "moving
+ * off the page" (this order's own outcome 2). Enabling wrap here is safe
+ * at every OTHER width: the strip already fits one line on desktop
+ * (WO-1713's own measurement), so wrap only changes anything once the
+ * content stops fitting, which is exactly the phone case this fixes. */
+[data-testid="machine-def-tabs"] {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+/* WO-1713 fix round: at a phone width, give the bar and the tab strip each
+ * their own full-width line (deterministic, rather than relying on
+ * overflow to force the wrap), and drop the header summary, which is what
+ * the Overview cards right below it already say in full. Every word this
+ * hides is still in the DOM unchanged (see the JSX comment on
+ * `.machine-def-summary-home`) - nothing here cuts a word short, only
+ * which whole clause is shown at a glance. */
+@media (max-width: 640px) {
+  .machine-def-bar,
+  [data-testid="machine-def-tabs"] {
+    /* `flex-basis: 100%` (not just `flex-wrap: wrap` above) is what actually
+       bounds this item's own width on a phone - a `flex: 0 0 auto` item
+       otherwise sizes to its unwrapped content and simply runs off the
+       right edge instead of wrapping within itself. Desktop is untouched:
+       this rule only applies under the breakpoint. */
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+
+  /* Tighten the compact row's own vertical rhythm on a phone - Operator's
+     complaint was specifically about vertical space, and every px here is
+     one this order can still give back without touching a control. */
+  .machine-def-compact-row {
+    gap: 4px 12px;
+    margin-bottom: 4px;
+  }
+
+  .machine-def-bar {
+    gap: 4px 10px;
+  }
+
+  /* THE HEADER ROW: "Machine definition" keeps its one line (the shared
+     `.panel-title` rule's `overflow: hidden` removes a flex item's
+     automatic minimum width, which is what let the title itself shrink
+     below "Machine definition" and wrap into "MACHINE" / "DEFINITION").
+     Revert and Save stay beside it. The pins summary is what the Overview
+     cards right below it already say in full, so on a phone it steps aside
+     rather than claiming a row of its own or wrapping under the title -
+     still unchanged, still in the DOM (`toContain('home Z,X,Y')`,
+     machineDefinitionEditor.wo913.test.tsx, reads this same node; CSS
+     visibility does not touch its text content). */
+  .machine-definition-panel > .panel-header {
+    height: auto;
+    min-height: 36px;
+  }
+
+  .machine-definition-panel > .panel-header .panel-title {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .machine-definition-panel > .panel-header [data-testid="machine-def-panel-summary"] {
+    display: none;
+  }
+}
+
+/* WO-1713 - THE SOURCE LINE, SHRUNK TO A TAG. The ordinary cases sit inline
+ * on the bar (fix round: right after Kind/Controller, where a phone still
+ * has room - see the JSX comment at the tag's own render site), a short
+ * COMPLETE label rather than a sentence - `data-tooltip` carries the full
+ * sentence on hover. The WO-1712 exception - a panel showing a machine
+ * Control does not drive - is the one case where the name is news, so
+ * `flex-basis: 100%` keeps it a full sentence on its own line instead of
+ * shrinking it, per Operator's own carve-out for that line. */
+.machine-def-authority-tag {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  border-radius: 10px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.machine-def-authority-line {
+  flex-basis: 100%;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* The temporary placeholder for a WO-1690..1694 area that has not landed
+ * yet - plain text, no heading, no banner: the console rule (COHESION-
+ * STANDARD s13) is about notices, and this is ordinary page content saying
+ * where the settings still live. */
+.machine-def-section-placeholder {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  padding: 12px 0;
+}
+
+/* The toggle row: leads the settings, right after the tab strips. */
+.machine-def-hide-empty-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.machine-def-hide-empty-count {
+  color: var(--text-muted);
+}
+
+/* THE USED-ONLY RULES. Each marker is written by its owning component:
+ *   [data-setting-unused] one generic catalog setting in a group the operator
+ *                         explicitly classified as unused for this machine.
+ *   [data-row-empty]      a table row whose cells are all unused.
+ *   [data-section-empty]  a whole boxed block whose fields are all unused -
+ *                         the block goes away and its heading carries the
+ *                         count instead (`.machine-def-none-set`).
+ * Toggling OFF removes `data-hide-unused-settings` from the panel and every
+ * rule here stops matching - "show everything, unchanged from today".
+ *
+ * !important is not decoration: the boxes carry their own inline
+ * `display: inline-flex` (a per-box literal this page deliberately keeps -
+ * 1489 style objects re-parsed per keystroke is the difference it measured),
+ * and a plain stylesheet rule loses to every one of them. The toggle's whole
+ * job is to beat inline display, so it says so. */
+.machine-definition-panel[data-hide-unused-settings] [data-setting-unused],
+.machine-definition-panel[data-hide-unused-settings] [data-row-empty],
+.machine-definition-panel[data-hide-unused-settings] [data-section-empty] {
+  display: none !important;
+}
+
+/* What an all-unused section collapses TO: its heading, then this count. A
+ * section that disappeared entirely would teach Operator it does not exist, so
+ * the count stays and says what the record does not carry - never what his
+ * controller has no key for. */
+.machine-def-none-set {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}

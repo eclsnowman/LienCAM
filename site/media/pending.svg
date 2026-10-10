@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300">
+  <rect width="480" height="300" fill="#e1e5ea"/>
+  <path d="M0 100h480M0 200h480M160 0v300M320 0v300" stroke="#ccd2da"/>
+  <rect x="95" y="119" width="290" height="62" rx="6" fill="#e1e5ea"/>
+  <text x="240" y="159" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="24">Screenshot coming soon</text>
+</svg>

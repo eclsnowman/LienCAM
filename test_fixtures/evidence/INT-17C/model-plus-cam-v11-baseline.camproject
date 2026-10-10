@@ -1,0 +1,266 @@
+{
+  "id": "p-int17c",
+  "name": "INT-17C C1 Baseline Fixture",
+  "version": "1.0.0",
+  "createdAt": "2026-07-22T00:00:00.000Z",
+  "updatedAt": "2026-07-22T00:00:00.000Z",
+  "machine": {
+    "id": "m-1",
+    "name": "Router",
+    "type": "gantry_router",
+    "controller": "grbl",
+    "travel": {
+      "x": 800,
+      "y": 600,
+      "z": 100
+    },
+    "rapidRate": 5000,
+    "maxSpindleRpm": 24000,
+    "minSpindleRpm": 8000,
+    "spindleDirection": "cw",
+    "toolChanger": "manual",
+    "coolant": false,
+    "notes": ""
+  },
+  "toolLibrary": [],
+  "geometry": [
+    {
+      "id": "modelbody:b1",
+      "name": "Bracket",
+      "filename": "Bracket",
+      "type": "model",
+      "format": "model",
+      "boundingBox": {
+        "min": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 0
+        },
+        "size": {
+          "x": 1,
+          "y": 1,
+          "z": 0
+        },
+        "center": {
+          "x": 0.5,
+          "y": 0.5,
+          "z": 0
+        }
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "color": "#ff8800",
+      "loaded": true,
+      "hidden": true,
+      "folderId": "40bd62a5-4e04-49dc-9b77-bcb9b27cae92",
+      "modelBody": {
+        "ref": {
+          "bodyId": "b1",
+          "stableIds": [
+            "b1:F0",
+            "b1:E0"
+          ],
+          "version": 3
+        },
+        "display": {
+          "positions": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0
+          ],
+          "normals": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1
+          ],
+          "indices": [
+            0,
+            1,
+            2
+          ],
+          "edgePositions": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0
+          ],
+          "edgeOffsets": [
+            0,
+            2
+          ],
+          "bbox": {
+            "min": [
+              0,
+              0,
+              0
+            ],
+            "max": [
+              1,
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "modelbody:b2",
+      "name": "Bearing Block",
+      "filename": "Bearing Block",
+      "type": "model",
+      "format": "model",
+      "boundingBox": {
+        "min": {
+          "x": 4,
+          "y": 0,
+          "z": 0
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 0
+        },
+        "size": {
+          "x": -3,
+          "y": 1,
+          "z": 0
+        },
+        "center": {
+          "x": 2.5,
+          "y": 0.5,
+          "z": 0
+        }
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "loaded": true,
+      "modelBody": {
+        "ref": {
+          "bodyId": "b2",
+          "stableIds": [
+            "b2:F0",
+            "b2:E0"
+          ],
+          "version": 1
+        },
+        "display": {
+          "positions": [
+            4,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0
+          ],
+          "normals": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1
+          ],
+          "indices": [
+            0,
+            1,
+            2
+          ],
+          "edgePositions": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0
+          ],
+          "edgeOffsets": [
+            0,
+            2
+          ],
+          "bbox": {
+            "min": [
+              4,
+              0,
+              0
+            ],
+            "max": [
+              1,
+              1,
+              0
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "setups": [],
+  "activeSetupId": null,
+  "activeOperationId": null,
+  "sceneStock": {
+    "mode": "auto",
+    "autoOffsetXY": 2,
+    "autoOffsetZTop": 1,
+    "fixedWidth": 100,
+    "fixedHeight": 100,
+    "fixedDepth": 12,
+    "fixedStocks": []
+  },
+  "notes": "",
+  "geometryFolders": [
+    {
+      "id": "40bd62a5-4e04-49dc-9b77-bcb9b27cae92",
+      "name": "Model Bodies",
+      "parentId": null
+    }
+  ],
+  "schemaVersion": 11,
+  "toolLibraries": [
+    {
+      "id": "lib-default",
+      "name": "My Tools"
+    }
+  ],
+  "holders": [],
+  "document": "UEsDBBQAAAAAAAAAIQDI8OCb1QMAANUDAAANAAAAZG9jdW1lbnQuanNvbnsiYm9keUNhY2hlcyI6W10sImNhbUJpbmRpbmdzIjpbXSwiZGFnIjp7Im5vZGVzIjpbeyJjb25zdW1lcyI6WyJTSzEiXSwiZGVncmFkZWQiOmZhbHNlLCJkaWFnbm9zdGljcyI6W10sImhpZGRlbiI6ZmFsc2UsImlkIjoiRjEiLCJraW5kIjoiZmVhdHVyZSIsImxhc3RHb29kQm91bmRUbyI6e30sInBheWxvYWQiOnsiYm9vbE1vZGUiOiJuZXdCb2R5IiwiZGlyZWN0aW9uIjoidXAiLCJkaXN0YW5jZSI6MTIsIm5hbWUiOiJCcmFja2V0IEJvZHkiLCJvcFR5cGUiOiJleHRydWRlIiwic2tldGNoSWQiOiJTSzEifSwicmVmcyI6W10sInN1cHByZXNzZWQiOmZhbHNlfSx7ImNvbnN1bWVzIjpbIkYxIl0sImRlZ3JhZGVkIjpmYWxzZSwiZGlhZ25vc3RpY3MiOltdLCJoaWRkZW4iOmZhbHNlLCJpZCI6IkYyIiwia2luZCI6ImZlYXR1cmUiLCJsYXN0R29vZEJvdW5kVG8iOnt9LCJwYXlsb2FkIjp7ImVkZ2VzIjpbIkYxOkJPWDplZGdlVG9wIl0sIm5hbWUiOiJFZGdlIEZpbGxldCIsIm9wVHlwZSI6ImZpbGxldCIsIm93bmVySWQiOiJGMSIsInByb3BhZ2F0ZVRhbmdlbnQiOnRydWUsInJhZGl1cyI6Mn0sInJlZnMiOltdLCJzdXBwcmVzc2VkIjpmYWxzZX0seyJjb25zdW1lcyI6W10sImRlZ3JhZGVkIjpmYWxzZSwiZGlhZ25vc3RpY3MiOltdLCJoaWRkZW4iOmZhbHNlLCJpZCI6IlNLMSIsImtpbmQiOiJza2V0Y2giLCJsYXN0R29vZEJvdW5kVG8iOnt9LCJwYXlsb2FkIjp7Im5hbWUiOiJCYXNlIFNrZXRjaCJ9LCJyZWZzIjpbXSwic3VwcHJlc3NlZCI6ZmFsc2V9XSwib3JkZXIiOlsiU0sxIiwiRjEiLCJGMiJdfSwiZG9jdW1lbnRLaW5kIjoibGllbmNhbS0zZC1kb2N1bWVudCIsImVsZW1lbnRNYXBEZWx0YXMiOltdLCJmb2xkZXJzIjp7ImZvbGRlcnMiOltdLCJtZW1iZXJzaGlwIjp7fX0sInBhcmFtZXRlcnMiOnt9LCJyb2xsYmFjayI6eyJmZWF0dXJlT3JkZXIiOltdLCJtYXJrZXIiOnsia2luZCI6ImVuZCJ9fSwic2tldGNoZXMiOltdfVBLAwQUAAAAAAAAACEA9Rcla24AAABuAAAADQAAAG1hbmlmZXN0Lmpzb257ImZpbGVzIjpbeyJieXRlcyI6OTgxLCJwYXRoIjoiZG9jdW1lbnQuanNvbiIsInJvbGUiOiJkb2N1bWVudCJ9XSwiZm9ybWF0IjoibGllbmNhbS0zZC16aXAiLCJzY2hlbWFWZXJzaW9uIjo0fVBLAQIUABQAAAAAAAAAIQDI8OCb1QMAANUDAAANAAAAAAAAAAAAAAAAAAAAAABkb2N1bWVudC5qc29uUEsBAhQAFAAAAAAAAAAhAPUXJWtuAAAAbgAAAA0AAAAAAAAAAAAAAAAAAAQAAG1hbmlmZXN0Lmpzb25QSwUGAAAAAAIAAgB2AAAAmQQAAAAA"
+}

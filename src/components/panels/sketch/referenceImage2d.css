@@ -1,0 +1,58 @@
+.reference-image2d-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.reference-image2d-panel .relief-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.reference-image2d-panel .relief-row-label {
+  width: 48px;
+  flex: 0 0 48px;
+  color: var(--text-muted);
+}
+
+.reference-image2d-panel input[type="text"] {
+  width: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.reference-image2d-panel .relief-slider-row {
+  min-width: 0;
+}
+
+/* Independent image panel: editing an underlay never scrolls Create away. */
+.reference-image2d-controls {
+  left: 16px;
+  top: 150px;
+  width: 260px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  z-index: 40;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px var(--overlay-scrim-2);
+}
+.reference-image2d-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+.reference-image2d-picker select {
+  width: 100%;
+  min-width: 0;
+}
+.reference-image2d-panel .sketch-section-heading {
+  overflow-wrap: anywhere;
+}

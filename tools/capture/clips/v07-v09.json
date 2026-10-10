@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "viewport": { "width": 1920, "height": 1080 },
+  "uiScale": 1,
+  "theme": "dark",
+  "clips": [
+    {
+      "id": "V07", "name": "Probe and zero your stock: simulator and motion previews",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "steps": [
+        { "action": "open", "caption": "Open the fixture plate for setup context. The simulator has its own virtual contact surface." },
+        { "action": "simulator", "caption": "Control: connect only to the built-in simulator, clear the software stop and Home." },
+        { "action": "diagnostics", "caption": "Machine > Diagnostics: read the virtual block position, top Z, bore diameter and surface bow." },
+        { "action": "probe", "kind": "outsideCorner", "caption": "Probing > Outside corner: inspect the approach and selected faces before any touch." },
+        { "action": "probeNext", "caption": "Next previews the next motion. A real cycle needs a clear path and a matching fixture." },
+        { "action": "probe", "kind": "bore", "caption": "Bore: establish work Z0 at stock top, start over the bore center, then review the four touches." },
+        { "action": "probe", "kind": "workZero", "caption": "Z0 sets the stock-top work reference immediately after a successful touch; no separate Confirm." },
+        { "action": "probe", "kind": "zSurface", "caption": "Load the fixture-plate setup in Control, then inspect its Z surface grid. Keep every sample on solid stock." },
+        { "action": "probe", "kind": "toolZ", "caption": "Tool Z records tool length after a successful touch. It is distinct from work Z0 and XY offsets." },
+        { "action": "hold", "caption": "This is a simulator and preview tour: no probing cycle or offset write, and no hardware motion." }
+      ]
+    },
+    {
+      "id": "V08", "name": "Form a knob: inspect the finished tutorial",
+      "project": "examples/06-knob-handwheel/lobed-knob-source.camproject",
+      "steps": [
+        { "action": "open", "caption": "Open the shipped Form source: Lobed knob, Shaft profile, Shaft, Bore and Rim fillet." },
+        { "action": "formEdit", "caption": "Right-click Lobed knob > Edit to reopen its cage. Set Circular copies to 4 for the four lobes." },
+        { "action": "formDisplay", "mode": "cage", "caption": "Display > Cage reveals the control points behind the four lobes and finger valleys." },
+        { "action": "formDisplay", "mode": "both", "caption": "Display > Both shows the cage over the smooth skin. Select points before dragging a move arrow." },
+        { "action": "hold", "caption": "The tutorial pulls a lobe out 10 mm, forms 6 mm valleys and lowers the top 8 mm. Here we inspect its saved result." },
+        { "action": "formDisplay", "mode": "smooth", "caption": "Display > Smooth inspects the skin without the cage. Finish Form creates an exact solid." },
+        { "action": "formFinish", "caption": "Finish Form rebuilds the saved shaft, 3 mm bore and 1.5 mm rim fillet on the knob." },
+        { "action": "zebra", "caption": "Display mode > Zebra stripes helps inspect the finished surface continuity." },
+        { "action": "hold", "caption": "The Form source creates a model. Open the separate knob machining companion when ready for CAM." }
+      ]
+    },
+    {
+      "id": "V09", "name": "Picture to relief: the shipped medallion",
+      "project": "examples/07-relief-medallion/relief-medallion.camproject",
+      "image": "examples/07-relief-medallion/medallion.png",
+      "steps": [
+        { "action": "open", "caption": "Open example 07: a picture relief on a round blank, held inside a 90 x 90 x 8 mm frame." },
+        { "action": "reliefEdit", "caption": "Edit the saved Relief and open medallion.png. Its target is the medallion face, not another example." },
+        { "action": "reliefStyle", "style": "raise", "caption": "Raise previews the picture above the face. Depth controls its height in millimetres." },
+        { "action": "reliefStyle", "style": "engrave", "caption": "Engrave previews the picture cut into the face. Review the height map and the zero plane." },
+        { "action": "reliefStyle", "style": "emboss", "caption": "Emboss is the shipped recipe: 2 mm depth across a 24 mm picture on the round blank." },
+        { "action": "reliefCancel", "caption": "Cancel these preview changes to retain the shipped medallion and its matching CAM recipe." },
+        { "action": "regen", "caption": "Regenerate: drill four screw holes, stop to fit screws and remove clamps, rough, finish, then tabbed outline." },
+        { "action": "simulate", "caption": "Simulate the whole setup to the end. The disc stays tabbed to the complete frame." },
+        { "action": "hold", "caption": "On the real job, follow the setup sheet at the operator stop. Cut the tabs after machining, then unscrew the frame." }
+      ]
+    }
+  ]
+}

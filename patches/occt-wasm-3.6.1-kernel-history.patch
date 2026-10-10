@@ -1,0 +1,443 @@
+diff --git a/xtask/src/codegen/emitter.rs b/xtask/src/codegen/emitter.rs
+--- a/xtask/src/codegen/emitter.rs
++++ b/xtask/src/codegen/emitter.rs
+@@ -76,7 +76,8 @@
+         params = param_list(spec.params)
+     );
+     let _ = writeln!(buf, "    try {{");
+-    let _ = writeln!(buf, "        {cls} op({args});");
++    let _ = writeln!(buf, "        {cls} op;");
++    let _ = writeln!(buf, "        prepareBoolean(op, {args});");
+     let _ = writeln!(buf, "        op.Build();");
+     let _ = writeln!(buf, "        if (!op.IsDone() || op.HasErrors()) {{");
+     let _ = writeln!(
+@@ -269,6 +270,25 @@
+     // Always-needed headers.
+     includes.insert("Standard_Failure.hxx".to_owned());
+ 
++    let has_boolean = methods
++        .iter()
++        .any(|m| matches!(m.kind, MethodKind::BooleanOp));
++    let has_evolution = methods
++        .iter()
++        .any(|m| matches!(m.return_type, ReturnType::EvolutionData));
++    if has_boolean {
++        // prepareBoolean's signature and body.
++        includes.insert("BRepAlgoAPI_BooleanOperation.hxx".to_owned());
++        includes.insert("NCollection_List.hxx".to_owned());
++        includes.insert("TopoDS_Shape.hxx".to_owned());
++    }
++    if has_evolution {
++        // buildEvolution's caller-owned `visited` map.
++        includes.insert("NCollection_IndexedMap.hxx".to_owned());
++        includes.insert("TopTools_ShapeMapHasher.hxx".to_owned());
++        includes.insert("TopoDS_Shape.hxx".to_owned());
++    }
++
+     for spec in methods {
+         if matches!(spec.kind, MethodKind::Skip) {
+             continue;
+@@ -312,10 +332,48 @@
+     let needs_evolution = methods
+         .iter()
+         .any(|m| matches!(m.return_type, ReturnType::EvolutionData));
++    let needs_boolean = methods
++        .iter()
++        .any(|m| matches!(m.kind, MethodKind::BooleanOp));
+ 
+-    if needs_evolution {
++    if needs_evolution || needs_boolean {
+         let _ = writeln!(buf, "// === helper functions ===");
+         let _ = writeln!(buf);
++    }
++
++    if needs_boolean {
++        let _ = writeln!(
++            buf,
++            "/// Configure a boolean before Build. The argument-taking constructors run"
++        );
++        let _ = writeln!(
++            buf,
++            "/// DESTRUCTIVELY: they rewrite the caller's input shapes, which makes any"
++        );
++        let _ = writeln!(
++            buf,
++            "/// post-Build exploration of those inputs report hashes that never existed."
++        );
++        let _ = writeln!(
++            buf,
++            "static void prepareBoolean(BRepAlgoAPI_BooleanOperation& op,"
++        );
++        let _ = writeln!(
++            buf,
++            "                           const TopoDS_Shape& left, const TopoDS_Shape& right) {{"
++        );
++        let _ = writeln!(
++            buf,
++            "    NCollection_List<TopoDS_Shape> arguments, tools;"
++        );
++        let _ = writeln!(buf, "    arguments.Append(left); tools.Append(right);");
++        let _ = writeln!(buf, "    op.SetArguments(arguments); op.SetTools(tools);");
++        let _ = writeln!(buf, "    op.SetNonDestructive(true);");
++        let _ = writeln!(buf, "}}");
++        let _ = writeln!(buf);
++    }
++
++    if needs_evolution {
+         let _ = writeln!(
+             buf,
+             "/// Build evolution data by tracking Modified/Generated/Deleted faces."
+@@ -330,8 +388,17 @@
+         );
+         let _ = writeln!(
+             buf,
+-            "                                    const std::vector<int>& inputFaceHashes, int hashUpperBound) {{"
++            "                                    const std::vector<int>& inputFaceHashes, int hashUpperBound,"
++        );
++        let _ = writeln!(
++            buf,
++            "                                    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>* visited = nullptr) {{"
++        );
++        let _ = writeln!(
++            buf,
++            "    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> localVisited;"
+         );
++        let _ = writeln!(buf, "    auto& seen = visited ? *visited : localVisited;");
+         let _ = writeln!(buf, "    EvolutionData evo;");
+         let _ = writeln!(buf, "    evo.resultId = resultId;");
+         let _ = writeln!(buf);
+@@ -354,6 +421,8 @@
+             "    for (TopExp_Explorer ex(inputShape, TopAbs_FACE); ex.More(); ex.Next()) {{"
+         );
+         let _ = writeln!(buf, "        const auto& face = ex.Current();");
++        let _ = writeln!(buf, "        if (seen.Contains(face)) continue;");
++        let _ = writeln!(buf, "        seen.Add(face);");
+         let _ = writeln!(buf, "        int faceHash = hashShape(face);");
+         let _ = writeln!(buf);
+         let _ = writeln!(
+diff --git a/xtask/src/codegen/config.rs b/xtask/src/codegen/config.rs
+--- a/xtask/src/codegen/config.rs
++++ b/xtask/src/codegen/config.rs
+@@ -274,6 +274,7 @@
+     args.Append(get(sid));
+ }
+ BRepAlgoAPI_BuilderAlgo builder;
++builder.SetNonDestructive(true);
+ builder.SetArguments(args);
+ builder.SetRunParallel(true);
+ builder.SetUseOBB(true);
+@@ -307,6 +308,7 @@
+     args.Append(s);
+ }
+ BOPAlgo_CellsBuilder builder;
++builder.SetNonDestructive(true);
+ builder.SetArguments(args);
+ builder.Perform();
+ if (builder.HasErrors()) {
+@@ -349,6 +351,7 @@
+     tools.Append(get(tid));
+ }
+ BRepAlgoAPI_Cut cutter;
++cutter.SetNonDestructive(true);
+ cutter.SetArguments(args);
+ cutter.SetTools(tools);
+ cutter.SetRunParallel(true);
+@@ -382,9 +385,9 @@
+     bool isLast = (i == opCodes.size() - 1);
+     Message_ProgressRange progress;
+     switch (opCodes[i]) {
+-    case 0: { BRepAlgoAPI_Fuse op(current, tool, progress); if (!op.IsDone() || op.HasErrors()) throw std::runtime_error(\"booleanPipeline: fuse step failed\"); current = op.Shape(); break; }
+-    case 1: { BRepAlgoAPI_Cut op(current, tool, progress); if (!op.IsDone() || op.HasErrors()) throw std::runtime_error(\"booleanPipeline: cut step failed\"); current = op.Shape(); break; }
+-    case 2: { BRepAlgoAPI_Common op(current, tool, progress); if (!op.IsDone() || op.HasErrors()) throw std::runtime_error(\"booleanPipeline: intersect step failed\"); current = op.Shape(); break; }
++    case 0: { BRepAlgoAPI_Fuse op; prepareBoolean(op, current, tool); op.Build(progress); if (!op.IsDone() || op.HasErrors()) throw std::runtime_error(\"booleanPipeline: fuse step failed\"); current = op.Shape(); break; }
++    case 1: { BRepAlgoAPI_Cut op; prepareBoolean(op, current, tool); op.Build(progress); if (!op.IsDone() || op.HasErrors()) throw std::runtime_error(\"booleanPipeline: cut step failed\"); current = op.Shape(); break; }
++    case 2: { BRepAlgoAPI_Common op; prepareBoolean(op, current, tool); op.Build(progress); if (!op.IsDone() || op.HasErrors()) throw std::runtime_error(\"booleanPipeline: intersect step failed\"); current = op.Shape(); break; }
+     default: throw std::runtime_error(\"booleanPipeline: unknown opCode\");
+     }
+     if (isLast) {
+@@ -415,6 +418,7 @@
+     tools.Append(get(tid));
+ }
+ BRepAlgoAPI_Splitter splitter;
++splitter.SetNonDestructive(true);
+ splitter.SetArguments(args);
+ splitter.SetTools(tools);
+ splitter.Build();
+@@ -3970,6 +3974,153 @@
+         return_type: ReturnType::EvolutionData,
+     },
+     MethodSpec {
++        name: "extrudeWithHistory",
++        kind: MethodKind::CustomBody,
++        params: &[
++            FacadeParam::ShapeId("shapeId"),
++            FacadeParam::Double("dx"),
++            FacadeParam::Double("dy"),
++            FacadeParam::Double("dz"),
++            FacadeParam::Int("hashUpperBound"),
++        ],
++        occt_class: "",
++        ctor_args: "",
++        // Same solid as `extrude`, plus the sweep's own construction record.
++        // The result rides on EvolutionData (no new Embind struct):
++        //   generated = [profileEdgeHash, n, sideFaceHash * n] per profile edge
++        //   modified  = [0, n, startCapHash * n] then [1, n, endCapHash * n]
++        //   deleted   = unused
++        // A sweep's parents are CONSTRUCTION edges, so the profile edge -> side
++        // face binding is exact rather than a nearest-surface guess.
++        setup_code: "\
++const auto& input = get(shapeId);
++if (hashUpperBound <= 0) {
++    throw std::runtime_error(\"extrudeWithHistory: invalid hash bound\");
++}
++BRepPrimAPI_MakePrism maker(input, gp_Vec(dx, dy, dz));
++maker.Build();
++if (!maker.IsDone()) {
++    throw std::runtime_error(\"extrudeWithHistory: construction failed\");
++}
++auto hashShape = [&](const TopoDS_Shape& s) -> int {
++    return static_cast<int>(TopTools_ShapeMapHasher{}(s) % static_cast<size_t>(hashUpperBound));
++};
++NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> outputs, edges;
++TopExp::MapShapes(maker.Shape(), TopAbs_FACE, outputs);
++TopExp::MapShapes(input, TopAbs_EDGE, edges);
++EvolutionData evo;
++for (int i = 1; i <= edges.Extent(); ++i) {
++    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> children;
++    const auto& swept = maker.Generated(edges(i));
++    for (auto it = swept.begin(); it != swept.end(); ++it) {
++        if (it->ShapeType() == TopAbs_FACE && outputs.Contains(*it)) children.Add(*it);
++    }
++    evo.generated.push_back(hashShape(edges(i)));
++    evo.generated.push_back(children.Extent());
++    for (int j = 1; j <= children.Extent(); ++j) evo.generated.push_back(hashShape(children(j)));
++}
++auto capRecord = [&](const TopoDS_Shape& cap, int key) {
++    std::vector<int> kept;
++    if (!cap.IsNull()) {
++        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
++        TopExp::MapShapes(cap, TopAbs_FACE, faces);
++        for (int i = 1; i <= faces.Extent(); ++i) {
++            if (outputs.Contains(faces(i))) kept.push_back(hashShape(faces(i)));
++        }
++    }
++    evo.modified.push_back(key);
++    evo.modified.push_back(static_cast<int>(kept.size()));
++    for (int h : kept) evo.modified.push_back(h);
++};
++capRecord(maker.FirstShape(), 0);
++capRecord(maker.LastShape(), 1);
++evo.resultId = store(normalizeSolidOrientation(maker.Shape()));
++return evo;",
++        includes: &[
++            "BRepPrimAPI_MakePrism.hxx", "gp_Vec.hxx", "TopExp.hxx",
++            "NCollection_IndexedMap.hxx", "TopTools_ShapeMapHasher.hxx",
++        ],
++        category: "evolution",
++        return_type: ReturnType::EvolutionData,
++    },
++    MethodSpec {
++        name: "revolveWithHistory",
++        kind: MethodKind::CustomBody,
++        params: &[
++            FacadeParam::ShapeId("shapeId"),
++            FacadeParam::Double("px"),
++            FacadeParam::Double("py"),
++            FacadeParam::Double("pz"),
++            FacadeParam::Double("dx"),
++            FacadeParam::Double("dy"),
++            FacadeParam::Double("dz"),
++            FacadeParam::Double("angleRad"),
++            FacadeParam::Int("hashUpperBound"),
++        ],
++        occt_class: "",
++        ctor_args: "",
++        // Same packing as extrudeWithHistory. One extra source: on a FULL turn
++        // the high-level Generated() drops radial faces whose profile edge is
++        // not used as a seam, while the underlying BRepSweep_Revol construction
++        // map still owns the exact swept face. It is accepted only when it is a
++        // member of the final result.
++        setup_code: "\
++const auto& input = get(shapeId);
++if (hashUpperBound <= 0) {
++    throw std::runtime_error(\"revolveWithHistory: invalid hash bound\");
++}
++BRepPrimAPI_MakeRevol maker(input, gp_Ax1(gp_Pnt(px, py, pz), gp_Dir(dx, dy, dz)), angleRad);
++maker.Build();
++if (!maker.IsDone()) {
++    throw std::runtime_error(\"revolveWithHistory: construction failed\");
++}
++auto hashShape = [&](const TopoDS_Shape& s) -> int {
++    return static_cast<int>(TopTools_ShapeMapHasher{}(s) % static_cast<size_t>(hashUpperBound));
++};
++NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> outputs, edges;
++TopExp::MapShapes(maker.Shape(), TopAbs_FACE, outputs);
++TopExp::MapShapes(input, TopAbs_EDGE, edges);
++EvolutionData evo;
++for (int i = 1; i <= edges.Extent(); ++i) {
++    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> children;
++    const auto& swept = maker.Generated(edges(i));
++    for (auto it = swept.begin(); it != swept.end(); ++it) {
++        if (it->ShapeType() == TopAbs_FACE && outputs.Contains(*it)) children.Add(*it);
++    }
++    const TopoDS_Shape constructed = const_cast<BRepSweep_Revol&>(maker.Revol()).Shape(edges(i));
++    if (!constructed.IsNull() && constructed.ShapeType() == TopAbs_FACE && outputs.Contains(constructed)) {
++        children.Add(constructed);
++    }
++    evo.generated.push_back(hashShape(edges(i)));
++    evo.generated.push_back(children.Extent());
++    for (int j = 1; j <= children.Extent(); ++j) evo.generated.push_back(hashShape(children(j)));
++}
++auto capRecord = [&](const TopoDS_Shape& cap, int key) {
++    std::vector<int> kept;
++    if (!cap.IsNull()) {
++        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
++        TopExp::MapShapes(cap, TopAbs_FACE, faces);
++        for (int i = 1; i <= faces.Extent(); ++i) {
++            if (outputs.Contains(faces(i))) kept.push_back(hashShape(faces(i)));
++        }
++    }
++    evo.modified.push_back(key);
++    evo.modified.push_back(static_cast<int>(kept.size()));
++    for (int h : kept) evo.modified.push_back(h);
++};
++capRecord(maker.FirstShape(), 0);
++capRecord(maker.LastShape(), 1);
++evo.resultId = store(normalizeSolidOrientation(maker.Shape()));
++return evo;",
++        includes: &[
++            "BRepPrimAPI_MakeRevol.hxx", "BRepSweep_Revol.hxx", "gp_Ax1.hxx",
++            "gp_Dir.hxx", "gp_Pnt.hxx", "TopExp.hxx",
++            "NCollection_IndexedMap.hxx", "TopTools_ShapeMapHasher.hxx",
++        ],
++        category: "evolution",
++        return_type: ReturnType::EvolutionData,
++    },
++    MethodSpec {
+         name: "fuseWithHistory",
+         kind: MethodKind::CustomBody,
+         params: &[
+@@ -3981,17 +4132,19 @@
+         setup_code: "\
+ const auto& shapeA = get(a);
+ const auto& shapeB = get(b);
+-BRepAlgoAPI_Fuse op(shapeA, shapeB);
++BRepAlgoAPI_Fuse op; prepareBoolean(op, shapeA, shapeB);
+ op.Build();
+ if (!op.IsDone() || op.HasErrors()) {
+     throw std::runtime_error(\"fuseWithHistory: operation failed\");
+ }
+ uint32_t resultId = store(op.Shape());
+ 
+-// Build evolution from both input shapes
+-EvolutionData evo = buildEvolution(op, resultId, shapeA, inputFaceHashes, hashUpperBound);
++// Build evolution from both input shapes. ONE visited map across both
++// passes: a face reachable from A and from B is one face, one record.
++NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> visited;
++EvolutionData evo = buildEvolution(op, resultId, shapeA, inputFaceHashes, hashUpperBound, &visited);
+ // Also check shapeB
+-EvolutionData evoB = buildEvolution(op, resultId, shapeB, inputFaceHashes, hashUpperBound);
++EvolutionData evoB = buildEvolution(op, resultId, shapeB, inputFaceHashes, hashUpperBound, &visited);
+ // Merge B into A
+ evo.modified.insert(evo.modified.end(), evoB.modified.begin(), evoB.modified.end());
+ evo.generated.insert(evo.generated.end(), evoB.generated.begin(), evoB.generated.end());
+@@ -4013,15 +4166,16 @@
+         setup_code: "\
+ const auto& shapeA = get(a);
+ const auto& shapeB = get(b);
+-BRepAlgoAPI_Cut op(shapeA, shapeB);
++BRepAlgoAPI_Cut op; prepareBoolean(op, shapeA, shapeB);
+ op.Build();
+ if (!op.IsDone() || op.HasErrors()) {
+     throw std::runtime_error(\"cutWithHistory: operation failed\");
+ }
+ uint32_t resultId = store(op.Shape());
+ 
+-EvolutionData evo = buildEvolution(op, resultId, shapeA, inputFaceHashes, hashUpperBound);
+-EvolutionData evoB = buildEvolution(op, resultId, shapeB, inputFaceHashes, hashUpperBound);
++NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> visited;
++EvolutionData evo = buildEvolution(op, resultId, shapeA, inputFaceHashes, hashUpperBound, &visited);
++EvolutionData evoB = buildEvolution(op, resultId, shapeB, inputFaceHashes, hashUpperBound, &visited);
+ evo.modified.insert(evo.modified.end(), evoB.modified.begin(), evoB.modified.end());
+ evo.generated.insert(evo.generated.end(), evoB.generated.begin(), evoB.generated.end());
+ evo.deleted.insert(evo.deleted.end(), evoB.deleted.begin(), evoB.deleted.end());
+@@ -4135,14 +4289,15 @@
+         setup_code: "\
+ const auto& shapeA = get(a);
+ const auto& shapeB = get(b);
+-BRepAlgoAPI_Common op(shapeA, shapeB);
++BRepAlgoAPI_Common op; prepareBoolean(op, shapeA, shapeB);
+ op.Build();
+ if (!op.IsDone() || op.HasErrors()) {
+     throw std::runtime_error(\"intersectWithHistory: operation failed\");
+ }
+ uint32_t resultId = store(op.Shape());
+-EvolutionData evo = buildEvolution(op, resultId, shapeA, inputFaceHashes, hashUpperBound);
+-EvolutionData evoB = buildEvolution(op, resultId, shapeB, inputFaceHashes, hashUpperBound);
++NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> visited;
++EvolutionData evo = buildEvolution(op, resultId, shapeA, inputFaceHashes, hashUpperBound, &visited);
++EvolutionData evoB = buildEvolution(op, resultId, shapeB, inputFaceHashes, hashUpperBound, &visited);
+ evo.modified.insert(evo.modified.end(), evoB.modified.begin(), evoB.modified.end());
+ evo.generated.insert(evo.generated.end(), evoB.generated.begin(), evoB.generated.end());
+ evo.deleted.insert(evo.deleted.end(), evoB.deleted.begin(), evoB.deleted.end());
+diff --git a/facade/include/occt_kernel.h b/facade/include/occt_kernel.h
+--- a/facade/include/occt_kernel.h
++++ b/facade/include/occt_kernel.h
+@@ -155,6 +155,11 @@
+ 
+     // --- Modeling operations ---
+     uint32_t extrude(uint32_t shapeId, double dx, double dy, double dz);
++    EvolutionData extrudeWithHistory(uint32_t shapeId, double dx, double dy, double dz,
++                                     int hashUpperBound);
++    EvolutionData revolveWithHistory(uint32_t shapeId, double px, double py, double pz,
++                                     double dx, double dy, double dz, double angleRad,
++                                     int hashUpperBound);
+     uint32_t revolve(uint32_t shapeId, double px, double py, double pz, double dx, double dy,
+                      double dz, double angleRad);
+     uint32_t fillet(uint32_t solidId, std::vector<uint32_t> edgeIds, double radius);
+diff --git a/ts/src/raw-types.ts b/ts/src/raw-types.ts
+--- a/ts/src/raw-types.ts
++++ b/ts/src/raw-types.ts
+@@ -321,6 +321,8 @@
+ 
+     // Evolution
+     translateWithHistory(id: number, dx: number, dy: number, dz: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
++    extrudeWithHistory(shapeId: number, dx: number, dy: number, dz: number, hashUpperBound: number): RawEvolutionData;
++    revolveWithHistory(shapeId: number, px: number, py: number, pz: number, dx: number, dy: number, dz: number, angleRad: number, hashUpperBound: number): RawEvolutionData;
+     fuseWithHistory(a: number, b: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+     cutWithHistory(a: number, b: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+     filletWithHistory(solidId: number, edgeIds: EmbindVectorU32, radius: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+diff --git a/ts/src/index.ts b/ts/src/index.ts
+--- a/ts/src/index.ts
++++ b/ts/src/index.ts
+@@ -1663,6 +1663,30 @@
+         });
+     }
+ 
++    /**
++     * Extrude a profile AND report the sweep's own construction record, so a
++     * caller can bind each side face to the profile edge that swept it instead
++     * of guessing from geometry. The result solid is the one `extrude` returns.
++     *
++     * The record rides on {@link EvolutionData}:
++     * - `generated` — flat `[profileEdgeHash, n, sideFaceHash * n]` per profile edge
++     * - `modified` — flat `[0, n, startCapHash * n]` then `[1, n, endCapHash * n]`
++     * - `deleted` — unused (a sweep deletes nothing)
++     *
++     * Hashes are `shapeHash % hashUpperBound`, the same convention every other
++     * `*WithHistory` method uses.
++     */
++    extrudeWithHistory(shape: ShapeHandle, dx: number, dy: number, dz: number, hashUpperBound: number): EvolutionData {
++        return wrap("extrudeWithHistory", () => this.#extractEvolution(this.#raw.extrudeWithHistory(shape, dx, dy, dz, hashUpperBound)));
++    }
++
++    /** {@link extrudeWithHistory} for a revolve. Same packing. */
++    revolveWithHistory(shape: ShapeHandle, axis: { point: Vec3; direction: Vec3 }, angleRad: number, hashUpperBound: number): EvolutionData {
++        const p = axis.point;
++        const d = axis.direction;
++        return wrap("revolveWithHistory", () => this.#extractEvolution(this.#raw.revolveWithHistory(shape, p.x, p.y, p.z, d.x, d.y, d.z, angleRad, hashUpperBound)));
++    }
++
+     fuseWithHistory(a: ShapeHandle, b: ShapeHandle, inputFaceHashes: number[], hashUpperBound: number): EvolutionData {
+         return wrap("fuseWithHistory", () => {
+             return this.#withI32(inputFaceHashes, (hashes) => this.#extractEvolution(this.#raw.fuseWithHistory(a, b, hashes, hashUpperBound)));

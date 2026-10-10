@@ -1,0 +1,27 @@
+.sketch-import-export-row {
+  display: flex;
+  gap: 6px;
+}
+.sketch-import-export-row > button {
+  flex: 1;
+  white-space: nowrap;
+}
+.sketch-import-export-window {
+  width: min(400px, calc(100vw - 32px));
+}
+.sketch-import-export-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sketch-import-export-controls .sketch-snap-spacing {
+  font-size: 13px;
+}
+.sketch-import-export-controls .sketch-snap-spacing > input {
+  width: 100px;
+}
+.sketch-import-picture-note {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}

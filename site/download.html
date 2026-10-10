@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Download LienCAM for Windows, Linux or macOS. Release files, SHA-256 checksums, installation steps and system needs.">
+  <title>Download - LienCAM</title>
+  <link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
+  <link rel="stylesheet" href="/styles/site.css">
+  <style>
+    .download-intro { padding-block: 64px 40px; }
+    .download-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin-block: 28px 48px; }
+    .platform-group { min-width: 0; }
+    .platform-group > h2 { font-size: 1.5rem; }
+    .download-cell { padding-block: 20px; border-top: 1px solid var(--border-subtle); }
+    .download-cell h3 { font-size: 1.1rem; margin: 0 0 14px; }
+    .release-file + .release-file { margin-top: 24px; }
+    .release-file .button { display: block; text-align: left; overflow-wrap: anywhere; font-size: 15px; }
+    .file-size, .checksum { font-size: 14px; color: var(--text-secondary); margin: 10px 0 0; }
+    .checksum code { display: block; overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
+    .missing { color: var(--text-secondary); background: var(--surface-1); padding: 20px 16px; }
+    .not-built { margin: 0; }
+    .preview-note { color: var(--text-secondary); }
+    .install-guides { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+    .install-guides h3 { margin-top: 0; }
+    .install-guides ol { padding-left: 24px; }
+    .install-guides li + li { margin-top: 12px; }
+    @media (max-width: 800px) { .download-grid, .install-guides { grid-template-columns: 1fr; gap: 28px; } .download-intro { padding-block: 36px 28px; } }
+  </style>
+</head>
+<body>
+  <!-- partial:header -->
+  <main id="main">
+    <section class="download-intro" aria-labelledby="download-heading">
+      <h1 id="download-heading">Download LienCAM</h1>
+      <p>Sketch to CNC, on your own computer. Choose a file for your platform below.</p>
+      <p class="alpha-note">Linux and macOS builds are untested. Desktop installers are unsigned.</p>
+      <!-- releases:start -->
+      <p class="release-version">Alpha / prerelease: <strong>0.36.0-alpha.1</strong></p>
+      <p class="preview-note">Preview data: these sample entries show the download layout. Installers have not been published yet.</p>
+      <div class="download-grid"><div class="platform-group" aria-labelledby="platform-windows"><h2 id="platform-windows">Windows</h2><div class="download-cell" data-platform="windows" data-kind="installer" data-available="true">
+          <h3>Installer</h3>
+          <div class="release-file" data-size="23">
+            <a class="button" href="https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-win-x64-setup.exe">LienCAM-0.36.0-alpha.1-win-x64-setup.exe</a>
+            <p class="file-size">x64 - 23 bytes</p>
+            <p class="checksum">SHA-256 <code>1b6316d34c7aaab039f23c8054892632195e2b6134ef1f8a7c893c6eb4881b6b</code></p>
+          </div>
+        </div>
+<div class="download-cell" data-platform="windows" data-kind="portable" data-available="true">
+          <h3>Portable</h3>
+          <div class="release-file" data-size="22">
+            <a class="button" href="https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-win-x64-portable.exe">LienCAM-0.36.0-alpha.1-win-x64-portable.exe</a>
+            <p class="file-size">x64 - 22 bytes</p>
+            <p class="checksum">SHA-256 <code>c0c71bcaea0e5bd7ecc891c8bd3ec47b1cf0bef1b1e6f0e76380651d99edb38d</code></p>
+          </div>
+        </div></div>
+<div class="platform-group" aria-labelledby="platform-linux"><h2 id="platform-linux">Linux</h2><div class="download-cell" data-platform="linux" data-kind="appimage" data-available="true">
+          <h3>AppImage</h3>
+          <div class="release-file" data-size="44">
+            <a class="button" href="https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-linux-x86_64.AppImage">LienCAM-0.36.0-alpha.1-linux-x86_64.AppImage</a>
+            <p class="file-size">x64 - 44 bytes</p>
+            <p class="checksum">SHA-256 <code>0bdbc73839b9b8b8d5e132a1f59111606f68445103eabb360eb0668ec686152b</code></p>
+          </div>
+        </div>
+<div class="download-cell" data-platform="linux" data-kind="archive" data-available="true">
+          <h3>tar.gz</h3>
+          <div class="release-file" data-size="43">
+            <a class="button" href="https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-linux-x64.tar.gz">LienCAM-0.36.0-alpha.1-linux-x64.tar.gz</a>
+            <p class="file-size">x64 - 43 bytes</p>
+            <p class="checksum">SHA-256 <code>1c95ff44cc2796f6c60b90d9146bfa91ed36ff7ee0e8157f82977c44ed795848</code></p>
+          </div>
+        </div>
+<div class="download-cell" data-platform="linux" data-kind="gateway" data-available="true">
+          <h3>LinuxCNC gateway</h3>
+          <div class="release-file" data-size="51">
+            <a class="button" href="https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/gateway.py">gateway.py</a>
+            <p class="file-size">Python - 51 bytes</p>
+            <p class="checksum">SHA-256 <code>73cacfeb02217717cf3d506c9a32bfa63a3b8b5611e9c5130e4a33259a770bb0</code></p>
+          </div>
+        </div></div>
+<div class="platform-group" aria-labelledby="platform-macos"><h2 id="platform-macos">macOS</h2><div class="download-cell" data-platform="macos" data-kind="dmg" data-available="true">
+          <h3>Disk image (.dmg)</h3>
+          <div class="release-file" data-size="39">
+            <a class="button" href="https://github.com/eclsnowman/LienCAM/releases/download/v0.36.0-alpha.1/LienCAM-0.36.0-alpha.1-mac-arm64.dmg">LienCAM-0.36.0-alpha.1-mac-arm64.dmg</a>
+            <p class="file-size">arm64 - 39 bytes</p>
+            <p class="checksum">SHA-256 <code>a12f9bae43b128ce3a31a9586f5fa22b6f3593156821f5df64141a3e74bb4d99</code></p>
+          </div>
+        </div></div></div>
+      <!-- releases:end -->
+      <p><a href="{{route:github}}/releases">Release notes and all releases</a></p>
+    </section>
+    <section aria-labelledby="install-heading">
+      <h2 id="install-heading">Opening an unsigned build</h2>
+      <p>Windows SmartScreen and macOS Gatekeeper may ask you to confirm before opening LienCAM.</p>
+      <div class="install-guides">
+        <div>
+          <h3 id="windows-install">Windows</h3>
+          <ol aria-labelledby="windows-install">
+            <li>Download the installer (setup) to install LienCAM, or the portable file to run without installing.</li>
+            <li>Open the downloaded .exe. If SmartScreen shows "Windows protected your PC", select <strong>More info</strong>.</li>
+            <li>Check that the file is the LienCAM download you chose, then select <strong>Run anyway</strong>. Follow the installer steps, or open the portable app.</li>
+          </ol>
+          <p><a href="https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/">Microsoft's SmartScreen guide</a></p>
+        </div>
+        <div>
+          <h3 id="macos-install">macOS</h3>
+          <ol aria-labelledby="macos-install">
+            <li>Download the disk image for your Mac's architecture. Open the .dmg and drag LienCAM into Applications.</li>
+            <li>Try opening LienCAM. If Gatekeeper blocks the unsigned app, open <strong>System Settings</strong>, then <strong>Privacy &amp; Security</strong>.</li>
+            <li>Find the message about LienCAM and select <strong>Open Anyway</strong>. Confirm with <strong>Open</strong>, and authenticate if asked.</li>
+          </ol>
+          <p><a href="https://support.apple.com/en-us/102445">Apple's guide to opening apps</a></p>
+        </div>
+      </div>
+    </section>
+    <section aria-labelledby="needs-heading">
+      <h2 id="needs-heading">System needs</h2>
+      <ul>
+        <li>Graphics with WebGL2 support.</li>
+        <li>About 8 GB RAM recommended; larger models and simulations need more memory.</li>
+        <li>Choose the architecture shown beside your download: x64 or arm64.</li>
+      </ul>
+      <p>The LinuxCNC gateway is a Python companion for connecting to LinuxCNC; it is separate from the desktop app. <a href="https://github.com/eclsnowman/LienCAM/wiki/Controllers-LinuxCNC">LinuxCNC setup</a></p>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Build-from-source">Build from source</a></p>
+    </section>
+  </main>
+  <!-- partial:footer -->
+</body>
+</html>

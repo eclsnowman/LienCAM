@@ -1,0 +1,27 @@
+import { afterAll, beforeAll, it } from 'vitest'
+import { GeomEngine } from '../../geom/worker/geom-engine'
+import { remeshFromBody } from '../../form/remesh'
+import { formFromBody, FORM_FROM_BODY_TESS } from '../../form/fromMesh'
+import { validateCage } from '../../form/halfEdge'
+import { DISPLAY_TESS_QUALITY } from '../../viewport3d/tessQuality'
+let engine: GeomEngine
+beforeAll(async () => { engine = new GeomEngine(); await engine.init() }, 120000)
+afterAll(async () => { await engine.disposeKernel() })
+it('rm', async () => {
+  const box = await engine.makeBox('B', { x: 40, y: 30, z: 20 })
+  const cyl = await engine.debugMakeCylinder('C', 10, 20)
+  const t0 = await engine.tessellate(box.body!, DISPLAY_TESS_QUALITY)
+  const edges: string[] = []
+  for (let e = 0; e < t0.edgeIds.length; e++) edges.push(t0.edgeIds[e])
+  const fil = await engine.applyFillet({ featureId: 'F', body: box.body!, edges, radius: 4, propagateTangent: true })
+  const box2 = await engine.makeBox('B2', { x: 30, y: 30, z: 20 })
+  const c2 = await engine.debugMakeCylinder('C2', 5, 20)
+  const notch = await engine.applyBoolean({ featureId: 'X', op: 'cut', target: box2.body!, tools: [c2.body!] })
+  for (const [name, body] of [['box', box.body!], ['cylinder', cyl.body!], ['filleted box', fil.body!], ['notched box', notch.body!]] as const) {
+    const t = await engine.tessellate(body, FORM_FROM_BODY_TESS)
+    const old = formFromBody(t, { remesh: false })
+    const r = remeshFromBody(t)
+    const quads = r.cage.faces.filter((f) => f.length === 4).length
+    console.log('RM', name, JSON.stringify({ oldFaces: old.cage.faces.length, oldPts: old.cage.positions.length, faces: r.cage.faces.length, pts: r.cage.positions.length, quads, flat: r.flatFaces, grid: r.gridFaces, triFaces: r.triangleFaces, tris: r.triangles, creases: r.cage.creases.length, off: [r.offBefore.toFixed(3), r.offAfter.toFixed(3)], problems: validateCage(r.cage, true).problems.slice(0, 2) }))
+  }
+}, 600000)

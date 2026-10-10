@@ -1,0 +1,60 @@
+/* WO-060 carries WO-047's header-native mode tabs in an owned override.
+   The existing app stylesheet remains the base; this file loads after it. */
+.header-mode-tabs {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+}
+
+.header-mode-tabs .mode-tab-strip {
+  align-items: stretch;
+  gap: 2px;
+}
+
+.header-mode-tabs .mode-tab {
+  height: auto;
+  padding: 0 15px;
+  font-size: var(--font-size-md);
+  border: none;
+  border-radius: 0;
+}
+
+.header-mode-tabs .mode-tab:hover {
+  background: var(--bg-hover);
+}
+
+.header-mode-tabs .mode-tab-active,
+.header-mode-tabs .mode-tab-active:hover {
+  background: transparent;
+  border: none;
+  color: var(--accent-cyan);
+  box-shadow: inset 0 -2px 0 var(--accent-cyan);
+  font-weight: 600;
+}
+
+/* WO-2473: Linux Chromium needs 1647px for the full-label header (WO-2465
+   measured 1640px on Windows). Restore utility labels at 1650px, leaving
+   3px of font-metric margin, including the machine label shown from 1600px. */
+@media (max-width: 1649px) {
+  .toolbar-section-right .tb-btn span {
+    display: none;
+  }
+}
+
+/* WO-2473: Linux needs 1439px for workflow labels (1434px on Windows).
+   Restore them at 1440px so a 1440x900 screen keeps its labels on both
+   platforms (1px Linux margin). Below it,
+   make every command icon-only so the complete header remains reachable down
+   to the project's explicit 960px floor. Tooltips retain every command name. */
+@media (max-width: 1439px) {
+  .toolbar-section-left .tb-btn span,
+  .header-mode-tabs .mode-tab span {
+    display: none;
+  }
+}
+
+/* WO-047 removed the floating mode strip that needed 46px of clearance. */
+.control-operator-bar {
+  margin: 6px 8px;
+}

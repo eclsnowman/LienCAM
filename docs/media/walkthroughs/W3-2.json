@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W3-2.png": {
+      "commit": "03ab05456dc6eb7e59e577845ba61afd30368e04",
+      "workingTreeDirty": false,
+      "workingTreeScope": [
+        "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+        "src",
+        "tools/capture/scenes.json",
+        "tools/capture/scenes.mjs"
+      ],
+      "sourceExcludes": [
+        "src/tests/evidence"
+      ],
+      "sourceHash": "cb6c69a1d7e548930cbdcf2173d5740567b9cea6ff1cefdcd58178d38bb2650a",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 4355,
+      "screenshotBytes": 150303,
+      "screenshotSha256": "dcc7cc42b1b4eaa97b04f0bb89820e992d518309b016e6c36a359aba9a01b801"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+[note] Lobed knob: Form for the organic grip, standard features for the exact parts.
+[step 1] Click Form on the Model rail, then Start from: Cylinder.
+  ok: a cylinder cage (24 points, 18 faces)
+  ok: a lobe point (8) and a valley point (15)
+[step 2] Symmetry: Circular, 4 copies. One lobe edited is four lobes edited.
+  ok: circular symmetry on ("c4")
+[step 3] Click a middle-ring point, Shift+click the two above and below it. Drag the red X arrow out 10 mm.
+  ok: a column selected ([8,0,16])
+  ok: the lobes pulled out (x 20.0 -> 30.0)
+[step 4] The column between two lobes: drag X in 6 mm, then Y in 6 mm. Finger valleys, all four at once.
+  ok: a column selected ([15,7,23])
+console error: SolidsWorkbenchPage: 3D geometry engine initialization failed (attempt 1 of 3); phase=starting; progress=0%; elapsed=30005ms Error: geometry engine initialization timed out after 30000ms
+    at http://127.0.0.1:4690/src/components/model3d/SolidsWorkbenchPage.tsx:1256:41
+  ok: the valleys came in (r -> 11.5)
+[step 5] Left-drag down on empty space to look from above. Click the top face, drag Z down 8 mm: a lower crown.
+  ok: the view orbited (camera moved 67812.1 mm)
+  ok: viewing from 62 deg elevation (wanted 62)
+  ok: the top face selected ({"points":[],"edges":[],"faces":[17]})
+  ok: the crown came down (z 30.0 -> 22.0)
+[step 6] Left-drag up to orbit underneath. Click the bottom face, then Crease: the base comes out flat.
+  ok: the view orbited (camera moved 107499.2 mm)
+  ok: viewing from -40 deg elevation (wanted -40)
+  ok: the bottom face selected ({"points":[],"edges":[],"faces":[16]})
+[step 7] Display: Smooth. Name it and Finish: Form writes an exact solid into the design tree.
+[step 8] Standard modeling: sketch a 4 mm circle on XY, extrude it 10 mm down, joined to the knob.
+  model SHAFT: {"ok":true,"volume":20664.610445262813,"faces":21}
+[step 9] Hole: 3 mm, 12 deep, in the shaft end.
+  ok: the shaft end face found
+  model BORE: {"ok":true,"volume":20579.795648493975,"faces":23}
+[step 10] Fillet 1.5 mm on the base rim: a standard fillet on an edge Form made.
+  ok: the rim edges found (2)
+  model RIMF: {"ok":true,"volume":20526.716883257115,"faces":25}
+[step 11] Orbit back over the top, Display Mode: Zebra. The stripes run on smoothly across every face.
+  ok: the view orbited (camera moved 123.8 mm)
+  ok: viewing from 35 deg elevation (wanted 35)
+  ok: the view orbited (camera moved 84.8 mm)
+[note] Done: 1 Form feature and 4 standard ones. Open lobed-knob.camproject to see the tree.
+[saved] docs\examples\form\lobed-knob.camproject (1139699 bytes)
+[video] docs\examples\form\lobed-knob.mp4 (2.7 MB, from 21.4 s in)
+[reopened] tree ["origin:Origin","datum:XY:XY","datum:XZ:XZ","datum:YZ:YZ","FRM1:Lobed knob","SKSH:Shaft profile","SHAFT:Shaft","BORE:Bore","RIMF:Rim fillet"]; volume 20526.72 (built 20526.72)

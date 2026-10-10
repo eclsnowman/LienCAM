@@ -1,0 +1,350 @@
+{
+  "version": 1,
+  "viewport": { "width": 1920, "height": 1080 },
+  "uiScale": 1,
+  "theme": "dark",
+  "scenes": [
+    { "id": "S02", "name": "pipeline-sketch", "project": "examples/03-soft-jaws/soft-jaws.camproject", "view": "sketch" },
+    { "id": "S03", "name": "pipeline-model", "project": "examples/03-soft-jaws/soft-jaws.camproject", "view": "model" },
+    { "id": "S04", "name": "pipeline-toolpath", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "toolpath" },
+    { "id": "S05", "name": "pipeline-simulate", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "simulate" },
+    { "id": "S06", "name": "pipeline-post", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "post" },
+    { "id": "S07", "name": "pipeline-control", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "control" },
+    { "id": "S08", "name": "form", "project": "examples/06-knob-handwheel/lobed-knob-source.camproject", "view": "form" },
+    { "id": "S09", "name": "relief", "project": "examples/03-soft-jaws/soft-jaws.camproject", "view": "relief", "image": "site/media/mark.svg" },
+    { "id": "S10", "name": "3d-finish", "project": "examples/06-knob-handwheel/knob-handwheel.camproject", "view": "toolpath3d" },
+    { "id": "S11", "name": "setup-vise", "project": "examples/03-soft-jaws/soft-jaws.camproject", "view": "setup" },
+    { "id": "S12", "name": "probing", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "probing" },
+    { "id": "S13", "name": "tool-library", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "tools", "tools": "examples/tools/starter-tools-metric.json" },
+    { "id": "S14", "name": "machine-definition", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "machine" },
+    { "id": "S15", "name": "light-theme", "project": "examples/01-fixture-plate/fixture-plate.camproject", "view": "toolpath", "theme": "light" },
+    { "id": "S16", "name": "demo-first-open", "view": "demo" },
+    { "id": "SP", "name": "social-preview", "project": "examples/06-knob-handwheel/knob-handwheel.camproject", "view": "social", "viewport": { "width": 1280, "height": 640 } }
+  ],
+  "walkthroughScenes": [
+    {
+      "id": "W7-1",
+      "name": "Tutorial knob opened in Edit Form with Circular symmetry and 4 copies",
+      "page": "Walkthrough-Form-a-Knob",
+      "project": "examples/06-knob-handwheel/lobed-knob-source.camproject",
+      "view": "form"
+    },
+    {
+      "id": "W1-1",
+      "name": "Toe-clamp stock and G54 setup",
+      "page": "Walkthrough-DXF-to-Pocket-and-Profile",
+      "project": "examples/02-toe-clamps/toe-clamps.camproject",
+      "view": "setup-overview"
+    },
+    {
+      "id": "W1-2",
+      "name": "Toe-clamp recesses, screw holes and shallow profiles",
+      "page": "Walkthrough-DXF-to-Pocket-and-Profile",
+      "project": "examples/02-toe-clamps/toe-clamps.camproject",
+      "view": "toolpath"
+    },
+    {
+      "id": "W1-3",
+      "name": "Toe-clamp stock removal during the cut",
+      "page": "Walkthrough-DXF-to-Pocket-and-Profile",
+      "project": "examples/02-toe-clamps/toe-clamps.camproject",
+      "view": "simulate"
+    },
+    {
+      "id": "W1-4",
+      "name": "Toe-clamp UCCNC combined program preview",
+      "page": "Walkthrough-DXF-to-Pocket-and-Profile",
+      "project": "examples/02-toe-clamps/toe-clamps.camproject",
+      "view": "post",
+      "post": "UCCNC",
+      "output": "combined",
+      "pause": false
+    },
+    {
+      "id": "W2-1",
+      "name": "Fixture-plate project tools, including the 5 mm pilot drill",
+      "page": "Walkthrough-Multi-Tool-Job-in-One-Program",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "view": "tools"
+    },
+    {
+      "id": "W2-2",
+      "name": "Fixture-plate operation tree and five generated paths",
+      "page": "Walkthrough-Multi-Tool-Job-in-One-Program",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "view": "toolpath"
+    },
+    {
+      "id": "W2-3",
+      "name": "Fixture-plate stock removal during the cut",
+      "page": "Walkthrough-Multi-Tool-Job-in-One-Program",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "view": "simulate",
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -350,
+      "simulationFraction": 1,
+      "simulationResolution": 0.25,
+      "simulationDisplay": "compare"
+    },
+    {
+      "id": "W2-4",
+      "name": "Fixture-plate UCCNC combined program preview",
+      "page": "Walkthrough-Multi-Tool-Job-in-One-Program",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "view": "post",
+      "post": "UCCNC",
+      "output": "combined",
+      "pause": false
+    },
+    {
+      "id": "W2-5",
+      "name": "Fixture-plate program loaded in Control for inspection",
+      "page": "Walkthrough-Multi-Tool-Job-in-One-Program",
+      "project": "examples/01-fixture-plate/fixture-plate.camproject",
+      "view": "control"
+    },
+    {
+      "id": "W3-1",
+      "name": "Storage-bar New Setup: Second side of Top - G54, turned about Y",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "second-side"
+    },
+    {
+      "id": "W3-2",
+      "name": "Storage-bar Top - G54 peck drilling, through bores and chamfers",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "toolpath",
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -350
+    },
+    {
+      "id": "W3-3",
+      "name": "Storage-bar G55 underside chamfers only on the mirrored drawing",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "toolpath",
+      "setup": 1,
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -350
+    },
+    {
+      "id": "W3-4",
+      "name": "Storage-bar Top - G54 stock removal at the end",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "simulate",
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -350,
+      "simulationFraction": 1
+    },
+    {
+      "id": "W3-5",
+      "name": "Storage-bar Bottom - flip about Y - G55 stock removal at the end",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "simulate",
+      "setup": 1,
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -350,
+      "simulationFraction": 1
+    },
+    {
+      "id": "W3-6",
+      "name": "Storage-bar UCCNC combined program with both setups and M0 flip pause",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "post",
+      "post": "UCCNC",
+      "output": "combined",
+      "pause": true
+    },
+    {
+      "id": "W3-7",
+      "name": "Storage-bar probing workspace for establishing the physical work offset",
+      "page": "Walkthrough-Two-Sided-Part-with-a-Flip",
+      "project": "examples/04-tool-storage-bar/tool-storage-bar.camproject",
+      "view": "probing"
+    },
+    {
+      "id": "W4-1",
+      "name": "Knob model, stock and G54 setup",
+      "page": "Walkthrough-STEP-Part-to-3D-Toolpaths",
+      "project": "examples/06-knob-handwheel/knob-handwheel.camproject",
+      "view": "setup-overview"
+    },
+    {
+      "id": "W4-2",
+      "name": "Knob roughing, ball-cutter dome finish and small flat-cutter wall finish",
+      "page": "Walkthrough-STEP-Part-to-3D-Toolpaths",
+      "project": "examples/06-knob-handwheel/knob-handwheel.camproject",
+      "view": "toolpath"
+    },
+    {
+      "id": "W4-3",
+      "name": "Knob completed stock removal after dome and wall finishing",
+      "page": "Walkthrough-STEP-Part-to-3D-Toolpaths",
+      "project": "examples/06-knob-handwheel/knob-handwheel.camproject",
+      "view": "simulate",
+      "simulationFraction": 1,
+      "simulationResolution": 0.25
+    },
+    {
+      "id": "W4-4",
+      "name": "Knob GRBL separate-setup program preview",
+      "page": "Walkthrough-STEP-Part-to-3D-Toolpaths",
+      "project": "examples/06-knob-handwheel/knob-handwheel.camproject",
+      "view": "post",
+      "post": "GRBL",
+      "output": "separate",
+      "pause": false
+    },
+    {
+      "id": "W5-1",
+      "name": "Gear-pair native parametric gear sketch",
+      "page": "Walkthrough-Sketch-to-Finished-Part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "view": "sketch"
+    },
+    {
+      "id": "W5-2",
+      "name": "Gear sketch promoted into Model for the solid-variation exercise",
+      "page": "Walkthrough-Sketch-to-Finished-Part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "view": "model"
+    },
+    {
+      "id": "W5-3",
+      "name": "Gear-pair bore, keyway and outside contour paths",
+      "page": "Walkthrough-Sketch-to-Finished-Part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "view": "toolpath",
+      "fitFrame": true,
+      "zoomWheel": 700
+    },
+    {
+      "id": "W5-4",
+      "name": "Gear-pair Setup 1 at the end: outline cut through, gear retained by tape and glue",
+      "page": "Walkthrough-Sketch-to-Finished-Part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "view": "simulate",
+      "fitFrame": true,
+      "zoomWheel": 700,
+      "simulationDisplay": "stock",
+      "simulationFraction": 1,
+      "simulationResolution": 0.25,
+      "cameraView": "iso"
+    },
+    {
+      "id": "W5-5",
+      "name": "Gear-pair GRBL separate programs for G54 and G55",
+      "page": "Walkthrough-Sketch-to-Finished-Part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "view": "post",
+      "post": "GRBL",
+      "output": "separate",
+      "pause": false
+    },
+    {
+      "id": "W5-6",
+      "name": "Gear-pair Setup 2 at the end: larger gear outline cut through",
+      "page": "Walkthrough-Sketch-to-Finished-Part",
+      "project": "examples/08-gear-pair/gear-pair.camproject",
+      "setup": 1,
+      "view": "simulate",
+      "fitFrame": true,
+      "zoomWheel": 700,
+      "simulationDisplay": "stock",
+      "simulationFraction": 1,
+      "simulationResolution": 0.25,
+      "cameraView": "iso"
+    },
+    {
+      "id": "W6-1",
+      "name": "Name-sign lettering outlines open in Sketch",
+      "page": "Walkthrough-V-Carve-a-Sign",
+      "project": "examples/05-name-sign/name-sign.camproject",
+      "view": "sketch"
+    },
+    {
+      "id": "W6-2",
+      "name": "Name-sign V-carve lettering and tabbed outside contour",
+      "page": "Walkthrough-V-Carve-a-Sign",
+      "project": "examples/05-name-sign/name-sign.camproject",
+      "view": "toolpath"
+    },
+    {
+      "id": "W6-3",
+      "name": "Name-sign stock removal during carving",
+      "page": "Walkthrough-V-Carve-a-Sign",
+      "project": "examples/05-name-sign/name-sign.camproject",
+      "view": "simulate",
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -350,
+      "simulationFraction": 1,
+      "simulationResolution": 0.25,
+      "simulationDisplay": "compare"
+    },
+    {
+      "id": "W6-4",
+      "name": "Name-sign GRBL separate-setup program preview",
+      "page": "Walkthrough-V-Carve-a-Sign",
+      "project": "examples/05-name-sign/name-sign.camproject",
+      "view": "post",
+      "post": "GRBL",
+      "output": "separate",
+      "pause": false
+    },
+    {
+      "id": "W9-1",
+      "name": "Medallion relief reopened in the Relief palette with its picture and height map",
+      "page": "Walkthrough-Picture-to-Relief",
+      "project": "examples/07-relief-medallion/relief-medallion.camproject",
+      "view": "relief"
+    },
+    {
+      "id": "W9-2",
+      "name": "Medallion setup overview: blank, two toe clamps and the screw holding method",
+      "page": "Walkthrough-Picture-to-Relief",
+      "project": "examples/07-relief-medallion/relief-medallion.camproject",
+      "view": "setup-overview"
+    },
+    {
+      "id": "W9-3",
+      "name": "Medallion drill, operator stop, relief rough and finish, and tabbed outline paths",
+      "page": "Walkthrough-Picture-to-Relief",
+      "project": "examples/07-relief-medallion/relief-medallion.camproject",
+      "view": "toolpath"
+    },
+    {
+      "id": "W9-4",
+      "name": "Medallion stock removal at the end of the cut",
+      "page": "Walkthrough-Picture-to-Relief",
+      "project": "examples/07-relief-medallion/relief-medallion.camproject",
+      "view": "simulate",
+      "fitFrame": true,
+      "cameraView": "top",
+      "zoomWheel": -1000,
+      "simulationFraction": 1,
+      "simulationDisplay": "compare"
+    },
+    {
+      "id": "W9-5",
+      "name": "Medallion GRBL program preview at the operator stop",
+      "page": "Walkthrough-Picture-to-Relief",
+      "project": "examples/07-relief-medallion/relief-medallion.camproject",
+      "view": "post",
+      "post": "GRBL",
+      "output": "combined",
+      "pause": false,
+      "scrollTo": "Operator stop"
+    }
+  ]
+}

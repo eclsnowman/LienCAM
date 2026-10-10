@@ -1,0 +1,989 @@
+/* ===========================================================================
+   LienCAM - Design tokens (single source of truth for all visual values)
+   ---------------------------------------------------------------------------
+   Three tiers (see docs/ui-ux/standard/UI-STANDARD.md):
+     TIER 1  primitives  - raw values; a future theme redefines ONLY these
+             via a [data-theme="..."] block.
+     TIER 2  semantic    - roles the app consumes; stable across themes.
+     TIER 3  component   - per-component knobs; kept minimal.
+
+   Rules:
+   - No raw hex/rgb in component CSS or TSX: everything references a token.
+   - The 3D viewport reads these same tokens through src/theme/
+     viewportColors.ts (added in action-plan Phase 1.3), so CSS and
+     viewport can never drift apart.
+
+   PHASING NOTE: values here are the CURRENT production values (Phase 1 =
+   plumbing, zero visual change). Approved value changes land in later
+   phases of docs/ui-ux/ACTION-PLAN.md:
+     Phase 2 (P1):  --text-muted -> --slate-400; danger text -> --red-300;
+                    accent-strong button fills; --text-active labels
+     Phase 3 (P2):  type-scale floor (xs 11px) applied across app.css
+     Phase 4 (P5):  toolpath role hue updates (gated on approved board)
+     Phase 5 (P8):  panel width tokens become resizable bounds
+   Target end-state values: docs/ui-ux/standard/tokens.css.
+   =========================================================================== */
+
+:root {
+  --ui-scale: 1;
+  font-size: calc(16px * var(--ui-scale));
+
+  /* ------------------------- TIER 1: PRIMITIVES -------------------------- */
+
+  /* Slate ramp */
+  --slate-950: #0d1117;   /* page bg */
+  --slate-925: #111827;   /* input bg */
+  --slate-915: #111418;   /* viewport canvas */
+  --slate-900: #161b22;   /* panel bg */
+  --slate-850: #1c2230;   /* panel-alt */
+  --slate-800: #1e2736;   /* hover */
+  --slate-700: #2d3748;   /* border */
+  --slate-600: #3d4f6a;   /* border-light */
+  --slate-550: #46566c;   /* scrollbar thumb target (Phase 2) */
+  --slate-500: #546070;   /* current muted text; becomes disabled-only (P1) */
+  --slate-400: #98a5b4;   /* readable muted text */
+  --slate-300: #8899aa;   /* secondary text */
+  --slate-100: #e2e8f0;   /* primary text */
+
+  /* Blues + cyan - the identity ramp (WO-269).
+     These SEVEN literals are the only blue/cyan values the app chrome is
+     allowed to contain. Every other blue anywhere in the chrome is a
+     reference to a colour ROLE (TIER 2 below); the roles are the only thing
+     component CSS names. Role table and the rule for choosing between them:
+     docs/ui-ux/COLOR-ROLES.md. Enforced by
+     src/tests/ui/colorRoles.wo269.test.ts.
+     --loop-blue belongs to the 3D viewport, which WO-269 leaves alone. */
+  --blue-300: #7ec0ff;    /* identity LIGHT - identity that has to be read */
+  --blue-400: #6fb3ff;    /* FOCUS ring */
+  --blue-500: #4a90d9;    /* identity BASE - the brand accent */
+  --blue-600: #2e6db8;    /* identity FILL - white text sits on it */
+  --blue-800: #1e4976;    /* identity DEEP - lines and edges, never text */
+  --blue-900: #1a3a5c;    /* SELECTION wash - the row the user picked */
+  --cyan-400: #00e5ff;    /* LIVE - real machine data, right now */
+  --loop-blue: #4ac3ff;   /* default 2D loop color (3D viewport) */
+
+  /* Status hues */
+  --green-500: #4caf50;
+  --green-600: #5ca85c;   /* Y axis */
+  --red-500: #e05252;
+  --red-300: #f28b8b;     /* danger text target (Phase 2) */
+  --amber-400: #ffaa00;   /* viewport selection amber */
+  --orange-500: #ff8c00;
+  --violet-500: #8b7cf6;  /* CAM-BINDING Stage 1: 'unsupported' op status only */
+  --violet-300: #aea3f9;  /* WO-331: LIGHT tone for violet-500 (identity ramp's
+                              --blue-300/--blue-500 pattern) - a text/glyph
+                              colour needs more luminance than the BASE tone
+                              chrome uses; violet had no LIGHT counterpart
+                              until the Control-tab jog X label needed one.
+                              5.81:1 against the X jog button's own fill
+                              (src/tests/theme/controlTabPalette.wo331.test.ts). */
+
+  /* Toolpath role hues - V5 palette v3 (Operator directive 2026-06-12,
+     supersedes board v2). Dash policy: dashes ONLY for rapids; all other
+     roles solid. Color merges: lead-in + lead-out SHARE #a78bfa (brighter
+     lavender, 6.8:1); helix + ramp SHARE #ff8c00 (orange, 7.1:1). Gold
+     #ffd700 is freed but stays RESERVED for the WCS origin (--vp-wcs-origin
+     now points at its own --gold-wcs primitive, not --hue-helix).
+     Carried from v2: finish #ff85a8, fast-traverse #5ea0ff.
+     DOCTRINE: no scene-furniture color may reuse a toolpath role color. */
+  --hue-cut: #00e5ff;
+  --hue-rapid: #ff4444;
+  --hue-fast-traverse: #5ea0ff;
+  --hue-helix: #ff8c00;       /* v3: merged with ramp (was #ffd700 gold) */
+  --hue-ramp: #ff8c00;
+  --hue-plunge: #ff44ff;
+  --hue-finish: #ff85a8;
+  --hue-stepover: #44ff88;
+  --hue-wall-follow: #00d0a0;
+  --hue-lead-in: #a78bfa;     /* v3: merged with lead-out (was #aa44ff) */
+  --hue-lead-out: #a78bfa;
+
+  /* WCS origin gold - freed from --hue-helix in v3 (helix merged to orange).
+     Reserved exclusively for the WCS origin/gizmo sphere. */
+  --gold-wcs: #ffd700;
+
+  /* Scene-furniture plane hue (Phase 4 P5): retract/clearance plane edge
+     lines were sharing --hue-cut cyan; decoupled so no furniture reuses a
+     toolpath role color. Planes stay DASHED (outline category). */
+  --hue-plane: #5a7ca6;
+
+  /* Type scale: 12px is the application floor. */
+  --font-size-xs: 12px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 20px;
+  --line-tight: 1.35;
+  --line-base: 1.45;
+  --tracking-caps: 0.06em;
+
+  /* Spacing scale (UI-BRAND-B1-1: vocabulary only, nothing consumes these
+     yet - zero pixel change). 4px base grid; values agreed by all four
+     UI-BRAND-1 critics through --space-8. Root-cause fix behind 320
+     padding/margin literals; later B2 batches migrate sites onto these. */
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+
+  /* Font-weight scale (UI-BRAND-B1-1: vocabulary only, nothing consumes
+     these yet - zero pixel change). Root-cause fix behind 106 font-weight
+     literals; later B2 batches migrate sites onto these. */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Radii */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  /* Fonts */
+  --font-ui:  'DM Sans', system-ui, sans-serif;
+  --font-mono:'JetBrains Mono', monospace;
+
+  /* ------------------------- TIER 2: SEMANTIC ---------------------------- */
+
+  /* ---- COLOUR ROLES (WO-269) ------------------------------------------
+     One blue family, one meaning per role. This is the whole vocabulary the
+     app chrome may use for blue; docs/ui-ux/COLOR-ROLES.md states each
+     meaning and the rule for picking between them. Hover/pressed are STATES
+     of a role, not roles - they derive from the role rather than adding a
+     new value. */
+  --role-identity:       var(--blue-500);  /* app identity; normal-surface machine readouts */
+  --role-identity-light: var(--blue-300);  /* labels/icons; readouts on highlighted surfaces */
+  --role-identity-deep:  var(--blue-800);  /* identity as an EDGE: borders, rules */
+  --role-primary-fill:   var(--blue-600);  /* a filled primary action; white text on it */
+  --role-selection:      var(--blue-900);  /* the row/item the user picked (background only) */
+  --role-focus:          var(--blue-400);  /* where the keyboard is (ring only, never a fill) */
+  --role-live:           var(--cyan-400);  /* armed/running/connected/in-progress marker */
+  --role-inert:          var(--slate-500); /* disabled / unavailable / not real yet */
+  /* State, not a role: primary fill pressed/hovered. */
+  --role-primary-fill-hover: color-mix(in srgb, var(--blue-600) 85%, #000);
+
+  --surface-page: #090c10;
+  --surface-canvas: #0d1117;
+  --surface-1: var(--slate-900);
+  --surface-2: var(--slate-850);
+  --surface-input: #0f141b;
+  --surface-hover: var(--slate-800);
+  --surface-selected: var(--role-selection);
+
+  --text-primary: var(--slate-100);
+  --text-secondary: var(--slate-300);
+  --text-muted: var(--slate-400);     /* Phase 2 (P1): readable muted 5.17:1 */
+  --text-disabled: var(--slate-500);  /* disabled-only after P1 demotion */
+  --text-on-accent: #ffffff;
+  --text-danger: var(--red-300);      /* Phase 2 (P1): error TEXT 6.69:1 */
+  --text-active: var(--role-identity-light);  /* Phase 2 (P4): active labels 8.95:1 */
+
+  --border-subtle: var(--slate-700);
+  --border-strong: var(--slate-600);
+  --border-accent: var(--role-identity-deep);
+
+  --accent: var(--role-identity);
+  --accent-strong: var(--role-primary-fill);  /* Phase 2 (P4): primary fills 5.26:1 */
+  --focus-ring: var(--role-focus);
+  --warning: var(--orange-500);       /* UI-70: mixed/partial-state indicator (.tree-op-enable-mixed) -- was referenced with no definition, painting transparent */
+
+  --status-ready: var(--green-500);
+  --status-error: var(--red-500);
+  --status-outdated: var(--orange-500);
+  --status-computing: var(--role-live);
+  --status-pending: var(--slate-300);
+  /* CAM-BINDING Stage 1: modeled-body source, no Stage 2 compute path yet -
+     deliberately violet, not slate/orange/red: distinct from a normal
+     pending op (charter risk note) and NOT an error (nothing is broken). */
+  --status-unsupported: var(--violet-500);
+
+  --axis-x: var(--red-500);
+  --axis-y: var(--green-600);
+  --axis-z: var(--blue-500);   /* WO-326: re-pinned in the amber block below --
+                                   the universal CAD X/Y/Z convention must NOT
+                                   follow the identity ramp just because it
+                                   happens to share blue-500's hue today. */
+
+  /* Selection doctrine: amber = viewport object selection; blue = UI rows */
+  --select-viewport: var(--amber-400);
+  --select-ui-bg: var(--surface-selected);
+
+  /* ---- Overlay chrome tokens (Phase 2.0 orphan absorption) -------------
+     One-off colors used by the in-viewport HTML overlays (slice-plane,
+     project-plane, optimization, toolbar-primary, simulation panel, planes
+     flyout, view cube, gizmo hints, picking banners). Absorbed from
+     hardcoded hex in app.css per docs/ui-ux/findings/07-orphan-absorption.md
+     table (b). CURRENT production values; zero visual change. Kept here as
+     semantic one-offs rather than primitive ramp entries to avoid polluting
+     the slate/blue ramps with bespoke overlay hues. */
+
+  /* Overlay white + scrim alpha ramps (UI-BRAND-B1-2). Step values are the
+     exact alphas already in use across the app (audit-confirmed), ordered
+     light->heavy - swapping a matching literal for its step is a zero
+     pixel change. Off-scale outliers (values not on either ramp) are left
+     as literals for B2-4 to reconcile onto the nearest step. */
+  --overlay-white-1: rgba(255, 255, 255, 0.05);  /* subtle hover wash */
+  --overlay-white-2: rgba(255, 255, 255, 0.06);
+  --overlay-white-3: rgba(255, 255, 255, 0.10);
+  --overlay-white-4: rgba(255, 255, 255, 0.12);
+  --overlay-white-5: rgba(255, 255, 255, 0.15);  /* strongest hover/border wash */
+  --overlay-scrim-1: rgba(0, 0, 0, 0.5);   /* light backdrop veil */
+  --overlay-scrim-2: rgba(0, 0, 0, 0.65);  /* modal backdrop */
+  --overlay-scrim-3: rgba(0, 0, 0, 0.72);  /* flyout backdrop */
+  --overlay-scrim-4: rgba(0, 0, 0, 0.85);  /* reserved, unconsumed today */
+  --overlay-scrim-5: rgba(0, 0, 0, 0.92);  /* heaviest veil, unconsumed today */
+
+  /* WO-269: the overlay blue family was a THIRD blue (#00aaff/#0099ee) that
+     meant nothing the identity roles did not already mean - a slice-plane
+     overlay is just a primary interaction. Collapsed onto the roles; the
+     names survive only because call sites outside this WO's lane use them. */
+  --overlay-blue: var(--role-identity);        /* slice-plane border/title */
+  --overlay-blue-hover: var(--role-primary-fill-hover);
+  --overlay-blue-border: var(--border-strong); /* sp-z input border (was a bespoke blue) */
+  --overlay-hint: var(--text-secondary);       /* overlay hint text (was #88aacc) */
+  --overlay-focus-blue: var(--role-focus);     /* WO-269: was a SECOND focus blue */
+
+  /* Overlay orange family (optimization confirm button) */
+  --overlay-orange: #ff8800;          /* opt-btn-confirm bg */
+  --overlay-orange-hover: #e07700;    /* opt-btn-confirm hover bg */
+
+  /* Accent-blue hover variants. WO-269: --blue-700 (#1e4a7a) and
+     --border-accent (#1e4976) were the same colour to the eye, so they are
+     one step now; --accent-blue-hover had zero call sites and is gone. A
+     hovered identity LINK lightens to the identity-light role rather than
+     carrying its own hex. */
+  --blue-650: var(--role-primary-fill-hover);  /* modal primary hover (P4) */
+  --blue-700: var(--role-identity-deep);       /* toolbar-primary hover bg */
+  --loop-pick-done-hover: var(--role-identity-light);  /* identity link/button, hovered */
+
+  /* Overlay text tints (sim panel + planes flyout). WO-269: --text-bright
+     was a dimmer blue-tinted duplicate of --text-primary. */
+  --text-bright: var(--text-primary);  /* sim-btn/stock/res, planes-flyout-item */
+  --text-dim-overlay: #667788;        /* planes-flyout close / hide-all */
+  --text-dim-overlay-hover: #aabbcc;  /* planes-flyout close hover */
+  --text-disabled-overlay: #445566;   /* tp-legend hidden label */
+  --icon-disabled-overlay: #3a4d5e;   /* tp-legend hidden eye icon */
+  --text-dim: #555555;                /* tree-layer-count (9px metadata) */
+
+  /* Misc overlay one-offs */
+  --status-stale: #f5a623;            /* stale-projection amber pulse */
+  --gizmo-gold: #ffd700;              /* wcs-gizmo-hint strong (== --gold-wcs) */
+  --view-cube-label: var(--text-secondary);  /* WO-269: was a bespoke #9abcdc blue-gray */
+  --surface-banner: #0d1b2e;          /* loop-pick / vertex-pick banner bg */
+  --accent-amber: #e0a94f;            /* amber accent fallback */
+
+  /* ----------------------- VIEWPORT SCENE (3D) -------------------------- */
+  /* Furniture, geometry-state, sketch, and interaction-feedback colors the
+     Three.js viewport consumes through src/theme/viewportColors.ts. ALL at
+     CURRENT production values (Phase 1.3 = plumbing, zero visual change).
+     Tier-1 primitives are added inline above only where a hue is reused;
+     viewport-only one-offs are kept as semantic tokens here to avoid
+     polluting the shared primitive ramp. */
+
+  /* Scene furniture */
+  --vp-canvas: #0d1117;           /* renderer clear color (== --surface-canvas) */
+  --vp-grid: #2a2f36;             /* grid minor lines */
+  --vp-grid-accent: var(--role-identity-deep);  /* grid Nth lines (== --border-accent) */
+  --vp-grid-plane: #141a22;       /* grid plane fill mesh */
+  --vp-axis-x: var(--axis-x);     /* #e05252 */
+  --vp-axis-y: var(--axis-y);     /* #5ca85c */
+  --vp-axis-z: var(--axis-z);     /* #4a90d9 */
+  --vp-wcs-origin: var(--gold-wcs);   /* #ffd700 gold origin sphere (freed from helix in v3) */
+  --vp-machine-border: var(--amber-400);  /* #ffaa00 travel border */
+  /* UI-BRAND-B1-7: base-plane/datum-plane genesis-glyph edge+fill (Model
+     workspace). Current production value, zero visual change - a later
+     B2/B3 pass decides whether to visually decouple this from the signature
+     cyan family (audit flagged it reading close to --vp-select-face/stock
+     edges at some zoom levels). */
+  --vp-construction-plane: #4ea1ff;
+
+  /* Stock + workpiece geometry */
+  --vp-stock: #2a5c8a;            /* stock box fill */
+  --vp-stock-edge: #4a9cd4;       /* stock box wireframe */
+  --vp-workpiece: #8ab4cc;        /* default part surface */
+  --vp-workpiece-edge: #bfd8ec;   /* part edge overlay */
+  --vp-stock-gizmo: var(--loop-blue);  /* #4ac3ff stock reposition sphere */
+  --vp-sim-mesh: #3a7ab0;         /* stock-removal sim heightmap */
+
+  /* Geometry-state (loops + parts) */
+  --vp-loop-default: var(--loop-blue);  /* #4ac3ff fallback loop color */
+  --vp-select-part: var(--amber-400);   /* Phase 2 (P6): amber selection (was --loop-blue, invisible vs default loop) */
+  --vp-select-face: var(--orange-500);  /* #ff8c00 selected face / ramp handle */
+  --vp-select-amber: var(--amber-400);  /* #ffaa00 loop-pick + sketch select */
+  --vp-seed: #b06bff;                   /* ADR 0025 seed (nest-source) halo + tree badge; violet, distinct from loop blue / amber select / stepover green */
+
+  /* B-rep pick mode */
+  --vp-brep-pick: var(--amber-400);   /* #ffaa00 picked */
+  --vp-brep-hover: #ffe080;           /* lighter gold-yellow hover */
+
+  /* WO-351: an edge/face highlight drawn on a body whose whole-part
+     selection is ALSO painting that body's fill amber (--vp-select-part, or
+     under a non-'current' selection-glow candidate, the same
+     resolveSelectionGlowColors().selected value the body fill uses) must not
+     resolve to the same colour as that fill -- CNCViewport.ts's
+     brepHighlightColorFor() swaps to these two dark, theme-invariant tones
+     whenever the target body's material is actually rendering an opaque
+     fill (selected + wireframe===false + transparent===false, read live off
+     the material, not inferred from the display mode -- see that function's
+     header for why a mode-based proxy under-covers Translucent/Unshaded),
+     so the highlight cannot land on the fill's colour under ANY selection-
+     glow candidate, viewport theme, or display mode. Measured WCAG contrast
+     against --vp-select-part (#ffaa00): hover 8.23:1, pick 9.89:1 (both
+     clear the 3:1 non-text floor with a wide margin); against the brighter
+     high-contrast-theme amber (--amber-400 #ffc34d there): 9.85:1 / 11.84:1.
+     BEFORE this fix, measured the same way: body fill (#ffaa00) vs the old
+     --vp-brep-hover (#ffe080) was 1.47:1; vs the old --vp-brep-pick
+     (#ffaa00, byte-identical to the fill) was 1.00:1 -- the two draws were
+     wired to the identical field, so the collision was structural, not
+     coincidental, for every glow candidate. See
+     src/tests/viewport/selectionVisibleOnPickedBody.wo351.test.ts. */
+  --vp-brep-hover-on-selected: #331f00;  /* dark amber preview */
+  --vp-brep-pick-on-selected: #1a0f00;   /* darker amber commit */
+
+  /* Face cluster overlay (lay-on-face / project-plane) */
+  --vp-face-overlay: #00a8ff;     /* blue overlay base */
+  --vp-face-overlay-hover: #ff8800;  /* orange on hover */
+
+  /* Optimization preview */
+  --vp-opt-before: #4488ff;       /* blue (geometry before) */
+  --vp-opt-after: #ff8800;        /* orange (geometry after) */
+
+  /* Slice / section preview */
+  --vp-slice-plane: #00aaff;      /* translucent blue slice plane */
+  --vp-slice-handle: var(--orange-500);  /* #ff8c00 drag handle sphere */
+  --vp-slice-preview: #ffff00;    /* yellow preview loops */
+
+  /* Height planes (each level a distinct hue) */
+  --vp-plane-clearance: var(--blue-500);  /* #4a90d9 */
+  --vp-plane-retract: var(--hue-plane);   /* Phase 4 (P5): #5a7ca6 decoupled from cut cyan */
+  --vp-plane-feed: var(--green-500);      /* #4caf50 */
+  --vp-plane-top: #aac8e0;                /* light blue */
+  --vp-plane-bottom: var(--axis-x);       /* #e05252 */
+
+  /* Tool mesh sections (animated 3D marker) */
+  --vp-tool-flutes: #33cc44;      /* green cutting zone */
+  --vp-tool-shoulder: #5588aa;    /* gray-blue non-cutting */
+  --vp-tool-shank: #cc3333;       /* red shank */
+
+  /* Scene lights (tint only) */
+  --vp-light-ambient: #ffffff;
+  --vp-light-key: #fff8f0;
+  --vp-light-fill: #b0d4ff;
+  --vp-light-rim: #ffffff;
+
+  /* Snap / interaction feedback */
+  --vp-snap-marker: var(--amber-400);  /* #ffaa00 endpoint/center markers */
+  --vp-snap-guide: #6fa8ff;            /* blue alignment guide */
+  --vp-snap-badge: #4a9eff;            /* blue badge preview (== sketch under-defined) */
+
+  /* Sketch tool overlay channels */
+  --vp-overlay-removal: #ff5566;  /* pinkish-red trim hover */
+  --vp-overlay-ghost: #9fb4c7;    /* gray-blue ghost preview */
+  --vp-overlay-warning: #ff8800;  /* orange warning triangle */
+
+  /* Sketch entity palette (definition-state semantics) */
+  --sketch-under-defined: #4a9eff;     /* blue */
+  --sketch-fully-defined: var(--slate-100);  /* #e2e8f0 near-white */
+  --sketch-conflict: #ff4444;          /* bright red; NOT --red-500 (#e05252) */
+  --sketch-selected: var(--amber-400); /* #ffaa00 */
+  --sketch-badge: #9fb0c2;             /* neutral gray-blue badge */
+  --sketch-dimension: #8899aa;         /* gray dimension leader (== --slate-300) */
+  --sketch-tool-preview: #4a9eff;      /* rubber-band (== under-defined) */
+  --sketch-hover: var(--cyan-400);     /* #00e5ff signature-cyan hover halo */
+
+  /* Toolpath roles (read by src/theme/viewportColors.ts) */
+  --role-cut: var(--hue-cut);
+  --role-rapid: var(--hue-rapid);
+  --role-fast-traverse: var(--hue-fast-traverse);
+  --role-helix: var(--hue-helix);
+  --role-ramp: var(--hue-ramp);
+  --role-plunge: var(--hue-plunge);
+  --role-finish: var(--hue-finish);
+  --role-stepover: var(--hue-stepover);
+  --role-wall-follow: var(--hue-wall-follow);
+  --role-lead-in: var(--hue-lead-in);
+  --role-lead-out: var(--hue-lead-out);
+  --role-unknown: #ffffff;
+
+  /* ------------------------- TIER 3: COMPONENT --------------------------- */
+
+  --hit-target-min: 24px;
+  --row-default: 26px;
+  --row-compact: 22px;
+  --panel-left-w: 280px;             /* Phase 5 (P8): at-rest default; live width set inline by the resizer */
+  --panel-right-w: 260px;            /* Phase 5 (P8): at-rest default; live width set inline by the resizer */
+  /* P8 resizable-panel bounds (consumed by src/store/uiPrefs.ts clamp). The
+     resizer writes a live px width onto .panel-left/.panel-right as an inline
+     style; these tokens document the legal range and mirror the JS constants. */
+  --panel-left-min: 220px;
+  --panel-left-max: 460px;
+  --panel-right-min: 240px;
+  --panel-right-max: 460px;
+  --panel-resizer-w: 5px;            /* drag-handle hit width */
+  --toolbar-h: 46px;
+  --statusbar-h: 26px;
+  --scrollbar-thumb: var(--slate-550);  /* Phase 2: visible thumb 2.31:1 */
+}
+
+/* ===========================================================================
+   THEME: High Contrast (THEME-HICONTRAST-BUILD, Operator Q-57 verdict 2026-07-25
+   verbatim "approve as an option") -- Settings > Display, opt-in, persisted
+   via src/store/uiPrefs.ts `uiTheme` / applied via src/theme/uiTheme.ts.
+   ---------------------------------------------------------------------------
+   TIER 1 PRIMITIVES ONLY, exactly as this file's header promises: every
+   Tier-2/Tier-3 token above still reads var(--slate-400) etc and inherits
+   the swap automatically -- no token is redeclared here, no new vocabulary.
+   Values + every measured WCAG 2.1 ratio (before -> after) are the recon's:
+   coordination/reports/THEME-HICONTRAST-RECON.report.md section 2 delta
+   table. Cross-checked (not hand-copied) by
+   src/tests/theme/uiThemeContrast.test.ts, which parses THIS block.
+
+   Deliberately unchanged (recon's own scope call): all --surface-* tokens
+   (no surface-side contrast problem was found; moving them risked losing
+   the dark identity Operator wants kept), the 9 toolpath role hues, --sketch-*
+   tokens, and every --vp-* SEMANTIC token that is not itself downstream of
+   a primitive changed below.
+
+   ONE known, disclosed consequence of the "same primitives, no new
+   vocabulary" constraint: --amber-400 and --cyan-400 are shared primitives
+   also consumed by 3D-viewport semantic tokens (--vp-select-part,
+   --vp-snap-marker, --sketch-selected, --status-computing, etc. all resolve
+   through var(--amber-400)/var(--cyan-400)). Enabling this theme therefore
+   also brightens those viewport highlight colors as a side effect -- the
+   recon explicitly scoped a dedicated 3D-scene contrast pass OUT (open
+   question 1 in its report), but did not exempt the shared primitive itself
+   from the "more saturated accent pop" ask, and its own delta table lists
+   --amber-400's improved ratio. Not a defect: flag to Operator if the viewport
+   pop reads as too much once he drives it.
+
+   CORRECTED at build time (measured, not eyeballed, per the WO's acceptance
+   gate): the recon's proposed --red-500 (#e74b4b) does NOT actually raise
+   the badge-counter white-on-fill ratio -- computing the real WCAG formula
+   against its own cited hex gives 3.81:1, essentially unchanged from the
+   3.82:1 failure it was meant to fix (the recon's claimed "4.66:1" for that
+   cell does not reproduce from its own hex value; a report arithmetic
+   error, not a code defect). Worse, no single --red-500 value can pass BOTH
+   "white text on a --red-500 fill" (needs a DARK fill, luminance <=0.183)
+   and "--red-500 as text color on --surface-1" (.status-degraded; needs a
+   LIGHT color, luminance >=0.223) at once -- those two floors are mutually
+   exclusive for one shared primitive, a real physical tradeoff the recon's
+   design did not account for. This build prioritizes the explicitly-named
+   worst offender (badge-counter error-count DIGITS, "the worst kind of
+   pair to under-contrast" per the recon's own section 1) with #e02020,
+   which genuinely clears white-on-fill at 4.78:1 (was 3.82:1, still FAIL);
+   .status-degraded text moves from a barely-passing 4.53:1 down to 3.62:1
+   (a disclosed, bounded step below the 4.5:1 body floor for that one
+   narrow op-status label -- not the general .status-error class, which
+   uses the separate --text-danger/red-300 token and is unaffected).
+   =========================================================================== */
+:root[data-theme="high-contrast"] {
+  /* Slate ramp -- lifted one notch, relative ordering (disabled < muted <
+     secondary < primary) preserved. */
+  --slate-700: #4b5b77;   /* border-subtle   1.44:1 -> 2.52:1 */
+  --slate-600: #546d92;   /* border-strong   2.08:1 -> 3.28:1 */
+  --slate-550: #5a6f8b;   /* scrollbar-thumb 2.31:1 -> 3.36:1 */
+  --slate-500: #69788c;   /* text-disabled   2.71:1 -> 3.84:1 */
+  --slate-400: #98a5b4;   /* text-muted      5.17:1 -> 6.90:1 */
+  --slate-300: #afbac6;   /* text-secondary  5.92:1 -> 8.78:1 */
+  --slate-100: #ebeff5;   /* text-primary   14.03:1 -> 14.99:1 */
+
+  /* Accent family -- more saturated + slightly brighter (Operator's "accent
+     pop" ask); --blue-600/--red-500 fixes also lift their white-on-fill
+     badge-counter pairing from below-floor to passing. */
+  --blue-300: #8fc8ff;    /* text-active      8.95:1 -> 9.78:1 */
+  --blue-400: #66aeff;    /* focus-ring       7.88:1 -> 7.47:1 (recon's "7.06" before-value doesn't reproduce from its own hex, CORRECTED comment; both far exceed every floor, no functional change) */
+  --blue-500: #4792e1;    /* accent           5.18:1 -> 5.33:1 */
+  --blue-600: #1d60af;    /* accent-strong fill, white-on-fill 5.26:1 -> 6.28:1 */
+  --cyan-400: #29e9ff;    /* signature cyan  11.25:1 -> 11.69:1 */
+  --amber-400: #ffc34d;   /* viewport/select amber 9.06:1 -> 10.84:1 (recon's "10.45" before-value doesn't reproduce from its own hex, CORRECTED comment; both far exceed every floor) */
+  --red-300: #f9a9a9;     /* text-danger      7.28:1 -> 9.29:1 */
+  --green-500: #65c269;   /* status-ready     6.22:1 -> 7.80:1 */
+  --red-500: #e02020;     /* status-error fill white-on-fill 3.82:1 -> 4.78:1 (CORRECTED, see block header) */
+  --violet-500: #8473fc;  /* status-unsupported 5.20:1 -> 4.81:1 (still clears 4.5) */
+
+  /* Broken dim/disabled one-offs -- the worst absolute floors in the audit. */
+  --text-dim-overlay: #6d7f92;        /* 3.76:1 -> 4.20:1 */
+  --text-disabled-overlay: #566b81;   /* 2.25:1 -> 3.14:1 */
+  --text-dim: #8c8c8c;                /* 2.32:1 -> 5.14:1 (tree-layer-count) */
+}
+
+/* ===========================================================================
+   THEME: Amber (WO-307 built the palette, capture-harness-only; WO-324 wired
+   it up) -- reachable from Settings > Theme (exactly two options, Default and
+   Amber -- no third, no re-derivation of the old high-contrast/viewport/glow
+   list), persisted in uiPrefs's `uiTheme` field, and applied by
+   src/theme/uiTheme.ts's applyUiTheme()/UI_THEME_IDS. Still opt-in: the
+   default (unthemed) app stays byte-identical to before either WO -- 'default'
+   REMOVES the data-theme attribute rather than writing an override (see
+   uiTheme.ts's own header for why that is load-bearing). Card
+   Q-THE-THEME-SWITCHES-ARE-OUT-YOUR--1786525594777 (2026-08-12) asked to see
+   it applied everywhere before deciding; card
+   Q-THE-AMBER-THEME-SEE-ALL-OF-IT-AN-1786569820206 (2026-08-12, "Make it an
+   alternate theme in settings. I will need to drive it for a while before I
+   can decide.") is Operator now choosing to live in it before deciding whether to
+   keep it -- this label is still a trial, not a permanent product decision.
+   ---------------------------------------------------------------------------
+   TIER 1 PRIMITIVES: the seven "identity ramp" literals this file's WO-269
+   comment names as "the only blue/cyan values the app chrome is allowed to
+   contain" (--blue-300/400/500/600/800/900, --cyan-400). Every role/component
+   token above (--role-identity, --role-selection, --role-focus, --text-active,
+   --border-accent, --overlay-blue, etc.) still reads var(--blue-500) etc and
+   inherits the swap for free, which is the whole point of the tier system.
+   Anything that does NOT turn amber under this block is therefore a color
+   that escaped the token system, not a bug in this block -- see the WO's
+   result section for the itemized list.
+
+   ONE Tier-2 exception, added by WO-325: --text-on-accent. Amber is a LIGHT
+   accent (base 8.61:1, unlike blue's DARK identity), so the base theme's
+   white-on-accent pairing does not carry over by inheritance the way every
+   other role does -- it has to flip to a dark foreground for THIS theme only.
+   See the WO-325 note below the (former) "DISCLOSED" paragraph for the fix
+   and the measured numbers.
+
+   Values: picked from the identity-look study
+   (docs/ui-ux/identity-study/report/identity-look-study.html,
+   docs/ui-ux/identity-study/tools/capture-after.mjs), not from taste. The
+   study measured amber #e0a94f at 8.61:1 chrome contrast vs today's blue's
+   5.43:1, and pinned four of these six values directly:
+     --blue-500 (identity BASE)  = #e0a94f  (study: base accent)
+     --blue-600 (identity FILL)  = #c9902f  (study: --blue-600 override)
+     --blue-400 (FOCUS ring)     = #ffc978  (study: --blue-400 override)
+     --blue-900 (SELECTION wash) = #3a2c14  (study: --surface-selected)
+     --cyan-400 (chrome's OTHER identity primitive, WO-269 doctrine comment
+                 above) = #e0a94f (study: set equal to the amber base --
+                 the study's own note explains why: "the two competing
+                 systems... both claim to be the identity... Both are set
+                 here").
+   The study's older snapshot of the app did not yet have separate
+   --blue-300 (identity LIGHT, read as text/icons) or --blue-800 (identity
+   DEEP, edges only) primitives to pin, so those two are DERIVED here, not
+   pinned: same hue as the pinned anchors, scaled by the same per-channel
+   ratio the CURRENT production blue ramp already uses between 300/400 and
+   800/600 (verified by hand: production --blue-800/--blue-600 is ~0.65x per
+   channel -- 0x1e/0x2e, 0x49/0x6d, 0x76/0xb8 -- applying that to the amber
+   --blue-600 #c9902f gives #835e1f; production --blue-300/--blue-400 scales
+   R/G/B by ~1.135/1.073/1.0 -- applying that to amber --blue-400 #ffc978
+   gives #ffd878, R clipped at 0xff since it was already at max):
+     --blue-300 (identity LIGHT) = #ffd878
+     --blue-800 (identity DEEP)  = #835e1f
+   --amber-400 and --loop-blue are Tier-1 primitives but are NOT part of the
+   identity ramp (viewport-only per this file's own WO-269 comment: "--loop-
+   blue belongs to the 3D viewport, which WO-269 leaves alone") -- left
+   unchanged here for the same reason, and any viewport surface that
+   therefore stays blue under this theme is an expected, disclosed
+   consequence, not a defect.
+
+   FIXED (WO-325): the study measured white-on-amber at 2.11:1 (fails) because
+   the pairing, not the amber, was wrong -- amber is a LIGHT accent, so text
+   sitting on it must go dark, same as any light fill would demand regardless
+   of hue. The amber hues themselves are UNCHANGED (--blue-500/600 identical
+   to WO-307/WO-324's values): the only edit is --text-on-accent, overridden
+   below to the same near-black (#10161f) the identity-look study itself
+   already pinned for this in its capture-after.mjs AMBER override, rather
+   than inventing a new value. Measured (src/tests/theme/amberContrast.wo324.test.ts,
+   parsed from this file, not hand-copied):
+     white on --blue-500 (BASE)  2.11:1 FAIL -> #10161f on --blue-500  8.61:1 PASS
+     white on --blue-600 (FILL)  2.79:1 FAIL -> #10161f on --blue-600  6.50:1 PASS
+   Operator's own "dark stroke around white text" alternative was built and
+   measured too (src/tests/evidence/WO-325/): it improves perceived legibility
+   but the MEASURED ratio stays 2.11/2.79 (a stroke does not change the
+   underlying fill/text luminance pair), so it ships only as a captured
+   alternative for his call, not as the default.
+
+   WO-326 (Operator, card Q-THE-AMBER-THEME-SEE-ALL-OF-IT-AN-1786569820206,
+   2026-08-12: "even in your screenshots there is some residual blue. Look to
+   tweak those to improve the Amber theme."): the 3D viewport's grid ACCENT
+   already turned amber for free (--vp-grid-accent above resolves through
+   --role-identity-deep -> --blue-800, pinned above) once viewportColors.ts
+   started re-reading on theme change -- but the surrounding scene chrome
+   (canvas clear colour, base grid, grid ground-plane fill) and the stock /
+   workpiece body tints were never anything but hardcoded literals in the
+   base :root block, so no theme block -- amber included -- could reach them.
+   Added here as plain overrides, the same pattern as --blue-500 etc above.
+   Explicitly NOT touched: --vp-axis-x/y/z (universal CAD X/Y/Z convention),
+   --vp-wcs-origin/--vp-machine-border (location/limit markers, semantic),
+   FOUND WHILE VERIFYING "not touched": --axis-z (base :root, above) reads
+   var(--blue-500) -- it happens to share blue-500's default hue, not because
+   the Z axis is secretly an identity color. That made it a landmine: fixing
+   viewportColors.ts's cache (this WO's cause 1) would have newly exposed a
+   real regression here, repainting the Z axis (3D --vp-axis-z AND the 2D
+   --z-axis/app.css legend, same token) amber the instant this theme's
+   --blue-500 override took effect. Re-pinned to its literal default value
+   below so the axis convention is provably invariant -- see this WO's own
+   acceptance test for the guard. --axis-x/--axis-y needed no such pin: they
+   read --red-500/--green-600, neither of which this block touches.
+   --vp-construction-plane and every geometry-state / interaction-feedback
+   token (selection, snap, brep-pick, slice, height planes, tool mesh) --
+   those carry state meaning or are documented viewport-only doctrine
+   (--loop-blue/--amber-400, see this file's WO-269 comment above) and stay
+   theme-invariant on purpose. DECIDE-AND-LOG: --vp-stock-edge/
+   --vp-workpiece-edge are included alongside their fills (not named
+   individually by the WO, which named only "stock and workpiece body
+   tints") because a fill that goes amber while its own wireframe/edge
+   overlay stays blue would read as a rendering glitch, not a theme -- if
+   Operator wants edges left blue this is the line to revert. Values are each
+   base hex's own H/S/L with H replaced by the amber identity's hue
+   (~37.2deg, matching --blue-800's own derived hue above almost exactly),
+   S and L UNCHANGED -- so every override keeps its source token's exact
+   lightness/contrast relationship to its neighbours (edge lighter than
+   fill, plane fill darker than grid lines, etc), just recoloured onto the
+   amber wheel instead of the blue one. Computed, not hand-picked; script in
+   this WO's result section. Default theme is untouched (zero pixel change,
+   per this WO's own "do not" list) -- only this block gained lines.
+   =========================================================================== */
+:root[data-theme="amber"] {
+  --blue-300: #ffd878;   /* identity LIGHT -- derived, see header */
+  --blue-400: #ffc978;   /* FOCUS ring -- study-pinned */
+  --blue-500: #e0a94f;   /* identity BASE -- study-pinned */
+  --blue-600: #c9902f;   /* identity FILL -- study-pinned */
+  --blue-800: #835e1f;   /* identity DEEP -- derived, see header */
+  --blue-900: #3a2c14;   /* SELECTION wash -- study-pinned */
+  --cyan-400: #e0a94f;   /* chrome's other identity primitive -- study-pinned */
+  --text-on-accent: #10161f;  /* WO-325: dark on-accent text -- study-pinned (capture-after.mjs AMBER override); 8.61:1 on BASE, 6.50:1 on FILL */
+
+  /* WO-326: axis convention re-pin -- see "FOUND WHILE VERIFYING" above */
+  --axis-z: #4a90d9;   /* the Z axis stays blue in EVERY theme, base :root's own literal value */
+
+  /* WO-326: scene chrome + stock/workpiece body tints -- see header above */
+  --vp-canvas: #111418;          /* WO-360: neutral scene background; same as blue reference */
+  --vp-grid: #36312a;            /* was #2a2f36 */
+  --vp-grid-plane: #141a22;      /* WO-360: neutral plane fill; same as blue reference */
+  --vp-stock: #8a662a;           /* was #2a5c8a */
+  --vp-stock-edge: #d4a04a;      /* was #4a9cd4 */
+  --vp-workpiece: #ccb38a;       /* was #8ab4cc */
+  --vp-workpiece-edge: #ecdbbf;  /* was #bfd8ec */
+}
+/*  WO-1154: scalable design tokens for the live application root.  */
+html[data-ui-scale] {
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.75rem;
+  --font-size-md: 0.8125rem;
+  --font-size-lg: 0.875rem;
+  --font-size-xl: 1rem;
+  --font-size-2xl: 1.25rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 2.5rem;
+  --space-9: 3rem;
+  --radius-sm: 0.1875rem;
+  --radius-md: 0.3125rem;
+  --radius-lg: 0.5rem;
+  --radius-pill: 62.4375rem;
+
+  --hit-target-min: 1.5rem;
+  --row-default: 1.625rem;
+  --row-compact: 1.375rem;
+  --panel-left-w: 17.5rem;
+  --panel-right-w: 16.25rem;
+  --panel-left-min: 13.75rem;
+  --panel-left-max: 28.75rem;
+  --panel-right-min: 15rem;
+  --panel-right-max: 28.75rem;
+  --panel-resizer-w: 0.3125rem;
+  --toolbar-h: 2.875rem;
+  --statusbar-h: 1.625rem;
+}
+
+/* WO-1200: extracted viewport chrome; dark values preserve the old fills. */
+:root {
+  --surface-viewport-dimension: rgba(13, 17, 23, 0.78);
+  --surface-viewport-badge: rgba(13, 17, 23, 0.75);
+  --surface-viewport-machine: rgba(13, 17, 23, 0.82);
+  --surface-viewport-machine-hover: rgba(30, 39, 54, 0.92);
+  --surface-viewport-selection: rgba(13, 17, 23, 0.85);
+  --surface-viewport-legend: rgba(16, 20, 26, 0.88);
+  --surface-viewport-transport: rgba(16, 20, 26, 0.92);
+  --surface-viewport-toolbar: rgba(22, 27, 34, 0.92);
+  --vp-cube-label-shadow: 0 0 4px rgba(0,0,0,0.9);
+  --vp-display-top: #3a424c;
+  --vp-display-left: #2b323b;
+  --vp-display-right: #20262d;
+  --vp-cube-face: #1a2d40;
+  --vp-cube-hover: #2d4a6e;
+  --vp-cube-edge: #4a90d9;
+}
+
+/* WO-1200: color mode is an axis, not a third theme. These overrides come
+   after the dark theme blocks so light mode works with either identity palette.
+   Dark has no matching selector and therefore remains byte-identical. */
+:root[data-color-mode="light"] {
+  /* WO-1258: drawing ink on pale paper; independent of chrome. */
+  --diagram-ground: #eaf0f5;
+  --diagram-overall-dimension: #526070;
+  --diagram-axis: #7b8793;
+  --diagram-flute-dimension: #246d54;
+  --diagram-flute-extension: #49816a;
+  --diagram-stickout-dimension: #95601e;
+  --diagram-stickout-extension: #967043;
+  --diagram-shank-outline: #536e81;
+  --diagram-material-helix: #0005;
+  --diagram-material-seam: #526576;
+  --diagram-collet-fill: #dce5df;
+  --diagram-collet-outline: #926323;
+  --diagram-collet-face: #975315;
+  --diagram-diameter-extension: #527c9c;
+  --diagram-diameter-line: #145e95;
+  --diagram-diameter-label: #125785;
+  --diagram-shank-extension: #6a7d8e;
+  --diagram-shank-dimension: #3d617c;
+  --diagram-shank-label: #344c67;
+  --diagram-angle-leader: #886b46;
+  --diagram-angle-label: #644616;
+  --diagram-type-label: #404f63;
+  --diagram-outline: #375b75;
+  --diagram-profile-fill: rgba(55,91,117,0.10);
+  --diagram-label: #253240;
+  --diagram-muted-label: #526171;
+  --diagram-coating-none-outline: #375b75;
+  --diagram-coating-tin-outline: #716000;
+  --diagram-coating-ticn-outline: #875020;
+  --diagram-coating-tialn-outline: #7355ad;
+  --diagram-coating-dlc-outline: #697581;
+  --diagram-coating-zrn-outline: #625b1c;
+
+  --surface-viewport-toolbar: var(--surface-1);
+  --vp-cube-label-shadow: 0 0 3px rgba(255,255,255,0.9);
+  --opacity-unavailable: 0.9;
+  /* Opacity-only off states must remain distinct from enabled controls.
+     Unavailable indicators already have dashed/italic/colour state cues. */
+  --opacity-disabled-control: 0.5;
+  --text-disabled: var(--slate-500);
+
+  --surface-viewport-dimension: var(--surface-1);
+  --surface-viewport-badge: var(--surface-1);
+  --surface-viewport-machine: var(--surface-1);
+  --surface-viewport-machine-hover: var(--surface-hover);
+  --surface-viewport-selection: var(--surface-1);
+  --surface-viewport-legend: var(--surface-1);
+  --surface-viewport-transport: var(--surface-1);
+  --vp-display-top: #eef2f6;
+  --vp-display-left: #e2e8f0;
+  --vp-display-right: #dceaf6;
+  --vp-cube-face: #e6edf6;
+  --vp-cube-hover: #dceaf6;
+  --vp-cube-edge: #245f96;
+
+  /* WO-1257: saturated identity ink and fills on cool/warm paper.
+     Keep WO-1254 depth: raised panels, recessed hover, deeper selection. */
+  --blue-300: #0052c0;
+  --blue-400: #006fc9;
+  --blue-500: #0061cd;
+  --blue-600: #006bd6;
+  --blue-800: #4f93cd;
+  --blue-900: #b6d5fc;
+  --cyan-400: #00768c;
+  --green-500: #1a7f37;
+  --green-600: #1a7f37;
+  --red-500: #c0231b;
+  --amber-400: #8a5200;
+  --orange-500: #c26a00;
+  --violet-500: #6d4fd6;
+  --slate-950: color-mix(in srgb, var(--role-selection) 20%, #e7ecf0);
+  --slate-925: #eaf4fd;
+  --slate-915: #edf2f9;
+  --slate-900: #edf7ff;
+  --slate-850: color-mix(in srgb, var(--role-selection) 16%, #f1f5fb);
+  --slate-800: color-mix(in srgb, var(--role-selection) 40%, #d9e1e9);
+  --slate-700: #dae2ed;
+  --slate-600: #b3c1d3;
+  --slate-550: #6b7a8f;
+  --slate-500: #748397;
+  --slate-400: #5a6b82;
+  --slate-300: #3d4c63;
+  --slate-100: #152238;
+  --surface-page: var(--slate-950);
+  --surface-canvas: var(--slate-915);
+  --surface-input: var(--slate-925);
+  --surface-hover: var(--slate-800);
+  --surface-selected: var(--role-selection);
+  --text-on-accent: #f8fbff;
+  --text-danger: #7f1d1d;
+  --text-dim-overlay: var(--slate-550);
+  --text-dim-overlay-hover: var(--slate-100);
+  --text-disabled-overlay: var(--slate-500);
+  --icon-disabled-overlay: var(--slate-500);
+  --text-dim: var(--slate-550);
+  --overlay-white-1: rgba(23, 32, 51, 0.05);
+  --overlay-white-2: rgba(23, 32, 51, 0.06);
+  --overlay-white-3: rgba(23, 32, 51, 0.10);
+  --overlay-white-4: rgba(23, 32, 51, 0.12);
+  --overlay-white-5: rgba(23, 32, 51, 0.15);
+  --overlay-scrim-1: rgba(23, 32, 51, 0.35);
+  --overlay-scrim-2: rgba(23, 32, 51, 0.50);
+  --overlay-scrim-3: rgba(23, 32, 51, 0.62);
+  --overlay-scrim-4: rgba(23, 32, 51, 0.75);
+  --overlay-scrim-5: rgba(23, 32, 51, 0.85);
+  --surface-banner: var(--role-selection);
+  --vp-canvas: var(--slate-915);
+  --vp-grid: #c3cfdd;
+  --vp-grid-plane: #e4ebf4;
+  --vp-stock: #5f8fbd;
+  --vp-stock-edge: #245f96;
+  --vp-workpiece: #5d7f91;
+  --vp-workpiece-edge: #203f52;
+  --vp-sim-mesh: #4f83b2;
+
+  /* The viewport is drawn on the pale canvas above in light mode, so its
+     geometry and toolpath hues need their own darker values. These stay in
+     the viewport token layer: renderers keep resolving the same role names. */
+  --loop-blue: #176b9c;
+  --hue-cut: #044e5c;
+  --hue-rapid: #c6281c;
+  --hue-fast-traverse: #1a5b9c;
+  --hue-helix: #c96a00;
+  --hue-ramp: #c96a00;
+  --hue-plunge: #81158a;
+  --hue-finish: #8e1d4e;
+  --hue-stepover: #16693a;
+  --hue-wall-follow: #00865c;
+  --hue-lead-in: #49339f;
+  --hue-lead-out: #49339f;
+  --gold-wcs: #966000;
+  --gizmo-gold: #875500;
+  --hue-plane: #426585;
+  --vp-grid-accent: #426585;
+  --vp-axis-x: #b42318;
+  --vp-axis-y: #287239;
+  --vp-axis-z: #1f5d99;
+  /* Machine Definition also uses the semantic axis label, not just the
+     viewport role. Keep Z blue and readable under either light identity. */
+  --axis-z: var(--vp-axis-z);
+  --vp-machine-border: #875500;
+  --vp-construction-plane: #236aa3;
+  --vp-stock-gizmo: #176b9c;
+  --vp-select-part: #875500;
+  --vp-select-face: #a45200;
+  --vp-select-amber: #875500;
+  --vp-seed: #6542a6;
+  --vp-brep-pick: #875500;
+  --vp-brep-hover: #765000;
+  --vp-face-overlay: #007b8d;
+  --vp-face-overlay-hover: #a45200;
+  --vp-opt-before: #236aa3;
+  --vp-opt-after: #a45200;
+  --vp-slice-plane: #007b8d;
+  --vp-slice-handle: #a45200;
+  --vp-slice-preview: #657000;
+  --vp-plane-clearance: #1f5d99;
+  --vp-plane-retract: #426585;
+  --vp-plane-feed: #287239;
+  --vp-plane-top: #426585;
+  --vp-plane-bottom: #b42318;
+  --vp-tool-flutes: #287239;
+  --vp-tool-shoulder: #426585;
+  --vp-tool-shank: #b42318;
+  --vp-snap-marker: #875500;
+  --vp-snap-guide: #236aa3;
+  --vp-snap-badge: #236aa3;
+  --vp-overlay-removal: #b4234a;
+  --vp-overlay-ghost: #426585;
+  --vp-overlay-warning: #a45200;
+  --sketch-under-defined: #236aa3;
+  --sketch-fully-defined: #172033;
+  --sketch-conflict: #b42318;
+  --sketch-selected: #875500;
+  --sketch-badge: #426585;
+  --sketch-dimension: #426585;
+  --sketch-tool-preview: #236aa3;
+  --sketch-hover: #007b8d;
+  --status-stale: #7d6a2e;
+  --accent-amber: #875500;
+  --overlay-orange: #a45200;
+  --overlay-orange-hover: #7a3d00;
+  --surface-1: var(--slate-900);
+  --surface-2: var(--slate-850);
+  --text-primary: var(--slate-100);
+  --text-secondary: var(--slate-300);
+  --text-muted: var(--slate-400);
+  /* Real controls render border-strong; decorative rules keep border-subtle. */
+  --border-strong: #68798f;
+  --wash-danger: #fad4d0;
+  --wash-warning: #fbeeda;
+  --wash-info: var(--surface-2);
+  --axis-x: #b42318;
+  --axis-y: #286f32;
+}
+
+/* The amber identity stays amber in light mode, while its selection and
+   readable action colours are retuned for the pale surfaces above. */
+:root[data-theme="amber"][data-color-mode="light"] {
+  --blue-300: #984500;
+  --blue-400: #aa6800;
+  --blue-500: #a34b00;
+  --blue-600: #ad5b00;
+  --blue-800: #c08a2e;
+  --blue-900: #f4d68b;
+  --cyan-400: #a34b00;
+  --text-on-accent: #fff9e8;
+  --vp-canvas: #f3efe8;
+  --vp-grid: #cbbfae;
+  --vp-grid-plane: #ebe3d7;
+  --vp-stock: #b7822d;
+  --vp-stock-edge: #6d4610;
+  --vp-workpiece: #9b7b4f;
+  --vp-workpiece-edge: #583f20;
+  --slate-950: #efe5cd;
+  --slate-915: #f8f3ea;
+  --slate-850: #f5efd9;
+  --slate-925: #fcf6e5;
+  --slate-900: #fff9e8;
+  --slate-800: #e9dcbf;
+  --slate-700: #e6ddcd;
+  --slate-600: #cbbda4;
+  --border-strong: #88795f;
+}
+
+/* WO-2501: Circular's fitted-count explanation must stay readable in the Form footer. */
+.form-palette-shell:has([data-testid="form-circular-copies"]) .form-notice {
+  -webkit-line-clamp: unset;
+}
+
+/* WO-1258: technical drawing roles, independent of chrome and identity.
+   Dark literals preserve the original previews exactly. Material fills stay physical. */
+:root {
+  --diagram-ground: #16191e;
+  --diagram-overall-dimension: #8a93a0;
+  --diagram-axis: #5a6470;
+  --diagram-flute-dimension: #3aa884;
+  --diagram-flute-extension: #2a6a54;
+  --diagram-stickout-dimension: #c07020;
+  --diagram-stickout-extension: #8a5018;
+  --diagram-shank-outline: #7a8e9e;
+  --diagram-material-helix: #0005;
+  --diagram-material-seam: #fff2;
+  --diagram-collet-fill: #263028;
+  --diagram-collet-outline: #a06018;
+  --diagram-collet-face: #e08020;
+  --diagram-diameter-extension: #3578a8;
+  --diagram-diameter-line: #4af;
+  --diagram-diameter-label: #6bf;
+  --diagram-shank-extension: #5c7184;
+  --diagram-shank-dimension: #8aa6bc;
+  --diagram-shank-label: #aab8c8;
+  --diagram-angle-leader: #9a7650;
+  --diagram-angle-label: #d8b67a;
+  --diagram-type-label: #aab3c0;
+  --diagram-outline: #9ab4c8;
+  --diagram-profile-fill: rgba(154,180,200,0.10);
+  --diagram-label: #d6dde4;
+  --diagram-muted-label: #8a94a0;
+  --diagram-coating-none-outline: #9ab4c8;
+  --diagram-coating-tin-outline: #c8a800;
+  --diagram-coating-ticn-outline: #c87830;
+  --diagram-coating-tialn-outline: #8060c0;
+  --diagram-coating-dlc-outline: #505860;
+  --diagram-coating-zrn-outline: #d8cc40;
+}

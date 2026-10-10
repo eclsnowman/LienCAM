@@ -1,0 +1,93 @@
+/*
+ * WO-2430 - the shared ResizableSplit and CollapsiblePanel stylesheet.
+ *
+ * The bar reuses the CAM shell's .panel-resizer look (transparent at rest
+ * with a short grip, accent on hover/focus; the global :focus-visible ring
+ * handles keyboard focus), so Main, the CAM shell and every adopting screen
+ * share one drag bar. Only geometry lives here.
+ */
+
+.resizable-split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.resizable-split-horizontal { flex-direction: row; }
+.resizable-split-vertical { flex-direction: column; }
+
+.resizable-split-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.resizable-split-fill { flex: 1 1 0; }
+
+/* A pane's single child fills it, so the panel inside keeps its own layout. */
+.resizable-split-pane > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.resizable-split > .resizable-split-bar {
+  flex: 0 0 8px;
+  width: 8px;
+  border-radius: var(--radius-sm);
+}
+
+.resizable-split-vertical > .resizable-split-bar {
+  width: auto;
+  height: 8px;
+  cursor: row-resize;
+}
+
+.resizable-split-vertical > .resizable-split-bar .panel-resizer-grip {
+  width: 28px;
+  height: 1px;
+}
+
+/* The sized pane is collapsed: the bar stays as spacing but does not offer a
+   drag it cannot honour. */
+.resizable-split > .resizable-split-bar-resting {
+  cursor: default;
+  background: transparent;
+}
+
+.resizable-split > .resizable-split-bar-resting .panel-resizer-grip { visibility: hidden; }
+
+/* A collapsed panel is its header line only. */
+.collapsible-panel-collapsed {
+  flex: 0 0 auto;
+}
+
+.collapsible-panel .panel-header > .panel-action-btn:last-child {
+  margin-left: auto;
+}
+
+/* WO-2452: a collapsed side-by-side sized pane is a narrow strip showing only
+   its expand control; everything else in it is hidden and the fill pane takes
+   the freed width. */
+.resizable-split-strip {
+  position: relative;
+  overflow: hidden;
+}
+
+.resizable-split-strip * { visibility: hidden; }
+
+.resizable-split-strip .panel-action-btn,
+.resizable-split-strip .panel-action-btn * {
+  visibility: visible;
+}
+
+.resizable-split-strip .panel-action-btn {
+  visibility: visible;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+}

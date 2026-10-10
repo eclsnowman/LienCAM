@@ -1,0 +1,15 @@
+diff --git a/xtask/src/build.rs b/xtask/src/build.rs
+--- a/xtask/src/build.rs
++++ b/xtask/src/build.rs
+@@ -239,6 +239,11 @@
+         "-sINITIAL_MEMORY=134217728".into(),
+         "-sMAXIMUM_MEMORY=4294967296".into(),
+         "-sALLOW_MEMORY_GROWTH=1".into(),
++        // An 8 MB C stack. Emscripten's default is 64 KB with no guard page; OCCT's
++        // blend code on B-spline faces recursed past it and overwrote the heap (a
++        // fillet returned a result, then every later call failed "memory access
++        // out of bounds").
++        "-sSTACK_SIZE=8388608".into(),
+         "-sEXPORT_ES6=1".into(),
+         "-sEVAL_CTORS=2".into(),
+         "-sWASM_BIGINT".into(),

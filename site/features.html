@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Every LienCAM workspace, from sketch to running your machine: what each one does, with a picture and a link to the full guide.">
+  <title>LienCAM - Features</title>
+  <link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
+  <link rel="stylesheet" href="/styles/site.css">
+</head>
+<body>
+  <!-- partial:header -->
+  <main id="main">
+    <section aria-labelledby="features-heading">
+      <h1 id="features-heading">Features</h1>
+      <p>One program, one workspace for each step from the first line to the finished cut. Each section links to its full guide in the wiki.</p>
+    </section>
+    <section id="sketch" class="feature" data-wiki="Sketch" aria-labelledby="sketch-heading">
+      <h2 id="sketch-heading">Sketch</h2>
+      <figure data-scene="S02">{{scene:S02}}</figure>
+      <ul>
+        <li>Draw lines, arcs, circles and splines on any plane.</li>
+        <li>Constrain the drawing and add dimensions so the part stays the size you meant.</li>
+        <li>Add text and reuse shapes as blocks.</li>
+        <li>Import SVG and DXF drawings and start from them.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Sketch">Learn more about Sketch</a></p>
+    </section>
+    <section id="model" class="feature" data-wiki="Model" aria-labelledby="model-heading">
+      <h2 id="model-heading">Model</h2>
+      <figure data-scene="S03">{{scene:S03}}</figure>
+      <ul>
+        <li>Extrude, revolve, sweep and loft sketches into solids.</li>
+        <li>Fillet, chamfer, shell, draft and drill holes, with the feature tree open beside you.</li>
+        <li>Combine solids with boolean cuts and joins.</li>
+        <li>Import STEP, IGES and STL parts; export STEP and STL.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Model">Learn more about Model</a></p>
+    </section>
+    <section id="form" class="feature" data-wiki="Form" aria-labelledby="form-heading">
+      <h2 id="form-heading">Form</h2>
+      <figure data-scene="S08">{{scene:S08}}</figure>
+      <ul>
+        <li>Shape organic bodies with a cage you push and pull (SubD modelling).</li>
+        <li>Watch the finished smooth body update as you work.</li>
+        <li>Turn the result into a solid you can machine.</li>
+        <li>Alpha: it works, and it has rough edges.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Form">Learn more about Form</a></p>
+    </section>
+    <section id="relief" class="feature" data-wiki="Relief" aria-labelledby="relief-heading">
+      <h2 id="relief-heading">Relief</h2>
+      <figure data-scene="S09">{{scene:S09}}</figure>
+      <ul>
+        <li>Turn a picture into a relief you can cut.</li>
+        <li>Choose raise, emboss or engrave.</li>
+        <li>Preview the relief before you make toolpaths.</li>
+        <li>Alpha: it works, and it has rough edges.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Relief">Learn more about Relief</a></p>
+    </section>
+    <section id="setup" class="feature" data-wiki="Setup-Stock-and-Workholding" aria-labelledby="setup-heading">
+      <h2 id="setup-heading">Setup</h2>
+      <figure data-scene="S11">{{scene:S11}}</figure>
+      <ul>
+        <li>Describe your stock and where it sits in the machine.</li>
+        <li>Show the vise or clamps so you can see what the cutter must avoid.</li>
+        <li>Set the work offset and see where zero is.</li>
+        <li>Use more than one setup for a part with a flip.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Setup-Stock-and-Workholding">Learn more about Setup</a></p>
+    </section>
+    <section id="toolpaths-2d" class="feature" data-wiki="Toolpaths-2.5D" aria-labelledby="toolpaths-2d-heading">
+      <h2 id="toolpaths-2d-heading">Toolpaths 2.5D</h2>
+      <figure data-scene="S04">{{scene:S04}}</figure>
+      <p>Ten operation types for flat and profile work. Each name below is the one the operation picker shows.</p>
+      <dl class="operations">
+        <dt><strong>2D Face</strong></dt>
+        <dd>Surfaces the top of the stock. Passes run past the edges so the cutter fully clears it. Zigzag or one-way passes.</dd>
+        <dt><strong>2D Contour</strong></dt>
+        <dd>Cuts along a profile at one or more depths. Choose from four cutting strategies, open or closed paths, holding tabs, ramped entry, spring passes, trochoidal roughing, and corner relief (dogbone or T-bone).</dd>
+        <dt><strong>2D Pocket</strong></dt>
+        <dd>Clears a closed region in rings and leaves islands standing. Enters by helix, ramp or plunge, finishes the wall, and offers corner relief and a slower slot feed.</dd>
+        <dt><strong>2D Adaptive Clearing</strong></dt>
+        <dd>Roughs a region while holding the side load on the tool near the value you set. Stay-down options keep the cutter down between passes, and a floor finish pass is available.</dd>
+        <dt><strong>Drill</strong></dt>
+        <dd>Drills at the centre of each picked or detected hole. Four cycles: simple, peck, chip break and dwell, with a depth for every hole.</dd>
+        <dt><strong>Bore</strong></dt>
+        <dd>Mills holes larger than the tool in circles, with roughing orbits, finish and spring passes.</dd>
+        <dt><strong>Thread Mill</strong></dt>
+        <dd>Cuts internal or external threads with a helix. Metric, UNC and UNF size presets, left-hand threads, and a cylinder pick that fills in the thread.</dd>
+        <dt><strong>Engrave / Trace</strong></dt>
+        <dd>Rides the tool along open or closed curves at a depth you set, or at a depth worked out from a line width. A trochoidal style cuts a slot wider than the tool.</dd>
+        <dt><strong>V-Carve</strong></dt>
+        <dd>Follows the centre line of letters and shapes with a V-bit, deeper where the outline is wide, with optional flat-floor clearing by a separate end mill.</dd>
+        <dt><strong>2D Chamfer</strong></dt>
+        <dd>Runs a V-bit or chamfer mill along profile edges and cuts a bevel to the depth you set, inside or outside.</dd>
+      </dl>
+      <ul>
+        <li>Feeds and speeds come from your tool library, and you can override them for one operation.</li>
+        <li>Set the heights for each operation, and see its toolpath over the part.</li>
+        <li>Run any operation in the simulator before you cut.</li>
+        <li>Post every operation to your controller's G-code dialect.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Toolpaths-2.5D">Learn more about Toolpaths 2.5D</a></p>
+    </section>
+    <section id="toolpaths-3d" class="feature" data-wiki="Toolpaths-3D" aria-labelledby="toolpaths-3d-heading">
+      <h2 id="toolpaths-3d-heading">Toolpaths 3D</h2>
+      <figure data-scene="S10">{{scene:S10}}</figure>
+      <p>Six operation types for shaped parts: one to rough and five to finish. Alpha: early, with limited proof.</p>
+      <dl class="operations">
+        <dt><strong>Adaptive Rough (3D)</strong></dt>
+        <dd>Clears stock level by level with light adaptive passes, down to the shape of the part. Set the stepdown, the entry helix and what to clear.</dd>
+        <dt><strong>Parallel Finish (3D)</strong></dt>
+        <dd>Lays parallel passes over the surface of a solid part, at the angle and stepover you choose, and can clip to the stock outline.</dd>
+        <dt><strong>Waterline Finish (3D)</strong></dt>
+        <dd>Follows the part at one height, steps down, and follows it again. A finish for steep walls, with a steep-areas-only choice.</dd>
+        <dt><strong>Scallop Finish (3D)</strong></dt>
+        <dd>Spaces its passes along the surface to hold the scallop height you set, so steep areas get passes closer together than flat ones.</dd>
+        <dt><strong>Steep and Shallow (3D)</strong></dt>
+        <dd>Finishes a part in one operation: waterline levels on the steep walls, parallel passes on the flatter areas, split at a threshold angle you set.</dd>
+        <dt><strong>Pencil Cleanup (3D)</strong></dt>
+        <dd>Runs along the inside corners of a part to clean out the material a larger finishing tool could not reach.</dd>
+      </dl>
+      <ul>
+        <li>Feeds and speeds come from your tool library, and you can override them for one operation.</li>
+        <li>Set the heights for each operation, and see its toolpath over the part.</li>
+        <li>Run any operation in the simulator before you cut.</li>
+        <li>Post every operation to your controller's G-code dialect.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Toolpaths-3D">Learn more about Toolpaths 3D</a></p>
+    </section>
+    <section id="simulate" class="feature" data-wiki="Simulate" aria-labelledby="simulate-heading">
+      <h2 id="simulate-heading">Simulate</h2>
+      <figure data-scene="S05">{{scene:S05}}</figure>
+      <ul>
+        <li>Watch the stock being cut away, move by move.</li>
+        <li>See what each tool removed and what is left.</li>
+        <li>Catch mistakes on screen instead of in the material.</li>
+        <li>Supported: part of the release journey.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Simulate">Learn more about Simulate</a></p>
+    </section>
+    <section id="post" class="feature" data-wiki="Post-Process" aria-labelledby="post-heading">
+      <h2 id="post-heading">Post Process</h2>
+      <figure data-scene="S06">{{scene:S06}}</figure>
+      <ul>
+        <li>Post G-code for UCCNC, GRBL, grblHAL and LinuxCNC, or a generic dialect.</li>
+        <li>Read the G-code in a preview before you save it.</li>
+        <li>The dialect follows the machine you set up.</li>
+        <li>One program for a job with several tools.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Post-Process">Learn more about Post Process</a></p>
+    </section>
+    <section id="control" class="feature" data-wiki="Control" aria-labelledby="control-heading">
+      <h2 id="control-heading">Control</h2>
+      <figure data-scene="S07">{{scene:S07}}</figure>
+      <ul>
+        <li>Jog the machine, set zero and run the job from one screen.</li>
+        <li>Watch the position readout, the program and the console while it runs.</li>
+        <li>Try everything first on the built-in simulator.</li>
+        <li>Run a real machine through UCCNC with a UC100 or AXBB-E controller (alpha).</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Control">Learn more about Control</a></p>
+    </section>
+    <section id="probing" class="feature" data-wiki="Probing" aria-labelledby="probing-heading">
+      <h2 id="probing-heading">Probing</h2>
+      <figure data-scene="S12">{{scene:S12}}</figure>
+      <ul>
+        <li>Find edges, corners and centres with a probe.</li>
+        <li>Measure tool length with a tool setter.</li>
+        <li>Map the Z surface of your stock and rotate work offsets to match.</li>
+        <li>Pause, move away and resume a job.</li>
+        <li>Alpha: it works, and it has rough edges.</li>
+      </ul>
+      <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Probing">Learn more about Probing</a></p>
+    </section>
+    <section id="light-theme" class="feature" aria-labelledby="light-heading">
+      <h2 id="light-heading">A light theme too</h2>
+      <figure data-scene="S15">{{scene:S15}}</figure>
+      <p>Prefer a bright screen? Every workspace also comes in a light theme.</p>
+    </section>
+  </main>
+  <!-- partial:footer -->
+</body>
+</html>

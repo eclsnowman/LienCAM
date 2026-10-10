@@ -1,0 +1,338 @@
+{
+  "head": "36a3dbb3a7333cc6b0cfaad944a3ad74b272f5ff",
+  "source": "fdc152440ae157635047dae2f2a3a6ac6b3f7315",
+  "viewport": {
+    "width": 1680,
+    "height": 1002
+  },
+  "route": "fresh browser -> Control -> simulator -> Home -> MDI G0 X5 Y20 Z10 -> Probing (no machine/offset/part record edits)",
+  "readback": {
+    "machine": {
+      "id": "default-machine",
+      "name": "Sample hobby router (GRBL)",
+      "type": "gantry_router",
+      "kind": "router",
+      "controller": "grbl",
+      "travel": {
+        "x": 406,
+        "y": 406,
+        "z": 95
+      },
+      "noHomingSwitches": false,
+      "homeConvention": {
+        "x": {
+          "homesToward": "max",
+          "machineZeroAt": "max"
+        },
+        "y": {
+          "homesToward": "max",
+          "machineZeroAt": "max"
+        },
+        "z": {
+          "homesToward": "max",
+          "machineZeroAt": "max"
+        }
+      },
+      "minSpindleRpm": 10000,
+      "maxSpindleRpm": 31000,
+      "probing": {
+        "positioningFeed": 1000,
+        "fastFeed": 400,
+        "slowFeed": 50,
+        "retract": 2,
+        "maxTravel": 50,
+        "surfaceClearance": 5,
+        "overtravel": 5,
+        "crossOverLift": 10,
+        "padThickness": 10
+      },
+      "rapidRate": 5000,
+      "spindleDirection": "cw",
+      "toolChanger": "manual",
+      "coolant": false,
+      "axisLimits": {
+        "x": {
+          "maxCutting": 3000,
+          "maxRapid": 5000
+        },
+        "y": {
+          "maxCutting": 3000,
+          "maxRapid": 5000
+        },
+        "z": {
+          "maxCutting": 1000,
+          "maxRapid": 3000
+        }
+      },
+      "notes": "Sample hobby router sized like the Shapeoko 5 Pro Standard class (406 x 406 x 95 mm), with homing switches and a 10,000-31,000 RPM compact trim router. Edit or replace this sample with your own machine.\nFeed, rapid, acceleration, probing and other setup values are editable LienCAM defaults, not published machine figures. No controller definition is supplied."
+    },
+    "motion": {
+      "authority": "simulator-profile",
+      "machineId": "default-machine",
+      "machineName": "Sample hobby router (GRBL)",
+      "axes": {
+        "x": {
+          "axis": "X",
+          "physical": {
+            "min": -406,
+            "max": 0,
+            "source": "pinned-profile",
+            "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention"
+          },
+          "controller": null,
+          "effective": {
+            "min": -406,
+            "max": 0,
+            "source": "pinned-profile",
+            "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention"
+          },
+          "definitionState": "missing-definition",
+          "state": "bounded",
+          "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention",
+          "homesToward": "max",
+          "machineZeroAt": "max",
+          "rapidMmMin": 5000,
+          "maxVelocityMmMin": null
+        },
+        "y": {
+          "axis": "Y",
+          "physical": {
+            "min": -406,
+            "max": 0,
+            "source": "pinned-profile",
+            "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention"
+          },
+          "controller": null,
+          "effective": {
+            "min": -406,
+            "max": 0,
+            "source": "pinned-profile",
+            "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention"
+          },
+          "definitionState": "missing-definition",
+          "state": "bounded",
+          "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention",
+          "homesToward": "max",
+          "machineZeroAt": "max",
+          "rapidMmMin": 5000,
+          "maxVelocityMmMin": null
+        },
+        "z": {
+          "axis": "Z",
+          "physical": {
+            "min": -95,
+            "max": 0,
+            "source": "pinned-profile",
+            "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention"
+          },
+          "controller": null,
+          "effective": {
+            "min": -95,
+            "max": 0,
+            "source": "pinned-profile",
+            "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention"
+          },
+          "definitionState": "missing-definition",
+          "state": "bounded",
+          "reason": "Sample hobby router (GRBL) Machine-page travel and coordinate convention",
+          "homesToward": "max",
+          "machineZeroAt": "max",
+          "rapidMmMin": 3000,
+          "maxVelocityMmMin": null
+        }
+      },
+      "envelope": {
+        "x": {
+          "travelMm": 406,
+          "homesToward": "max",
+          "homePositionMm": 0,
+          "pulloffMm": 0,
+          "min": -406,
+          "max": 0
+        },
+        "y": {
+          "travelMm": 406,
+          "homesToward": "max",
+          "homePositionMm": 0,
+          "pulloffMm": 0,
+          "min": -406,
+          "max": 0
+        },
+        "z": {
+          "travelMm": 95,
+          "homesToward": "max",
+          "homePositionMm": 0,
+          "pulloffMm": 0,
+          "min": -95,
+          "max": 0
+        }
+      },
+      "reportedEnvelope": {
+        "x": {
+          "travelMm": 406,
+          "homesToward": "max",
+          "homePositionMm": 0,
+          "pulloffMm": 0,
+          "min": -406,
+          "max": 0
+        },
+        "y": {
+          "travelMm": 406,
+          "homesToward": "max",
+          "homePositionMm": 0,
+          "pulloffMm": 0,
+          "min": -406,
+          "max": 0
+        },
+        "z": {
+          "travelMm": 95,
+          "homesToward": "max",
+          "homePositionMm": 0,
+          "pulloffMm": 0,
+          "min": -95,
+          "max": 0
+        }
+      },
+      "datum": {
+        "known": true,
+        "source": "homed-session",
+        "reason": "the controller established this session datum by homing",
+        "axes": {
+          "x": {
+            "known": true,
+            "source": "homed-session",
+            "reason": "the controller established this session datum by homing"
+          },
+          "y": {
+            "known": true,
+            "source": "homed-session",
+            "reason": "the controller established this session datum by homing"
+          },
+          "z": {
+            "known": true,
+            "source": "homed-session",
+            "reason": "the controller established this session datum by homing"
+          }
+        }
+      },
+      "rapidMmMin": 3000,
+      "diagnostics": []
+    },
+    "part": {
+      "origin": {
+        "x": -253,
+        "y": -243
+      },
+      "sizeX": 100,
+      "sizeY": 80,
+      "topZ": -60.25,
+      "height": 30,
+      "bore": {
+        "cx": -203,
+        "cy": -203,
+        "diameter": 20,
+        "depth": 15
+      },
+      "boss": {
+        "cx": -228,
+        "cy": -223,
+        "diameter": 25,
+        "height": 10
+      }
+    },
+    "controller": {
+      "state": "idle",
+      "subState": null,
+      "machinePos": {
+        "x": -248,
+        "y": -223,
+        "z": -50.25
+      },
+      "workPos": {
+        "x": 5,
+        "y": 20,
+        "z": 10
+      },
+      "feedMmMin": 0,
+      "spindleRpm": 0,
+      "overrides": {
+        "feed": 100,
+        "rapid": 100,
+        "spindle": 100
+      },
+      "executingMoveId": null,
+      "buffer": {
+        "moves": 0,
+        "capacitySeconds": null
+      },
+      "inputs": {
+        "estop": false,
+        "hardLimit": false,
+        "softLimit": false,
+        "probe": false,
+        "limits": null,
+        "door": null,
+        "hold": null,
+        "home": {
+          "X": false,
+          "Y": false,
+          "Z": false
+        },
+        "limitMinus": {
+          "X": null,
+          "Y": null,
+          "Z": null
+        },
+        "limitPlus": {
+          "X": null,
+          "Y": null,
+          "Z": null
+        }
+      },
+      "homed": {
+        "Z": true,
+        "X": true,
+        "Y": true
+      },
+      "spindle": null
+    },
+    "offsets": {
+      "G54": [
+        -253,
+        -243,
+        -60.25
+      ],
+      "G55": [
+        0,
+        0,
+        0
+      ],
+      "G56": [
+        0,
+        0,
+        0
+      ],
+      "G57": [
+        0,
+        0,
+        0
+      ],
+      "G58": [
+        0,
+        0,
+        0
+      ],
+      "G59": [
+        0,
+        0,
+        0
+      ]
+    },
+    "startProbing": {
+      "disabled": false,
+      "reason": "Run Edge"
+    },
+    "consoleErrors": []
+  },
+  "pageErrors": []
+}

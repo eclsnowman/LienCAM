@@ -1,0 +1,86 @@
+solid knob-support-block
+facet normal 0 0 0
+outer loop
+vertex -18 -18 -22
+vertex 18 18 -22
+vertex 18 -18 -22
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 -18 -22
+vertex -18 18 -22
+vertex 18 18 -22
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 -18 -10
+vertex 18 -18 -10
+vertex 18 18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 -18 -10
+vertex 18 18 -10
+vertex -18 18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 -18 -22
+vertex 18 -18 -22
+vertex 18 -18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 -18 -22
+vertex 18 -18 -10
+vertex -18 -18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 18 -18 -22
+vertex 18 18 -22
+vertex 18 18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 18 -18 -22
+vertex 18 18 -10
+vertex 18 -18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 18 18 -22
+vertex -18 18 -22
+vertex -18 18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 18 18 -22
+vertex -18 18 -10
+vertex 18 18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 18 -22
+vertex -18 -18 -22
+vertex -18 -18 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -18 18 -22
+vertex -18 -18 -10
+vertex -18 18 -10
+endloop
+endfacet
+endsolid knob-support-block

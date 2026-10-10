@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W9-4.png": {
+      "commit": "bf7023188ed86753cfa048664cc1e7edd7694926",
+      "workingTreeDirty": true,
+      "workingTreeScope": [
+        "examples/07-relief-medallion/relief-medallion.camproject",
+        "src",
+        "tools/capture/scenes.json",
+        "tools/capture/scenes.mjs"
+      ],
+      "sourceExcludes": [
+        "src/tests/evidence"
+      ],
+      "sourceHash": "5d7540e9ab3bbc049f4edb437461fa22609d3748466e31e26f54f04a2fdb3e0c",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 4348,
+      "screenshotBytes": 182863,
+      "screenshotSha256": "44500adc4354d9ef81538c9e0eac8ae701f986f707819eafea6944b1abb9e481"
+    }
+  }
+}

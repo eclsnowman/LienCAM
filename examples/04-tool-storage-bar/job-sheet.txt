@@ -1,0 +1,55 @@
+LienCAM Setup Sheet
+Program: "04_Tool_storage_bar.nc"
+Units: mm
+
+Setup: "Top - G54" (G54)
+  Work offset origin: X-80 Y-25 Z0 mm
+  Stock: "Stock 1" size 160 x 50 x 12 mm
+  Origin offset from stock min corner: X0 Y0 Z12 mm
+  Workholding:
+    Method: Clamps
+    Note: "Clamp the ends with the two example 02 toe clamps; inner edges at X -69 and +69 mm, outside X +/-62. Bolt clamps to the spoilboard with firm 12 mm packing under their outer ends; seat the bar on the spoilboard against the fixed end stop at X -80. At the M0 pause, flip end-for-end about Y, back against the stop, re-clamp. Keep the bar at the same XY position; use G55 for the second side. G54 makes all three holes completely: peck-drill pilots in 3 mm increments (G83 Q3) to Z-13 into the sacrificial spoilboard. Bore each finished diameter to Z-12.5, breaking through the 12 mm bar by 0.5 mm. Specify the same 3 mm flat end mill with 15 mm flutes, rather than the starter 12 mm flute version, so the cut clears the bottom while retaining the default 0.25 mm shank clearance allowance. The kit still uses three tools. Chamfer the top rims. One-sided bores avoid flip mismatch; G55 only chamfers the underside rims."
+    Clamp: "example-02-toe-clamp" x 2
+    Holder: "fixed-end-stop"
+
+1. "Drill 1"
+   Tool: T3 "3 mm drill" dia 3mm flute length 20mm
+   Spindle: 10000 RPM
+   Feed: cutting 180mm/min, plunge 150mm/min
+   Z range: -13 to 15 mm
+   NC lines: 4-11
+
+2. "Bore 2"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 15mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -12.5 to 15 mm
+   NC lines: 12-899
+
+3. "Chamfer 3"
+   Tool: T6 "6 mm 90 deg chamfer mill" dia 6mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 400mm/min, plunge 150mm/min
+   Z range: -0.7 to 15 mm
+   NC lines: 900-1667
+
+Setup: "Bottom - flip about Y - G55" (G55)
+  Work offset origin: X-80 Y-25 Z0 mm
+  Stock: "Stock 1" size 160 x 50 x 12 mm
+  Origin offset from stock min corner: X0 Y0 Z12 mm
+  Workholding:
+    Method: Clamps
+    Note: "Clamp the ends with the two example 02 toe clamps; inner edges at X -69 and +69 mm, outside X +/-62. Bolt clamps to the spoilboard with firm 12 mm packing under their outer ends; seat the bar on the spoilboard against the fixed end stop at X -80. At the M0 pause, flip end-for-end about Y, back against the stop, re-clamp. Keep the bar at the same XY position; use G55 for the second side. G55 only chamfers the three underside rims at mirrored centres; do not drill or bore again. These rims are accessible only after the flip."
+    Clamp: "example-02-toe-clamp" x 2
+    Holder: "fixed-end-stop"
+
+4. "Chamfer underside"
+   Tool: T6 "6 mm 90 deg chamfer mill" dia 6mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 400mm/min, plunge 150mm/min
+   Z range: -0.7 to 15 mm
+   NC lines: 1673-2433
+
+File: "04_Tool_storage_bar.nc"
+Bytes: 73831
+SHA-256: 4c08738932ac7f243dd8fdeb642cc716fa274114036c60b32acc3873c707a74d

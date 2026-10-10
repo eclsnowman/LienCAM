@@ -1,0 +1,363 @@
+[
+  {
+    "id": "c16e38af-6d03-4fd9-b164-7a5d11e107e2",
+    "name": "6mm Flat End Mill",
+    "type": "flat_end_mill",
+    "diameter": 6,
+    "fluteLength": 20,
+    "shankDiameter": 6,
+    "overallLength": 60,
+    "numberOfFlutes": 2,
+    "material": "carbide",
+    "coating": "none",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1000,
+        "plungeRate": 300
+      }
+    },
+    "cutHand": "right",
+    "libraryId": "08cc1a5e-b9ef-44af-8ff9-35aeac21c4bb",
+    "toolNumber": 1
+  },
+  {
+    "id": "ba0208c5-2242-4e60-84d4-b8d4c71acbbe",
+    "name": "6mm Ball End Mill",
+    "type": "ball_end_mill",
+    "diameter": 6,
+    "fluteLength": 20,
+    "shankDiameter": 6,
+    "overallLength": 60,
+    "numberOfFlutes": 2,
+    "material": "carbide",
+    "coating": "none",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1000,
+        "plungeRate": 300
+      }
+    },
+    "cutHand": "right",
+    "libraryId": "08cc1a5e-b9ef-44af-8ff9-35aeac21c4bb"
+  },
+  {
+    "id": "77165f3f-b2de-4c0f-80b8-089fb91b045f",
+    "name": "Test Long Tool",
+    "type": "flat_end_mill",
+    "diameter": 9.52,
+    "shankDiameter": 9.52,
+    "overallLength": 80,
+    "fluteLength": 50,
+    "shoulderLength": 0,
+    "numberOfFlutes": 3,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "vendor": "",
+    "productId": "",
+    "cutHand": "right",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1500,
+        "plungeRate": 500,
+        "depthOfCut": 1.5,
+        "stepover": 3,
+        "rampFeedrate": 750,
+        "leadInFeedrate": 1500,
+        "leadOutFeedrate": 1500,
+        "fastTraverseFeedrate": 3000,
+        "rampAngle": 2,
+        "coolant": "none"
+      }
+    },
+    "libraryId": "08cc1a5e-b9ef-44af-8ff9-35aeac21c4bb",
+    "toolNumber": 92
+  },
+  {
+    "id": "3c32b4ea-98c1-48f2-a183-18563692e523",
+    "name": "4mm drill",
+    "type": "drill",
+    "diameter": 4,
+    "shankDiameter": 4,
+    "overallLength": 50,
+    "fluteLength": 18,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "vendor": "",
+    "productId": "",
+    "cutHand": "right",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1500,
+        "plungeRate": 500,
+        "depthOfCut": 1.5,
+        "stepover": 3,
+        "rampFeedrate": 750,
+        "leadInFeedrate": 1500,
+        "leadOutFeedrate": 1500,
+        "fastTraverseFeedrate": 3000,
+        "rampAngle": 2,
+        "coolant": "none"
+      }
+    },
+    "libraryId": "08cc1a5e-b9ef-44af-8ff9-35aeac21c4bb",
+    "toolNumber": 99
+  },
+  {
+    "id": "f7449a1a-608f-45de-ac6b-403916c44785",
+    "name": "Rennie 1/8\"(.1250\") Single Flute DLC Carbide",
+    "type": "flat_end_mill",
+    "diameter": 3.1,
+    "shankDiameter": 3.1,
+    "fluteLength": 6.75,
+    "overallLength": 39.2,
+    "shoulderLength": 7,
+    "lengthBelowHolder": 14,
+    "numberOfFlutes": 1,
+    "material": "carbide",
+    "coating": "none",
+    "vendor": "Rennie Tools",
+    "productId": "RTC3.175-7SDDLC",
+    "toolNumber": 19,
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 24000,
+        "feedRate": 1200,
+        "plungeRate": 200,
+        "depthOfCut": 0,
+        "stepover": 0,
+        "rampFeedrate": 610,
+        "leadInFeedrate": 610,
+        "leadOutFeedrate": 610,
+        "rampAngle": 2,
+        "coolant": "none",
+        "feedPerTooth": 0.05,
+        "surfaceSpeed": 233.73449342708065
+      }
+    },
+    "libraryId": "08cc1a5e-b9ef-44af-8ff9-35aeac21c4bb",
+    "cutHand": "right"
+  },
+  {
+    "id": "ms2s-tool-a-6mm",
+    "name": "MS2S 6 mm flat (18k)",
+    "type": "flat_end_mill",
+    "toolNumber": 1,
+    "diameter": 6,
+    "shankDiameter": 6,
+    "overallLength": 60,
+    "fluteLength": 20,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "material": "carbide",
+    "coating": "none",
+    "notes": "MACHINE-SESSION-TWO-SETUP",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1200,
+        "plungeRate": 400,
+        "depthOfCut": 1.5,
+        "stepover": 3
+      }
+    },
+    "cutHand": "right",
+    "libraryId": "lib-default"
+  },
+  {
+    "id": "ms2s-tool-b-3mm",
+    "name": "MS2S 3 mm flat (12k)",
+    "type": "flat_end_mill",
+    "toolNumber": 2,
+    "diameter": 3,
+    "shankDiameter": 3,
+    "overallLength": 50,
+    "fluteLength": 12,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "material": "carbide",
+    "coating": "none",
+    "notes": "MACHINE-SESSION-TWO-SETUP",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 12000,
+        "feedRate": 600,
+        "plungeRate": 200,
+        "depthOfCut": 1,
+        "stepover": 1
+      }
+    },
+    "cutHand": "right",
+    "libraryId": "lib-default"
+  },
+  {
+    "id": "t-flat",
+    "toolNumber": 1,
+    "name": "6mm Flat End Mill",
+    "type": "flat_end_mill",
+    "diameter": 6,
+    "fluteLength": 20,
+    "shankDiameter": 6,
+    "overallLength": 60,
+    "numberOfFlutes": 2,
+    "material": "carbide",
+    "coating": "none",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1000,
+        "plungeRate": 300
+      }
+    },
+    "cutHand": "right",
+    "libraryId": "lib-default"
+  },
+  {
+    "id": "t-ball",
+    "toolNumber": 2,
+    "name": "6mm Ball End Mill",
+    "type": "ball_end_mill",
+    "diameter": 6,
+    "fluteLength": 20,
+    "shankDiameter": 6,
+    "overallLength": 60,
+    "numberOfFlutes": 2,
+    "material": "carbide",
+    "coating": "none",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1000,
+        "plungeRate": 300
+      }
+    },
+    "cutHand": "right",
+    "libraryId": "lib-default"
+  },
+  {
+    "id": "ab94f491-0dbf-456b-82c4-c7564c04d120",
+    "name": "Test Long Tool",
+    "type": "flat_end_mill",
+    "diameter": 9.52,
+    "shankDiameter": 9.52,
+    "overallLength": 80,
+    "fluteLength": 50,
+    "shoulderLength": 0,
+    "numberOfFlutes": 3,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "vendor": "",
+    "productId": "",
+    "cutHand": "right",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1500,
+        "plungeRate": 500,
+        "depthOfCut": 1.5,
+        "stepover": 3,
+        "rampFeedrate": 750,
+        "leadInFeedrate": 1500,
+        "leadOutFeedrate": 1500,
+        "fastTraverseFeedrate": 3000,
+        "rampAngle": 2,
+        "coolant": "none"
+      }
+    },
+    "libraryId": "lib-default",
+    "toolNumber": 92
+  },
+  {
+    "id": "7a68818c-3753-478b-a140-176cb9a11e85",
+    "name": "4mm drill",
+    "type": "drill",
+    "diameter": 4,
+    "shankDiameter": 4,
+    "overallLength": 50,
+    "fluteLength": 18,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "vendor": "",
+    "productId": "",
+    "cutHand": "right",
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 18000,
+        "feedRate": 1500,
+        "plungeRate": 500,
+        "depthOfCut": 1.5,
+        "stepover": 3,
+        "rampFeedrate": 750,
+        "leadInFeedrate": 1500,
+        "leadOutFeedrate": 1500,
+        "fastTraverseFeedrate": 3000,
+        "rampAngle": 2,
+        "coolant": "none"
+      }
+    },
+    "libraryId": "lib-default",
+    "toolNumber": 99
+  },
+  {
+    "id": "3c5f00ba-e4eb-4b6e-b305-1e6a40644d77",
+    "name": "Rennie 1/8\"(.1250\") Single Flute DLC Carbide",
+    "type": "flat_end_mill",
+    "diameter": 3.1,
+    "shankDiameter": 3.1,
+    "fluteLength": 6.75,
+    "overallLength": 39.2,
+    "shoulderLength": 7,
+    "lengthBelowHolder": 14,
+    "numberOfFlutes": 1,
+    "material": "carbide",
+    "coating": "none",
+    "vendor": "Rennie Tools",
+    "productId": "RTC3.175-7SDDLC",
+    "toolNumber": 19,
+    "notes": "",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 24000,
+        "feedRate": 1200,
+        "plungeRate": 200,
+        "depthOfCut": 0,
+        "stepover": 0,
+        "rampFeedrate": 610,
+        "leadInFeedrate": 610,
+        "leadOutFeedrate": 610,
+        "rampAngle": 2,
+        "coolant": "none",
+        "feedPerTooth": 0.05,
+        "surfaceSpeed": 233.73449342708065
+      }
+    },
+    "libraryId": "404d9215-d969-44b1-a92f-c7610d11d646",
+    "cutHand": "right"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "example": "08-gear-pair",
+  "title": "Gear pair",
+  "teaches": "Involute gear sketches, pitch-circle centre distance, bore milling, keyway pockets, shared-sheet tape and glue",
+  "wikiPage": "Sketching",
+  "licence": "Apache-2.0",
+  "provenance": "Original geometry made for the release through LienCAM production sketch controls",
+  "project": "gear-pair.camproject",
+  "gears": [ { "module": 4, "teeth": 16 }, { "module": 4, "teeth": 24 } ],
+  "centreDistanceMm": 80,
+  "machiningCentreDistanceMm": 96,
+  "tipEnvelopeClearanceMm": 8,
+  "machining": "One 200 x 120 x 6 mm sheet, both setups without moving it",
+  "holdingMethod": "tape_glue",
+  "outlineThroughAllowanceMm": 0.5,
+  "removal": "Pry off both gears and deburr"
+}

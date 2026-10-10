@@ -1,0 +1,526 @@
+/* WO-2063 - the Probing screen, laid out to docs/design/PROBING-SCREEN-V2.md
+   (src/tests/evidence/WO-2063/wireframe-v5-1920x1080.png): left column 350 px,
+   middle card, right column 280 px ending level with the middle card. Colours
+   are the app's tokens only. */
+
+.pbn-screen {
+  display: grid;
+  grid-template-columns: 350px minmax(0, 1fr) 280px;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+.pbn-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The side columns are Main's rails (.control-col-scroll): the same panel
+   chrome as Main. The last card in each fills to the foot of the screen, so
+   both columns end level with the middle card. */
+.pbn-screen .pbn-col-left > .pbn-setup {
+  flex: 1 0 auto;
+}
+
+.pbn-screen .pbn-col-right > .pbn-disclosure-open {
+  flex: 1 1 auto;
+}
+
+.pbn-screen .pbn-col-right > .pbn-controls {
+  margin-top: auto;
+}
+
+/* ---- routine picker: 3 across, full names ----
+   WO-2270 (Operator, 09-30): the Routine card and the setup rows are tighter and
+   their text a step smaller (13.5 px - still above the UI's 13 px), so every
+   routine's setup fits his 1680x979 window without scrolling. */
+.pbn-routines {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.pbn-routine {
+  height: 38px;
+  padding: 0 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* The shared tile class (app.css) lays out an icon grid; here a routine is
+   one centred name, as in the approved screens and the Bore video. */
+.pbn-routines .pbn-routine.control-probe-routine-tile {
+  display: block;
+  min-height: 0;
+  height: 30px;
+  padding: 0;
+  border-color: var(--border-strong);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.pbn-routine:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.pbn-routine.control-chip-active {
+  font-weight: 500;
+  color: var(--text-primary);
+  border-color: var(--role-identity-light);
+  background: var(--surface-selected);
+}
+
+/* ---- setup: label left, field right, one row each ---- */
+.pbn-setup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pbn-setup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+
+.pbn-setup-row > :last-child {
+  min-width: 0;
+}
+
+.pbn-setup-row .mform-input,
+.pbn-setup-row input,
+.pbn-setup-row select {
+  width: 100%;
+}
+
+.pbn-setup-row .mform-input {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.pbn-setup-row .modal-btn {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.pbn-setup-note {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+/* ---- middle card ---- */
+.pbn-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 12px 12px;
+}
+
+.pbn-captions {
+  display: grid;
+  align-items: end;
+  height: 40px;
+  flex: 0 0 auto;
+}
+
+/* WO-2181: the Probing screen's text sits halfway between its old size and
+   the rest of the UI's (Operator: "just go in between"). */
+.pbn-caption {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding-left: 12px;
+  line-height: 1;
+}
+
+.pbn-picture-box {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.pbn-picture {
+  display: block;
+  font-family: var(--font-sans, 'DM Sans', sans-serif);
+}
+
+.pbn-bg { fill: var(--surface-2); }
+.pbn-cut { stroke: var(--text-secondary); stroke-width: 1.75; }
+.pbn-ball { fill: var(--text-primary); }
+.pbn-stem { fill: var(--text-secondary); }
+.pbn-tool { fill: var(--text-secondary); stroke: var(--text-primary); stroke-width: 2; }
+.pbn-setter { fill: color-mix(in srgb, var(--select-viewport) 45%, var(--surface-2)); stroke: var(--select-viewport); stroke-width: 2; }
+.pbn-ghost {
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+}
+.pbn-zone {
+  fill: color-mix(in srgb, var(--role-identity-light) 18%, transparent);
+  stroke: var(--role-identity-light);
+  stroke-width: 3;
+  stroke-dasharray: 10 7;
+}
+
+.pbn-refusal {
+  padding: 24px;
+  font-size: 22px;
+  color: var(--text-secondary);
+}
+
+.pbn-sentence-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  margin-top: 14px;
+}
+
+.pbn-sentence {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.pbn-sentence-distance {
+  color: var(--text-secondary);
+}
+
+.pbn-confirm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+/* WO-2122: a second side's working, one line per axis, above what Confirm writes. */
+.pbn-confirm-working {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+/* WO-2188: Angle's result - the angle, the tap-it-square number, and under
+   them the Confirm that rotates the work offset - in one readable column. */
+.pbn-confirm-angle {
+  flex: 0 1 380px;
+  min-width: 280px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.pbn-confirm .modal-btn {
+  font-size: 18px;
+  height: 44px;
+  padding: 0 22px;
+}
+
+/* The empty band between the sentence and the step numbers is Operator's open
+   question (the brief): it is left empty until he answers. */
+.pbn-band {
+  flex: 0 0 56px;
+}
+
+.pbn-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pbn-chips {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.pbn-chips > li {
+  flex: 0 0 var(--pbn-chip-w, 60px);
+  width: var(--pbn-chip-w, 60px);
+}
+
+.pbn-chip {
+  width: 100%;
+  height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.pbn-chip:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.pbn-chip-n {
+  font-size: var(--pbn-chip-font, 20px);
+  font-weight: 700;
+  line-height: 1.05;
+}
+
+.pbn-chip-foot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pbn-chip-you {
+  color: var(--text-active);
+}
+
+.pbn-chip-tick {
+  color: var(--status-ready);
+}
+
+.pbn-chip-done {
+  border-color: var(--status-ready);
+}
+
+.pbn-chip-current {
+  height: 70px;
+  border: 3px solid var(--text-primary);
+  background: var(--surface-selected);
+}
+
+.pbn-chip-current .pbn-chip-n {
+  font-size: calc(var(--pbn-chip-font, 20px) + 4px);
+}
+
+/* WO-2181: Back, Next and Preview steps are a step number's height, text
+   size, corners and border, and sit level with the numbers (top and foot). */
+.pbn-page {
+  height: 62px;
+  width: 84px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: var(--pbn-chip-font, 20px);
+  cursor: pointer;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
+.pbn-page:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pbn-run-line {
+  flex: 1 1 360px;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-left: 12px;
+}
+
+.pbn-run-state {
+  flex: 0 0 auto;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* WO-2113: why the run stopped, beside "Stopped at step N" (the console's
+   words; not a banner - COHESION-STANDARD s13). The line takes its own row
+   under the numbers, so the sentence reads across the card. */
+.pbn-run-line-why {
+  flex-basis: 100%;
+  order: 1;
+  margin-left: 0;
+  margin-top: 6px;
+}
+
+.pbn-run-why {
+  min-width: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  color: var(--text-secondary);
+}
+
+/* ---- right column ---- */
+.pbn-disclosure .disclosure-section {
+  border: 0;
+}
+
+/* WO-2270: "Picture key" and "More about this step" a step smaller (Operator,
+   09-30: "not all the way down to the general UI sizing"). */
+.pbn-disclosure .disclosure-title {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.pbn-key {
+  list-style: none;
+  margin: 0;
+  padding: 4px 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pbn-key-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.12;
+  color: var(--text-primary);
+}
+
+.pbn-more {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 4px 8px;
+}
+
+.pbn-more-section h4 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pbn-more-section p,
+.pbn-more-empty {
+  margin: 0 0 3px;
+  font-size: 16px;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+/* More open widens past the column into the picture key's room - the side
+   view keeps its size (the top view gives the width back). Only where the
+   screen is wide enough for that to be true. */
+@media (min-width: 1800px) {
+  .pbn-screen:has(.pbn-more-open) {
+    grid-template-columns: 350px minmax(0, 1fr) 420px;
+  }
+}
+
+.pbn-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.pbn-controls .control-btn-estop {
+  width: 100%;
+  height: 64px;
+  font-size: 22px;
+  justify-content: center;
+}
+
+.pbn-controls-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pbn-start,
+.pbn-stop {
+  height: 64px;
+  justify-content: center;
+  font-size: 18px;
+  border-width: 2px;
+}
+
+/* WO-2126: Play steps - beside Back / Next, walks the preview through every step. */
+.pbn-play {
+  width: auto;
+  min-width: 142px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.pbn-play-on {
+  border: 2px solid var(--text-primary);
+  background: var(--surface-selected);
+}
+
+/* WO-2184: Z surface - the point a run is on, beside the 8 plan steps. */
+.pbn-point-counter {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* WO-2184: Z surface after a run - the measured heights' colours, lowest to highest. */
+.pbn-mesh-legend {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.pbn-mesh-ramp {
+  width: 96px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.pbn-mesh-range {
+  color: var(--text-primary);
+}

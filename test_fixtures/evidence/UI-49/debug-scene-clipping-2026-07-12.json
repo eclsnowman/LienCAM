@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "appVersion": "0.10.4",
+  "gitCommit": "bd605d3e",
+  "gitBranch": "main",
+  "buildDate": "2026-07-12",
+  "exportedAt": "2026-07-12T23:38:54.427Z",
+  "dag": "{\"nodes\":[{\"id\":\"IMP1\",\"kind\":\"import\",\"consumes\":[],\"refs\":[],\"payload\":{\"fileName\":\"boring_test_plate.step\",\"cacheKey\":\"24ba4aa5-b0fb-4f5e-836a-c94e20de22c5\"},\"degraded\":false,\"diagnostics\":[],\"lastGoodBoundTo\":{},\"suppressed\":false},{\"id\":\"datum:XY\",\"kind\":\"datum\",\"consumes\":[],\"refs\":[],\"payload\":{\"datumType\":\"plane\",\"planeKind\":\"base-plane\",\"basePlane\":\"xy\",\"lastGoodFrame\":{\"origin\":{\"x\":0,\"y\":0,\"z\":0},\"normal\":{\"x\":0,\"y\":0,\"z\":1},\"xDir\":{\"x\":1,\"y\":0,\"z\":0}},\"name\":\"XY\"},\"degraded\":false,\"diagnostics\":[],\"lastGoodBoundTo\":{},\"suppressed\":false},{\"id\":\"datum:XZ\",\"kind\":\"datum\",\"consumes\":[],\"refs\":[],\"payload\":{\"datumType\":\"plane\",\"planeKind\":\"base-plane\",\"basePlane\":\"xz\",\"lastGoodFrame\":{\"origin\":{\"x\":0,\"y\":0,\"z\":0},\"normal\":{\"x\":0,\"y\":-1,\"z\":0},\"xDir\":{\"x\":1,\"y\":0,\"z\":0}},\"name\":\"XZ\"},\"degraded\":false,\"diagnostics\":[],\"lastGoodBoundTo\":{},\"suppressed\":false},{\"id\":\"datum:YZ\",\"kind\":\"datum\",\"consumes\":[],\"refs\":[],\"payload\":{\"datumType\":\"plane\",\"planeKind\":\"base-plane\",\"basePlane\":\"yz\",\"lastGoodFrame\":{\"origin\":{\"x\":0,\"y\":0,\"z\":0},\"normal\":{\"x\":1,\"y\":0,\"z\":0},\"xDir\":{\"x\":0,\"y\":1,\"z\":0}},\"name\":\"YZ\"},\"degraded\":false,\"diagnostics\":[],\"lastGoodBoundTo\":{},\"suppressed\":false},{\"id\":\"origin\",\"kind\":\"datum\",\"consumes\":[],\"refs\":[],\"payload\":{\"datumType\":\"origin\",\"name\":\"Origin\"},\"degraded\":false,\"diagnostics\":[],\"lastGoodBoundTo\":{},\"suppressed\":false}],\"order\":[\"IMP1\",\"datum:XY\",\"datum:XZ\",\"datum:YZ\",\"origin\"]}",
+  "featureOrder": [
+    "origin",
+    "datum:XY",
+    "datum:XZ",
+    "datum:YZ",
+    "IMP1"
+  ],
+  "rollbackMarker": {
+    "kind": "end"
+  },
+  "camera": {
+    "position": {
+      "x": 131.18797761857573,
+      "y": -29.76945244847684,
+      "z": 22.297677745228015
+    },
+    "target": {
+      "x": 243.9627003827214,
+      "y": 124.96232382339551,
+      "z": -63.381603981238854
+    },
+    "up": {
+      "x": 0.15814506815741364,
+      "y": 0.3876092959535896,
+      "z": 0.9081570189718569
+    },
+    "projection": "orthographic",
+    "left": -90.83124250572448,
+    "right": 90.83124250572448,
+    "top": 56.60497721371236,
+    "bottom": -56.60497721371236,
+    "zoom": 0.32353354497370784,
+    "near": 0.1,
+    "far": 2000
+  },
+  "displayMode": "shaded-edges",
+  "hiddenGenesisIds": [
+    "datum:XY",
+    "datum:XZ",
+    "datum:YZ"
+  ],
+  "skipped": []
+}

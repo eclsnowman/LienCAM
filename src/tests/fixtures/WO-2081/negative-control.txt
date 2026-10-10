@@ -1,0 +1,79 @@
+
+ RUN  v3.2.7 ./LienCAM-worktrees/WO-2081
+
+ ❯ src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts (9 tests | 9 failed) 1568ms
+   × WO-2081: imported pocket corner fillets > lists all four complete corner bands in the Model screen 228ms
+     → expected [] to have a length of 4 but got +0
+   × WO-2081: imported pocket corner fillets > changes corner 0 to 3 mm through the Model tool and journal 184ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > changes corner 1 to 3 mm through the Model tool and journal 150ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > changes corner 2 to 3 mm through the Model tool and journal 148ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > changes corner 3 to 3 mm through the Model tool and journal 170ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > removes corner 0 through Defeature and journal 179ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > removes corner 1 through Defeature and journal 150ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > removes corner 2 through Defeature and journal 226ms
+     → expected undefined to be defined
+   × WO-2081: imported pocket corner fillets > removes corner 3 through Defeature and journal 130ms
+     → expected undefined to be defined
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > lists all four complete corner bands in the Model screen
+AssertionError: expected [] to have a length of 4 but got +0
+
+- Expected
++ Received
+
+- 4
++ 0
+
+ ❯ src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts:31:21
+     29|     const body = model()
+     30|     const fillets = body.features.filter((f) => f.kind === 'fillet')
+     31|     expect(fillets).toHaveLength(4)
+       |                     ^
+     32|     expect(recognizeEdgeBlends(body.mesh, body.sourceFacetIds).blends)…
+     33|     for (const f of fillets) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > changes corner 0 to 3 mm through the Model tool and journal
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > changes corner 1 to 3 mm through the Model tool and journal
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > changes corner 2 to 3 mm through the Model tool and journal
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > changes corner 3 to 3 mm through the Model tool and journal
+AssertionError: expected undefined to be defined
+ ❯ src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts:51:21
+     49|     const body = model()
+     50|     const feature = body.features.filter((f) => f.kind === 'fillet')[i…
+     51|     expect(feature).toBeDefined()
+       |                     ^
+     52|     const plan = planStlFeatureEdits(body, [{ tool: 'fillet', feature,…
+     53|     expect(plan.ok, JSON.stringify(plan)).toBe(true)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > removes corner 0 through Defeature and journal
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > removes corner 1 through Defeature and journal
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > removes corner 2 through Defeature and journal
+ FAIL  src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts > WO-2081: imported pocket corner fillets > removes corner 3 through Defeature and journal
+AssertionError: expected undefined to be defined
+ ❯ src/tests/mesh/recognizePocketCornerFillets.wo2081.test.ts:71:21
+     69|     const body = model()
+     70|     const feature = body.features.filter((f) => f.kind === 'fillet')[i…
+     71|     expect(feature).toBeDefined()
+       |                     ^
+     72|     const plan = planStlFeatureEdits(body, [{ tool: 'defeature', featu…
+     73|     expect(plan.ok, JSON.stringify(plan)).toBe(true)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed (9)
+   Start at  16:32:34
+   Duration  3.05s (transform 482ms, setup 101ms, collect 694ms, tests 1.57s, environment 0ms, prepare 129ms)

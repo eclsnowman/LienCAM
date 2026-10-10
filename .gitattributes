@@ -1,0 +1,21 @@
+*.snap text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+coordination/**/*.log text eol=lf
+coordination/**/*.json text eol=lf
+# Committed evidence JSON is compared byte-for-byte by its own tests (WO-1142
+# asserts findings.json equals its canonical JSON.stringify output). Without
+# eol=lf, checkout rewrites it to CRLF and the test passes its worktree gate
+# then fails on main - which is exactly what happened when WO-1142 landed.
+src/tests/evidence/**/*.json text eol=lf
+
+# Skill trees: canonical .agents synced to .claude; one eol to prevent
+# spurious cross-client diffs (2026-07-21 audit).
+.agents/skills/** text eol=lf
+.claude/skills/** text eol=lf
+
+# Test fixtures are byte-exact log excerpts; CRLF checkout silently no-ops
+# the spoof-mutation replaces in run-suite-flake-triage (BK-160 harvest find).
+tools/tests/fixtures/** text eol=lf
+# A CRLF checkout of a shebang .mjs fails vitest import on Windows (creditsCoverage.wo2334, 10-09)
+*.mjs text eol=lf

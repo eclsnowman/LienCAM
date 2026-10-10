@@ -1,0 +1,170 @@
+solid moving-vise
+facet normal 0 0 0
+outer loop
+vertex 8 43 -10
+vertex 72 51 -10
+vertex 72 43 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 43 -10
+vertex 8 51 -10
+vertex 72 51 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 43 0
+vertex 72 43 0
+vertex 72 51 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 43 0
+vertex 72 51 0
+vertex 8 51 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 43 -10
+vertex 72 43 -10
+vertex 72 43 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 43 -10
+vertex 72 43 0
+vertex 8 43 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 72 43 -10
+vertex 72 51 -10
+vertex 72 51 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 72 43 -10
+vertex 72 51 0
+vertex 72 43 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 72 51 -10
+vertex 8 51 -10
+vertex 8 51 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 72 51 -10
+vertex 8 51 0
+vertex 72 51 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 51 -10
+vertex 8 43 -10
+vertex 8 43 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 8 51 -10
+vertex 8 43 0
+vertex 8 51 0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 62 -10
+vertex 84 68 -10
+vertex 84 62 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 62 -10
+vertex -4 68 -10
+vertex 84 68 -10
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 62 -2
+vertex 84 62 -2
+vertex 84 68 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 62 -2
+vertex 84 68 -2
+vertex -4 68 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 62 -10
+vertex 84 62 -10
+vertex 84 62 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 62 -10
+vertex 84 62 -2
+vertex -4 62 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 84 62 -10
+vertex 84 68 -10
+vertex 84 68 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 84 62 -10
+vertex 84 68 -2
+vertex 84 62 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 84 68 -10
+vertex -4 68 -10
+vertex -4 68 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 84 68 -10
+vertex -4 68 -2
+vertex 84 68 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 68 -10
+vertex -4 62 -10
+vertex -4 62 -2
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex -4 68 -10
+vertex -4 62 -2
+vertex -4 68 -2
+endloop
+endfacet
+endsolid moving-vise

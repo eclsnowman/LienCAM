@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "V09",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "project": "examples/07-relief-medallion/relief-medallion.camproject",
+  "holdMs": 800,
+  "steps": [
+    {
+      "action": "open"
+    },
+    {
+      "action": "reliefEdit"
+    },
+    {
+      "action": "reliefImage"
+    },
+    {
+      "action": "reliefStyle",
+      "style": "raise"
+    },
+    {
+      "action": "reliefStyle",
+      "style": "engrave"
+    },
+    {
+      "action": "reliefStyle",
+      "style": "emboss"
+    },
+    {
+      "action": "reliefCancel"
+    },
+    {
+      "action": "regen"
+    },
+    {
+      "action": "simulate"
+    },
+    {
+      "action": "hold"
+    }
+  ],
+  "finishedOrbitDelta": [
+    50,
+    -40
+  ],
+  "regenTimeoutMs": 600000
+}

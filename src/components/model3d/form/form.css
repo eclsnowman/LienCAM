@@ -1,0 +1,103 @@
+/* Form palette (form mode inside the Model screen). Tokens only - no raw colours. */
+
+.form-palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.form-row-label {
+  width: 4.5rem;
+  color: var(--text-muted);
+}
+
+.form-text {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+}
+
+.form-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.form-seg-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.form-status,
+.form-static-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.form-static-status {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Only Form needs a status row above the actions; other docked palettes keep their footer layout. */
+.form-palette-shell .docked-panel-footer {
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.form-hint { color: var(--text-muted); }
+.form-notice {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* palette groups: a slim header per group, named after the rail group whose tools its rows set; folds */
+.form-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 4px 0 1px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+
+.form-group-header:hover {
+  color: var(--text-primary);
+}

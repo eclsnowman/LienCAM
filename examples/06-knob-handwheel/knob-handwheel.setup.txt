@@ -1,0 +1,37 @@
+LienCAM Setup Sheet
+Program: "06_Knob_and_handwheel-G54.gcode"
+Units: mm
+
+Setup: "Setup 1" (G54)
+  Work offset origin: X-25.714 Y-25.714 Z22.614 mm
+  Stock: "Auto Stock 1" size 51.428 x 51.428 x 32.614 mm
+  Origin offset from stock min corner: X0 Y0 Z32.614 mm
+  Workholding:
+    Method: Vise
+    Note: "Raise the stock on a 36 x 36 x 12 mm undersized support block seated on the vise bed. Vise grips only the bottom 3 mm of the remaining square stock base on the X faces, from Z -10 to Z -7. The base is about 15 mm high; set the jaw opening to the full stock width. Keep jaw tops at Z -7, below every cutting move; the waterline lead exits in -Y. Remove the base in a second setup or with a saw; underside finishing is not part of this example."
+    Vise: "Knob base vise"
+
+1. "3D Rough 1"
+   Tool: T2 "6 mm flat end mill" dia 6mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 800mm/min, plunge 150mm/min
+   Z range: -17.5 to 15 mm
+   NC lines: 3-3431
+
+2. "3D Finish 2"
+   Tool: T5 "3 mm ball end mill" dia 3mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 100mm/min
+   Z range: -17.5 to 15 mm
+   NC lines: 3432-49778
+
+3. "Waterline Finish 3"
+   Tool: T6 "3 mm wall-finishing end mill" dia 3mm flute length 18mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 100mm/min
+   Z range: -17.5 to 15 mm
+   NC lines: 49779-55854
+
+File: "06_Knob_and_handwheel-G54.gcode"
+Bytes: 957125
+SHA-256: 7e724fd78d37181707f084ec91266189e9eb96c36e3a9b5db2a6dc316e2d3cc1

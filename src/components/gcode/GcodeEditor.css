@@ -1,0 +1,119 @@
+/* WO-2651: the G-code editor. The textarea and the coloured copy under it
+   share one font, one row height and one padding, so the caret sits on the
+   coloured glyphs; only the rows on screen are drawn. */
+.gce {
+  display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--slate-915, var(--vp-canvas)); overflow: hidden;
+}
+.gce-group { display: inline-flex; align-items: center; gap: 4px; }
+.gce-goto { width: 64px; }
+.gce-find { width: 120px; }
+.gce-btn { padding: 2px 8px; }
+.gce-note { color: var(--text-muted); min-width: 4em; font-size: var(--font-size-sm); }
+/* Transient tools and readouts sit OVER the text's corners - none of them is
+   a row, so nothing below the editor moves (the operator's amendment, item 6). */
+.gce-popover {
+  position: absolute; top: 6px; right: 14px; z-index: 3; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 4px; max-width: calc(100% - 28px); padding: 5px 6px;
+  background: var(--bg-panel); border: 1px solid var(--border-light); border-radius: var(--radius-md);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+}
+.gce-chip {
+  position: absolute; z-index: 2; padding: 2px 8px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent); border: 1px solid var(--border);
+  font-size: var(--font-size-xs, 11px); line-height: 1.4;
+}
+.gce-chip-top { top: 6px; left: 8px; right: 8px; color: var(--accent-orange); }
+.gce-position { right: 14px; bottom: 6px; color: var(--text-muted); font-family: var(--font-mono); pointer-events: none; }
+.gce-chip-stack {
+  position: absolute; z-index: 2; left: 8px; bottom: 6px; max-width: calc(100% - 210px); /* clear of the position chip */
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+}
+.gce-chip-stack .gce-chip { position: static; }
+.gce-mark { cursor: pointer; color: var(--text-danger); font: inherit; text-align: left; }
+.gce-mark:hover { background: var(--bg-hover); }
+.gce-body { position: relative; display: flex; flex: 1 1 auto; min-height: 120px; overflow: hidden; }
+.gce-gutter {
+  position: relative; flex: none; overflow: hidden; border-right: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-disabled); user-select: none;
+}
+.gce-lineno {
+  position: absolute; right: 6px; height: var(--gce-line); line-height: var(--gce-line); text-align: right;
+  white-space: pre;
+}
+.gce-lineno-mark { color: var(--text-danger); font-weight: 700; }
+.gce-code { position: relative; flex: 1 1 auto; overflow: hidden; }
+.gce-paint {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-primary);
+}
+.gce-row { position: absolute; height: var(--gce-line); line-height: var(--gce-line); white-space: pre; }
+.gce-band { position: absolute; left: 0; right: 0; height: var(--gce-line); }
+.gce-band-caret { background: var(--bg-hover); }
+.gce-band-target { background: var(--surface-selected); }
+.gce-band-match { background: color-mix(in srgb, var(--accent-orange) 28%, transparent); }
+.gce-band-mark { background: color-mix(in srgb, var(--accent-red) 26%, transparent); }
+/* The line a right-click menu belongs to (editor band and listing row). */
+.gce-band-menu { background: var(--surface-selected); box-shadow: inset 0 0 0 1px var(--accent-blue); }
+.gcode-line.gcode-line-menu-target { background: var(--surface-selected); box-shadow: inset 0 0 0 1px var(--accent-blue); }
+.gce-text {
+  position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; margin: 0;
+  padding: var(--gce-pad-y) var(--gce-pad-x); border: 0; outline: none; resize: none;
+  background: transparent; color: transparent; caret-color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 12px; line-height: var(--gce-line);
+  white-space: pre; overflow-wrap: normal; overflow: auto; tab-size: 4;
+  scrollbar-width: thin; scrollbar-color: var(--border-light) transparent;
+}
+.gce-text::selection { background: color-mix(in srgb, var(--accent-blue) 40%, transparent); color: transparent; }
+.gce-paint, .gce-text { tab-size: 4; }
+.gce-t-comment { color: var(--text-muted); font-style: italic; }
+.gce-t-g { color: var(--accent-cyan); font-weight: 600; }
+.gce-t-m { color: var(--accent-orange); font-weight: 600; }
+.gce-t-tool { color: var(--accent-green); font-weight: 600; }
+.gce-t-axis { color: var(--text-primary); }
+.gce-t-feed { color: var(--accent-blue); }
+.gce-t-number { color: var(--text-disabled); }
+.gce-t-other { color: var(--text-secondary); }
+.gce-readonly .gce-text { caret-color: transparent; }
+
+/* Control > program panel: the editor is an overlay card over the preview
+   (the panel's layout law - transient state never resizes the preview). */
+/* Over the preview, clear of its view rail (right 8px + 42px wide) so the
+   rail stays usable and nothing in the card's head is hidden under it. */
+.gce-control-card {
+  position: absolute; inset: 6px 58px 6px 6px; z-index: 5; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; background: var(--bg-panel); border: 1px solid var(--border-light);
+  border-radius: var(--radius-md); box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+}
+.gce-control-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gce-control-title { font-weight: 600; color: var(--text-primary); }
+.gce-control-summary { color: var(--accent-orange); font-size: var(--font-size-sm); }
+.gce-control-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+.gce-control-note { color: var(--text-muted); font-size: var(--font-size-sm); }
+
+/* Post Process preview: the hand-edit line and the stale-edits choice. */
+.gce-post-line {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 2px;
+  font-size: var(--font-size-sm); color: var(--accent-orange);
+}
+.gce-post-line .modal-btn { padding: 2px 8px; }
+/* In the preview head: one line, no padding, so the head keeps its height. */
+.gce-post-line-head { flex-wrap: nowrap; padding: 0; min-width: 0; white-space: nowrap; }
+.gce-post-line-head > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.gce-post-editor { height: 320px; display: flex; }
+
+/* Control: the ONE Apply / Discard place, only while edits are staged. In the
+   editor's head when it is open, otherwise a small card laid over the bottom
+   of the preview - never a row (the operator's amendment, item 6). */
+.gce-staged { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Lower-left, one row: the intended-stock chip owns lower-right. */
+.gce-staged-card { left: 10px; bottom: 10px; width: max-content; z-index: 4; }
+.gce-staged-card .gce-staged { flex-wrap: nowrap; white-space: nowrap; }
+/* The listing marks staged rows and holds Insert line's inline field. */
+.gcode-line.gcode-line-staged { box-shadow: inset 3px 0 0 var(--accent-orange); }
+.gcode-line.gcode-line-staged .gcode-linetext { color: var(--accent-orange); }
+.gcode-line-insert { align-items: center; }
+.gce-insert-input { flex: 1 1 auto; min-width: 0; margin-left: 14px; height: 18px; padding: 0 6px; }
+/* The line menu reads in the UI face wherever it opens (the listing is mono). */
+.gce-line-menu { font-family: var(--font-ui); }

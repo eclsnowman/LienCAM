@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "proof.png": {
+      "commit": "bcae99ad065fb476b1f752680067272e2aebe4de",
+      "workingTreeDirty": false,
+      "workingTreeScope": [
+        "src"
+      ],
+      "sourceExcludes": [
+        "src/tests"
+      ],
+      "sourceHash": "c3ab17bb7ef7ac2ab1d36700f23a96d5029d0f09aa0f0363e03d1b5046726857",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 1,
+      "screenshotBytes": 1200,
+      "screenshotSha256": "1ea6240b6ae51b736e6de35a4550fef9a266b7dce57c8376e81996a8d05e7068"
+    }
+  }
+}

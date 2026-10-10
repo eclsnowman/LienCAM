@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question or get help
+    url: https://github.com/eclsnowman/LienCAM/discussions/categories/q-a
+    about: How do I... / setup help / controller wiring
+  - name: Vote on or suggest ideas
+    url: https://github.com/eclsnowman/LienCAM/discussions/categories/ideas
+    about: See what others want and add your vote with the up-arrow
+  - name: Report a security problem privately
+    url: https://github.com/eclsnowman/LienCAM/security/advisories/new
+    about: Do not post security problems publicly

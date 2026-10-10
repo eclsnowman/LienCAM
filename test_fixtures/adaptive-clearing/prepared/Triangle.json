@@ -1,0 +1,110 @@
+{
+  "schema": "ac-boundaries",
+  "name": "Sketch1 / Triangle",
+  "source": "Triangle_fixture.json",
+  "description": "Right triangle — acute corner is a known hard case for linking adjacency. Tool params are defaults — set toolRadius/stepover to match the reference CAM tool before comparing. Seed is advisory (AC recomputes via findSeed).",
+  "params": {
+    "toolDiameter": 4,
+    "toolRadius": 2,
+    "stockToLeave": 0,
+    "offsetDistance": 2,
+    "arcTolerance": 0.01
+  },
+  "stock": [
+    {
+      "x": 0,
+      "y": 0
+    },
+    {
+      "x": 77.48078,
+      "y": 0
+    },
+    {
+      "x": 77.48078,
+      "y": 96.67789
+    },
+    {
+      "x": 0,
+      "y": 96.67789
+    }
+  ],
+  "pockets": [
+    {
+      "boundary": [
+        {
+          "x": 72.48078,
+          "y": 5
+        },
+        {
+          "x": 72.48078,
+          "y": 91.67789
+        },
+        {
+          "x": 5,
+          "y": 91.67789
+        },
+        {
+          "x": 5,
+          "y": 60.26443
+        },
+        {
+          "x": 38.74039,
+          "y": 60.26443
+        }
+      ],
+      "islands": [],
+      "offset": [
+        {
+          "isHole": false,
+          "area": 2508.19991,
+          "pts": [
+            {
+              "x": 70.4808,
+              "y": 89.6779
+            },
+            {
+              "x": 7,
+              "y": 89.6779
+            },
+            {
+              "x": 7,
+              "y": 62.2644
+            },
+            {
+              "x": 38.7404,
+              "y": 62.2644
+            },
+            {
+              "x": 39.1379,
+              "y": 62.2245
+            },
+            {
+              "x": 39.5195,
+              "y": 62.1064
+            },
+            {
+              "x": 39.8701,
+              "y": 61.9148
+            },
+            {
+              "x": 40.1756,
+              "y": 61.6573
+            },
+            {
+              "x": 40.4238,
+              "y": 61.3443
+            },
+            {
+              "x": 40.4474,
+              "y": 61.3066
+            },
+            {
+              "x": 70.4808,
+              "y": 12.114
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

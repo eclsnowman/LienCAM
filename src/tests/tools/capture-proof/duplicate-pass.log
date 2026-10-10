@@ -1,0 +1,11 @@
+[capture] starting branch server at http://127.0.0.1:4295/ (--strictPort)
+[capture:vite]
+  VITE v8.2.0  ready in 387 ms
+
+[capture:vite]   -> Local:   http://127.0.0.1:4295/
+[capture] branch server answered at http://127.0.0.1:4295/
+[capture] wrote initial.png (15917 bytes, sha256 1626934a081acf9aaa3811ffab94f1599f2cd753d393b280b372579ef2c4a16f)
+[capture] wrote changed.png (16909 bytes, sha256 ae942b84ef83c4028ebc411c152e99bc49c3b29e6ba5f75bbc200bf6224e84eb)
+[proof] changed views have distinct hashes: true
+[capture] branch server stopped at http://127.0.0.1:4295/
+PROCESS EXIT CODE: 0

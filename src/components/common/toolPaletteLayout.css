@@ -1,0 +1,70 @@
+/* The tool palettes - the Model / Form / Model-sketch rail and the CAM Sketch
+   toolbox: tighter buttons, groups that fold, and a compact mode (icons only,
+   packed tight; each hover hint names the tool). useToolPaletteLayout.ts keeps
+   the choices. */
+
+.workbench-rail .sketch-tool-btn,
+.sketch-toolbox .sketch-tool-btn {
+  gap: 3px;
+  padding: 5px 2px 4px;
+}
+
+.workbench-rail .tree-section-header {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.rail-collapse-btn,
+.rail-compact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* a header with its own right-hand control (Constraints' glyph toggle) keeps
+   that control; the fold button sits after it */
+.tree-section-header > * + .rail-collapse-btn { margin-left: 2px; }
+
+.rail-collapse-btn:hover,
+.rail-compact-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.rail-compact-btn[aria-pressed='true'] {
+  color: var(--text-active);
+}
+
+.workbench-rail.is-compact .sketch-tool-grid,
+.sketch-toolbox.is-compact .sketch-tool-grid {
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+  gap: 1px;
+  padding: 2px 6px 3px;
+}
+
+.workbench-rail.is-compact .sketch-tool-btn,
+.sketch-toolbox.is-compact .sketch-tool-btn {
+  min-height: 28px;
+  padding: 5px 0;
+  gap: 0;
+}
+
+/* the name stays for screen readers (it is still in the button); only the eye loses it */
+.workbench-rail.is-compact .sketch-tool-btn > span,
+.sketch-toolbox.is-compact .sketch-tool-btn > span {
+  width: 0;
+  height: 0;
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+}

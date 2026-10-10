@@ -1,0 +1,31 @@
+[note] Grip handle: a Form pipe along a sketch, shaped by hand, joined to a machined plate.
+[step 1] Sketch on XZ: a 26 mm arch, its feet 3 mm below XY where the plate will be.
+  model SKARC: {"ok":true,"status":"ok"}
+[step 2] Select the sketch in the tree, click Form. Pipe radius 6 mm, then Pipe: a tube along the sketch.
+  ok: a pipe cage (80 points): Pipe along Handle path: 81.6 mm, radius 6 mm
+  ok: the top of the arch (point 34)
+[step 3] Mirror X keeps the halves the same. Soft radius 22 mm: nearby points follow a move, fading out.
+[step 4] Click the top of the arch, drag the Z arrow up 5 mm: a palm swell.
+  ok: the top point selected
+  ok: the top rose (z 35.8 -> 40.8)
+[step 5] Display: Smooth. Name it and Finish.
+[step 6] Sketch an 80 x 30 mm rectangle on XY, extrude it 6 mm up, joined to the grip: one solid.
+console error: SolidsWorkbenchPage: 3D geometry engine initialization failed (attempt 1 of 3); phase=starting; progress=0%; elapsed=30004ms Error: geometry engine initialization timed out after 30000ms
+    at http://127.0.0.1:4690/src/components/model3d/SolidsWorkbenchPage.tsx:1256:41
+  model PLATE: {"ok":true,"volume":23950.297988161292,"faces":8}
+[step 7] Fillet the four plate corners, 5 mm.
+  ok: the four corner edges (4)
+  model CORNF: {"ok":true,"volume":23821.538770657455,"faces":12}
+[step 8] Offset plane 6 mm up (the plate top), four 5 mm circles on it, extrude-cut through: mounting holes.
+  model HOLES: {"ok":true,"volume":23350.30068024372,"faces":16}
+  ok: the four holes cut through (471.2 mm^3 removed)
+[step 9] Left-drag up to orbit underneath: the holes go through. Back over the top, Display Mode: Zebra.
+  ok: the view orbited (camera moved 108.5 mm)
+  ok: viewing from -34 deg elevation (wanted -35)
+  ok: the view orbited (camera moved 123.0 mm)
+  ok: viewing from 32 deg elevation (wanted 32)
+  ok: the view orbited (camera moved 94.0 mm)
+[note] Done: 1 Form feature and 7 standard ones. Open grip-handle.camproject to see the tree.
+[saved] docs\examples\form\grip-handle.camproject (1185964 bytes)
+[video] docs\examples\form\grip-handle.mp4 (1.8 MB, from 18.4 s in)
+[reopened] tree ["origin:Origin","datum:XY:XY","datum:XZ:XZ","datum:YZ:YZ","SKARC:Handle path","FRM1:Grip","SKPL:Plate","PLATE:Plate","CORNF:Corner fillets","datum:TOP6:Plate top","SKHO:Mounting holes","HOLES:Mounting holes"]; volume 23350.30 (built 23350.30)

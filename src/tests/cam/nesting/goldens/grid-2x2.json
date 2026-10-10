@@ -1,0 +1,42 @@
+{
+  "placements": [
+    {
+      "partId": "grid",
+      "instanceId": "grid#0",
+      "x": 25,
+      "y": 0,
+      "rotationDeg": 90,
+      "depth": 0
+    },
+    {
+      "partId": "grid",
+      "instanceId": "grid#1",
+      "x": 25,
+      "y": 50,
+      "rotationDeg": 180,
+      "depth": 0
+    },
+    {
+      "partId": "grid",
+      "instanceId": "grid#2",
+      "x": 25,
+      "y": 25,
+      "rotationDeg": 270,
+      "depth": 0
+    },
+    {
+      "partId": "grid",
+      "instanceId": "grid#3",
+      "x": 25,
+      "y": 25,
+      "rotationDeg": 0,
+      "depth": 0
+    }
+  ],
+  "unplaced": [],
+  "utilization": 0.5102040816326531,
+  "sheetUsed": {
+    "width": 70,
+    "height": 70
+  }
+}

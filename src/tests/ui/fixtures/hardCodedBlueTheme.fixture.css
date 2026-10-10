@@ -1,0 +1,5 @@
+:root[data-theme="fixture-hard-coded-blue"] {
+  /* Invalid on purpose: a theme must redefine the ramp primitive, not pin a
+     semantic role to a literal that its consumers cannot inherit around. */
+  --role-identity: #2388ff;
+}

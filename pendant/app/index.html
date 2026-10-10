@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>LienCAM Mobile Pendant</title>
+  <link rel="stylesheet" href="app.css?v=10">
+</head>
+<body>
+  <div id="app">
+    <header id="hdr">
+      <div class="hdr-left">
+        <span class="hdr-logo">&#9632;</span>
+        <span class="hdr-title">LienCAM</span>
+        <button id="btn-theme" class="hdr-theme" type="button" aria-label="Switch theme">
+          <span class="hdr-theme-dot"></span><span id="theme-name">BLUE</span>
+        </button>
+        <span id="hdr-wcs" class="hdr-wcs">G54</span>
+        <span id="hdr-state" class="pill st-idle">IDLE</span>
+      </div>
+      <div class="hdr-safety">
+        <button id="btn-hold" class="btn-hold" type="button">HOLD (!)</button>
+        <button id="btn-reset" class="btn-reset" type="button">RESET</button>
+      </div>
+    </header>
+    <div id="command-feedback" role="status" aria-live="polite" hidden></div>
+
+    <nav id="tabs">
+      <button class="tab active" data-tab="pane-jog" type="button">JOG</button>
+      <button class="tab" data-tab="pane-probe" type="button">PROBING</button>
+      <button class="tab" data-tab="pane-status" type="button">STATUS &amp; OVR</button>
+    </nav>
+
+    <main id="body">
+
+      <section id="pane-jog" class="pane active">
+        <div class="dro-card">
+          <div class="dro-row">
+            <div class="dro-cell"><span class="dro-tag">X</span><span class="dro-main"><span id="dro-x" class="dro-num">0.000</span><span id="dro-x-sub" class="dro-sub">0.000</span></span></div>
+            <div class="dro-cell"><span class="dro-tag">Y</span><span class="dro-main"><span id="dro-y" class="dro-num">0.000</span><span id="dro-y-sub" class="dro-sub">0.000</span></span></div>
+            <div class="dro-cell"><span class="dro-tag">Z</span><span class="dro-main"><span id="dro-z" class="dro-num">0.000</span><span id="dro-z-sub" class="dro-sub">0.000</span></span></div>
+            <div class="dro-opts">
+              <button id="btn-units" class="pip" type="button">MM</button>
+              <button id="btn-dromode" class="pip" type="button">WPOS</button>
+            </div>
+          </div>
+          <div class="glance-row">
+            <span class="glance">SPINDLE <b id="gl-spindle">OFF</b></span>
+            <span class="glance">TOOL <b id="gl-tool">T1</b></span>
+            <span class="glance">FEED <b id="gl-feed">0</b></span>
+            <span class="glance">OVR <b id="gl-ovr">100%</b></span>
+          </div>
+        </div>
+
+        <div id="jog-cluster" class="jog-cluster">
+          <div id="xy-pad" class="xy-pad">
+            <button class="wedge w-n" data-axis="Y" data-sign="1" type="button" aria-label="Jog Y plus">
+              <svg class="plate" viewBox="0 0 176 176" preserveAspectRatio="none" aria-hidden="true"><path class="face" d="M 0 0 H 176 L 88 88 Z" /></svg>
+              <span class="wedge-inner col"><span class="rail-h2"><i></i><i></i></span><span class="wedge-label">Y+</span></span>
+            </button>
+            <button class="wedge w-e" data-axis="X" data-sign="1" type="button" aria-label="Jog X plus">
+              <svg class="plate" viewBox="0 0 176 176" preserveAspectRatio="none" aria-hidden="true"><path class="face" d="M 176 0 V 176 L 88 88 Z" /></svg>
+              <span class="wedge-inner row"><span class="wedge-label">X+</span><i class="rail-v1"></i></span>
+            </button>
+            <button class="wedge w-s" data-axis="Y" data-sign="-1" type="button" aria-label="Jog Y minus">
+              <svg class="plate" viewBox="0 0 176 176" preserveAspectRatio="none" aria-hidden="true"><path class="face" d="M 176 176 H 0 L 88 88 Z" /></svg>
+              <span class="wedge-inner col"><span class="wedge-label">Y-</span><span class="rail-h2"><i></i><i></i></span></span>
+            </button>
+            <button class="wedge w-w" data-axis="X" data-sign="-1" type="button" aria-label="Jog X minus">
+              <svg class="plate" viewBox="0 0 176 176" preserveAspectRatio="none" aria-hidden="true"><path class="face" d="M 0 176 V 0 L 88 88 Z" /></svg>
+              <span class="wedge-inner row"><i class="rail-v1"></i><span class="wedge-label">X-</span></span>
+            </button>
+            <svg class="seams" viewBox="0 0 176 176" aria-hidden="true">
+              <line x1="0" y1="0" x2="176" y2="176" /><line x1="176" y1="0" x2="0" y2="176" />
+            </svg>
+            <button id="btn-safez" class="safez" type="button">SAFE Z</button>
+          </div>
+          <div id="z-axis" class="z-axis">
+            <button class="zbtn" data-axis="Z" data-sign="1" type="button" aria-label="Jog Z plus">
+              <span class="zrails"><i></i><i></i><i></i></span>
+              <span class="zbtn-label">Z+</span>
+            </button>
+            <button class="zbtn" data-axis="Z" data-sign="-1" type="button" aria-label="Jog Z minus">
+              <span class="zbtn-label">Z-</span>
+              <span class="zrails"><i></i><i></i><i></i></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="row step-row">
+          <div class="chips" id="step-chips">
+            <button class="chip" data-step="0.01" type="button">0.01</button>
+            <button class="chip" data-step="0.1" type="button">0.1</button>
+            <button class="chip active" data-step="1" type="button">1.0</button>
+            <button class="chip" data-step="10" type="button">10.0</button>
+          </div>
+          <button id="btn-mode" class="mode-btn" type="button">STEP</button>
+        </div>
+
+        <div class="row feed-row">
+          <span class="row-label">FEED</span>
+          <div class="chips">
+            <button class="chip chip-feed" data-feed="200" type="button">200</button>
+            <button class="chip chip-feed active" data-feed="800" type="button">800</button>
+            <button class="chip chip-feed" data-feed="1500" type="button">1500</button>
+            <button class="chip chip-feed" data-feed="3000" type="button">3000</button>
+          </div>
+          <span id="feed-readout" class="live-readout">800</span>
+        </div>
+
+        <div class="row zero-row">
+          <button class="zero-btn" data-zero="X" type="button">0 X</button>
+          <button class="zero-btn" data-zero="Y" type="button">0 Y</button>
+          <button class="zero-btn" data-zero="Z" type="button">0 Z</button>
+          <button class="zero-btn zero-all" data-zero="ALL" type="button">0 ALL</button>
+        </div>
+
+        <div id="macro-panel" class="macro-panel">
+          <div class="card-title">QUICK MACROS</div>
+          <div class="macro-grid">
+            <button class="macro-btn" data-macro="raise-z" data-cmd="G53 G0 Z15.0" type="button">RAISE Z</button>
+            <button class="macro-btn" data-macro="park-rear" data-cmd="G53 G0 X80.0 Y80.0" type="button">PARK REAR</button>
+            <button class="macro-btn" data-macro="go-xy-zero" data-cmd="G90 G0 X0 Y0 F800" type="button">GO XY ZERO</button>
+            <button class="macro-btn" data-macro="center-table" data-cmd="G53 G0 X50.0 Y50.0" type="button">CENTER TABLE</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="pane-probe" class="pane">
+        <div class="probe-layout">
+          <details class="card" open>
+            <summary class="card-title">SELECT PROBE ROUTINE</summary>
+            <div id="probe-grid" class="probe-grid"></div>
+          </details>
+          <details class="card diagram-card" open>
+            <summary class="card-title" id="diagram-title">ROUTINE DIAGRAM</summary>
+            <div id="probe-diagram" class="probe-diagram"></div>
+          </details>
+          <details class="card" id="params-card">
+            <summary class="card-title" id="params-title">CYCLE PARAMETERS</summary>
+            <div class="form-grid">
+              <div class="field"><label for="inp-feed">Probe Feed (mm/min)</label><input id="inp-feed" type="number" value="80"></div>
+              <div class="field"><label for="inp-travel">Search Travel (mm)</label><input id="inp-travel" type="number" value="20"></div>
+              <div class="field"><label for="inp-tip">Tip Radius (mm)</label><input id="inp-tip" type="number" value="2" step="0.1"></div>
+              <div class="field" id="field-size"><label for="inp-size">Nominal Dia (mm)</label><input id="inp-size" type="number" value="30"></div>
+              <div class="field" id="field-edge"><label for="sel-edge">Edge Direction</label>
+                <select id="sel-edge">
+                  <option value="X-">X- (Left)</option>
+                  <option value="X+">X+ (Right)</option>
+                  <option value="Y-">Y- (Front)</option>
+                  <option value="Y+">Y+ (Back)</option>
+                </select>
+              </div>
+            </div>
+            <label class="probe-path-confirm">
+              <input id="probe-path-clear" type="checkbox">
+              <span>I checked that the probe, positioning path, and cross-over are clear.</span>
+            </label>
+            <button id="btn-probe-start" class="probe-start" type="button">START PROBE ROUTINE</button>
+          </details>
+        </div>
+
+        <div id="probe-exec" class="card" hidden>
+          <div class="card-title"><span>PROBING PROGRESS</span><span id="probe-pill" class="pill st-run">RUNNING</span></div>
+          <p id="probe-msg" class="probe-msg">Positioning...</p>
+          <div class="track"><div id="probe-fill" class="fill"></div></div>
+          <div id="probe-log" class="log"></div>
+        </div>
+
+        <div id="probe-result" class="card" hidden>
+          <div class="card-title">PROBE RESULT</div>
+          <div id="result-box" class="result-box"></div>
+          <button id="btn-apply-zero" class="apply-zero" type="button">APPLY AS WORK ZERO (G10 L20)</button>
+        </div>
+      </section>
+
+      <section id="pane-status" class="pane">
+        <div class="status-grid">
+          <details class="card" open>
+            <summary class="card-title">COORDINATE SYSTEMS</summary>
+            <div class="coords-grid">
+              <div class="coords-box"><span class="sub">WORK (WPOS)</span>
+                <div class="crow"><span>X</span><b id="st-wx">0.000</b></div>
+                <div class="crow"><span>Y</span><b id="st-wy">0.000</b></div>
+                <div class="crow"><span>Z</span><b id="st-wz">0.000</b></div>
+              </div>
+              <div class="coords-box"><span class="sub">MACHINE (MPOS)</span>
+                <div class="crow"><span>X</span><b id="st-mx">0.000</b></div>
+                <div class="crow"><span>Y</span><b id="st-my">0.000</b></div>
+                <div class="crow"><span>Z</span><b id="st-mz">0.000</b></div>
+              </div>
+              <div class="coords-box"><span class="sub">ORIGIN (WCO)</span>
+                <div class="crow"><span>X</span><b id="st-ox">0.000</b></div>
+                <div class="crow"><span>Y</span><b id="st-oy">0.000</b></div>
+                <div class="crow"><span>Z</span><b id="st-oz">0.000</b></div>
+              </div>
+            </div>
+          </details>
+
+          <details class="card">
+            <summary class="card-title">PARSER MODAL STATE</summary>
+            <div class="chip-row">
+              <span class="mchip" id="ch-motion">Motion: G0</span>
+              <span class="mchip" id="ch-wcs">WCS: G54</span>
+              <span class="mchip" id="ch-plane">Plane: G17</span>
+              <span class="mchip" id="ch-dist">Dist: G90</span>
+              <span class="mchip" id="ch-units">Units: G21</span>
+              <span class="mchip" id="ch-spindle">Spindle: M5</span>
+              <span class="mchip" id="ch-coolant">Coolant: M9</span>
+            </div>
+          </details>
+
+          <details class="card" open>
+            <summary class="card-title">SPINDLE &amp; FEED</summary>
+            <div class="meters">
+              <div class="meter"><span class="sub">ACTUAL SPEED</span><b id="st-rpm" class="meter-num">0 RPM</b></div>
+              <div class="meter"><span class="sub">ACTUAL FEED</span><b id="st-feed" class="meter-num">0 mm/min</b></div>
+            </div>
+            <div class="spindle-row">
+              <button class="sp-btn" data-spindle="M3" type="button">CW (M3)</button>
+              <button class="sp-btn" data-spindle="M4" type="button">CCW (M4)</button>
+              <button class="sp-btn sp-stop" data-spindle="M5" type="button">STOP (M5)</button>
+            </div>
+          </details>
+
+          <details class="card">
+            <summary class="card-title">REALTIME OVERRIDES</summary>
+            <div class="ovr-block">
+              <div class="ovr-head"><span>Feed</span><b id="ov-feed">100%</b></div>
+              <div class="ovr-row">
+                <button class="ovr-btn" data-ovr="feed:-10">-10%</button>
+                <button class="ovr-btn" data-ovr="feed:-1">-1%</button>
+                <button class="ovr-btn ovr-100" data-ovr="feed:100">100%</button>
+                <button class="ovr-btn" data-ovr="feed:+1">+1%</button>
+                <button class="ovr-btn" data-ovr="feed:+10">+10%</button>
+              </div>
+            </div>
+            <div class="ovr-block">
+              <div class="ovr-head"><span>Rapid</span><b id="ov-rapid">100%</b></div>
+              <div class="ovr-row">
+                <button class="ovr-btn" data-ovr="rapid:25">25%</button>
+                <button class="ovr-btn" data-ovr="rapid:50">50%</button>
+                <button class="ovr-btn ovr-100" data-ovr="rapid:100">100%</button>
+              </div>
+            </div>
+            <div class="ovr-block">
+              <div class="ovr-head"><span>Spindle</span><b id="ov-spindle">100%</b></div>
+              <div class="ovr-row">
+                <button class="ovr-btn" data-ovr="spindle:-10">-10%</button>
+                <button class="ovr-btn" data-ovr="spindle:-1">-1%</button>
+                <button class="ovr-btn ovr-100" data-ovr="spindle:100">100%</button>
+                <button class="ovr-btn" data-ovr="spindle:+1">+1%</button>
+                <button class="ovr-btn" data-ovr="spindle:+10">+10%</button>
+              </div>
+            </div>
+          </details>
+
+          <details class="card">
+            <summary class="card-title">ACTIVE TOOL</summary>
+            <div class="spec-rows">
+              <div class="srow"><span>Tool Number</span><b id="tl-num">T1</b></div>
+              <div class="srow"><span>Description</span><b id="tl-name">6mm 3-Flute Carbide</b></div>
+              <div class="srow"><span>Diameter</span><b id="tl-dia">6.000 mm</b></div>
+              <div class="srow"><span>Length Offset (TLO)</span><b id="tl-tlo">0.000 mm</b></div>
+            </div>
+          </details>
+
+          <details class="card">
+            <summary class="card-title">WORK COORDINATE SYSTEM</summary>
+            <div class="wcs-grid">
+              <button class="wcs-btn active" data-wcs="G54">G54</button>
+              <button class="wcs-btn" data-wcs="G55">G55</button>
+              <button class="wcs-btn" data-wcs="G56">G56</button>
+              <button class="wcs-btn" data-wcs="G57">G57</button>
+              <button class="wcs-btn" data-wcs="G58">G58</button>
+              <button class="wcs-btn" data-wcs="G59">G59</button>
+            </div>
+          </details>
+
+          <details class="card">
+            <summary class="card-title">HARDWARE SIGNALS</summary>
+            <div class="spec-rows">
+              <div class="srow"><span>Probe Pin (Pn:P)</span><b id="hw-probe" class="pin-off">INACTIVE</b></div>
+              <div class="srow"><span>Limit Switches</span><b>ALL CLEAR</b></div>
+              <div class="srow"><span>Planner Buffer</span><b>15 / 15 BLOCKS</b></div>
+              <div class="srow"><span>RX Buffer</span><b>128 / 128 BYTES</b></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+    </main>
+  </div>
+  <script type="module" src="app.js?v=10"></script>
+</body>
+</html>

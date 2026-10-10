@@ -1,0 +1,65 @@
+LienCAM Setup Sheet
+Program: "08_Gear_pair.nc"
+Units: mm
+
+Setup: "Setup 1" (G54)
+  Work offset origin: X0 Y0 Z6 mm
+  Stock: "Stock 1" size 200 x 120 x 6 mm
+  Origin offset from stock min corner: X0 Y0 Z6 mm
+  Workholding:
+    Method: Tape and glue
+    Note: "Apply masking tape to the spoilboard and underside of the full 200 x 120 x 6 mm sheet. Bond the taped faces with superglue and let it cure. Run both setups on this same sheet without moving it. Both outlines cut 0.5 mm below the stock bottom, through the tape and slightly into the sacrificial spoilboard, to ensure breakthrough. Both gears stay glued in place. Pry off both gears and deburr. Tabs are off to keep nubs off the tooth flanks."
+
+1. "Bore 1"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -6 to 15 mm
+   NC lines: 3-307
+
+2. "Pocket 2"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -6 to 15 mm
+   NC lines: 308-2488
+
+3. "Contour 3"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -6.5 to 15 mm
+   NC lines: 2489-4774
+
+Setup: "Setup 2" (G54)
+  Work offset origin: X0 Y0 Z6 mm
+  Stock: "Stock 1" size 200 x 120 x 6 mm
+  Origin offset from stock min corner: X0 Y0 Z6 mm
+  Workholding:
+    Method: Tape and glue
+    Note: "Apply masking tape to the spoilboard and underside of the full 200 x 120 x 6 mm sheet. Bond the taped faces with superglue and let it cure. Run both setups on this same sheet without moving it. Both outlines cut 0.5 mm below the stock bottom, through the tape and slightly into the sacrificial spoilboard, to ensure breakthrough. Both gears stay glued in place. Pry off both gears and deburr. Tabs are off to keep nubs off the tooth flanks."
+
+4. "Bore 1"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -6 to 15 mm
+   NC lines: 4778-5079
+
+5. "Pocket 2"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -6 to 15 mm
+   NC lines: 5080-7260
+
+6. "Contour 3"
+   Tool: T1 "3 mm flat end mill" dia 3mm flute length 12mm
+   Spindle: 10000 RPM
+   Feed: cutting 450mm/min, plunge 150mm/min
+   Z range: -6.5 to 15 mm
+   NC lines: 7261-10363
+
+File: "08_Gear_pair.nc"
+Bytes: 261230
+SHA-256: b2cbe463b6dd73552387a810d431b71d855056fe1ddcc9b5f3502893eb4fcb94

@@ -1,0 +1,43 @@
+/* WO-2202: the work-offset rotation column beside X Y Z, in the Offsets panel
+   (Control screen) and the Offsets tab. The value is the controller's report
+   (docs/design/WCS-ROTATION.md). Only the new column is added; every other
+   track keeps its app.css width. */
+
+.control-offsets-row.offsets-rotation-row {
+  grid-template-columns: 42px repeat(3, 1fr) minmax(0, 0.85fr);
+}
+
+:where(html[data-ui-scale]) .control-offsets-row.offsets-rotation-row {
+  grid-template-columns: 2.625rem repeat(3, 1fr) minmax(0, 0.85fr);
+}
+
+.control-offset-workspace-row.offsets-rotation-row {
+  grid-template-columns:
+    minmax(190px, 1.45fr)
+    repeat(3, minmax(105px, 0.8fr))
+    minmax(96px, 0.7fr)
+    minmax(286px, 1.55fr);
+}
+
+:where(html[data-ui-scale]) .control-offset-workspace-row.offsets-rotation-row {
+  grid-template-columns:
+    minmax(11.875rem, 1.45fr)
+    repeat(3, minmax(6.5625rem, 0.8fr))
+    minmax(6rem, 0.7fr)
+    minmax(17.875rem, 1.55fr);
+}
+
+.offsets-rotation-value {
+  min-width: 0;
+}
+
+.offsets-rotation-head {
+  white-space: nowrap;
+}
+
+/* A rotated system reads apart from a square one at a glance: its angle is
+   amber and heavier; a 0 stays in the plain zero-cell style. */
+.offsets-rotation-value[data-rotated] input {
+  color: var(--accent-amber);
+  font-weight: var(--weight-semibold);
+}

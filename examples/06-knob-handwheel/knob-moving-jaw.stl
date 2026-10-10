@@ -1,0 +1,86 @@
+solid knob-moving-jaw
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 -30 -19
+vertex 33.71405029296875 30 -19
+vertex 33.71405029296875 -30 -19
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 -30 -19
+vertex 25.71405029296875 30 -19
+vertex 33.71405029296875 30 -19
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 -30 -7
+vertex 33.71405029296875 -30 -7
+vertex 33.71405029296875 30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 -30 -7
+vertex 33.71405029296875 30 -7
+vertex 25.71405029296875 30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 -30 -19
+vertex 33.71405029296875 -30 -19
+vertex 33.71405029296875 -30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 -30 -19
+vertex 33.71405029296875 -30 -7
+vertex 25.71405029296875 -30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 33.71405029296875 -30 -19
+vertex 33.71405029296875 30 -19
+vertex 33.71405029296875 30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 33.71405029296875 -30 -19
+vertex 33.71405029296875 30 -7
+vertex 33.71405029296875 -30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 33.71405029296875 30 -19
+vertex 25.71405029296875 30 -19
+vertex 25.71405029296875 30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 33.71405029296875 30 -19
+vertex 25.71405029296875 30 -7
+vertex 33.71405029296875 30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 30 -19
+vertex 25.71405029296875 -30 -19
+vertex 25.71405029296875 -30 -7
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 25.71405029296875 30 -19
+vertex 25.71405029296875 -30 -7
+vertex 25.71405029296875 30 -7
+endloop
+endfacet
+endsolid knob-moving-jaw

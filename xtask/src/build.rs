@@ -1,0 +1,422 @@
+//! Build pipeline: OCCT static libs → facade compilation → linking → wasm-opt.
+
+use anyhow::{Context, Result, bail};
+use std::path::{Path, PathBuf};
+use xshell::{Shell, cmd};
+
+use crate::util::{bytes_to_mb, find_occt_lib_dir, find_wasm_opt, project_root};
+
+/// Step 1: Build OCCT static libraries via emcmake cmake.
+pub fn build_occt() -> Result<()> {
+    let root = project_root()?;
+    let occt_dir = root.join("occt");
+    let build_dir = occt_dir.join("build");
+
+    if !occt_dir.join("CMakeLists.txt").exists() {
+        bail!(
+            "OCCT source not found at {}. Run: git submodule update --init",
+            occt_dir.display()
+        );
+    }
+
+    let sh = Shell::new()?;
+    sh.create_dir(&build_dir)?;
+    sh.change_dir(&build_dir);
+
+    // Skip if already configured
+    if build_dir.join("build.ninja").exists() {
+        eprintln!("Step 1a: OCCT already configured, skipping cmake.");
+    } else {
+        eprintln!("Step 1a: Configuring OCCT with emcmake cmake...");
+
+        let c_flags = "-fwasm-exceptions -O3 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS";
+        let cxx_flags = c_flags;
+        let rapidjson_inc = root.join("3rdparty/rapidjson").display().to_string();
+
+        cmd!(
+            sh,
+            "emcmake cmake ..
+            -G Ninja
+            -DCMAKE_BUILD_TYPE=Release
+            -DBUILD_MODULE_FoundationClasses=TRUE
+            -DBUILD_MODULE_ModelingData=TRUE
+            -DBUILD_MODULE_ModelingAlgorithms=TRUE
+            -DBUILD_MODULE_DataExchange=TRUE
+            -DBUILD_MODULE_ApplicationFramework=TRUE
+            -DBUILD_MODULE_Visualization=FALSE
+            -DBUILD_MODULE_Draw=FALSE
+            -DBUILD_LIBRARY_TYPE=Static
+            -DUSE_FREETYPE=OFF
+            -DUSE_RAPIDJSON=ON
+            -D3RDPARTY_RAPIDJSON_INCLUDE_DIR={rapidjson_inc}
+            -DCMAKE_C_FLAGS={c_flags}
+            -DCMAKE_CXX_FLAGS={cxx_flags}
+            -Wno-dev"
+        )
+        .run()?;
+    }
+
+    eprintln!("Step 1b: Building OCCT...");
+    cmd!(sh, "cmake --build . --parallel").run()?;
+
+    eprintln!("OCCT static libs built successfully.");
+    Ok(())
+}
+
+/// Step 2: Compile facade C++ files with emcc.
+fn compile_facade(sh: &Shell, root: &Path) -> Result<Vec<PathBuf>> {
+    let build_dir = root.join("build");
+    sh.create_dir(&build_dir)?;
+
+    let occt_inc = root.join("occt/build/include/opencascade");
+    let facade_inc = root.join("facade/include");
+
+    if !occt_inc.exists() {
+        bail!(
+            "OCCT include dir not found at {}. Run `cargo xtask build-occt` first.",
+            occt_inc.display()
+        );
+    }
+
+    let mut sources: Vec<PathBuf> = std::fs::read_dir(root.join("facade/src"))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "cpp"))
+        .collect();
+
+    // Also compile generated facade files (kernel.cpp + bindings.cpp).
+    // Exclude wasi_exports.cpp — that's the C-ABI export layer for the standalone
+    // WASI build (cargo xtask build-wasi), not the Embind/npm path. Linking it here
+    // adds ~60 KB of dead code and, with -O3 -flto on top of newer OCCT objects, can
+    // produce invalid wasm at the linker output.
+    let gen_dir = root.join("facade/generated");
+    if gen_dir.is_dir() {
+        let gen_sources: Vec<PathBuf> = std::fs::read_dir(&gen_dir)?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "cpp"))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| !n.starts_with("wasi_"))
+            })
+            .collect();
+        sources.extend(gen_sources);
+    }
+
+    // Sort for deterministic compilation order across platforms.
+    sources.sort();
+
+    // Track header mtimes: if any header changed, all objects are stale.
+    let newest_header = newest_header_mtime(&facade_inc)?;
+
+    let mut objects = Vec::new();
+    let occt_inc_str = occt_inc.display().to_string();
+    let facade_inc_str = facade_inc.display().to_string();
+
+    for src in &sources {
+        let name = src.file_stem().context("no file stem")?.to_string_lossy();
+        let is_generated = src.starts_with(&gen_dir);
+        let prefix = if is_generated { "gen_" } else { "" };
+        let obj = build_dir.join(format!("{prefix}{name}.o"));
+
+        // Skip if .o is newer than both the .cpp and all facade headers.
+        if obj.exists() {
+            let src_modified = std::fs::metadata(src)?.modified()?;
+            let newest_dep = newest_header.map_or(src_modified, |h| h.max(src_modified));
+            let obj_modified = std::fs::metadata(&obj)?.modified()?;
+            if obj_modified >= newest_dep {
+                objects.push(obj);
+                continue;
+            }
+        }
+
+        eprintln!("  Compiling {name}.cpp...");
+        let src_str = src.display().to_string();
+        let obj_str = obj.display().to_string();
+        cmd!(
+            sh,
+            "em++ -std=c++17 -fwasm-exceptions -O3 -msimd128
+            -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS
+            -I{occt_inc_str} -I{facade_inc_str}
+            -w -c {src_str} -o {obj_str}"
+        )
+        .run()?;
+
+        objects.push(obj);
+    }
+
+    Ok(objects)
+}
+
+/// OCCT static libraries not used by the facade — excluded from linking.
+const EXCLUDED_LIBS: &[&str] = &[
+    // IGES exchange (deliberately excluded — STEP is the modern standard, saves ~1-2 MB)
+    "libTKDEIGES.a",
+    // Persistence / serialization
+    "libTKStd.a",
+    "libTKStdL.a",
+    "libTKBin.a",
+    "libTKBinL.a",
+    "libTKBinXCAF.a",
+    "libTKBinTObj.a",
+    "libTKXml.a",
+    "libTKXmlL.a",
+    "libTKXmlXCAF.a",
+    "libTKXmlTObj.a",
+    "libTKTObj.a",
+    // Note: TKVCAF NOT excluded — TKXCAF depends on TPrsStd_Driver from TKVCAF
+    // Unused exchange formats
+    "libTKDEVRML.a",
+    "libTKDEOBJ.a",
+    "libTKDEPLY.a",
+    "libTKDECascade.a",
+    "libTKXMesh.a",
+    // Note: TKV3d and TKService NOT excluded — TKXCAF depends on Graphic3d_* from TKService
+    // Features not used by facade
+    "libTKFeat.a",
+    "libTKHelix.a",
+];
+
+/// Step 3: Link facade objects + OCCT static libs → .wasm + .js
+fn link_wasm(
+    sh: &Shell,
+    root: &Path,
+    objects: &[PathBuf],
+    release: bool,
+    size: bool,
+) -> Result<()> {
+    let dist_dir = root.join("dist");
+    sh.create_dir(&dist_dir)?;
+
+    let occt_lib_dir = find_occt_lib_dir(&root.join("occt/build"))?;
+
+    // Collect all OCCT static lib paths, filtering out unused libraries.
+    let mut all_libs: Vec<PathBuf> = std::fs::read_dir(&occt_lib_dir)?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "a"))
+        .collect();
+    all_libs.sort(); // Deterministic link order across platforms.
+    let total = all_libs.len();
+
+    let occt_libs: Vec<String> = all_libs
+        .into_iter()
+        .filter(|p| {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
+            !name.is_some_and(|n| EXCLUDED_LIBS.contains(&n.as_str()))
+        })
+        .map(|p| p.display().to_string())
+        .collect();
+
+    let excluded = total - occt_libs.len();
+    eprintln!("  Excluded {excluded}/{total} unused OCCT libs from link.");
+
+    let obj_strs: Vec<String> = objects.iter().map(|p| p.display().to_string()).collect();
+    let output = dist_dir.join("occt-wasm.js");
+    let output_str = output.display().to_string();
+    let post_js = root.join("scripts/symbol_dispose.js");
+    let post_js_str = post_js.display().to_string();
+
+    let opt_level = if release && size {
+        "-Oz"
+    } else if release {
+        "-O3"
+    } else {
+        "-O2"
+    };
+
+    // Build the full args list
+    let mut args: Vec<String> = vec![
+        "-lembind".into(),
+        "-fwasm-exceptions".into(),
+        "-msimd128".into(),
+        "-mtail-call".into(),
+        opt_level.into(),
+        "-sINITIAL_MEMORY=134217728".into(),
+        "-sMAXIMUM_MEMORY=4294967296".into(),
+        "-sALLOW_MEMORY_GROWTH=1".into(),
+        "-sEXPORT_ES6=1".into(),
+        "-sEVAL_CTORS=2".into(),
+        "-sWASM_BIGINT".into(),
+        "-sMODULARIZE=1".into(),
+        "-sEXPORT_NAME=createOcctWasm".into(),
+        "-sEXPORTED_RUNTIME_METHODS=[\"FS\",\"HEAP32\",\"HEAPF32\",\"HEAPU32\"]".into(),
+        "-sEXPORT_EXCEPTION_HANDLING_HELPERS=1".into(),
+        "--no-entry".into(),
+        format!("--post-js={post_js_str}"),
+    ];
+
+    if release {
+        args.push("-flto".into());
+    }
+
+    // Add object files
+    args.extend(obj_strs);
+    // Add OCCT static libs
+    args.extend(occt_libs);
+    // Output
+    args.push("-o".into());
+    args.push(output_str);
+
+    eprintln!("Step 3: Linking WASM ({opt_level})...");
+
+    // xshell cmd! doesn't support dynamic arg lists well, use std::process::Command
+    let status = std::process::Command::new("em++")
+        .args(&args)
+        .status()
+        .context("failed to run em++")?;
+
+    if !status.success() {
+        bail!("em++ linking failed with status: {status}");
+    }
+
+    Ok(())
+}
+
+/// Step 4: Run wasm-opt on the output.
+fn optimize_wasm(sh: &Shell, root: &Path) -> Result<()> {
+    let wasm = root.join("dist/occt-wasm.wasm");
+    let wasm_str = wasm.display().to_string();
+
+    let wasm_opt_bin = find_wasm_opt();
+
+    // Deliberately NOT translating legacy `try`/`catch` to the new
+    // `try_table`/`exnref` encoding here (cf. `convert_eh` in build_wasi.rs).
+    // Firefox emits a deprecation warning for legacy EH, but it still runs it;
+    // exnref, by contrast, is rejected by Node's V8 without
+    // --experimental-wasm-exnref and post-dates the Chrome 114 / Safari 17.2
+    // floor. The crate build can use exnref only because wasmtime is configured
+    // to accept it; the npm build targets unmodified browsers AND Node, so
+    // legacy EH stays. Revisit once exnref is default across the support matrix.
+    eprintln!("Step 4: Running wasm-opt...");
+    cmd!(
+        sh,
+        "{wasm_opt_bin} -O4 --strip-debug --strip-producers
+        --converge --gufa
+        --enable-bulk-memory --enable-sign-ext
+        --enable-nontrapping-float-to-int --enable-mutable-globals
+        --enable-exception-handling --enable-simd --enable-tail-call
+        {wasm_str} -o {wasm_str}"
+    )
+    .run()?;
+
+    Ok(())
+}
+
+/// Find the newest mtime among all `.h`, `.hxx`, and `.hpp` files in a
+/// directory tree (recursive).
+///
+/// Returns `None` if the directory doesn't exist or contains no headers.
+fn newest_header_mtime(include_dir: &Path) -> Result<Option<std::time::SystemTime>> {
+    if !include_dir.is_dir() {
+        return Ok(None);
+    }
+    let mut newest = None;
+    let mut stack = vec![include_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let is_header = path
+                .extension()
+                .is_some_and(|e| e == "h" || e == "hxx" || e == "hpp");
+            if is_header {
+                let mtime = std::fs::metadata(&path)?.modified()?;
+                newest = Some(newest.map_or(mtime, |prev: std::time::SystemTime| prev.max(mtime)));
+            }
+        }
+    }
+    Ok(newest)
+}
+
+/// Full build: OCCT + facade + link + wasm-opt.
+pub fn build(release: bool, size: bool) -> Result<()> {
+    let root = project_root()?;
+    let sh = Shell::new()?;
+
+    // Step 1: Build OCCT static libs (skip if already built)
+    let occt_lib_dir = find_occt_lib_dir(&root.join("occt/build"));
+    if occt_lib_dir.is_err() {
+        eprintln!("Step 1: OCCT static libs not found, building...");
+        build_occt()?;
+    } else {
+        eprintln!("Step 1: OCCT static libs found, skipping.");
+    }
+
+    // Step 1b: Run codegen if generated facade is missing
+    let gen_kernel = root.join("facade/generated/kernel.cpp");
+    if !gen_kernel.exists() {
+        eprintln!("Step 1b: Generated facade not found, running codegen...");
+        crate::codegen::run::run()?;
+    }
+
+    // Step 2: Compile facade
+    eprintln!("Step 2: Compiling facade...");
+    let objects = compile_facade(&sh, &root)?;
+    eprintln!("  {} object files ready.", objects.len());
+
+    // Step 3: Link
+    link_wasm(&sh, &root, &objects, release, size)?;
+
+    // Step 4: wasm-opt (release only)
+    if release {
+        optimize_wasm(&sh, &root)?;
+    }
+
+    // Report
+    let wasm_path = root.join("dist/occt-wasm.wasm");
+    if wasm_path.exists() {
+        let size_mb = bytes_to_mb(std::fs::metadata(&wasm_path)?.len());
+        eprintln!("Build complete: dist/occt-wasm.wasm ({size_mb:.1}MB)");
+    }
+
+    Ok(())
+}
+
+/// Remove all build artifacts.
+pub fn clean(keep_generated: bool) -> Result<()> {
+    let root = project_root()?;
+    let sh = Shell::new()?;
+
+    let mut dirs_to_clean = vec![
+        root.join("occt/build"),
+        root.join("build"),
+        root.join("dist"),
+    ];
+    if !keep_generated {
+        dirs_to_clean.push(root.join("facade/generated"));
+    }
+
+    for dir in &dirs_to_clean {
+        if dir.exists() {
+            eprintln!("Removing {}", dir.display());
+            sh.remove_path(dir)?;
+        }
+    }
+
+    eprintln!("Clean complete.");
+    Ok(())
+}
+
+/// Run integration tests.
+pub fn test(watch: bool) -> Result<()> {
+    let root = project_root()?;
+    let sh = Shell::new()?;
+
+    if !root.join("dist/occt-wasm.wasm").exists() {
+        bail!("WASM not built. Run `cargo xtask build` first.");
+    }
+
+    sh.change_dir(root.join("ts"));
+    if watch {
+        cmd!(sh, "npx vitest --watch").run()?;
+    } else {
+        cmd!(sh, "npx vitest run").run()?;
+    }
+
+    Ok(())
+}

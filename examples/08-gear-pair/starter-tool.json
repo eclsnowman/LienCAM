@@ -1,0 +1,31 @@
+[
+  {
+    "id": "starter-metric-1",
+    "name": "3 mm flat end mill",
+    "type": "flat_end_mill",
+    "diameter": 3,
+    "shankDiameter": 6,
+    "overallLength": 50,
+    "fluteLength": 12,
+    "shoulderLength": 0,
+    "numberOfFlutes": 2,
+    "cornerRadius": 0,
+    "angleFromAxisDeg": 59,
+    "material": "carbide",
+    "coating": "none",
+    "toolNumber": 1,
+    "cutHand": "right",
+    "notes": "Original starter example. Dimensions in mm; feeds in mm/min. Adjust for your machine and material.",
+    "feedsAndSpeeds": {
+      "default": {
+        "rpm": 10000,
+        "feedRate": 450,
+        "plungeRate": 150,
+        "depthOfCut": 0.5,
+        "stepover": 1.2000000000000002,
+        "rampAngle": 2,
+        "coolant": "air"
+      }
+    }
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "durationSeconds": 26,
+  "viewport": { "width": 1920, "height": 1080 },
+  "project": "examples/02-toe-clamps/toe-clamps.camproject",
+  "steps": [
+    { "at": 2, "action": "play", "duration": 0.9 },
+    { "at": 7, "action": "orbit", "duration": 4, "from": [0.59, 0.48], "to": [0.70, 0.54] },
+    { "at": 17, "action": "orbit", "duration": 4, "from": [0.65, 0.48], "to": [0.56, 0.43] },
+    { "at": 24, "action": "pause", "duration": 0.9 }
+  ]
+}

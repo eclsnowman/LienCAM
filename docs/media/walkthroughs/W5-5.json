@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "shots": {
+    "W5-5.png": {
+      "commit": "ecc9779b30487ef475fac51ef0b916b7cba6b401",
+      "workingTreeDirty": false,
+      "workingTreeScope": [
+        "examples/08-gear-pair/gear-pair.camproject",
+        "src",
+        "tools/capture/scenes.json",
+        "tools/capture/scenes.mjs"
+      ],
+      "sourceExcludes": [
+        "src/tests/evidence"
+      ],
+      "sourceHash": "bd11a609b6be2fef30cf5a248b5c1d93ae501eea03ef52c8c763975ed9e1fcdb",
+      "sourceHashAlgorithm": "sha256-path-and-content-v1",
+      "sourceFileCount": 4362,
+      "screenshotBytes": 273119,
+      "screenshotSha256": "44f5279deb7ddf665c0526210d7b05c35f31d44039a3185f3bc4e7b6c6284eef"
+    }
+  }
+}

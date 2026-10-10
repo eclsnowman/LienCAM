@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160mm" height="50mm" viewBox="0 0 160 50">
+  <title>Original tool storage bar - top</title>
+  <desc>Apache-2.0; made for the release. 160 x 50 x 12 mm bar.</desc>
+  <rect x="0" y="0" width="160" height="50" fill="none" stroke="#54b9d5"/>
+  <circle cx="25" cy="25" r="3.25" fill="none" stroke="#54b9d5"/>
+  <circle cx="68" cy="25" r="4.25" fill="none" stroke="#54b9d5"/>
+  <circle cx="121" cy="25" r="6.25" fill="none" stroke="#54b9d5"/>
+</svg>

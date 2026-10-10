@@ -1,0 +1,47 @@
+{
+  "fix0": {
+    "name": "CommaSpiral",
+    "hash": "4cf32417ccc5549f",
+    "passes": 621
+  },
+  "fix1": {
+    "name": "Kidney",
+    "hash": "ecf9dc4133be9867",
+    "passes": 860
+  },
+  "fix2": {
+    "name": "SquareIsland",
+    "hash": "6e30318dd08452c0",
+    "passes": 1125
+  },
+  "fix3": {
+    "name": "Tee",
+    "hash": "0d633234a4c500ae",
+    "passes": 570
+  },
+  "fix4": {
+    "name": "Bar",
+    "hash": "8e6e9f4c310bef95",
+    "passes": 366
+  },
+  "fix5": {
+    "name": "BootL",
+    "hash": "7aafff783ab5f606",
+    "passes": 1129
+  },
+  "fix6": {
+    "name": "Triangle",
+    "hash": "f33be1d0ca0f72c7",
+    "passes": 611
+  },
+  "fix7": {
+    "name": "Barbell",
+    "hash": "51691479507980d4",
+    "passes": 616
+  },
+  "fix8": {
+    "name": "Boomerang",
+    "hash": "edc8df09162587e0",
+    "passes": 809
+  }
+}

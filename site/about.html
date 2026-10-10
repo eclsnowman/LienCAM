@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Why LienCAM was built: a hobbyist's free, open-source CAM program for sketch, model, toolpath, simulation, post and machine control.">
+  <title>About LienCAM - Why I built it</title>
+  <link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
+  <link rel="stylesheet" href="/styles/site.css">
+  <style>.about { padding-block: 40px 24px; }</style>
+</head>
+<body>
+  <!-- partial:header -->
+  <main id="main">
+    <article class="about" aria-labelledby="about-heading">
+      <h1 id="about-heading">Why I built LienCAM</h1>
+      <p>I'm a hobbyist. I've enjoyed designing and building 3D printers since 2013, and CNC machines along the way. The technology hooked me at first, but it's the community that has kept me at it all these years. I've designed or partnered on printers like HercuLien, Eustathios and Talos, and on CNC routers like LienCNC and the R7, always alongside other great makers, and I've shared every design openly, native CAD files included. None of it was ever for money. I just love building things, and I love seeing what other people make of them. When Google+ shut down, I pitched in to help carry our community's threads over to what became Maker Forums, because those conversations were worth keeping.</p>
+      <p>The one part of my hobby I never felt I owned was the software. The programs I used to turn a part into G-code could change their terms whenever they liked, and features I relied on - things as basic as rapid moves, or posting a multi-tool job as one program - got limited or taken away. I wanted software I could count on: sketch, model, toolpaths, simulation, post-processing and machine control in one program, running on my own computer, with no account and no cloud.</p>
+      <p>I started building it at the end of April 2026 and have put well over 1,000 hours into development and testing since then. That has included geometry imports, toolpath planning and tuning, sketch and modeling tools, and machine control. My own machine runs UCCNC with an AXBB-E controller. I've spent multiple weeks testing and troubleshooting motion and running output from the software on that machine through the UCCNC API bridge I built. I don't have a GRBL or LinuxCNC machine, so testing for those systems has been limited to simulators. I've worked through what I can with those, but both will need alpha testing by others on actual hardware.</p>
+      <p>Throughout development, I've been using the software to make parts and working through the problems I've found, with the hope that it will be useful to others from the first release. There's only so much I can cover on my own, and there will still be bugs, but I've tried to test it as thoroughly as I can with the knowledge and equipment I have. Feedback from others will help identify what I've missed and where it needs more work.</p>
+      <p><strong>How it was made.</strong> LienCAM was built with a great deal of help from AI coding assistants, and I'd rather you hear that from me than find it out on your own. My part was deciding what it should do and how it should work, making the design calls, judging every result, and testing it on real hardware - machine-control changes are tried on a simulator first and then on my router. The AI wrote much of the code under that direction. The source is all open, so you can judge the result for yourself.</p>
+      <p><strong>Standing on other people's work.</strong> LienCAM leans on a lot of open-source projects and on the people who wrote them - geometry kernels, toolpath algorithms, solvers, fonts and more. They are all listed, with my thanks, on the <a href="{{route:credits}}">Credits</a> page. Credit where it's due matters to me.</p>
+      <p><strong>Why it's open.</strong> I'm sharing LienCAM under the Apache-2.0 licence so that anyone can use it, modify it, fork it and adapt it to their own machine and their own way of working - for the same reason I've always shared my hardware designs. If you make something with it, I'd love to see it.</p>
+      <p><strong>Open by design.</strong> Everything you make in LienCAM is yours, and it leaves with you. Models export as STEP and STL, sketches as DXF and SVG, programs as plain G-code, and your tools, machines, post-processors, macros, settings and projects as documented JSON. Inside, LienCAM uses whatever formats work best for it - but the way out is always an open, standard format that other software can read. No account, no cloud, no lock-in.</p>
+      <p><strong>What to expect from me.</strong> This is a passion project. I have a day job and a family, and I can't be a full-time developer on it. I'll do my best to keep up with bug reports, and I'll be honest about what works and what doesn't. If LienCAM turns out to be as useful to you as I meant it to be, and you have the time and the skills to help - code, testing on your machine, documentation, example parts - I'd really look forward to building it together.</p>
+      <p class="signature">- Eric Lien</p>
+    </article>
+  </main>
+  <!-- partial:footer -->
+</body>
+</html>
