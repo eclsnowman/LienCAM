@@ -64,7 +64,41 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Public tests
-        run: npm run test:public -- --shard=${{ matrix.shard }}/4
+        run: node tools/release/public-test-run.mjs --shard=${{ matrix.shard }}/4
+      - name: Preserve raw test report and exit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: public-tests-${{ matrix.shard }}
+          path: public-test-results/public-tests-${{ matrix.shard }}/
+          if-no-files-found: error
+
+  tests-summary:
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci
+      - name: Download all shard reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: public-tests-*
+          path: public-test-results
+      - name: Verify every public file ran exactly once
+        run: node tools/release/public-test-run.mjs --summary public-test-results
 
   windows-build:
     runs-on: windows-latest

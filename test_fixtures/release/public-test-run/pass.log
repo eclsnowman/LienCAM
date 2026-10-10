@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 /fixture
+
+ ✓ capture.test.mjs (1 test) 2ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  01:33:32
+   Duration  263ms (transform 18ms, setup 0ms, collect 19ms, tests 2ms, environment 0ms, prepare 103ms)
+
+JSON report written to /fixture/test_fixtures/release/public-test-run/pass.json

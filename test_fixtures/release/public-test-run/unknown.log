@@ -1,0 +1,41 @@
+
+ RUN  v3.2.7 /fixture
+
+ ✓ capture.test.mjs (1 test) 65ms
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: capture unknown unhandled failure
+ ❯ capture.test.mjs:9:20
+      7|   if (process.env.WO2723_CASE === 'crash') process.exit(1)
+      8|   if (process.env.WO2723_CASE === 'unknown') {
+      9|     Promise.reject(new Error('capture unknown unhandled failure'))
+       |                    ^
+     10|     await new Promise(resolve => setTimeout(resolve, 50))
+     11|   }
+ ❯ ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+ ❯ ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+ ❯ ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+ ❯ runWithTimeout ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10
+ ❯ runTest ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12
+ ❯ processTicksAndRejections node:internal/process/task_queues:103:5
+ ❯ runSuite ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8
+ ❯ runFiles ../../LienCAM/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3
+
+This error originated in "capture.test.mjs" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "real reporter capture". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+     Errors  1 error
+   Start at  01:33:35
+   Duration  333ms (transform 17ms, setup 0ms, collect 18ms, tests 65ms, environment 0ms, prepare 101ms)
+
+JSON report written to /fixture/test_fixtures/release/public-test-run/unknown.json

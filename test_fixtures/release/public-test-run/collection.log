@@ -1,0 +1,25 @@
+
+ RUN  v3.2.7 /fixture
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  capture.test.mjs [ capture.test.mjs ]
+Error: capture collection failure
+ ❯ capture.test.mjs:4:53
+      2| import { expect, it } from 'vitest'
+      3| 
+      4| if (process.env.WO2723_CASE === 'collection') throw new Error('capture…
+       |                                                     ^
+      5| it('real reporter capture', async () => {
+      6|   if (process.env.WO2723_CASE === 'timeout') spawnSync(process.execPat…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  01:33:34
+   Duration  321ms (transform 20ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 153ms)
+
+JSON report written to /fixture/test_fixtures/release/public-test-run/collection.json

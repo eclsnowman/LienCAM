@@ -1,0 +1,28 @@
+
+ RUN  v3.2.7 /fixture
+
+ ❯ capture.test.mjs (1 test | 1 failed) 6ms
+   × real reporter capture 5ms
+     → expected 'assertion' not to be 'assertion' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  capture.test.mjs > real reporter capture
+AssertionError: expected 'assertion' not to be 'assertion' // Object.is equality
+ ❯ capture.test.mjs:12:39
+     10|     await new Promise(resolve => setTimeout(resolve, 50))
+     11|   }
+     12|   expect(process.env.WO2723_CASE).not.toBe('assertion')
+       |                                       ^
+     13| })
+     14| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  01:36:23
+   Duration  278ms (transform 19ms, setup 0ms, collect 21ms, tests 6ms, environment 0ms, prepare 104ms)
+
+JSON report written to /fixture/test_fixtures/release/public-test-run/assertion.json

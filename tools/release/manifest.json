@@ -149,6 +149,16 @@
     },
     {
       "action": "include",
+      "path": "tools/release/public-test-run.mjs",
+      "reason": "Preserve raw test results and verify complete public shard coverage."
+    },
+    {
+      "action": "include",
+      "path": "test_fixtures/release/public-test-run/",
+      "reason": "Real Vitest reporter fixtures for the public CI result checker."
+    },
+    {
+      "action": "include",
       "path": "tools/release/manifest.json",
       "reason": "Keep the test selection contract available in the public tree."
     },

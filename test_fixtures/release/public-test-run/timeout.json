@@ -1,0 +1,49 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 1,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 1,
+  "numPassedTests": 1,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791613854706,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "real reporter capture",
+          "status": "passed",
+          "title": "real reporter capture",
+          "duration": 65056.4728,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1791613854945,
+      "endTime": 1791613920001.473,
+      "status": "passed",
+      "message": "",
+      "name": "/fixture/capture.test.mjs"
+    }
+  ]
+}
