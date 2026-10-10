@@ -17,7 +17,7 @@ describe('WO-2704 simulator and setter Help', () => {
   })
   it('distinguishes Control practice from stock simulation and documents landed drilling', () => {
     const text = prose('control-simulator')
-    for (const phrase of ['Choose Simulator', 'click Connect', 'moves no physical machine', 'Press CLEAR', 'Simulated part', 'Place under probe', 'Reset', 'G81, G82 and G83', 'G98/G99', 'Simulate tab is a separate']) expect(text).toContain(phrase)
+    for (const phrase of ['Choose Simulate followed by your machine name', 'click Connect', 'moves no physical machine', 'Press CLEAR', 'Simulated part', 'Place under probe', 'Reset', 'G81, G82 and G83', 'G98/G99', 'Simulate tab is a separate']) expect(text).toContain(phrase)
   })
   it('documents reference measurement, unassigned contacts, and the actual virtual setter height', () => {
     const text = prose('control-tool-setter')
