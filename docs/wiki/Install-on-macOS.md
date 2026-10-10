@@ -9,7 +9,7 @@
 
 ## Install
 
-1. From the project's Releases page, download the `.dmg` file. It is built for Apple silicon (M1 and later). On an Intel Mac, use the [browser version](Run-in-your-browser) or [build it from source](Build-from-source).
+1. From the project's [Releases page](../releases), download `LienCAM-<version>-mac-arm64.dmg`. It is built for Apple silicon (M1 and later). On an Intel Mac, use the [browser version](Run-in-your-browser) or [build it from source](Build-from-source).
 2. Open the dmg and drag LienCAM into Applications.
 
 ## The Gatekeeper prompt

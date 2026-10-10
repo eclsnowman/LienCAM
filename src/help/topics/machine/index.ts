@@ -84,7 +84,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     id: 'moving-to-a-new-pc',
     title: 'Moving LienCAM to a new or rebuilt PC',
     category: 'machine',
-    summary: "Install LienCAM and UCCNC, copy your UCCNC profile, then Restore bundle: your shop data and this machine's connection settings come back from the backup, with no file to hand-edit. Two things a backup cannot carry are listed here, with why.",
+    summary: "Install LienCAM and UCCNC, copy your UCCNC profile, then use Settings > User Data > Inspect backup... > Confirm restore: your shop data and this machine's connection settings come back from the backup, with no file to hand-edit. Two things a backup cannot carry are listed here, with why.",
     sections: [
       {
         kind: 'paragraph',
@@ -411,7 +411,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     id: 'probing-tab',
     title: 'The Probing tab',
     category: 'machine',
-    summary: 'Probing finds edges, corners, bores, bosses, surfaces and tool lengths with a touch probe, shows the plan on a diagram, and writes an offset only after you confirm.',
+    summary: 'Probing finds edges, corners, bores, bosses, surfaces and tool lengths with a touch probe and shows the plan on a diagram. Z0 writes immediately; Tool Z records its measurement immediately. Review other results before applying them.',
     sections: [
       {
         kind: 'paragraph',
@@ -431,7 +431,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         steps: [
           'Setup panel: define the feature - work offset, axis and side, approximate size, search distance. The picture updates as you type; nothing moves.',
           'Run: jog to the labeled start shown in the picture, read the motion plan and feeds, make sure the path is clear, then press Start probing - it moves straight away, with no further confirmation. An approach toward a face to be touched is itself a probe seek at Search speed, followed by a back-off and a slow touch at Probe speed. Clear-area moves use the Clear positioning setting. A missed seek stops where it is, without an automatic retract.',
-          'Result: the measured numbers, the tip-radius compensation sentence, and "Would write G54 ... after confirmation". Nothing is written until you press Confirm.',
+          'Result: Z0 writes the active work Z0 during the successful cycle. Tool Z immediately records the measured Setter Z for the active tool, or holds it as the active tool length if no tool number is active. Neither has a separate Confirm. Feature offsets show "Would write G54 ... after confirmation" and use Confirm to apply them. Z surface and Calibrate also use Confirm. Angle reports the measured angle and offers Rotate to apply a nonzero change to the work offset rotation.',
           'While probing runs, Pause stops the current move and becomes Resume. Resume continues toward the same endpoint. Stop ends only probing, from running or paused, and a stopped routine writes no result. Start probing starts it afresh. These buttons preserve a loaded program; probing cannot start while that program is running or held.',
           'When paused with the probing screen\'s Pause, the status line points to that screen\'s Resume and Stop. Other held routines, such as Measure tool, still use CYCLE START and Stop/Reset as their status sentence says.',
           'Save probing settings under Control > Machine > Definition > Probing and the next routine uses them without reconnecting, including Search speed, Probe speed, clearance and search bounds. Settings that must be written to the controller still need its receipt; this change applies to probing values used by LienCAM.',
@@ -440,6 +440,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
           'A refused probe start keeps the current preview. A failed or stopped probe cycle shows Stopped and the full reason in red on the probing screen; a refused start shows Did not start and its reason. A new stop or refused start replaces the previous reason. The message states what happened, without guessing a cause. If a tool-setter measurement fails on a tool-change card, Retry measure repeats the measurement without visiting the park again. The failure names the setter and the touch result; Cancel on a manual tool change reports the cancellation and keeps the recorded spindle tool.',
           'When the reference tool is measured again, the Console reports its reading change and the actual work Z offset change sent to the controller. Those can differ on a controller that stores tool length in the work offset.',
         ],
+      },
+      {
+        kind: 'paragraph',
+        text: 'Top tells you where a feature routine gets its top reference. Edge, Outside corner and Angle use "Touch it first". Bore, Rect pocket and Inside corner use "Use work Z0": set work Z0 at the stock top before running them. Boss and Rect boss let you choose either, starting with "Touch it first"; set work Z0 first if you choose "Use work Z0". Calibrate touches the top for an outside reference and uses work Z0 for an inside reference.',
       },
       { kind: 'image', slot: 'probing-result-confirm' },
       {
@@ -586,7 +590,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'A routine can PROPOSE three things and perform none of them: a work offset ("Would write G54 X= Y= after confirmation"), a tool length ("Would record T3 length"), or a report (a measured diameter, position or angle, read-only). When the routine finishes, the proposals appear under the result with the same Confirm button the Probing tab has always used. Nothing is written until you press it; Cancel discards the proposal and the machine keeps its offsets.',
+        text: 'A routine can PROPOSE three things and perform none of them: a work offset ("Would write G54 X= Y= after confirmation"), a tool length ("Would record T3 length"), or a report (a measured diameter, position or angle, read-only). When a routine on the Routines tab finishes, its proposals appear under the result with a Confirm button. Nothing is written until you press it; Cancel discards the proposal and the machine keeps its offsets. The Probing tab\'s Z0 and Tool Z cycles are separate: they write or record their results immediately.',
       },
       {
         kind: 'heading',
@@ -1059,7 +1063,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
   "id": "control-simulator",
   "title": "The in-app machine simulator",
   "category": "machine",
-  "summary": "Choose Simulator in Control to practice running programs, jogging and probing against a virtual machine using the selected machine settings.",
+  "summary": "Choose Simulate followed by your machine name in Control to practice running programs, jogging and probing against a virtual machine using the selected machine settings.",
   "keywords": "simulator simulation virtual machine practice dry run offline no hardware in-app simulated part drill canned cycles g81 g82 g83 g98 g99 tool setter",
   "contextKeys": [
     "workspace:control",
@@ -1069,7 +1073,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     {
       "kind": "steps",
       "steps": [
-        "Open Control with the machine you want to practice on selected. Choose Simulator in the connection selector and click Connect. This connection runs inside LienCAM and moves no physical machine.",
+        "Open Control with the machine you want to practice on selected. Choose Simulate followed by your machine name in the connection selector and click Connect. This connection runs inside LienCAM and moves no physical machine.",
         "Press CLEAR to release the software stop after connecting, then home or set the datum as the status sentence asks. Load a G-code file or post your setup into Control, and use CYCLE START, Feed Hold and Stop/Reset as you would for a connected machine.",
         "For probing practice, open Diagnostics and find Simulated part. Place under probe moves the virtual part beneath the current probe position; Reset restores its default placement. Neither action moves the tool."
       ]
@@ -1093,7 +1097,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         "slot": "simulated-part-full",
         "file": "simulated-part-full.webp",
-        "alt": "Machine > Diagnostics on the simulator, with the Simulated part card below the drive links.",
+        "alt": "The simulator's Diagnostics page, where you can place a virtual part for probing practice.",
         "captureNotes": "Machine > Diagnostics on the simulator, with the Simulated part card below the drive links. WO-2714; architect-accepted production candidate.",
         "status": "done"
       },
@@ -1152,7 +1156,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         "slot": "tools-setter",
         "file": "tools-setter.webp",
-        "alt": "Tools table and probe card after the simulator measured T2 at machine Z -40.00 mm; T1 is the reference tool and Apply length is disabled.",
+        "alt": "The Tools tab after measuring T2 on the simulated setter, with T1 as the reference tool. Apply length is unavailable in this state.",
         "captureNotes": "Tools table and probe card after the simulator measured T2 at machine Z -40.00 mm; T1 is the reference tool and Apply length is disabled. WO-2714; architect-accepted production candidate.",
         "status": "done"
       },

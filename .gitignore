@@ -118,3 +118,6 @@ src/tests/evidence/WO-439/_last-run/
 /.planning/rehearsal-*/profile-*/
 /.planning/rehearsal-2026-09-29-evening/probing/
 /.planning/rehearsal-2026-09-29-evening/rotation/
+
+# One-folder archive (owner ruling 10-09): kept evidence from housekeeping, never committed
+/archive/

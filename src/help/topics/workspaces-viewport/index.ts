@@ -22,7 +22,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'Clicking the Model tab opens the New Model window: Create Model starts a new model, and closing the window keeps you where you were. To open a model you already have, use Edit model on its row in the design tree.',
+        text: 'Clicking the Model tab opens the New Model window: Create Model starts a new model, or choose one of the models in the project below it to open it. Closing the window keeps you where you were. You can also open a model with Edit model on its row in the design tree.',
       },
       { kind: 'image', slot: 'mode-strip' },
     ],
@@ -44,11 +44,11 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     id: 'new-model',
     title: 'New Model',
     category: 'workspaces-viewport',
-    summary: 'The Model tab opens the New Model window: Create Model starts a new, empty model and opens it in the Model workspace.',
+    summary: 'The Model tab opens the New Model window: Create Model starts a new, empty model, or choose an existing model to open it in the Model workspace.',
     sections: [
       {
         kind: 'paragraph',
-        text: 'Click the Model tab and the New Model window opens. Create Model adds a new model to the project and opens it in the Model workspace, ready to build. Cancel, the X or Escape closes the window and leaves you where you were; nothing is added.',
+        text: 'Click the Model tab and the New Model window opens. Create Model adds a new model to the project and opens it in the Model workspace, ready to build. Below it, Or choose an existing model lists the models in the project; click one to open it. An imported STEP or STL part in that list opens as a model, the same as Edit as model in the design tree. Cancel, the X or Escape closes the window and leaves you where you were; nothing is added.',
       },
       {
         kind: 'paragraph',

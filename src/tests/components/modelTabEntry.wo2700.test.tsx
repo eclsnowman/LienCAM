@@ -19,10 +19,14 @@ function seedItems(count = 1) {
     })),
   } })))
 }
+// Owner ruling 10-09: the plain tab must at least offer New Model - never ONLY that. Like the Sketch window, the
+// project's existing models are listed below Create Model.
 function expectNewDialog() {
   expect(screen.getByText('New Model', { selector: '.modal-title' })).toBeTruthy()
   expect(state().activeModal).toBe('new-model')
-  expect(screen.queryByTestId('model-entry-list')).toBeNull()
+  expect(screen.getByTestId('model-entry-new')).toBeTruthy()
+  for (const item of state().project.modelItems ?? []) expect(screen.getByTestId(`model-entry-row-${item.id}`)).toBeTruthy()
+  if (!(state().project.modelItems ?? []).length) expect(screen.getByTestId('model-entry-empty')).toBeTruthy()
 }
 function seedModelGeometry() {
   seedItems(2)
@@ -87,6 +91,38 @@ describe('WO-2700: plain Model tab means New Model', () => {
     expect(state().workspace).toBe('control')
     expect(state().activeModelItemId).toBe('item-1')
     expect(state().project).toBe(before)
+  })
+  it('lists every existing model under Create Model and opens the chosen one', () => {
+    seedItems(3)
+    act(() => useCamStore.setState({ activeModelItemId: 'item-0' }))
+    mount()
+    fireEvent.click(screen.getByTestId('mode-tab-part'))
+    expectNewDialog()
+    expect(screen.getByText('Or choose an existing model')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('model-entry-row-item-2'))
+    expect(state().activeModal).toBeNull()
+    expect(state().workspace).toBe('part')
+    expect(state().activeModelItemId).toBe('item-2')
+    expect(state().project.modelItems).toHaveLength(3)
+  })
+  it('lists an imported STEP part as one to open as a model, and opens it through Edit as model', () => {
+    const step: ImportedGeometry = {
+      id: 'step-row', name: 'Plate', filename: 'plate.step', type: 'brep', format: 'step',
+      boundingBox: { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 },
+        size: { x: 1, y: 1, z: 1 }, center: { x: 0.5, y: 0.5, z: 0.5 } },
+      position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, loaded: true,
+    }
+    let wrapped: string | null = null
+    act(() => useCamStore.setState(s => ({
+      project: { ...s.project, geometry: [step] },
+      wrapImportedGeometryAsModelItem: async (id: string) => { wrapped = id; return { ok: true } as never },
+    })))
+    mount()
+    fireEvent.click(screen.getByTestId('mode-tab-part'))
+    expect(screen.getByTestId('model-entry-import-step-row').textContent).toContain('Plate')
+    fireEvent.click(screen.getByTestId('model-entry-import-step-row'))
+    expect(state().activeModal).toBeNull()
+    expect(wrapped).toBe('step-row')
   })
   it('creates only on confirmation; leaving and re-entering offers another new model', () => {
     seedItems()

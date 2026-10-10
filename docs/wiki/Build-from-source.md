@@ -21,11 +21,11 @@ npm run dev
 ## Tests and build
 
 ```
-npm test
+npm run test:public
 npm run build
 ```
 
-`npm test` runs the whole suite and takes a while; while working on one thing, run just its files with `npx vitest run <path>`. `npm run build` type-checks and writes the browser version to `dist/`.
+`npm run test:public` runs the regression tests that ship in the public repository. While working on one thing, run just its files with `npx vitest run --config vitest.public.config.mts <path>`. The private development gate is not included in the public repository. `npm run build` type-checks and writes the browser version to `dist/`.
 
 ## Desktop app and installers
 

@@ -23,7 +23,7 @@ release notes and the commit, and close the pull request with a link. The Merge 
 
 ## Good first things
 
-Look for issues labelled `good-first-issue` and `help-wanted`.
+Look for issues labelled [good first issue](../../issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) and [help wanted](../../issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
 
 ## Building and running the tests
 
@@ -38,7 +38,8 @@ npm run test:public
 ```
 
 `npm run dev` starts the app in your browser. `npm run test:public` runs the regression tests that ship in this
-repository. For a small change, run only the test files for the part you touched.
+repository. For a small change, run only the test files for the part you touched with
+`npx vitest run --config vitest.public.config.mts <path>`.
 
 ## Pull request rules
 
@@ -61,8 +62,9 @@ it, under the project's licence. Git does this for you:
 git commit -s -m "Fix the thing"
 ```
 
-One folder is the exception. Changes to files under `src/lib/cam/adaptiveClearing2d/engine/` stay under
-LGPL-2.1-or-later, because that folder is a marked LGPL module. See `NOTICE` for the full list of folder licences.
+Two folders are exceptions. Changes under `src/lib/cam/adaptiveClearing2d/engine/` stay under LGPL-2.1-or-later.
+The separate LinuxCNC gateway program, including `pendant/linuxcnc-gateway/gateway.py`, stays under
+GPL-3.0-or-later. See the `LICENSE` in each folder and the repository's `NOTICE` for details.
 
 ## Machine safety
 

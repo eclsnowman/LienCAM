@@ -28,7 +28,7 @@ export const entries: HelpIndexEntry[] = [
     id: 'new-model',
     title: 'New Model',
     category: 'workspaces-viewport',
-    summary: 'The Model tab opens the New Model window: Create Model starts a new, empty model and opens it in the Model workspace.',
+    summary: 'The Model tab opens the New Model window: Create Model starts a new, empty model, or choose an existing model to open it in the Model workspace.',
     keywords: 'new model create model tab window empty start build edit existing open design tree pen cancel',
     contextKeys: ['modal:new-model'],
   },

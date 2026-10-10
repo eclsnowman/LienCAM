@@ -6,6 +6,21 @@ import { build, defineConfig, type Plugin } from 'vite'
 const projectRoot = dirname(fileURLToPath(import.meta.url))
 const repository = 'https://github.com/eclsnowman/LienCAM'
 const escapeHtml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+const sceneTasks: Record<string, string> = {
+  'pipeline-sketch': 'Sketching soft jaws',
+  'pipeline-model': 'Modeling soft jaws',
+  'pipeline-toolpath': 'Generating fixture-plate toolpaths',
+  'pipeline-simulate': 'Simulating fixture-plate stock removal',
+  'pipeline-post': 'Posting fixture-plate G-code',
+  'pipeline-control': 'Running a fixture-plate program in Control',
+  form: 'Shaping a lobed knob', relief: 'Creating a relief from an image',
+  '3d-finish': 'Finishing a knob with 3D toolpaths', 'setup-vise': 'Setting up soft jaws in a vise',
+  probing: 'Previewing an inside-corner probing routine', 'tool-library': 'Choosing tools from the tool library',
+  'machine-definition': 'Configuring a machine', 'light-theme': 'Viewing fixture-plate toolpaths in the light theme',
+  'demo-first-open': 'Opening the browser demo',
+}
+const scenes = JSON.parse(readFileSync(join(projectRoot, 'tools/capture/scenes.json'), 'utf8')).scenes as Array<{ id: string; name: string }>
+const sceneAlt = new Map(scenes.map(scene => [scene.id, sceneTasks[scene.name]]))
 
 export function createSiteConfig(options: { strict?: boolean; siteRoot?: string; mediaRoot?: string } = {}) {
   const root = options.siteRoot ?? join(projectRoot, 'site')
@@ -76,7 +91,9 @@ export function createSiteConfig(options: { strict?: boolean; siteRoot?: string;
         html = html.replace(/\{\{scene:(S\d{2})\}\}/g, (_, id: string) => {
           const path = pictures.get(id) ?? findPicture(id)
           const file = path ? `media/${id}${path.slice(path.lastIndexOf('.'))}` : 'media/pending.svg'
-          return `<img src="${base}${file}" alt="${path ? `${id} workspace screenshot` : 'Screenshot coming soon'}" width="480" height="300" loading="lazy">`
+          const alt = path ? sceneAlt.get(id) : 'Screenshot coming soon'
+          if (alt === undefined) throw new Error(`Missing site description for scene: ${id}`)
+          return `<img src="${base}${file}" alt="${escapeHtml(alt)}" width="480" height="300" loading="lazy">`
         })
         const photo = findPicture('P02')
         return html.replaceAll('{{part-photo}}', photo ? `<figure class="part-photo"><img src="${base}media/P02${photo.slice(photo.lastIndexOf('.'))}" alt="Finished parts cut on a real machine with LienCAM G-code" loading="lazy"><figcaption>Made on a real machine with LienCAM G-code.</figcaption></figure>` : '')

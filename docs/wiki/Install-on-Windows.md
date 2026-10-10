@@ -10,7 +10,7 @@ Windows is the platform LienCAM is built and tested on. The desktop app is in al
 
 ## Two ways to get it
 
-Download from the Releases page of the project on GitHub. Each release lists two Windows files:
+Download from the project's [Releases page](../releases) on GitHub. Each release lists two Windows files:
 
 - `LienCAM-<version>-win-x64-setup.exe` - the installer. It installs for your own user (no administrator needed), and adds a desktop and Start menu shortcut named LienCAM.
 - `LienCAM-<version>-win-x64-portable.exe` - the portable build. Nothing is installed; keep it anywhere (a USB stick works) and double-click it.
@@ -32,6 +32,8 @@ Open LienCAM from the Start menu (or double-click the portable file). On first s
 To run a real machine you also need your controller software. LienCAM drives UCCNC with a UC100 or AXBB-E controller; see [Controllers: UCCNC, UC100, AXBB-E](Controllers-UCCNC-UC100-AXBB-E). If you only want to design, simulate and post G-code, you do not need any of that.
 
 ## Updating or moving to another PC
+
+At startup, the desktop app mentions a newer release in the console with its link; it never installs anything by itself.
 
 Before updating, open **Settings > User Data > Download backup** and keep the file somewhere safe. Close LienCAM, run the newer installer over your existing installation, then open it from its shortcut. Your machines, tools, settings, work offsets and other saved shop data stay in place.
 

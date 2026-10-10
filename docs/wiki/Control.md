@@ -56,7 +56,7 @@ See also: [The Control tab](Control#control-tab-overview), [Jogging and setting 
 
 ## Moving LienCAM to a new or rebuilt PC
 
-Install LienCAM and UCCNC, copy your UCCNC profile, then Restore bundle: your shop data and this machine's connection settings come back from the backup, with no file to hand-edit. Two things a backup cannot carry are listed here, with why.
+Install LienCAM and UCCNC, copy your UCCNC profile, then use Settings \> User Data \> Inspect backup... \> Confirm restore: your shop data and this machine's connection settings come back from the backup, with no file to hand-edit. Two things a backup cannot carry are listed here, with why.
 
 Everything LienCAM keeps travels in one backup file: your active project, machines, tool libraries, preferences, and this computer's machine connection settings - the UCCNC install folder, profile, board, spindle definition file and Bridge port. Nothing needs hand-editing: no .bat file and no environment variable. Make the backup on the old PC first with Settings \> User Data \> Download backup (see "Backing up your data"), and keep it on another drive.
 
@@ -285,9 +285,9 @@ See also: [Running a job](Control#control-run-job), [Include LienCAM context](Po
 
 ## The in-app machine simulator
 
-Choose Simulator in Control to practice running programs, jogging and probing against a virtual machine using the selected machine settings.
+Choose Simulate followed by your machine name in Control to practice running programs, jogging and probing against a virtual machine using the selected machine settings.
 
-1. Open Control with the machine you want to practice on selected. Choose Simulator in the connection selector and click Connect. This connection runs inside LienCAM and moves no physical machine.
+1. Open Control with the machine you want to practice on selected. Choose Simulate followed by your machine name in the connection selector and click Connect. This connection runs inside LienCAM and moves no physical machine.
 2. Press CLEAR to release the software stop after connecting, then home or set the datum as the status sentence asks. Load a G-code file or post your setup into Control, and use CYCLE START, Feed Hold and Stop/Reset as you would for a connected machine.
 3. For probing practice, open Diagnostics and find Simulated part. Place under probe moves the virtual part beneath the current probe position; Reset restores its default placement. Neither action moves the tool.
 
@@ -297,7 +297,7 @@ A machine with a stated fixed tool setter also has a virtual setter at that mach
 
 > **Tip:** The Control simulator practices the machine sender and probing. The Simulate tab is a separate toolpath and stock preview. Simulator results do not verify physical wiring, clearances or a real tool setter.
 
-![Machine \> Diagnostics on the simulator, with the Simulated part card below the drive links.](images/control-simulator/simulated-part-full.webp)
+![The simulator's Diagnostics page, where you can place a virtual part for probing practice.](images/control-simulator/simulated-part-full.webp)
 
 ![Simulated part at the sample router default: machine X -253.00, Y -243.00, top Z -60.25 mm; size, bow, bore, boss, Place under probe and Reset are shown.](images/control-simulator/simulated-part.webp)
 
@@ -320,7 +320,7 @@ With Simulator connected, the selected machine's fixed setter is a virtual conta
 
 > **Tip:** Keep the approach and setter position clear on the real machine, and inspect the routine preview before running it. A simulated touch is practice, not a calibration of the physical setter.
 
-![Tools table and probe card after the simulator measured T2 at machine Z -40.00 mm; T1 is the reference tool and Apply length is disabled.](images/control-tool-setter/tools-setter.webp)
+![The Tools tab after measuring T2 on the simulated setter, with T1 as the reference tool. Apply length is unavailable in this state.](images/control-tool-setter/tools-setter.webp)
 
 ![The full Tools tab after measuring T2 on the simulated setter. The result is recorded for T2; Apply length is disabled and no length application is shown.](images/control-tool-setter/tools-setter-apply.webp)
 

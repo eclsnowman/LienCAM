@@ -13,7 +13,7 @@ The examples live in the `examples/` folder of the repository. This page uses `e
 
    ![The fixture plate after REGEN ALL: the design tree lists Face, Drill, Thread Mill, Contour and Chamfer with green ticks, and their paths are drawn on the plate](images/walkthroughs/W2-2.png)
 
-5. **Simulate.** Open the **Simulate** tab and press play to watch the cutter remove the stock. See [Simulate](Simulate).
+5. **Simulate.** Select the setup in the design tree so no operation is selected; playback then includes all enabled operations in that setup. Open the **Simulate** tab and enable **Simulate Stock Removal** (off by default on a fresh install). Press play to watch the cutter remove the stock. See [Simulate](Simulate).
 
    ![The Simulate tab at the end of the cut: the plate seen from the top with its holes cut, and the play controls under the view](images/walkthroughs/W2-3.png)
 

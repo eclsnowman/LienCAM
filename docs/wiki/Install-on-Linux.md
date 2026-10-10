@@ -9,7 +9,7 @@
 
 ## Two ways to get it
 
-From the project's Releases page:
+From the project's [Releases page](../releases):
 
 - `LienCAM-<version>-linux-x86_64.AppImage` - one file, no install. Make it executable and run it:
 

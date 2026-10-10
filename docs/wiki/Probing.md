@@ -10,7 +10,7 @@
 
 ## The Probing tab
 
-Probing finds edges, corners, bores, bosses, surfaces and tool lengths with a touch probe, shows the plan on a diagram, and writes an offset only after you confirm.
+Probing finds edges, corners, bores, bosses, surfaces and tool lengths with a touch probe and shows the plan on a diagram. Z0 writes immediately; Tool Z records its measurement immediately. Review other results before applying them.
 
 The Probing tab is the workpiece probing station. Pick what you are measuring in the Routine panel (Z0, Edge, Outside corner, Inside corner, Angle, Bore, Boss, Rect pocket, Rect boss, Z surface, Tool Z, Calibrate), fill in its setup panel (for example "Outside corner setup": which work offset, the approach side, the rough size), and the picture beside it draws the moves and touches in order before anything moves.
 
@@ -22,7 +22,7 @@ On connection, the built-in simulator places a fixed tool setter at the machine 
 
 1. Setup panel: define the feature - work offset, axis and side, approximate size, search distance. The picture updates as you type; nothing moves.
 2. Run: jog to the labeled start shown in the picture, read the motion plan and feeds, make sure the path is clear, then press Start probing - it moves straight away, with no further confirmation. An approach toward a face to be touched is itself a probe seek at Search speed, followed by a back-off and a slow touch at Probe speed. Clear-area moves use the Clear positioning setting. A missed seek stops where it is, without an automatic retract.
-3. Result: the measured numbers, the tip-radius compensation sentence, and "Would write G54 ... after confirmation". Nothing is written until you press Confirm.
+3. Result: Z0 writes the active work Z0 during the successful cycle. Tool Z immediately records the measured Setter Z for the active tool, or holds it as the active tool length if no tool number is active. Neither has a separate Confirm. Feature offsets show "Would write G54 ... after confirmation" and use Confirm to apply them. Z surface and Calibrate also use Confirm. Angle reports the measured angle and offers Rotate to apply a nonzero change to the work offset rotation.
 4. While probing runs, Pause stops the current move and becomes Resume. Resume continues toward the same endpoint. Stop ends only probing, from running or paused, and a stopped routine writes no result. Start probing starts it afresh. These buttons preserve a loaded program; probing cannot start while that program is running or held.
 5. When paused with the probing screen's Pause, the status line points to that screen's Resume and Stop. Other held routines, such as Measure tool, still use CYCLE START and Stop/Reset as their status sentence says.
 6. Save probing settings under Control \> Machine \> Definition \> Probing and the next routine uses them without reconnecting, including Search speed, Probe speed, clearance and search bounds. Settings that must be written to the controller still need its receipt; this change applies to probing values used by LienCAM.
@@ -30,6 +30,8 @@ On connection, the built-in simulator places a fixed tool setter at the machine 
 8. PROBE shows the touch input; PROBING shows that a probe cycle is in process. The Control, Probing, Tools and tool-change surfaces share the same probe reading. If the controller does not report it, the lamp says so; PROBE is not read while the spindle turns.
 9. A refused probe start keeps the current preview. A failed or stopped probe cycle shows Stopped and the full reason in red on the probing screen; a refused start shows Did not start and its reason. A new stop or refused start replaces the previous reason. The message states what happened, without guessing a cause. If a tool-setter measurement fails on a tool-change card, Retry measure repeats the measurement without visiting the park again. The failure names the setter and the touch result; Cancel on a manual tool change reports the cancellation and keeps the recorded spindle tool.
 10. When the reference tool is measured again, the Console reports its reading change and the actual work Z offset change sent to the controller. Those can differ on a controller that stores tool length in the work offset.
+
+Top tells you where a feature routine gets its top reference. Edge, Outside corner and Angle use "Touch it first". Bore, Rect pocket and Inside corner use "Use work Z0": set work Z0 at the stock top before running them. Boss and Rect boss let you choose either, starting with "Touch it first"; set work Z0 first if you choose "Use work Z0". Calibrate touches the top for an outside reference and uses work Z0 for an inside reference.
 
 ![An Outside corner run finished on the simulator: the touches marked in the pictures, the corner position, and Confirm. For Outside corner nothing is written until Confirm is pressed](images/probing-tab/probing-result-confirm.webp)
 
@@ -91,7 +93,7 @@ Check does two things. First it validates the routine itself - every problem is 
 
 ### Proposals and the Confirm button
 
-A routine can PROPOSE three things and perform none of them: a work offset ("Would write G54 X= Y= after confirmation"), a tool length ("Would record T3 length"), or a report (a measured diameter, position or angle, read-only). When the routine finishes, the proposals appear under the result with the same Confirm button the Probing tab has always used. Nothing is written until you press it; Cancel discards the proposal and the machine keeps its offsets.
+A routine can PROPOSE three things and perform none of them: a work offset ("Would write G54 X= Y= after confirmation"), a tool length ("Would record T3 length"), or a report (a measured diameter, position or angle, read-only). When a routine on the Routines tab finishes, its proposals appear under the result with a Confirm button. Nothing is written until you press it; Cancel discards the proposal and the machine keeps its offsets. The Probing tab's Z0 and Tool Z cycles are separate: they write or record their results immediately.
 
 <a id="probe-routines-provenance"></a>
 

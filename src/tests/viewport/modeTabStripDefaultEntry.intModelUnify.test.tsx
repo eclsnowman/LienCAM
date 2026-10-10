@@ -130,9 +130,9 @@ describe('INT-MODEL-UNIFY: plain Model tab click with 2+ Model Items and no acti
     expect(st().activeModal).toBe('new-model')
     expect(st().workspace).toBe('cam')
     expect(st().activeModelItemId).toBeNull()
-    // WO-2700: the plain tab's dialog offers creation only, no existing-item list.
-    expect(screen.queryByTestId('model-entry-row-item-a')).toBeNull()
-    expect(screen.queryByTestId('model-entry-row-item-b')).toBeNull()
+    // Owner ruling 10-09: the plain tab's dialog offers creation AND lists the existing items, like the Sketch window.
+    expect(screen.getByTestId('model-entry-row-item-a')).toBeTruthy()
+    expect(screen.getByTestId('model-entry-row-item-b')).toBeTruthy()
     fireEvent.click(screen.getByText('Cancel'))
 
     fireEvent.click(screen.getByTestId('model-placeholder-edit-btn-item-b'))

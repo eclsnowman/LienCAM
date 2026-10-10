@@ -1,5 +1,9 @@
 # LienCAM Conventions
 
+Public contributors: follow [CONTRIBUTING](../CONTRIBUTING.md) and run
+`npm run test:public`. This document also records private development practices;
+private-only tools and documents named below do not ship in the public repository.
+
 This document describes how we work on LienCAM: engineering principles,
 workflow patterns, code and commit conventions, testing discipline, and
 the patterns for AI-assisted development that have proven effective for
@@ -253,6 +257,9 @@ and plan steps. The boundary between trivial and non-trivial is judgment:
 when in doubt, plan.
 
 ### Help/wiki updated with every completed feature (the operator rule, 2026-08-01)
+
+Private development: the planning hitlist below is not exported. Public help sources
+and the wiki generator are included in the release.
 
 A feature is not COMPLETE until the in-app help/wiki reflects it. When a
 feature lands and is considered done, the same delivery updates the help
@@ -537,6 +544,8 @@ right. This pairs with principle 1 (functional clarity) and principle 3 (audit r
 cause): if a constraint isn't being met, fix the construction, not the output.
 
 ## UI conventions the operator has ruled on (binding)
+
+Private development: the standards document below is not exported.
 
 These live in `docs/ui-ux/COHESION-STANDARD.md` (section 13 and the modality
 rules) - encode new rulings THERE the moment they surface, and read it before
@@ -896,10 +905,16 @@ src/tests/
 Stable operations don't need a subdirectory unless they have enough
 tests to warrant organizing.
 
-### Full-suite gate command
+### Public contributor tests and the private full-suite gate
 
-Any full-repository run used to certify a milestone, release, or merge
-gate goes through `npm run test:gate` (`node tools/run-suite.mjs`), never
+In the public repository, use `npm run test:public` to run the regression
+tests with exported inputs (`vitest.public.config.mts`). For a focused
+change, use `npx vitest run --config vitest.public.config.mts <path>`.
+The private gate tools below are not shipped in the public repository.
+
+In the private development repository, a full-repository run used to
+certify a milestone, release, or merge gate goes through `npm run test:gate`
+(`node tools/test-gate.mjs`), never
 raw `npm test` / `npx vitest run`. Vitest's own worker-RPC teardown can
 throw `[vitest-worker]: Timeout calling "onTaskUpdate"` under heavy CPU
 load even when every test passed (root cause is inside
@@ -1038,6 +1053,9 @@ The visual review step is not yet automated. It is a manual gate.
 
 ### Where docs live
 
+Private development layout: `UI-ARCHITECTURE.md`, `planning/` and session/work-order
+documents below are not part of the public release.
+
 ```
 /
 ├── README.md               Quick-start, what this project is
@@ -1135,6 +1153,8 @@ docs/ARCHITECTURE.md — unless the decision history itself is valuable.
 
 ### Finding IDs for audit-to-WO tracing (forward-only)
 
+Private development: the audit tools and work-order queue below are not exported.
+
 An audit finding meant to become a work-order candidate gets a stable id the
 moment it's written: `FINDING-<audit-slug>-<n>` (e.g.
 `FINDING-architect-audit-2026-09-21-1`), stated once next to the finding in
@@ -1153,6 +1173,8 @@ under this convention is reported as pre-convention/out-of-scope by name -
 never silently passed as "nothing missing" and never false-flagged.
 
 ### Paired documentation
+
+Private development: the UI architecture document below is not exported.
 
 Features that span the backend/algorithm layer and the user interface require
 updates to both architecture documents as part of the work:
@@ -1185,6 +1207,8 @@ relevant "Known Limitations" or "Future Work" section rather than left in chat
 history.
 
 ### Avoiding doc proliferation
+
+Private development: the planning directory below is not exported.
 
 The codebase previously accumulated many root-level `.md` files
 during active development that became stale. To avoid recurrence:

@@ -5,7 +5,7 @@ LienCAM is a free, open-source CAD/CAM program for designing parts and running y
 ## Start here
 
 - **Try it:** [Run in your browser](Run-in-your-browser).
-- **Install:** [Windows](Install-on-Windows), [Linux](Install-on-Linux) or [macOS](Install-on-macOS).
+- **Install:** download from [Releases](../releases), then follow [Windows](Install-on-Windows), [Linux](Install-on-Linux) or [macOS](Install-on-macOS).
 - **Make a first part:** [First part in 15 minutes](First-part-in-15-minutes).
 - **Connect your machine:** [Set up your machine](Set-Up-Your-Machine), then [UCCNC](Controllers-UCCNC-UC100-AXBB-E), [GRBL / grblHAL](Controllers-GRBL-and-grblHAL) or [LinuxCNC](Controllers-LinuxCNC).
 

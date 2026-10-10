@@ -174,6 +174,11 @@
     },
     {
       "action": "include",
+      "path": "tools/release/site-releases.mjs",
+      "reason": "Fill the site Download page from the newest published release when Pages deploys."
+    },
+    {
+      "action": "include",
       "path": "tools/release/make-releases-json.mjs",
       "reason": "Assemble release installer metadata and SHA-256 checksums, and verify every asset before creating the draft release."
     },
@@ -2511,6 +2516,26 @@
         "rule": "personal:eclsnowman",
         "path": "tools/release/roadmap.mjs",
         "reason": "The roadmap generator writes links to the approved public repository."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/lib/update/releaseCheck.ts",
+        "reason": "The desktop new-release check reads the approved public repository eclsnowman/LienCAM release list and links its release pages."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/tests/lib/update/releaseCheck.test.ts",
+        "reason": "The desktop new-release check reads the approved public repository eclsnowman/LienCAM release list and links its release pages."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/tests/lib/update/AppReleaseCheck.test.tsx",
+        "reason": "The desktop new-release check reads the approved public repository eclsnowman/LienCAM release list and links its release pages."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "tools/release/site-releases.mjs",
+        "reason": "Download links and the release list must name the approved public repository eclsnowman/LienCAM."
       },
       {
         "rule": "personal:eclsnowman",

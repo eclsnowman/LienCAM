@@ -3,6 +3,9 @@ name: Publish site and browser demo
 on:
   push:
     tags: ['v*']
+  # Publishing the drafted release rebuilds the site, so the Download page lists its real files.
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -50,6 +53,22 @@ jobs:
         run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # The installers' sizes and checksums exist only after the tag is built, so the Download page is filled at
+      # deploy time from the newest published release. The filler comes from this workflow's own commit, which may
+      # be newer than the release tag being built.
+      - name: Fill the Download page from the newest published release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TOOL_SHA: ${{ github.workflow_sha }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          tool="$RUNNER_TEMP/site-releases"
+          mkdir -p "$tool/tools/release" "$tool/site"
+          git fetch --quiet --depth 1 "$REPOSITORY_URL" "$TOOL_SHA"
+          git show FETCH_HEAD:tools/release/site-releases.mjs > "$tool/tools/release/site-releases.mjs"
+          cp site/download.html "$tool/site/download.html"
+          node "$tool/tools/release/site-releases.mjs" --latest --output site/download.html
+          ! grep -q 'class="preview-note"' site/download.html
       - name: Build the site and browser demo
         run: npm run build:pages
       - name: Upload Pages output

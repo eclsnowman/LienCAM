@@ -25,8 +25,7 @@
     "test:public": "vitest run --config vitest.public.config.mts",
     "test:watch": "vitest",
     "wiki:generate": "node tools/release/help-to-wiki.mjs",
-    "mc": "node -e \"const fs=require('node:fs'),cp=require('node:child_process'),p='tools/mc/serve.mjs';if(!fs.existsSync(p)){console.log('Mission Control is not included in this source tree.');process.exit(0)}process.exit(cp.spawnSync(process.execPath,[p],{stdio:'inherit'}).status??1)\"",
-    "test:gate": "node tools/test-gate.mjs"
+    "mc": "node -e \"const fs=require('node:fs'),cp=require('node:child_process'),p='tools/mc/serve.mjs';if(!fs.existsSync(p)){console.log('Mission Control is not included in this source tree.');process.exit(0)}process.exit(cp.spawnSync(process.execPath,[p],{stdio:'inherit'}).status??1)\""
   },
   "dependencies": {
     "@opencamlib/opencamlib": "2023.1.11",

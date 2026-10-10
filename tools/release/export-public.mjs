@@ -217,6 +217,42 @@ export function assertExportRights(directory, manifest) {
   if (violations.length) throw new Error(`export contains non-redistributable content:\n${violations.join('\n')}`)
 }
 
+// npm installs node_modules later. Repository file commands, however, must
+// already have their target in the published tree; keep the private package intact.
+function pruneMissingNodeScripts(directory, log) {
+  const packagePath = join(directory, 'package.json')
+  if (!existsSync(packagePath)) return
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf8'))
+  let changed = false
+  for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
+    const tokens = script.match(/"[^"]*"|'[^']*'|&&|\|\||[;|]|[^\s;&|]+/g) ?? []
+    const unquote = token => token.replace(/^(?:"(.*)"|'(.*)')$/, (_, double, single) => double ?? single)
+    for (let index = 0; index < tokens.length; index += 1) {
+      if (tokens[index] !== 'node') continue
+      let target
+      for (index += 1; index < tokens.length && !/^(?:&&|\|\||[;|])$/.test(tokens[index]); index += 1) {
+        const token = unquote(tokens[index])
+        if (/^(?:-e|-p|--eval|--print)(?:=|$)/.test(token)) break
+        if (['-r', '--require', '--import', '--loader', '--experimental-loader', '--conditions'].includes(token)) { index += 1; continue }
+        if (token.startsWith('-')) continue
+        target = token
+        break
+      }
+      if (!target) continue
+      const path = resolve(directory, target)
+      const local = relative(directory, path).replaceAll('\\', '/')
+      if (local.startsWith('node_modules/')) continue
+      if (local.startsWith('../') || !existsSync(path) || !lstatSync(path).isFile()) {
+        delete pkg.scripts[name]
+        changed = true
+        log(`DROP script ${name}: Node target ${target} is not exported`)
+        break
+      }
+    }
+  }
+  if (changed) writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`)
+}
+
 export function exportPublic(commitish, outputPath, { cwd = process.cwd(), log = console.log } = {}) {
   const root = git(cwd, ['rev-parse', '--show-toplevel'])
   const commit = git(root, ['rev-parse', '--verify', `${commitish}^{commit}`])
@@ -245,6 +281,7 @@ export function exportPublic(commitish, outputPath, { cwd = process.cwd(), log =
     writeFileSync(join(outputDirectory, MANIFEST_REPOSITORY_PATH), `${JSON.stringify(manifest, null, 2)}\n`)
   }
   preserveShippedFiles(outputDirectory)
+  pruneMissingNodeScripts(outputDirectory, log)
 
   // Surface omitted test inputs during export, before a public CI run. The
   // selector traverses helper imports too and names the excluded import route.

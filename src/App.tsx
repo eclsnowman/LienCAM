@@ -27,6 +27,7 @@ import { ProjectStartupFlow } from './components/modals/DemoExamplePickerModal'
 import { useCamStore } from './store'
 import type { Project } from './types'
 import { subscribeToProjectOpenTiming } from './lib/perf/projectOpenTiming'
+import { scheduleDesktopReleaseCheck } from './lib/update/releaseCheck'
 import { useEffect, useLayoutEffect, useRef, useState, lazy, Suspense } from 'react'
 import {
   MACHINE_PANEL_LEFT_DEFAULT,
@@ -230,6 +231,7 @@ function CamApp({ partWorkspaceEnabled }: { partWorkspaceEnabled: boolean }) {
     s.project.setups.reduce((n, setup) =>
       n + setup.operations.filter(op => op.enabled && op.status === 'error').length, 0))
   const addConsoleEvent = useCamStore(s => s.addConsoleEvent)
+  useEffect(() => { scheduleDesktopReleaseCheck(addConsoleEvent) }, [addConsoleEvent])
   useEffect(() => subscribeToProjectOpenTiming({
     getSnapshot: () => useCamStore.getState().projectOpen,
     subscribe: (listener) => useCamStore.subscribe((state, previousState) => {

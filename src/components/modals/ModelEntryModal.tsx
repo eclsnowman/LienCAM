@@ -16,7 +16,8 @@
 import { useEffect, useRef } from 'react'
 import { X, Box, Plus } from 'lucide-react'
 import { useCamStore } from '../../store'
-import type { ModelItemRecord } from '../../types'
+import type { ImportedGeometry, ModelItemRecord } from '../../types'
+import { isWrappableGeometryRow } from '../../lib/cam/modelOrigin'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 
 // Module-level stable reference -- `s.project.modelItems ?? []` INSIDE a
@@ -27,6 +28,7 @@ import { useDialogFocus } from '../../hooks/useDialogFocus'
 // update even while closed). Same fix DesignTree.tsx avoids by never
 // putting `?? []` inside a selector itself -- only in the render body.
 const EMPTY_MODEL_ITEMS: ModelItemRecord[] = []
+const EMPTY_GEOMETRY: ImportedGeometry[] = []
 
 export function ModelEntryModal() {
   const activeModal = useCamStore((s) => s.activeModal)
@@ -34,9 +36,12 @@ export function ModelEntryModal() {
   const modelItems = useCamStore((s) => s.project.modelItems ?? EMPTY_MODEL_ITEMS)
   const openModelItem = useCamStore((s) => s.openModelItem)
   const addModelItem = useCamStore((s) => s.addModelItem)
+  const geometry = useCamStore((s) => s.project.geometry ?? EMPTY_GEOMETRY)
+  const wrapImportedGeometryAsModelItem = useCamStore((s) => s.wrapImportedGeometryAsModelItem)
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
 
-  // Keep programmatic STL/help entry's chooser separate from plain tab intent.
+  // The plain tab's New Model window always offers Create Model AND the project's existing models (owner ruling 10-09:
+  // it must at least offer New Model, never only that). The programmatic STL/help chooser keeps its own title.
   const newOnly = activeModal === 'new-model'
   const open = newOnly || activeModal === 'model-entry'
 
@@ -63,6 +68,13 @@ export function ModelEntryModal() {
   const handleOpen = (id: string) => {
     closeModal()
     openModelItem(id)
+  }
+
+  // Imported STEP/STL parts open the same way as the design tree's "Edit as model" button.
+  const importedParts = geometry.filter((geo) => isWrappableGeometryRow(geo))
+  const handleOpenImported = (id: string) => {
+    closeModal()
+    void wrapImportedGeometryAsModelItem(id)
   }
 
   const handleNew = () => {
@@ -97,23 +109,40 @@ export function ModelEntryModal() {
             <span className="op-type-name">{newOnly ? 'Create Model' : 'New Model Item'}</span>
           </button>
 
-          {!newOnly && <>
-            <div className="sketch-entry-list-title">Or open an existing one</div>
+          {/* Same shape as the Sketch window: create on top, then every existing entry to open. */}
+          <div className="sketch-entry-list-title">Or choose an existing model</div>
+          {modelItems.length === 0 && importedParts.length === 0 ? (
+            <div className="sketch-entry-empty" data-testid="model-entry-empty">
+              No models in this project yet - import a STEP or STL file, or create a new model.
+            </div>
+          ) : (
             <div className="sketch-entry-list" data-testid="model-entry-list">
               {modelItems.map((item) => (
-                <div
+                <button
                   key={item.id}
-                  className="tree-folder-row"
+                  className="sketch-entry-row"
                   data-testid={`model-entry-row-${item.id}`}
                   onClick={() => handleOpen(item.id)}
                   data-tooltip={`Open ${item.name}`}
                 >
-                  <Box size={12} className="tree-folder-icon" />
-                  <span className="tree-folder-name">{item.name}</span>
-                </div>
+                  <span className="sketch-entry-row-name">{item.name}</span>
+                  <span className="sketch-entry-row-meta">model</span>
+                </button>
+              ))}
+              {importedParts.map((geo) => (
+                <button
+                  key={geo.id}
+                  className="sketch-entry-row"
+                  data-testid={`model-entry-import-${geo.id}`}
+                  onClick={() => handleOpenImported(geo.id)}
+                  data-tooltip={`Edit ${geo.name} as a model`}
+                >
+                  <span className="sketch-entry-row-name">{geo.name}</span>
+                  <span className="sketch-entry-row-meta">imported {geo.format === 'stl' ? 'STL' : 'STEP'} - opens as a model</span>
+                </button>
               ))}
             </div>
-          </>}
+          )}
         </div>
 
         <div className="modal-footer">
