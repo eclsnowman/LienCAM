@@ -7,7 +7,8 @@ import { checkCoverage, classifyResult, validateReport } from '../../../tools/re
 const directory = resolve(import.meta.dirname, '../../../test_fixtures/release/public-test-run')
 const fixture = (name: string) => ({
   report: JSON.parse(readFileSync(resolve(directory, `${name}.json`), 'utf8')),
-  output: readFileSync(resolve(directory, `${name}.log`), 'utf8'),
+  // A Windows checkout may hold the captured logs with CRLF; the mutations below are written for LF as on CI.
+  output: readFileSync(resolve(directory, `${name}.log`), 'utf8').replaceAll('\r\n', '\n'),
   rawExit: Number(readFileSync(resolve(directory, `${name}.exit`), 'utf8')),
 })
 const timeout = () => fixture('timeout')
@@ -30,6 +31,16 @@ describe('WO-2723 narrow public result conversion', () => {
     data.output = readFileSync(resolve(directory, 'public-stderr-unknown.log'), 'utf8')
     expect(classify(data)).toEqual({ exitCode: 1, converted: false, errorCount: 0 })
   })
+  // Rholand 10-10 negative control: an error printed after the summary (report already written) must stay red.
+  it.each(['Error: unexpected teardown', 'TypeError: reporter failed', 'fatal: worker channel closed'])(
+    'rejects an unknown diagnostic after the summary: %s', tail => {
+      const data = timeout()
+      data.output += `\n${tail}\n`
+      expect(classify(data)).toEqual({ exitCode: 1, converted: false, errorCount: 0 })
+      const real = fixture('public-stderr')
+      real.output += `\n${tail}\n`
+      expect(classify(real)).toEqual({ exitCode: 1, converted: false, errorCount: 0 })
+    })
   it.each(['assertion', 'collection', 'unknown', 'crash'])('rejects captured %s failure', name => {
     const data = fixture(name)
     expect(data.rawExit).toBe(1)

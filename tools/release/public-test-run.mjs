@@ -88,6 +88,9 @@ export function classifyResult(rawExit, output, report, signal = null) {
   const unhandled = text.slice(banners[0].index, summaryStart)
   const errorLines = unhandled.split('\n').filter(line => /\b\w*Error:/.test(line))
   if (errorLines.length !== errorCount || errorLines.some(line => line !== timeoutMessage)) return unchanged
+  // Nothing may report an error from the summary onwards (a teardown or reporter failure printed after the report was
+  // written, Rholand 10-10). In-test console errors print earlier, before the unhandled region, and stay allowed.
+  if (text.slice(summaryStart).split('\n').some(line => /\b\w*Error:|\bfatal\b/i.test(line))) return unchanged
   return { exitCode: 0, converted: true, errorCount }
 }
 
