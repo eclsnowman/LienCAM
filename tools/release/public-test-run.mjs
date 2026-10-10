@@ -11,7 +11,17 @@ const count = value => Number.isSafeInteger(value) && value >= 0
 
 // Vitest's suite count includes nested describe blocks, not just files. Compare
 // files against the console summary; reconcile assertions separately with JSON.
-export function validateReport(report) {
+// A file whose tests are all skipped at describe level (describe.skipIf) is reported "passed" with zero assertions;
+// vitest prints it as "↓ <path> (0 test)". Only that console proof lets a zero-assertion file through (public run
+// 38035495500 shard 1: src/tests/examples/_exampleGenerate.probe.test.ts).
+function skippedInConsole(output, name) {
+  if (typeof output !== 'string') return false
+  const text = stripVTControlCharacters(output).replaceAll('\r\n', '\n').replaceAll('\\', '/')
+  const file = name.replaceAll('\\', '/')
+  return [...text.matchAll(/^ *↓ (\S+) \(0 tests?\)\s*$/gm)].some(match => file.endsWith('/' + match[1]))
+}
+
+export function validateReport(report, output) {
   const fields = ['numTotalTestSuites', 'numPassedTestSuites', 'numFailedTestSuites', 'numPendingTestSuites', 'numTotalTests', 'numPassedTests', 'numFailedTests', 'numPendingTests', 'numTodoTests']
   if (!report || fields.some(key => !count(report[key]))) return false
   if (report.success !== true || report.numFailedTestSuites !== 0 || report.numFailedTests !== 0 || report.numPendingTestSuites !== 0) return false
@@ -24,7 +34,7 @@ export function validateReport(report) {
     if (!file || typeof file.name !== 'string' || !file.name || names.has(file.name)) return false
     names.add(file.name)
     if (!['passed', 'skipped'].includes(file.status) || file.message !== '' || !Array.isArray(file.assertionResults)) return false
-    if (file.status === 'passed' && file.assertionResults.length === 0) return false
+    if (file.status === 'passed' && file.assertionResults.length === 0 && !skippedInConsole(output, file.name)) return false
     for (const assertion of file.assertionResults) {
       if (!assertion || !Object.hasOwn(assertions, assertion.status) || !Array.isArray(assertion.failureMessages) || assertion.failureMessages.length) return false
       assertions[assertion.status]++
@@ -52,11 +62,14 @@ function summary(text, label) {
 export function classifyResult(rawExit, output, report, signal = null) {
   const unchanged = { exitCode: rawExit ?? 1, converted: false, errorCount: 0 }
   if (signal) return { ...unchanged, exitCode: rawExit || 1 }
-  if (rawExit !== 1 || !validateReport(report)) return unchanged
+  if (rawExit !== 1 || !validateReport(report, output)) return unchanged
   const text = stripVTControlCharacters(output).replaceAll('\r\n', '\n')
   // WO-2723: never generalize this to arbitrary worker errors. A collection
   // failure, teardown crash or incomplete update must remain red.
-  if (/worker.*(?:exited|killed)|out of memory|heap limit|SIG(?:KILL|SEGV|ABRT)|segmentation fault|segfault|\bOOM\b|\bkilled\b|Some tests are still running/i.test(text)) return unchanged
+  // Process-level crash signals only. A bare "OOM"/"killed" word also appears in passing test names and in-test logs
+  // (public run 38035495500: "...without OOM", a WASM "Aborted(OOM)" inside a passing perf ladder); an actually
+  // crashed worker also leaves an incomplete report, which validateReport rejects.
+  if (/worker.*(?:exited|killed)|out of memory|heap limit|SIG(?:KILL|SEGV|ABRT)|segmentation fault|segfault|^Killed\s*$|Some tests are still running/im.test(text)) return unchanged
   const fileSummary = summary(text, 'Test Files')
   const testSummary = summary(text, 'Tests')
   if (!fileSummary || fileSummary.total !== report.testResults.length || fileSummary.todo
@@ -98,7 +111,7 @@ export function checkCoverage(expected, shards) {
   if (shards.length !== 4) throw new Error('Expected all four shard reports')
   const seen = new Set()
   for (const shard of shards) {
-    if (!validateReport(shard.report)) throw new Error('Incomplete or failed shard report')
+    if (!validateReport(shard.report, shard.output)) throw new Error('Incomplete or failed shard report')
     if (classifyResult(shard.rawExit, shard.output, shard.report, shard.signal).exitCode !== 0) throw new Error('Failed shard exit')
     if (typeof shard.root !== 'string' || !shard.root) throw new Error('Missing shard root')
     // Artifacts originate on Linux CI, but support Windows paths in local proof.

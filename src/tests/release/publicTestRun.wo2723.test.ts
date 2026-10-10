@@ -41,6 +41,22 @@ describe('WO-2723 narrow public result conversion', () => {
       real.output += `\n${tail}\n`
       expect(classify(real)).toEqual({ exitCode: 1, converted: false, errorCount: 0 })
     })
+  // Public run 38035495500: shards 3 and 4 passed every test but carried the word OOM in a passing test name and in a
+  // WASM log line inside a passing test; those are not crashes.
+  it.each([
+    ' ✓ large lifted import: partitioned solve under the fixed WASM heap > solves the real BMG.dxf lift without OOM  3528ms',
+    'stderr | src/tests/sketch3d/dragPerfLadder.test.ts > measures median/p95 solve-per-move\nAborted(OOM)',
+  ])('converts despite an in-test OOM word: %s', line => {
+    const data = timeout()
+    data.output = `${line}\n${data.output}`
+    expect(classify(data)).toEqual({ exitCode: 0, converted: true, errorCount: 1 })
+  })
+  it.each(['FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory', 'Killed'])(
+    'still rejects a process-level crash line: %s', line => {
+      const data = timeout()
+      data.output = `${line}\n${data.output}`
+      expect(classify(data)).toEqual({ exitCode: 1, converted: false, errorCount: 0 })
+    })
   it.each(['assertion', 'collection', 'unknown', 'crash'])('rejects captured %s failure', name => {
     const data = fixture(name)
     expect(data.rawExit).toBe(1)
@@ -181,5 +197,18 @@ describe('WO-2723 complete shard union', () => {
     const report = timeout().report
     report.numFailedTests = '0'
     expect(validateReport(report)).toBe(false)
+  })
+  // Public run 38035495500 shard 1: a describe.skipIf file is "passed" with zero assertions and printed "↓ <path> (0 test)".
+  it('accepts a zero-assertion passed file only when the console marks that file skipped', () => {
+    const data = timeout()
+    const name = data.report.testResults[0].name
+    const relative = name.replaceAll('\\', '/').split('/').slice(-2).join('/')
+    data.report.testResults[0].assertionResults = []
+    data.report.numPassedTests = 0
+    data.report.numTotalTests = 0
+    expect(validateReport(data.report)).toBe(false)
+    expect(validateReport(data.report, 'no skip marker here')).toBe(false)
+    expect(validateReport(data.report, ` ↓ other/${relative} (0 test)`)).toBe(false)
+    expect(validateReport(data.report, ` ↓ ${relative} (0 test)`)).toBe(true)
   })
 })
