@@ -33,10 +33,35 @@ jobs:
         run: npm run lint
       - name: Build
         run: npm run build
+
+  # One 97-minute vitest run on a hosted runner ended with vitest's own worker RPC timeout
+  # ("Timeout calling onTaskUpdate") although every test passed (10-09, both first-commit runs).
+  # Four shards keep each run short and finish CI about four times sooner.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Public tests
-        run: npm run test:public
+        run: npm run test:public -- --shard=${{ matrix.shard }}/4
 
   windows-build:
     runs-on: windows-latest
