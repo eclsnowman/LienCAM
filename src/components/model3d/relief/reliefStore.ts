@@ -4,6 +4,8 @@
 // poles, the status line) live in src/relief/; this store only holds what the
 // operator chose, so the palette, the rail and the preview all read one place.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { create } from 'zustand'
 import { autoAdjust, MANUAL_PICTURE_ADJUST, type AutoParams, type PictureAdjust } from '../../../relief/adjust'
 import type { Picture } from '../../../relief/picture'
@@ -71,7 +73,7 @@ export interface ReliefState {
 const CLOSED = {
   active: false,
   featureId: null,
-  name: 'Relief',
+  get name() { return workbenchText('reliefStore.relief') },
   target: null,
   image: null,
   picture: null,

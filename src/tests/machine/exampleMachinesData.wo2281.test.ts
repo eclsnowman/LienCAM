@@ -41,6 +41,23 @@ describe('WO-2281 published example data and labelled defaults', () => {
       travel,
       minSpindleRpm: row.rpm[0] ?? undefined,
       maxSpindleRpm: row.rpm[1] ?? undefined,
+      // WO-2597: approved editable examples are product defaults, not
+      // published machine specifications. Pin their metadata independently;
+      // exampleMacros.wo2597.test.ts checks the bodies through production MDI.
+      macros: [
+        {
+          id: 'example-part-swap', name: 'Example - Part swap', mCode: 300, hidden: true,
+          body: expect.stringMatching(/^\/\/ Retract first, park at the BACK of travel, then M0 pauses for a part swap\.\n/),
+        },
+        {
+          id: 'example-spindle-warm-up', name: 'Example - Spindle warm-up', mCode: 301, hidden: true,
+          body: expect.stringMatching(/^\/\/ Warm up clockwise at three RPM stages for 30 seconds each, then stop\.\n/),
+        },
+        {
+          id: 'example-part-trace', name: 'Example - Part trace', mCode: 302, hidden: true,
+          body: expect.stringMatching(/^\/\/ Trace a rectangular stock\/part outline in work coordinates, at safe machine Z\.\n/),
+        },
+      ],
       ...(row.key === 'pcnc-440' ? { type: 'vertical_mill' } : {}),
       ...('cutting' in row ? {
         axisLimits: {

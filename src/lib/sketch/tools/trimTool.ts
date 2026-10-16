@@ -59,11 +59,12 @@ import { positiveArcSweep } from './dimTool'
 import { detachProjectedFixes, markProjectedGeometryDetached } from '../projectedEdit'
 
 // Minimal document view every transform works on (a full Sketch is one).
-export type SketchDoc = Pick<Sketch, 'entities' | 'constraints' | 'dimensions'>
+export type SketchDoc = Pick<Sketch, 'entities' | 'constraints' | 'dimensions' | 'patterns'>
 
 /** Replacement document arrays — the store swaps them in wholesale as a
  *  single undo step (the modify-tool analog of ToolCommit's append). */
 export interface SketchDocTransform {
+  patterns?: import('../patterns').SketchPatternDefinition[]
   entities: SketchEntity[]
   constraints: SketchConstraint[]
   dimensions: SketchDimension[]
@@ -1176,7 +1177,7 @@ function trimEntityAt(
     return r
       ? {
           transform: {
-            entities: r.entities, constraints: r.constraints, dimensions: r.dimensions,
+            entities: r.entities, constraints: r.constraints, dimensions: r.dimensions, patterns: r.patterns,
           },
           repairs: [],
           targetId: target.id,
@@ -1227,6 +1228,7 @@ function trimEntityAt(
       entities: markProjectedGeometryDetached(doc.entities, entities, [target.id]),
       constraints: detachProjectedFixes(doc.entities, constraints, [target.id]),
       dimensions,
+      patterns: doc.patterns,
     },
     repairs: [...entityRepair.repairs, ...dimSplit.repairs, ...cutRepairs],
     targetId: target.id,
@@ -1476,7 +1478,7 @@ function runSwipe(
       onTrim?.(current, best.e, best.p)
       const next = trimEntityAt(current, best.e, best.p, newId)
       if (!next) break // degenerate target: stop rather than loop
-      current = next.transform
+      current = { ...current, ...next.transform }
       repairs.push(...next.repairs)
       trimmed++
     }
@@ -1503,6 +1505,7 @@ export function trimSwipe(
       entities: [...r.doc.entities],
       constraints: [...r.doc.constraints],
       dimensions: [...r.doc.dimensions],
+      patterns: r.doc.patterns,
     },
     notice: clauses.length > 0
       ? `Trimmed ${r.trimmed} span${r.trimmed === 1 ? '' : 's'}: ${clauses.join(', ')}`

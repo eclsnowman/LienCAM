@@ -16,15 +16,10 @@
 //   3. CONFIRM OVERLAY: count (and per-step angle for circular) editable
 //      with the ghosts live-updating; OK commits as one undo step.
 //
-// CONSTRAINTS (honest v1 scope): copies carry NO inter-instance
-// constraints (a pattern constraint binding copies to the seed
-// is out of scope) — but each copy is internally constraint-complete:
-// every constraint whose operands ALL live inside the pattern set
-// (coincident, tangent, parallel, ... ) is duplicated per copy with the
-// entity ids remapped to that copy. 'fix' is NOT duplicated (grounding
-// is positional, not internal shape) and dimensions are not duplicated
-// (v1). Dragging a copy keeps the copy's own shape but does not move
-// its siblings.
+// The low-level copy builders duplicate internal constraints for callers
+// needing independent geometry. Production linear/circular Apply retains a
+// pattern definition instead: staged source and dependent solves tie every copy
+// to its source, without repeating redundant internal shape constraints.
 //
 // PURE module following the toolMachine pattern: clicks RETURN chain
 // transitions; the overlay apply (store) commits as one undo step.
@@ -46,6 +41,7 @@ import { distanceToText } from '../text'
 import { isInjectedSketchAnchorId } from '../sketchAnchors'
 import { chainContaining, type ChainStep } from '../bake'
 import { centroidOfEntities } from '../blocks'
+import { definePattern } from '../patterns'
 
 function dist(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y)
@@ -166,7 +162,7 @@ export interface CopyTransform {
   dTheta: number
 }
 
-function transformEntity(e: SketchEntity, t: CopyTransform, id: string): SketchEntity {
+export function transformEntity(e: SketchEntity, t: CopyTransform, id: string): SketchEntity {
   switch (e.kind) {
     case 'point':
       return { id, kind: 'point', construction: e.construction, at: t.map(e.at) }
@@ -323,6 +319,7 @@ export function remapConstraint(
 }
 
 export interface PatternResult {
+  patterns?: import('../patterns').SketchPatternDefinition[]
   entities: SketchEntity[]
   constraints: SketchConstraint[]
 }
@@ -500,7 +497,9 @@ export function linearPatternApply(
   newId?: () => string,
 ): PatternResult | string {
   if (!chain.vector) return 'Linear pattern: place the step vector first'
-  return linearPattern(entities, constraints, chain.ids, count, chain.vector, newId)
+  return definePattern(linearPattern(entities, constraints, chain.ids, count, chain.vector, newId),
+    entities, chain.ids, { kind: 'linear', count, step: chain.vector, rows: 1,
+      rowStep: { x: -chain.vector.y, y: chain.vector.x } }, newId)
 }
 
 /** Commit for a center-locked circular pattern at the live count/angle. */
@@ -513,8 +512,9 @@ export function circularPatternApply(
   newId?: () => string,
 ): PatternResult | string {
   if (!chain.center) return 'Circular pattern: click the rotation center first'
-  return circularPattern(
-    entities, constraints, chain.ids, count, chain.center, stepAngle, newId)
+  return definePattern(circularPattern(
+    entities, constraints, chain.ids, count, chain.center, stepAngle, newId),
+    entities, chain.ids, { kind: 'circular', count, center: chain.center, stepAngle }, newId)
 }
 
 // ---- Click behavior ----------------------------------------------------------------
@@ -990,7 +990,18 @@ export function pathPatternApply(
   const transformAt = pathPatternTransformAt(
     chain.path, reference, chain.count, chain.spacingMode, chain.fixedSpacing, chain.followTangent,
   )
-  return pathPatternEntities(entities, constraints, chain.ids, chain.count, transformAt, newId)
+  const result = pathPatternEntities(entities, constraints, chain.ids, chain.count, transformAt, newId)
+  if (typeof result === 'string') return result
+  const path = chain.path.kind === 'chain' ? { kind: 'chain' as const, closed: chain.path.closed,
+    steps: chain.path.steps.map(s => ({ entityId: s.entity.id, forward: s.forward })) }
+    : { kind: chain.path.kind, entityId: chain.path.entity.id }
+  return { entities: result.entities, constraints: [], patterns: [{
+    id: (newId ?? (() => crypto.randomUUID()))(), sources: sources.map(e => e.id),
+    values: { kind: 'path', path, count: chain.count, spacingMode: chain.spacingMode,
+      fixedSpacing: chain.fixedSpacing, followTangent: chain.followTangent }, suppressed: [],
+    members: result.entities.map((e, i) => ({ id: e.id, sourceId: sources[i % sources.length].id,
+      column: Math.floor(i / sources.length), row: 0 })),
+  }] }
 }
 
 // ---- Path pattern click behavior --------------------------------------------------

@@ -511,11 +511,26 @@ describe('WO-1568 through the sketcher click path', () => {
       await idle()
       expect(sketch().entities.slice(0, before.entities.length)).toEqual(before.entities)
       expect(userLines()).toHaveLength(8)
-      expect(sketch().dimensions).toHaveLength(4)
+      // WO-2784 RE-PIN: WO-2616 (4d60c51a8a, landed 5211ea829b, owner 10-06: "we should maintain
+      // the math that defined them") made a Keep original copy a DEPENDENT member of a 'transform'
+      // pattern: transformApply keeps doc.dimensions/doc.constraints and records the copy in
+      // Sketch.patterns, and the copy's size/shape follows the source through that definition
+      // (dependentDimensionRouting.ts). Duplicating the source's dimensions onto the copy (the
+      // old 4) would now constrain the copy twice. So: the original dimensions are kept exactly,
+      // and every copy is pinned to its source by one transform pattern.
+      expect(sketch().dimensions).toEqual(before.dimensions)
+      const beforeIds = new Set(before.entities.map((e) => e.id))
+      const copyIds = sketch().entities.filter((e) => !beforeIds.has(e.id)).map((e) => e.id).sort()
+      const added = (sketch().patterns ?? []).slice((before.patterns ?? []).length)
+      expect(added).toHaveLength(1)
+      expect(added[0].values.kind).toBe('transform')
+      expect(added[0].members.map((m) => m.id).sort()).toEqual(copyIds)
+      for (const m of added[0].members) expect(beforeIds.has(m.sourceId)).toBe(true)
       state().undo()
       await idle()
       expect(sketch().entities).toEqual(before.entities)
       expect(sketch().dimensions).toEqual(before.dimensions)
+      expect(sketch().patterns ?? []).toEqual(before.patterns ?? [])
     })
   }
 })

@@ -1,9 +1,8 @@
 name: Publish site and browser demo
 
 on:
-  push:
-    tags: ['v*']
-  # Publishing the drafted release rebuilds the site, so the Download page lists its real files.
+  # Publishing the drafted release rebuilds the site, so the Download page lists its real files. A tag push does not:
+  # its release is still a draft then, so the fill step had nothing real to show and failed on every new tag.
   release:
     types: [published]
   workflow_dispatch:
@@ -54,10 +53,11 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       # The installers' sizes and checksums exist only after the tag is built, so the Download page is filled at
-      # deploy time from the newest published release. The filler comes from this workflow's own commit, which may
+      # deploy time from the selected published release. The filler comes from this workflow's own commit, which may
       # be newer than the release tag being built.
-      - name: Fill the Download page from the newest published release
+      - name: Fill the Download page from the selected published release
         env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
           GITHUB_TOKEN: ${{ github.token }}
           TOOL_SHA: ${{ github.workflow_sha }}
           REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
@@ -67,7 +67,7 @@ jobs:
           git fetch --quiet --depth 1 "$REPOSITORY_URL" "$TOOL_SHA"
           git show FETCH_HEAD:tools/release/site-releases.mjs > "$tool/tools/release/site-releases.mjs"
           cp site/download.html "$tool/site/download.html"
-          node "$tool/tools/release/site-releases.mjs" --latest --output site/download.html
+          node "$tool/tools/release/site-releases.mjs" --tag "$RELEASE_TAG" --output site/download.html
           ! grep -q 'class="preview-note"' site/download.html
       - name: Build the site and browser demo
         run: npm run build:pages

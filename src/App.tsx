@@ -392,7 +392,7 @@ function CamApp({ partWorkspaceEnabled }: { partWorkspaceEnabled: boolean }) {
           UI-73's floating strip and its per-workspace portal hosts are gone.
           TopToolbar hosts the one shared strip; the Model-tab flag threads
           through it. */}
-      <TopToolbar showPartTab={partWorkspaceEnabled} />
+      <TopToolbar showPartTab={partWorkspaceEnabled} onAbout={() => setAboutOpen(true)} />
       {/* CAM workspace host — always mounted; hidden (not unmounted) while the 3D modeling workspace is
           active so switching back is instant and no CAM state is lost (D1). display:contents
           keeps app-body/BottomConsole/the status footer as direct flex children of app-shell

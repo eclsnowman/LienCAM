@@ -37,6 +37,8 @@
 // off the face it was projected from -- byte-for-byte the guarantee `Sketch3dFixedConstraint` gave.
 // Reference geometry that cannot move, and that still bounds a profile: that is the whole contract.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { SketchConstraint, SketchEntity } from '../../../lib/sketch/sketcher'
 import type { Sketch3dConstraint, Sketch3dEntity } from '../../../sketch3d'
 
@@ -81,7 +83,7 @@ export function projectedBoundaryToCamSeed(
         refusal: {
           code: 'unsupported-projected-entity',
           id: e.id,
-          message: `The projected face boundary contains a '${e.kind}' entity, which the face-sketch seed cannot carry.`,
+          message: workbenchText('faceSketchSeed.theProjectedFaceBoundaryContainsAEntityWhichThe', { kind: String(e.kind) }),
         },
       }
     }
@@ -91,7 +93,7 @@ export function projectedBoundaryToCamSeed(
         refusal: {
           code: 'non-finite-coordinate',
           id: e.id,
-          message: `The projected face boundary segment '${e.id}' has a non-finite coordinate.`,
+          message: workbenchText('faceSketchSeed.theProjectedFaceBoundarySegmentHasANonFinite', { id: String(e.id) }),
         },
       }
     }
@@ -113,7 +115,7 @@ export function projectedBoundaryToCamSeed(
         refusal: {
           code: 'unsupported-projected-constraint',
           id: c.id,
-          message: `The projected face boundary carries a '${c.kind}' constraint, which the face-sketch seed cannot carry.`,
+          message: workbenchText('faceSketchSeed.theProjectedFaceBoundaryCarriesAConstraintWhichThe', { kind: String(c.kind) }),
         },
       }
     }

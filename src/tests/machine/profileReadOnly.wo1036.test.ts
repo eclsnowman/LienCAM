@@ -85,7 +85,9 @@ public static class Harness {
     fault.Set("description", "drive fault"); fault.Set("port", 1.0); fault.Set("pin", 10.0);
     var offsets = new Json.Obj();
     foreach (string wcs in new [] { "G54", "G55", "G56", "G57", "G58", "G59" }) {
-      var one = new Json.Obj(); one.Set("x", 0.0); one.Set("y", 0.0); one.Set("z", 0.0); offsets.Set(wcs, one);
+      // WO-2764: WO-1726 carries the rotary axes through offsets - a complete baseline states a/b/c too.
+      var one = new Json.Obj(); one.Set("x", 0.0); one.Set("y", 0.0); one.Set("z", 0.0);
+      one.Set("a", 0.0); one.Set("b", 0.0); one.Set("c", 0.0); offsets.Set(wcs, one);
     }
     var baseline = new Json.Obj(); baseline.Set("trajectory", trajectory); baseline.Set("softLimitsEnabled", true);
     baseline.Set("compAccel", comp); baseline.Set("faultSignal", fault); baseline.Set("workOffsets", offsets); return baseline;
@@ -372,7 +374,8 @@ describe('WO-1036: the bridge never writes the operator\'s .pro', () => {
       'baseline-only=cached profile baseline',
       'empty-without-baseline=none',
       'empty-load=False',
-      'empty-profile={"current":{"G54":{"x":0,"y":0,"z":0},"G55":{"x":0,"y":0,"z":0},"G56":{"x":0,"y":0,"z":0},"G57":{"x":0,"y":0,"z":0},"G58":{"x":0,"y":0,"z":0},"G59":{"x":0,"y":0,"z":0}},"profile":null}',
+      // WO-2764: WO-2186 reports the rotation each WCS holds beside its offset.
+      'empty-profile={"current":{"G54":{"x":0,"y":0,"z":0},"G55":{"x":0,"y":0,"z":0},"G56":{"x":0,"y":0,"z":0},"G57":{"x":0,"y":0,"z":0},"G58":{"x":0,"y":0,"z":0},"G59":{"x":0,"y":0,"z":0}},"rotation":{"G54":0,"G55":0,"G56":0,"G57":0,"G58":0,"G59":0},"profile":null}',
       'sticky-refusal=False',
       'complete-settings=cached machine definition',
       'parse=True',

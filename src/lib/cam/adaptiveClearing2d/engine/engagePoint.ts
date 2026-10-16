@@ -147,48 +147,24 @@ export function getEngagePoint(
 
   const rejectArea = 2 * targetArea // FreeCAD safety reject: area > 2*optimal*minStep
 
-  const materialNormalAt = (pt: Pt): Pt => {
-    let best = { x: 0, y: 0, d2: Infinity }
-    for (const loop of boundLoops) {
-      for (let i = 0; i < loop.length; i++) {
-        const a = loop[i], b = loop[(i + 1) % loop.length]
-        const dx = b.x - a.x, dy = b.y - a.y
-        const l2 = dx * dx + dy * dy
-        const t = l2 > 1e-12
-          ? Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / l2))
-          : 0
-        const qx = a.x + t * dx, qy = a.y + t * dy
-        const nx = qx - pt.x, ny = qy - pt.y
-        const d2 = nx * nx + ny * ny
-        if (d2 < best.d2) best = { x: nx, y: ny, d2 }
-      }
-    }
-    const m = Math.hypot(best.x, best.y) || 1
-    return { x: best.x / m, y: best.y / m }
-  }
-
-  // initToolDir: trial the edge tangent and its 3 cardinal rotations; among the
-  // non-rejected CUTTING directions keep the one whose load is closest to optimal.
+  // Roll in along the actual cleared-stock frontier. The two tangents have
+  // opposite cutting sides; the normal directions head into stock or back into air.
   const bestDirAt = (pt: Pt, tx: number, ty: number): Pt | null => {
     const cands: Pt[] = [
       { x: tx, y: ty },
-      { x: -ty, y: tx },
       { x: -tx, y: -ty },
-      { x: ty, y: -tx },
     ]
-    const materialNormal = materialNormalAt(pt)
     const materialLeft = materialSideFor(millingDirection) === 'left'
     let best: { dir: Pt; err: number } | null = null
     for (const d of cands) {
-      // CW-spindle rule (./millingDirection, WO-1896): climb keeps material right,
-      // conventional keeps it left. cross > 0 = the material normal is on the left.
-      const cross = d.x * materialNormal.y - d.y * materialNormal.x
-      // Reject cross == 0 as well: that heads straight into/out of material and begins
-      // as a slot, so it has no honest climb/conventional side.
-      if (materialLeft ? cross <= 1e-9 : cross >= -1e-9) continue
       const to = { x: pt.x + d.x * minStep, y: pt.y + d.y * minStep }
-      const { area, areaPerDist } = tool.cutArea(pt, to, cleared)
+      const { area, areaPerDist, sideBalance } = tool.cutArea(pt, to, cleared)
       if (!(area > 0) || area > rejectArea) continue // no cut, or the safety reject
+      // The machining envelope can extend beyond the stock, and a rest entry can
+      // lie inside it. Its nearest boundary is not the remaining-material side.
+      // M3: climb keeps the actual fresh cut on the right; conventional on the left.
+      // A balanced bite has no defined milling side and is not a side entry.
+      if (materialLeft ? sideBalance <= 1e-9 : sideBalance >= -1e-9) continue
       const err = Math.abs(areaPerDist - optimalCutAreaPerDist)
       if (best === null || err < best.err) best = { dir: d, err }
     }

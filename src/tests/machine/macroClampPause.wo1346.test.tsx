@@ -158,10 +158,10 @@ describe('WO-1346 M2001 clamp pause', () => {
       '"m2001.nc" reached M2001 on line 3: running this machine\'s macro "Clamp pause".',
     )
 
-    // WO-2437 fix round (architect, rehearsal 2026-10-02): CYCLE START is live
-    // at the parked clamp pause and runs the rest, as the card's Continue
-    // does (operatorPausePark.wo2437 presses it). This case takes the card.
-    expect(currentOperatorTransport()).toMatchObject({ action: 'resume', cycleStartEnabled: true })
+    // WO-2773 (Operator 2026-10-13, "A - Continue on both"): the card's Continue is
+    // the one door at the parked clamp pause, as on the guided tool-change
+    // card; CYCLE START is dark (was live from the WO-2437 fix round).
+    expect(currentOperatorTransport()).toMatchObject({ action: 'none', cycleStartEnabled: false })
     expect(useMachineControl.getState().job.phase).toBe('paused')
     expect(useMachineControl.getState().toolChange).toMatchObject({
       mode: 'clampPause',

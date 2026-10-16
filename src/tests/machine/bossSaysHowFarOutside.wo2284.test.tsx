@@ -2,6 +2,7 @@
 // WO-2284: real ProbingPanel, all four faces and both Top choices.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { wo2665SetupWords } from './support/wo2665Layout'
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -130,7 +131,8 @@ describe('WO-2284 Boss says how far outside each face it descends', () => {
     for (const [key, value] of Object.entries(now)) {
       expect(value.picture, key).toBe(main[key].picture)
       if (/^(boss|rectBoss) /.test(key) && /^(Right|Left|Back|Front) face:/.test(value.sentence)) continue
-      expect(value.sentence, key).toBe(main[key].sentence)
+      // WO-2764: WO-2665 shortened four setup sentences; every other word keeps the baseline.
+      expect(value.sentence, key).toBe(wo2665SetupWords(main[key].sentence))
     }
   })
 })

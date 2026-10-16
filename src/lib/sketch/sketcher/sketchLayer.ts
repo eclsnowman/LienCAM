@@ -44,6 +44,7 @@ import {
   formatDimensionValue, formatChamferSetbackValue, positiveArcSweep, type PlannedDimension,
 } from '../tools/dimTool'
 import { dimGuides, ordinateStackAnchor } from '../tools/dimPlacement'
+import { chevronTip, screenSizedChevron } from '../tools/dimensionGuideSizing'
 import type { Units } from '../../ui/unitFormat'
 import { asNumber } from '../../../theme/viewportColors'
 import { resolveSelectionGlowColors } from '../../viewport/lighting/selectionGlowTokens'
@@ -2549,62 +2550,13 @@ export class SketchLayer {
    *  intended pixel length; projection then solves each plane-aligned barb
    *  independently so camera foreshortening cannot enlarge or shrink it. */
   private screenSizedChevron(poly: Vec2[], worldPerPixel: number): Vec2[] {
-    if (!this.projectToScreen) return poly
-    const tip = this.chevronTip(poly)
-    if (!tip) return poly
-    const len0 = Math.hypot(poly[0].x - tip.x, poly[0].y - tip.y)
-    const targetPx = len0 / Math.max(worldPerPixel, 1e-9)
-    return [
-      this.solveProjectedEndpoint(tip, poly[0], targetPx),
-      tip,
-      this.solveProjectedEndpoint(tip, poly[2], targetPx),
-    ]
+    return screenSizedChevron(poly, worldPerPixel,
+      this.projectToScreen ? (at) => this.projectRenderedPoint(at) : undefined)
   }
 
   private chevronTip(poly: Vec2[]): Vec2 | null {
-    if (poly.length !== 3) return null
-    const tip = poly[1]
-    const len0 = Math.hypot(poly[0].x - tip.x, poly[0].y - tip.y)
-    const len2 = Math.hypot(poly[2].x - tip.x, poly[2].y - tip.y)
-    if (!(len0 > 0 && len2 > 0) ||
-        Math.abs(len0 - len2) > Math.max(len0, len2) * 1e-6) return null
-    return tip
+    return chevronTip(poly)
   }
-
-  private solveProjectedEndpoint(tip: Vec2, endpoint: Vec2, targetPx: number): Vec2 {
-    const project = this.projectToScreen
-    if (!project || !(Number.isFinite(targetPx) && targetPx > 0)) return endpoint
-    const tipPx = this.projectRenderedPoint(tip)
-    if (!tipPx) return endpoint
-    const dx = endpoint.x - tip.x
-    const dy = endpoint.y - tip.y
-    const lengthAt = (factor: number): number => {
-      const p = this.projectRenderedPoint({ x: tip.x + dx * factor, y: tip.y + dy * factor })
-      return p ? Math.hypot(p.x - tipPx.x, p.y - tipPx.y) : Number.NaN
-    }
-    const initial = lengthAt(1)
-    if (!(Number.isFinite(initial) && initial > 0)) return endpoint
-    if (Math.abs(initial - targetPx) < 1e-4) return endpoint
-
-    let low = 0
-    let high = Math.max(1, targetPx / initial)
-    let highLength = lengthAt(high)
-    for (let i = 0; i < 8 && Number.isFinite(highLength) && highLength < targetPx; i++) {
-      high *= 2
-      highLength = lengthAt(high)
-    }
-    if (!(Number.isFinite(highLength) && highLength >= targetPx)) return endpoint
-    for (let i = 0; i < 18; i++) {
-      const mid = (low + high) / 2
-      const midLength = lengthAt(mid)
-      if (!Number.isFinite(midLength)) return endpoint
-      if (midLength < targetPx) low = mid
-      else high = mid
-    }
-    const factor = (low + high) / 2
-    return { x: tip.x + dx * factor, y: tip.y + dy * factor }
-  }
-
   // ---- F9 hover-treatment underlay (variant B, shipped) ---------------------
   //
   // Builds the cyan-halo hover affordance UNDER the hovered curve, entity color

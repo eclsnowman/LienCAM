@@ -18,7 +18,7 @@ LienCAM takes a part from a sketch to a running CNC machine in one program: draw
 
 ## Try it
 
-- [Download](https://github.com/eclsnowman/LienCAM/releases)
+- [Download](https://eclsnowman.github.io/LienCAM/download.html)
 - [Try it in your browser](https://eclsnowman.github.io/LienCAM/app/)
 - [Read the docs](https://github.com/eclsnowman/LienCAM/wiki)
 

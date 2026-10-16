@@ -52,7 +52,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'The right rail holds the modeling tools in five groups: Sketch (New sketch), Create (Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean), Construct (Offset plane, Midplane, At angle, Axis, Plane through, Tangent plane, Point), Modify (Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole, Defeature, Edit...) and Document (Undo, Redo, Import, Export, STL, Debug export). Click a group\'s name to fold it, and the button at the top of the rail switches to compact icons (hover a tool for its name); both are remembered. While a sketch is open the rail shows the sketch tools instead, and in Form it shows the Form tools.',
+        text: 'The right rail holds the modeling tools in five groups: Sketch (New sketch), Create (Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean), Construct (Offset plane, Midplane, At angle, Axis, Plane through, Tangent plane, Point), Modify (Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole, Move Hole, Defeature, Edit...) and Document (Undo, Redo, Import, Export, STL, Debug export). Click a group\'s name to fold it, and the button at the top of the rail switches to compact icons (hover a tool for its name); both are remembered. While a sketch is open the rail shows the sketch tools instead, and in Form it shows the Form tools.',
       },
       { kind: 'heading', text: 'Docked palettes', anchor: 'docked-palettes' },
       {
@@ -67,7 +67,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       { kind: 'heading', text: 'What the tree shows', anchor: 'tree-rows' },
       {
         kind: 'paragraph',
-        text: 'The Model section lists the part\'s history in order: Origin and the XY, XZ and YZ planes at the top, then a row for every sketch (pen icon), every construction plane, axis and point, every imported STEP or STL part, and every feature - Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean, Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole and Defeature - each under the name you gave it. A Form row holds everything done inside Form; Edit on it reopens the cage. Every row has its status mark, a suppress button and a right-click menu, and sketch rows an eye to show or hide them ("The feature tree"); the bodies the features make are shown, hidden and isolated from the Bodies list below.',
+        text: 'The Model section lists the part\'s history in order: Origin and the XY, XZ and YZ planes at the top, then a row for every sketch (pen icon), every construction plane, axis and point, every imported STEP or STL part, and every feature - Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean, Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole, Move Hole and Defeature - each under the name you gave it. A Form row holds everything done inside Form; Edit on it reopens the cage. Every row has its status mark, a suppress button and a right-click menu, and sketch rows an eye to show or hide them ("The feature tree"); the bodies the features make are shown, hidden and isolated from the Bodies list below.',
       },
       {
         kind: 'paragraph',
@@ -259,9 +259,17 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'On an imported STEP part, turn on Fillet and click a fillet that is already on the part: the bar opens with its current radius. Type the new radius and Apply - only that fillet changes. On an STL opened in the Model tab, Fillet changes the radius of a rounded edge the same way, and Chamfer puts a chamfer on the sharp edges you click.',
+        text: 'On an imported STEP part, turn on Fillet and click a fillet that is already on the part: the bar opens with its current radius. Type the new radius and Apply - the recognized fillet or its tangent chain changes. On an STL opened in the Model tab, Fillet changes the radius of a rounded edge the same way, and Chamfer puts a chamfer on the sharp edges you click.',
       },
       { kind: 'image', slot: 'fillet-preview' },
+      {
+        kind: 'paragraph',
+        text: 'On imported STEP and STL parts, a tangent-connected fillet or chamfer chain is one feature. With Fillet or Chamfer active, click an existing blend to change its radius or distance for the whole chain. Defeature removes the recognized chain as a whole; removing a boss takes its foot fillet with it. A size that cannot be built leaves the part unchanged and gives the reason.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Chamfer picks real sharp edges. The seam used to draw a cylinder is not a sharp edge and is not offered for Chamfer.',
+      },
     ],
     images: [
       {
@@ -296,6 +304,18 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'Hole: click Hole, then click a face - the panel opens with the Seed point (X, Y, Z) where you clicked. If the face has sketch points, they light up and a Snap to list appears ("Pick a highlighted sketch point in the viewport, or use Snap to below"). Choose the Style (Simple, Counterbore with CB diameter and CB depth, or Countersink with CS diameter and CS angle), the Diameter, and the Depth (Blind with a Depth in mm, or Through all). Under Placement, Pattern repeats the hole: Linear adds Count and Spacing, Circular adds Count, Bolt radius and Start angle.',
       },
       { kind: 'image', slot: 'draft-preview' },
+      {
+        kind: 'paragraph',
+        text: 'Draft beside existing fillets keeps their radii when the edit can be built. Shell can work on filleted parts too; opening a pocketed part can leave separate pieces rather than one connected body.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'After Shell succeeds, the Console reports any information about the resulting pieces once, including when you edit an existing Shell.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'On a curved STEP face, Hole uses the surface normal at the point you click as its drilling direction. The seed point still comes from that click.',
+      },
     ],
     images: [
       {
@@ -315,12 +335,12 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     id: 'push-pull',
     title: 'Push/pull direct editing',
     category: 'modeling',
-    summary: 'Push/Pull grabs a flat face and moves it along its normal with a drag arrow or a typed distance - and the result is a feature row you can edit later.',
+    summary: 'Push/Pull moves a flat face along its normal, or offsets a cylindrical or conical hole face on a STEP body, with a drag arrow or a typed distance. The result is a feature row you can edit later.',
     sections: [
       {
         kind: 'steps',
         steps: [
-          'Click Push/Pull in the Modify group, then click a flat face on a body.',
+          'Click Push/Pull in the Modify group, then click a flat face, or a cylindrical or conical hole face on a STEP body.',
           'Drag the arrow, or type a distance in the small card next to the face (+ pulls, - pushes). Letting go of the drag does not commit - you can keep adjusting.',
           'Press Enter to preview a typed value, then Enter again or Apply to commit. Esc or Cancel stops.',
         ],
@@ -330,6 +350,18 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'The commit adds a Push/Pull row to the feature tree like any other feature, so it rebuilds with the model. To change it later, select the row and press Edit... - the arrow and the distance card come back on the same face with the distance you used.',
       },
       { kind: 'image', slot: 'pushpull-gizmo' },
+      {
+        kind: 'paragraph',
+        text: 'Push/Pull and pocket-depth edits can carry neighboring fillet and chamfer chains with the face, keeping their size, including supported drafted walls and cone feet. On STL parts, a flat face meeting fillets can move with those fillets, and a counterbore floor can be picked for Push/Pull. An edit that cannot be built reports why and leaves the body unchanged.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'On a STEP hole, a cylindrical face changes radius by the typed offset; a cone moves parallel to itself and keeps its angle. A positive offset enlarges the hole. On an STL, a flat face beside a curved rim can move while staying joined to that rim.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'On an STL, Edit on the Push/Pull tree row brings back its stored distance. Apply replaces that edit; Undo and Redo step through the replacement, including when you press Undo quickly after Apply.',
+      },
     ],
     images: [
       {
@@ -340,7 +372,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         status: 'done',
       },
     ],
-    keywords: 'push pull direct edit face arrow drag distance normal pulls pushes offset preview commit enter feature row edit',
+    keywords: 'push pull direct edit face cylinder cone counterbore countersink arrow drag distance normal pulls pushes offset preview commit enter feature row edit',
     contextKeys: ['workspace:part'],
     relatedTopicIds: ['defeature-resize-hole', 'feature-tree-history', 'model-imported-parts'],
     sinceVersion: '0.36.0',
@@ -368,6 +400,22 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'Hole depth: while Resize hole is waiting for a hole, press Depth on its bar (Diameter switches back). The card then shows the Current depth ("(through)" for a through hole); type a New depth, or press Through, then Apply. The hole\'s floor moves and its diameter stays.',
       },
       { kind: 'image', slot: 'defeature-groups' },
+      {
+        kind: 'paragraph',
+        text: 'Move Hole in the Modify group relocates a recognized hole on STEP or STL. Click the hole and type an XYZ delta in mm on the same face, then Apply. Every counterbore or countersink step moves together with its diameters and depths preserved. An overlap or wall breakthrough reports why the move cannot be built. Edit on the Move Hole tree row reopens it; Undo restores the old position.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'On an STL, Defeature can remove a recognized round boss with its foot fillet, or a dome, leaving the plate face. Stepped-hole recognition includes connected cylindrical and conical bands, so moving a hole carries the whole stack.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'A resized stepped hole keeps its remaining steps selectable for later edits and CAM face picks.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'To change an imported-hole resize again, select its Resize hole row in the feature tree and choose Edit. The card reopens at the diameter you last applied; enter the next diameter and Apply to replace that edit. If an upstream change removed the hole, the console says why it cannot reopen.',
+      },
     ],
     images: [
       {
@@ -378,7 +426,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         status: 'done',
       },
     ],
-    keywords: 'defeature delete faces heal recognized hole pocket boss fillet chamfer engraving group orange resize hole diameter depth through blind counterbore list current new',
+    keywords: 'defeature delete faces heal recognized hole pocket boss dome fillet chamfer engraving group orange resize hole move hole relocate xyz delta diameter depth through blind counterbore countersink list current new',
     contextKeys: ['modal:defeature-dialog', 'workspace:part'],
     relatedTopicIds: ['push-pull', 'shell-draft-hole', 'model-imported-parts'],
     sinceVersion: '0.36.0',
@@ -403,7 +451,11 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'With an STL open in the Model tab, Boolean works on the STL as the target and the tool is a shape you set in the panel: Tool Box (Centre and Size) or Cylinder (Centre, Diameter, Length), in mm, in the part\'s own coordinates.',
+        text: 'If Subtract would remove the whole target, it says that nothing would remain and leaves the model unchanged.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Import in the Document group can add an STL as another body. Boolean can use an STL and a STEP body, or two STLs, with either body as target or tool. Select the bodies in the view or from the lists; a mesh target also offers a Box or Cylinder tool sized in the panel. An STL used by a Boolean is hidden while that feature is active; Undo or rollback before it shows the STL again. An STL added through Model Import becomes a faceted solid that can later be exported as STEP.',
       },
       { kind: 'image', slot: 'boolean-result' },
     ],
@@ -604,11 +656,15 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     sections: [
       {
         kind: 'paragraph',
+        text: 'Import in the Model rail accepts STEP and STL files. A closed STL imported here becomes a faceted solid for further modeling and STEP export; curved surfaces keep their facets. This lets you combine imported bodies in one model.',
+      },
+      {
+        kind: 'paragraph',
         text: 'A STEP part gets here two ways: Import in the Document group brings a STEP file into the model as a body named after the file, or the pen button (Edit as model) on an imported STEP row in Setup opens it in the Model tab. It is then a body like any other: Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole (diameter or depth) and Defeature all work on it, and Fillet also changes the radius of a fillet already on the part.',
       },
       {
         kind: 'paragraph',
-        text: 'An STL gets here with the pen button (Edit as model) on its row in Setup. It opens as a mesh body and stays an STL; the message line says how many features it recognised ("Click a feature to select it whole"). A click picks a whole feature - a hole, a rounded edge, a flat face - never a single triangle.',
+        text: 'An STL opened with the pen button (Edit as model) on its row in Setup can remain a mesh body and stay an STL; the message line says how many features it recognised ("Click a feature to select it whole"). A click picks a whole feature - a hole, a rounded edge, a flat face - never a single triangle.',
       },
       {
         kind: 'table',
@@ -622,12 +678,20 @@ export const topics: HelpTopic[] = localizeHelpTopics([
           { cells: ['Hole', 'Drills a hole square to the face you click, with the usual Hole panel.'] },
           { cells: ['Resize hole', 'Changes a recognized hole\'s diameter, or its depth with Depth.'] },
           { cells: ['Defeature', 'Removes recognized features and heals the part.'] },
-          { cells: ['Boolean', 'Adds or cuts a Box or Cylinder you size in the panel.'] },
+          { cells: ['Boolean', 'Combines with another STL or STEP body in either direction, or with a Box or Cylinder sized in the panel.'] },
         ],
       },
       {
         kind: 'paragraph',
+        text: 'Move Hole relocates a complete recognized hole stack on STEP or STL. From body in Form also accepts the open STL; the source mesh is hidden while its Form feature is active. Relief is not available on a mesh body yet; hover its disabled button to read why.',
+      },
+      {
+        kind: 'paragraph',
         text: 'Each Apply is one step for Undo. Finish (top of the left panel) goes back to Setup with the edited part.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Import in the Model rail brings every solid of a multi-solid STEP into the model as its own body and reports the body count in the console. Cancel while the import is counting solids drops the import.',
       },
     ],
     images: [],
@@ -680,6 +744,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
           'Open image: a PNG or JPG, 8- or 16-bit. Light is high. Auto adjusts the picture and fits it inside the face, centred, and the part shows the relief live.',
           'Set the Depth and pick Raise, Emboss or Engrave, then Apply Relief. The relief is one row in the design tree; Edit on it reopens the palette with the picture and every value.',
         ],
+      },
+      {
+        kind: 'paragraph',
+        text: 'Relief is not available on an STL mesh body yet. Hover its disabled button for the reason; a flat face on a modelled solid can use Relief.',
       },
       { kind: 'image', slot: 'relief-palette' },
       { kind: 'heading', text: 'Height: Raise, Emboss, Engrave', anchor: 'height' },

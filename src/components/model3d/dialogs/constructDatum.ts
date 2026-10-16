@@ -8,6 +8,8 @@
 // a flat face for a tangent plane gives its own plane; a straight edge for a circle centre gives the
 // edge's middle; a flat face for a circle centre gives the face's centre.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import * as THREE from 'three'
 import type { CachedBody } from '../../../viewport3d'
 import type { StableId, Vec3 } from '../../../geom/geom-service'
@@ -76,7 +78,7 @@ export function planeFromThreePoints(points: readonly AxisPickedPoint[]): Outcom
   const [a, b, c] = points
   const seed: PickedPlaneState = { kind: 'three-points', points: [a.point, b.point, c.point] }
   const framed = pickedPlaneFrame(seed, false)
-  if (!framed.ok) return { ok: false, message: 'Plane: the three points are on one line - pick a point off that line.' }
+  if (!framed.ok) return { ok: false, message: workbenchText('constructDatum.planeTheThreePointsAreOnOneLinePick') }
   return {
     ok: true,
     pick: {
@@ -84,7 +86,7 @@ export function planeFromThreePoints(points: readonly AxisPickedPoint[]): Outcom
       faces: [...roleFaces('pointA', a.faceIds), ...roleFaces('pointB', b.faceIds), ...roleFaces('pointC', c.faceIds)],
       ownerIds: [...new Set([a.ownerId, b.ownerId, c.ownerId])],
       seed,
-      said: 'through the three points',
+      said: workbenchText('constructDatum.throughTheThreePoints'),
     },
   }
 }
@@ -110,7 +112,7 @@ export async function lineFromEdgePick(body: CachedBody, ownerId: string, edgeId
 export function planeFromTwoLines(a: PickedLine, b: PickedLine): Outcome<PickedPlanePick> {
   const seed: PickedPlaneState = { kind: 'two-edges', lines: [a.line, b.line] }
   const framed = pickedPlaneFrame(seed, false)
-  if (!framed.ok) return { ok: false, message: 'Plane: the two edges are on one line - pick an edge off that line.' }
+  if (!framed.ok) return { ok: false, message: workbenchText('constructDatum.planeTheTwoEdgesAreOnOneLinePick') }
   const meet = len(cross(a.line.dir, b.line.dir)) > 1e-6
   const gap = Math.abs(
     (b.line.origin.x - a.line.origin.x) * framed.frame.normal.x + (b.line.origin.y - a.line.origin.y) * framed.frame.normal.y + (b.line.origin.z - a.line.origin.z) * framed.frame.normal.z,
@@ -123,7 +125,7 @@ export function planeFromTwoLines(a: PickedLine, b: PickedLine): Outcome<PickedP
       ownerIds: [...new Set([a.ownerId, b.ownerId])],
       seed,
       lineKinds: [a.kind, b.kind],
-      said: meet && gap > 1e-6 ? 'through the first edge, parallel to the second (they do not meet)' : 'through the two edges',
+      said: meet && gap > 1e-6 ? workbenchText('constructDatum.throughTheFirstEdgeParallelToTheSecondThey') : workbenchText('constructDatum.throughTheTwoEdges'),
     },
   }
 }
@@ -157,14 +159,14 @@ export function meshNormalNear(body: CachedBody, faceId: StableId, point: Vec3):
 /** Tangent to the face clicked, touching it where it was clicked. */
 export async function planeTangentAt(body: CachedBody, ownerId: string, faceId: StableId, hit: Vec3, lookup: AxisFaceLookup): Promise<Outcome<PickedPlanePick>> {
   const geometry = await lookup(faceId)
-  if (geometry === undefined) return { ok: false, message: 'Plane: that face has no captured geometry yet - pick it again once the model has rebuilt.' }
+  if (geometry === undefined) return { ok: false, message: workbenchText('constructDatum.planeThatFaceHasNoCapturedGeometryYetPick') }
   const seed = tangentSeed(geometry, v3(hit), meshNormalNear(body, faceId, v3(hit)))
-  if (seed === undefined) return { ok: false, message: 'Plane: that face has no direction at the click - click the face again.' }
+  if (seed === undefined) return { ok: false, message: workbenchText('constructDatum.planeThatFaceHasNoDirectionAtTheClick') }
   const said = geometry.surfaceType === 'plane'
-    ? 'on the flat face (its own plane)'
+    ? workbenchText('constructDatum.onTheFlatFaceItsOwnPlane')
     : geometry.surfaceType === 'cylinder' && geometry.axis !== undefined
-      ? 'tangent to the round face where you clicked'
-      : `square to the ${geometry.surfaceType} face where you clicked (held there)`
+      ? workbenchText('constructDatum.tangentToTheRoundFaceWhereYouClicked')
+      : workbenchText('constructDatum.squareToTheFaceWhereYouClickedHeldThere', { surfaceType: String(geometry.surfaceType) })
   return { ok: true, pick: { kind: 'tangent', faces: roleFaces('tangentFace', [faceId]), ownerIds: [ownerId], seed, said } }
 }
 
@@ -172,7 +174,7 @@ export async function planeTangentAt(body: CachedBody, ownerId: string, faceId: 
 
 /** A point at a picked vertex. */
 export function pointAtVertex(point: AxisPickedPoint): PointPick {
-  return { kind: 'vertex', faces: roleFaces('pointFace', point.faceIds), consumes: [point.ownerId], seed: point.point, said: 'at the vertex' }
+  return { kind: 'vertex', faces: roleFaces('pointFace', point.faceIds), consumes: [point.ownerId], seed: point.point, said: workbenchText('constructDatum.atTheVertex') }
 }
 
 function circumcentre(points: readonly Vec3[]): Vec3 | undefined {
@@ -205,7 +207,7 @@ function edgePolyline(body: CachedBody, edgeId: StableId): Vec3[] {
 /** A circle's centre from a picked edge: a round edge's centre; a straight edge's middle. */
 export async function pointAtCircleEdge(body: CachedBody, ownerId: string, edgeId: StableId, lookup: AxisFaceLookup): Promise<Outcome<PointPick>> {
   const points = edgePolyline(body, edgeId)
-  if (points.length < 2) return { ok: false, message: 'Point: that edge has no drawn points - pick it again once the model has rebuilt.' }
+  if (points.length < 2) return { ok: false, message: workbenchText('constructDatum.pointThatEdgeHasNoDrawnPointsPickIt') }
   const faceIds = facesOfEdge(edgeId)
   const known: { id: StableId; geometry: NonNullable<Awaited<ReturnType<AxisFaceLookup>>> }[] = []
   for (const id of faceIds) {
@@ -224,7 +226,7 @@ export async function pointAtCircleEdge(body: CachedBody, ownerId: string, edgeI
       faces: roleFaces('pointFace', kept.map((face) => face.id)),
       consumes: [ownerId],
       seed,
-      said: round === undefined ? 'at the straight edge\'s middle (held there)' : 'at the circle\'s centre',
+      said: round === undefined ? workbenchText('constructDatum.atTheStraightEdgeSMiddleHeldThere') : workbenchText('constructDatum.atTheCircleSCentre'),
     },
   }
 }
@@ -232,9 +234,9 @@ export async function pointAtCircleEdge(body: CachedBody, ownerId: string, edgeI
 /** A circle's centre from a picked face: a round face's axis at its middle; a flat face's centre. */
 export async function pointAtCircleFace(ownerId: string, faceId: StableId, lookup: AxisFaceLookup): Promise<Outcome<PointPick>> {
   const geometry = await lookup(faceId)
-  if (geometry === undefined) return { ok: false, message: 'Point: that face has no captured geometry yet - pick it again once the model has rebuilt.' }
+  if (geometry === undefined) return { ok: false, message: workbenchText('constructDatum.pointThatFaceHasNoCapturedGeometryYetPick') }
   const made = computeDatumPoint({ kind: 'circle-centre' }, [{ role: 'pointFace', geometry }], { point: geometry.centroid })
-  if (!made.ok) return { ok: false, message: `Point: ${made.reason}.` }
+  if (!made.ok) return { ok: false, message: workbenchText('constructDatum.point', { reason: String(made.reason) }) }
   return {
     ok: true,
     pick: {
@@ -242,7 +244,7 @@ export async function pointAtCircleFace(ownerId: string, faceId: StableId, looku
       faces: roleFaces('pointFace', [faceId]),
       consumes: [ownerId],
       seed: made.point,
-      said: geometry.surfaceType === 'plane' ? 'at the flat face\'s centre' : 'on the round face\'s axis, at its middle',
+      said: geometry.surfaceType === 'plane' ? workbenchText('constructDatum.atTheFlatFaceSCentre') : workbenchText('constructDatum.onTheRoundFaceSAxisAtItsMiddle'),
     },
   }
 }
@@ -256,7 +258,7 @@ export function pointWhereLineMeets(
   const faces: ConstructFaceRefInput[] = roleFaces('lineA', line.faceIds)
   if (plane.kind === 'face') faces.push({ role: 'planeFace', faceId: plane.faceId })
   const made = computeDatumPoint({ kind: 'edge-plane', lineKind: line.kind }, [], { line: line.line }, plane.frame)
-  if (!made.ok) return { ok: false, message: 'Point: that edge runs parallel to the plane - they never meet. Pick another edge or plane.' }
+  if (!made.ok) return { ok: false, message: workbenchText('constructDatum.pointThatEdgeRunsParallelToThePlaneThey') }
   return {
     ok: true,
     pick: {
@@ -266,7 +268,7 @@ export function pointWhereLineMeets(
       seed: made.point,
       seedLine: line.line,
       lineKind: line.kind,
-      said: `where ${line.kind === 'cylinder' ? 'the round edge\'s centre line' : 'the edge'} meets ${plane.kind === 'datum' ? plane.label : 'the face'}`,
+      said: workbenchText('constructDatum.whereMeets', { value1: String(line.kind === 'cylinder' ? workbenchText('constructDatum.theRoundEdgeSCentreLine') : workbenchText('constructDatum.theEdge')), value2: String(plane.kind === 'datum' ? plane.label : workbenchText('constructDatum.theFace')) }),
     },
   }
 }

@@ -85,7 +85,11 @@ public static class Harness {
       MaxVelPerMin = 6000, Acceleration = 800,
       SoftLimitMin = -10, SoftLimitMax = 700, SlaveAxis = 3,
       HasHoming = true, HomeDirectionPositive = false, HomeBackOff = 2,
-      HomeFastPerMin = 1200, HomeSlowPerMin = 300
+      HomeFastPerMin = 1200, HomeSlowPerMin = 300,
+      // WO-2764: apply now writes only what the definition states (an unstated value is
+      // left as the board has it), so this axis states the facts the dump checks.
+      StepsPerUnitStated = true, MaxVelocityStated = true, AccelerationStated = true,
+      HomeDirectionStated = true, HomeFastStated = true, HomeSlowStated = true, HomeBackOffStated = true
     };
   }
 

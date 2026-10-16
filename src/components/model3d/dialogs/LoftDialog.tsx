@@ -18,6 +18,7 @@
 // loft feature now reopens this dialog prefilled from the stored payload, and
 // Apply rewrites the SAME node through EditFeaturePayloadCommand.
 
+import { useText } from '../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -86,6 +87,7 @@ function isUpstreamProducer(dag: FeatureDag, featureId: string | undefined, prod
 }
 
 export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featureId, treeSketchPick, onTreePickConsumed, onStartProfilePick, onApplied, onClose }: LoftDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const editing = mode === 'edit'
   const existing = editing && featureId !== undefined ? (dag.getNode(featureId)?.payload as Record<string, unknown> | undefined) : undefined
   const existingSectionIds = existing?.sectionIds as string[] | undefined
@@ -108,7 +110,7 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
     if (treeSketchPick === undefined || treeSketchPick.nonce <= handledTreeSketchPickNonceRef.current) return
     handledTreeSketchPickNonceRef.current = treeSketchPick.nonce
     if (isPickingProfiles || !treeSketchPickAvailable) {
-      console.info(`Tree pick ignored: ${isPickingProfiles ? 'profile pick session is active' : 'sketch is not available'}`)
+      console.info(workbenchText('LoftDialog.treePickIgnored', { value1: String(isPickingProfiles ? workbenchText('LoftDialog.profilePickSessionIsActive') : workbenchText('LoftDialog.sketchIsNotAvailable')) }))
       onTreePickConsumed?.(treeSketchPick.nonce)
       return
     }
@@ -135,7 +137,7 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
     setIsPickingProfiles(true)
     const stop = onStartProfilePick({
       allowedIds: sections.map((option) => option.id),
-      prompt: 'Pick the first loft section, then the second section.',
+      prompt: workbenchText('LoftDialog.pickTheFirstLoftSectionThenTheSecondSection'),
       maxPicks: 2,
       onDone: ([first, second]) => {
         if (!session.active) return
@@ -206,7 +208,7 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
       ...(sectionProfileSelectorsChanged ? { sectionProfileSelectors: [section1Selector, section2Selector] } : {}),
       spacing,
       ruled,
-      name: `Loft ${id}`,
+      name: workbenchText('LoftDialog.loft', { id: String(id) }),
     }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [section1, section2], payload }))
@@ -220,10 +222,10 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
 
   return (
     <DialogShell
-      title={editing ? 'Edit loft' : 'Loft'}
+      title={editing ? workbenchText('LoftDialog.editLoft') : workbenchText('LoftDialog.loft2')}
       onApply={handleApply}
       onCancel={isPickingProfiles ? cancelProfilePick : onClose}
-      cancelLabel={isPickingProfiles ? 'Stop picking' : 'Cancel'}
+      cancelLabel={isPickingProfiles ? workbenchText('LoftDialog.stopPicking') : workbenchText('LoftDialog.cancel')}
       applyDisabled={invalid || isPickingProfiles}
       floatingPalette
     >
@@ -236,27 +238,25 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
           aria-pressed={isPickingProfiles}
           onClick={isPickingProfiles ? cancelProfilePick : beginProfilePick}
         >
-          {isPickingProfiles ? 'Cancel section picks' : 'Pick sections in viewport'}
-          <span className="op-pick-count">2 ordered picks</span>
+          {isPickingProfiles ? workbenchText('LoftDialog.cancelSectionPicks') : workbenchText('LoftDialog.pickSectionsInViewport')}
+          <span className="op-pick-count">{workbenchText('LoftDialog.2OrderedPicks')}</span>
         </button>
         {treeSelectionActive && (
           <div data-testid="loft-tree-sketch-status" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Sketch: {sections.find((option) => option.id === section1)?.label ?? section1} (from the design tree) - whole sketch
-          </div>
+            {workbenchText('LoftDialog.sketch')}{sections.find((option) => option.id === section1)?.label ?? section1}{workbenchText('LoftDialog.fromTheDesignTreeWholeSketch')}</div>
         )}
         {isPickingProfiles && (
           <div data-testid="loft-profile-pick-guidance" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Pick the first and second closed profiles in order, then use Done in the viewport. Escape stops picking and keeps this panel open.
-          </div>
+            {workbenchText('LoftDialog.pickTheFirstAndSecondClosedProfilesInOrder')}</div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-          <span data-testid="loft-section1-label">First: {(sections.find((option) => option.id === section1)?.label ?? section1) || 'none'}</span>
-          <span data-testid="loft-section2-label">Second: {(sections.find((option) => option.id === section2)?.label ?? section2) || 'none'}</span>
+          <span data-testid="loft-section1-label">{workbenchText('LoftDialog.first')}{(sections.find((option) => option.id === section1)?.label ?? section1) || workbenchText('LoftDialog.none')}</span>
+          <span data-testid="loft-section2-label">{workbenchText('LoftDialog.second')}{(sections.find((option) => option.id === section2)?.label ?? section2) || workbenchText('LoftDialog.none')}</span>
         </div>
         <details>
-          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>Choose sections by name fallback</summary>
+          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>{workbenchText('LoftDialog.chooseSectionsByNameFallback')}</summary>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <span style={{ width: 90, color: 'var(--text-muted)' }}>Section 1</span>
+            <span style={{ width: 90, color: 'var(--text-muted)' }}>{workbenchText('LoftDialog.section1')}</span>
             <select
               data-testid="loft-section1-select"
               value={section1}
@@ -267,7 +267,7 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
               }}
               style={{ flex: 1 }}
             >
-              {!section1Available && section1 !== '' && <option value={section1}>(unavailable: {section1})</option>}
+              {!section1Available && section1 !== '' && <option value={section1}>{workbenchText('LoftDialog.unavailable')}{section1}{workbenchText('LoftDialog.value')}</option>}
               {sections.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
@@ -276,7 +276,7 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
             </select>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <span style={{ width: 90, color: 'var(--text-muted)' }}>Section 2</span>
+            <span style={{ width: 90, color: 'var(--text-muted)' }}>{workbenchText('LoftDialog.section2')}</span>
             <select
               data-testid="loft-section2-select"
               value={section2}
@@ -287,7 +287,7 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
               }}
               style={{ flex: 1 }}
             >
-              {!section2Available && section2 !== '' && <option value={section2}>(unavailable: {section2})</option>}
+              {!section2Available && section2 !== '' && <option value={section2}>{workbenchText('LoftDialog.unavailable')}{section2}{workbenchText('LoftDialog.value')}</option>}
               {sections.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
@@ -298,22 +298,21 @@ export function LoftDialog({ dag, history, sketchOptions, mode = 'create', featu
         </details>
         {(!section1Available || !section2Available) && (
           <div data-testid="loft-sections-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            Select two available upstream sketch sections.
-          </div>
+            {workbenchText('LoftDialog.selectTwoAvailableUpstreamSketchSections')}</div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 90, color: 'var(--text-muted)' }}>Spacing</span>
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>{workbenchText('LoftDialog.spacing')}</span>
           <span data-testid="loft-spacing" style={{ flex: 1 }}>
             <NumericInput value={spacing} onChange={setSpacing} min={0.1} style={{ width: '100%' }} />
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('LoftDialog.mm')}</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 90, color: 'var(--text-muted)' }}>Ruled</span>
+          <span style={{ width: 90, color: 'var(--text-muted)' }}>{workbenchText('LoftDialog.ruled')}</span>
           <input data-testid="loft-ruled-checkbox" type="checkbox" checked={ruled} onChange={(e) => setRuled(e.target.checked)} />
         </label>
         {section1 === section2 && section1 !== '' && (
-          <div style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>Sections must be different sketches.</div>
+          <div style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('LoftDialog.sectionsMustBeDifferentSketches')}</div>
         )}
         {applyError !== undefined && (
           <div data-testid="loft-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>

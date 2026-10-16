@@ -1,4 +1,5 @@
-(LienCAM 0.36.0-alpha.1 - 05 Name sign - generic)
+(LienCAM 0.36.0-alpha.2 - 05 Name sign - generic)
+G90 G21
 ( Setup 1 )
 G54
 ( V-carve 1 )

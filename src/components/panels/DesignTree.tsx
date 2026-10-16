@@ -1,3 +1,4 @@
+import { geometryDisplayName } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 import { Fragment, useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { NumericInput } from '../ui/NumericInput'
@@ -613,11 +614,11 @@ export function DesignTree() {
         layerVis.set(layer.id, vis)
         if (self || loopMatch) anyChild = true
       }
-      const selfMatch = matchesFilter(query, geo.name, geo.filename, geo.format)
+      const selfMatch = matchesFilter(query, geometryDisplayName(geo, project.modelItems), geo.name, geo.filename, geo.format)
       map.set(geo.id, { visible: isVisible(query, selfMatch, anyChild), layers: layerVis })
     }
     return map
-  }, [project.geometry, query, displayUnits])
+  }, [project.geometry, project.modelItems, query, displayUnits])
 
   // Seed (nest-source) ids: a geometry is a SEED iff some nest references it as a
   // source (ADR 0025 §2). Drives the seed badge on the geometry row and the nest's
@@ -1963,11 +1964,11 @@ export function DesignTree() {
                   )}
                   <FileBox size={11} className="tree-item-geo-icon" />
                   <TreeRenameLabel
-                    name={geo.name}
+                    name={renameTarget?.kind === 'geometry' && renameTarget.id === geo.id ? geo.name : geometryDisplayName(geo, project.modelItems)}
                     editing={renameTarget?.kind === 'geometry' && renameTarget.id === geo.id}
                     className="tree-item-label"
                     testId="tree-name-geometry"
-                    tooltip={shellText('DesignTree.doubleClickToRename')}
+                    tooltip={`${geometryDisplayName(geo, project.modelItems)} - ${shellText('DesignTree.doubleClickToRename')}`}
                     onStart={() => setRenameTarget({ kind: 'geometry', id: geo.id })}
                     onCommit={(n) => { updateGeometryName(geo.id, n); setRenameTarget(null) }}
                     onCancel={cancelRename}

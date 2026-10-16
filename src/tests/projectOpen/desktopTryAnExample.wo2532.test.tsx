@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { readFileSync } from 'node:fs'
 import { DEMO_EXAMPLES, ProjectStartupFlow, demoExampleAssetUrl } from '../../components/modals/DemoExamplePickerModal'
 import { useCamStore } from '../../store'
+import { useProjectPicker } from '../../lib/projectOpen/picker'
 import { createSampleMachine } from '../../lib/machine/sampleMachine'
 
 // jsdom has no IndexedDB; keep the real project-open path (as WO-2393's test does).
@@ -23,6 +24,7 @@ const real = { ...createSampleMachine(), id: 'operator', name: 'Operator Machine
 const desktopHost = { platform: 'win32', versions: { chrome: '1', electron: '1' } }
 
 beforeEach(() => {
+  useProjectPicker.getState().close()
   vi.stubEnv('VITE_DEMO_BUILD', '')
   vi.stubGlobal('liencamHost', desktopHost)
   act(() => useCamStore.setState({
@@ -31,16 +33,16 @@ beforeEach(() => {
     appSettings: { ...initial.appSettings, defaultMachineId: null },
   }))
 })
-afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); useProjectPicker.getState().close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('WO-2532 the desktop app offers Try an example', () => {
   it('a fresh desktop start shows the browser demo picker, with every shipped example and no machine prompt behind it', async () => {
     render(<ProjectStartupFlow />)
-    const dialog = await screen.findByRole('dialog', { name: 'Try an example' })
-    expect(Array.from(dialog.querySelectorAll('.machine-choice-name'), (e) => e.textContent))
+    const dialog = await screen.findByRole('dialog', { name: 'Open a project' })
+    expect(Array.from(dialog.querySelectorAll('.project-example-card strong'), (e) => e.textContent))
       .toEqual(DEMO_EXAMPLES.map((example) => example.label))
     expect(DEMO_EXAMPLES.filter((e) => e.group === 'CNC starter kit').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: 'Start with an empty project' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
     expect(screen.queryByText('Choose a machine for this project')).toBeNull()
     expect(useCamStore.getState().machineChoiceRequired).toBe(false)
   })
@@ -51,7 +53,7 @@ describe('WO-2532 the desktop app offers Try an example', () => {
     const load = vi.spyOn(useCamStore.getState(), 'loadProjectFromFile')
     render(<ProjectStartupFlow />)
     fireEvent.click(await screen.findByRole('button', { name: /Fixture Plate/ }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Try an example' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Open a project' })).toBeNull())
     const example = DEMO_EXAMPLES.find((e) => e.label === 'Fixture Plate')!
     // A package-relative asset URL, never a network address.
     const url = demoExampleAssetUrl(example.path, example.url)
@@ -68,9 +70,9 @@ describe('WO-2532 the desktop app offers Try an example', () => {
 
   it('starting empty hands over to the machine choice, as the browser does', async () => {
     render(<ProjectStartupFlow />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Start with an empty project' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByText('Choose a machine for this project')
-    expect(screen.queryByRole('dialog', { name: 'Try an example' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Open a project' })).toBeNull()
     fireEvent.click(screen.getByText('Use this machine'))
     expect(useCamStore.getState().project.machine.id).toBe('operator')
   })
@@ -79,7 +81,7 @@ describe('WO-2532 the desktop app offers Try an example', () => {
     act(() => useCamStore.setState({ project: { ...initial.project, id: 'saved-desktop-project' } }))
     render(<ProjectStartupFlow />)
     await screen.findByText('Choose a machine for this project')
-    expect(screen.queryByRole('dialog', { name: 'Try an example' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Open a project' })).toBeNull()
   })
 
   it('an ordinary browser session (no desktop host, no demo flag) still starts without the picker', () => {

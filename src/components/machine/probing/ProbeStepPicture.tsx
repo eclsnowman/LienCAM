@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-2063 - one step's picture: the side view and the top view, drawn from
 // the step's own millimetres (probeScene.ts), never a hand-drawn sketch.
 //
@@ -47,8 +50,8 @@ export interface PictureProgress {
 /** Before Start, while the machine runs, or after the run ended. */
 export type PictureMode = 'preview' | 'running' | 'after'
 
-export const PREVIEW_CAPTION = 'BEFORE START - preview (nothing moves)'
-export const RUNNING_CAPTION = 'RUNNING'
+export const PREVIEW_CAPTION = probeText('probeStepPicture1')
+export const RUNNING_CAPTION = probeText('probeStepPicture2')
 
 const GAP = 48 // the top view starts this far right of the side view
 const MIN_TOP_W = 220
@@ -165,6 +168,7 @@ export function probeAt(step: ProbeStep, progress: PictureProgress | null): P3 {
 }
 
 function Arrow({ x1, y1, x2, y2, color, dashed, testId, beside }: { x1: number; y1: number; x2: number; y2: number; color: string; dashed: boolean; testId?: string; beside?: boolean }) {
+  useText('probing-screens')
   const len = Math.hypot(x2 - x1, y2 - y1)
   if (len < 1) return null
   const ux = (x2 - x1) / len
@@ -192,6 +196,7 @@ function Arrow({ x1, y1, x2, y2, color, dashed, testId, beside }: { x1: number; 
 
 /** A dimension: a line with end ticks and its words above it. */
 function DimH({ xa, xb, y, label, color, testId, size = DIM_TEXT }: { xa: number; xb: number; y: number; label: string; color: string; testId?: string; size?: number }) {
+  useText('probing-screens')
   return (
     <g data-testid={testId}>
       <line x1={xa} y1={y} x2={xb} y2={y} stroke={color} strokeWidth={3} />
@@ -383,12 +388,16 @@ export function ProbeStepPicture({
   /** For captures: where the preview loop is ('start' holds before the move). */
   previewPhase?: 'still' | 'start' | 'playing' | 'live'
 }) {
+  useText('probing-screens')
   const { W, H, sideW, topX, topW, topH } = pictureLayout(scene, width, height)
   const sideH = H
   const R = scene.tipRadiusMm
   // The caption strip's lines (two on a narrow side view), reserved on every
   // step so the drawing never jumps when the strip comes or goes.
-  const capLines = textW(PREVIEW_CAPTION, CAP_TEXT) * 0.95 > sideW - 32 ? 2 : 1
+  // Caption is bold text, wider than the dimension-label estimate. Reserve
+  // a conservative 0.65em per character so the intermediate MiniPC side
+  // width wraps too; keep both wording and font size unchanged.
+  const capLines = PREVIEW_CAPTION.length * CAP_TEXT * 0.65 > sideW - 32 ? 2 : 1
   const CAP_BAND = CAP_H + (capLines - 1) * 32 + 10
   const frames = sideFrame(scene, sideW, sideH - CAP_BAND)
   const F = frames[step.view]
@@ -736,9 +745,9 @@ export function ProbeStepPicture({
     // search ("Z- up to 25 mm") - the start is any height below that.
     const searchMm = m.searchLabel && mode !== 'running' ? m.searchMm : undefined
     const txt = searchMm !== undefined
-      ? moveLabel(m, () => `up to ${Number(searchMm.toFixed(1))} mm`)
+      ? moveLabel(m, () => probeText('probeStepPicture3', { value1: String(Number(searchMm.toFixed(1))) }))
       : startSearch !== null
-        ? moveLabel(m, () => `up to ${Number(rem.toFixed(1))} mm`)
+        ? moveLabel(m, () => probeText('probeStepPicture4', { value1: String(Number(rem.toFixed(1))) }))
         : moveLabel(m, () => `${Number(rem.toFixed(1))} mm`)
     const tw = textW(txt, TEXT)
     const px = sx(u(pos, step.view))
@@ -1176,7 +1185,7 @@ export function ProbeStepPicture({
   // sentence's. In the open air first, else on the part's flat face.
   if (angle && scene.angle) {
     const v = scene.angle.measuredDeg
-    const text = v === null ? 'angle' : `${Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2)} deg`
+    const text = v === null ? 'angle' : probeText('probeStepPicture5', { value1: String(Math.abs(v) < 0.005 ? '0.00' : v.toFixed(2)) })
     const SIZE = TOP_TEXT
     const keep: Area[] = [
       { x0: ax0 - 16, x1: ax0 + 68, y0: ay0 - 58, y1: ay0 + 16 },

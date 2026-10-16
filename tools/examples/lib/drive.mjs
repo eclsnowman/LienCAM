@@ -64,6 +64,20 @@ export function portableSnapshot(project, tools = project.toolLibrary ?? []) {
   }
 }
 
+/**
+ * Open a project file through the real Open button. Since WO-2725 Open shows
+ * the "Open a project" window first; its Browse... raises the file chooser.
+ * An operator who chose to open directly gets the chooser straight away.
+ */
+export async function openProjectFile(page, file) {
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Open project', exact: true }).click()
+  const browse = page.locator('.project-picker-browse')
+  const windowShown = await Promise.race([chooser.then(() => false), browse.waitFor().then(() => true, () => false)])
+  if (windowShown) await browse.click()
+  await (await chooser).setFiles(file)
+}
+
 export class ExampleDriver {
   constructor(browser, baseUrl, outDir) {
     this.browser = browser
@@ -213,11 +227,7 @@ export class ExampleDriver {
     const originalPage = this.page
     await this.open()
     assert.notEqual((await this.readState())?.project.id, saved.id, 'Fresh page must not already contain the saved project')
-    await this.step('Reopen saved project in a fresh context', async page => {
-      const chooser = page.waitForEvent('filechooser')
-      await page.getByRole('button', { name: 'Open project', exact: true }).click()
-      await (await chooser).setFiles(file)
-    }, state => {
+    await this.step('Reopen saved project in a fresh context', page => openProjectFile(page, file), state => {
       if (state.project.id !== saved.id) return false
       assert.equal(state.toolLibrary.length, saved.toolLibrary.length, 'Fresh library must match the saved tool count')
       assert.deepEqual(portableSnapshot(state.project, state.toolLibrary), expected)

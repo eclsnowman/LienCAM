@@ -1,3 +1,6 @@
+import { textFor } from '../../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-2166: the Calibrate routine's references, kept per machine - each a name,
 // a kind (outside: gauge pin / round boss; inside: ring gauge / known bore)
 // and an exact diameter - and the one last used, which the screen preselects.
@@ -11,7 +14,7 @@ import { create } from 'zustand'
 import type { CalibrationReference, CalibrationReferenceKind } from '../../../lib/machine/probeCalibration'
 
 /** Every machine's list starts with the order's own example. */
-export const FIRST_REFERENCE: CalibrationReference = { id: 'ref-1', name: '25.000 gauge pin', kind: 'outside', diameterMm: 25 }
+export const FIRST_REFERENCE: CalibrationReference = { id: 'ref-1', name: probeText('calibrationReferences1'), kind: 'outside', diameterMm: 25 }
 
 interface MachineReferences {
   list: CalibrationReference[]
@@ -57,7 +60,7 @@ export function addCalibrationReference(machineId: string, from: { kind: Calibra
   write(machineId, (r) => {
     let n = r.list.length + 1
     while (r.list.some((ref) => ref.id === `ref-${n}`)) n++
-    const ref: CalibrationReference = { id: `ref-${n}`, name: `Reference ${n}`, kind: from.kind, diameterMm: from.diameterMm }
+    const ref: CalibrationReference = { id: `ref-${n}`, name: probeText('calibrationReferences2', { value1: String(n) }), kind: from.kind, diameterMm: from.diameterMm }
     return { list: [...r.list, ref], lastUsedId: ref.id }
   })
 }

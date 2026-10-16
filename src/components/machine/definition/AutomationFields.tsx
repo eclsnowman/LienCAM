@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type SettingSource } from './DefinitionFields'
 import { NotSent } from './DefinitionFields'
 import { useHeldRow } from './IoFields'
@@ -10,18 +14,18 @@ import { useState } from 'react'
  * stems here rather than translating them into a second data model - driving a
  * field later means giving it a bridge contract and `data-wired`, not renaming
  * it. */
-export const FAULT_SIGNAL_FIELDS = [
-  ['Enable',      'enabled'],
-  ['Port',        'port'],
-  ['Pin',         'pin'],
-  ['ActiveLow',   'active low'],
-  ['Description', 'description'],
-  ['Action',      'action'],
-  ['StartDelay',  'start delay'],
-  ['ActionDelay', 'action delay'],
-  ['LED',         'LED'],
-  ['Invert',      'invert LED'],
-] as const
+export const FAULT_SIGNAL_FIELDS = liveCatalog(() => ([
+  ['Enable',      controlText('AutomationFields.text001')],
+  ['Port',        controlText('AutomationFields.text002')],
+  ['Pin',         controlText('AutomationFields.text003')],
+  ['ActiveLow',   controlText('AutomationFields.text004')],
+  ['Description', controlText('AutomationFields.text005')],
+  ['Action',      controlText('AutomationFields.text006')],
+  ['StartDelay',  controlText('AutomationFields.text007')],
+  ['ActionDelay', controlText('AutomationFields.text008')],
+  ['LED',         controlText('AutomationFields.text009')],
+  ['Invert',      controlText('AutomationFields.text010')],
+] as const))
 
 export const FAULT_SIGNAL_ROWS = Array.from({ length: 15 }, (_, index) => index + 1)
 
@@ -38,36 +42,36 @@ export const FAULT_SIGNAL_ROWS = Array.from({ length: 15 }, (_, index) => index 
 export const MACRO_LOOP_ROWS = Array.from({ length: 48 }, (_, index) => index)
 export const AUX_ENCODER_ROWS = Array.from({ length: 6 }, (_, index) => index + 1)
 
-export const DIGITIZE_AXIS_FIELDS = [
-  ['include axis names', 'Addaxisnames'],
-  ['include X', 'Xinclude'],
-  ['include Y', 'Yinclude'],
-  ['include Z', 'Zinclude'],
-  ['include A', 'Ainclude'],
-  ['include B', 'Binclude'],
-  ['include C', 'Cinclude'],
-] as const
+export const DIGITIZE_AXIS_FIELDS = liveCatalog(() => ([
+  [controlText('AutomationFields.text011'), 'Addaxisnames'],
+  [controlText('AutomationFields.text012'), 'Xinclude'],
+  [controlText('AutomationFields.text013'), 'Yinclude'],
+  [controlText('AutomationFields.text014'), 'Zinclude'],
+  [controlText('AutomationFields.text015'), 'Ainclude'],
+  [controlText('AutomationFields.text016'), 'Binclude'],
+  [controlText('AutomationFields.text017'), 'Cinclude'],
+] as const))
 
-export const DIGITIZE_FORMAT_FIELDS = [
-  ['comma separated', 'Commaseparation'],
-  ['decimal digits', 'Numberofdigits'],
-  ['probe diameter', 'Probedia'],
-  ['clear file name when finished', 'Clearfilenamewhenfinished'],
-] as const
+export const DIGITIZE_FORMAT_FIELDS = liveCatalog(() => ([
+  [controlText('AutomationFields.text018'), 'Commaseparation'],
+  [controlText('AutomationFields.text019'), 'Numberofdigits'],
+  [controlText('AutomationFields.text020'), 'Probedia'],
+  [controlText('AutomationFields.text021'), 'Clearfilenamewhenfinished'],
+] as const))
 
-export const LASER_ENGRAVE_FIELDS = [
-  ['workpiece width', 'workpiecewidth'],
-  ['workpiece height', 'workpieceheight'],
-  ['keep aspect ratio', 'keepaspectratio'],
-  ['Y scan distance', 'Yscandistance'],
-  ['feed rate', 'Feedrate'],
-  ['origin setting', 'Originsetting'],
-] as const
+export const LASER_ENGRAVE_FIELDS = liveCatalog(() => ([
+  [controlText('AutomationFields.text022'), 'workpiecewidth'],
+  [controlText('AutomationFields.text023'), 'workpieceheight'],
+  [controlText('AutomationFields.text024'), 'keepaspectratio'],
+  [controlText('AutomationFields.text025'), 'Yscandistance'],
+  [controlText('AutomationFields.text026'), 'Feedrate'],
+  [controlText('AutomationFields.text027'), 'Originsetting'],
+] as const))
 
-export const RFH_FIELDS = [
-  ['switch spindle mode', 'Switchspindlemode'],
-  ['initial moves use rapid', 'Doinitialmoveswithrapid'],
-] as const
+export const RFH_FIELDS = liveCatalog(() => ([
+  [controlText('AutomationFields.text028'), 'Switchspindlemode'],
+  [controlText('AutomationFields.text029'), 'Doinitialmoveswithrapid'],
+] as const))
 
 export function ProfileNotSent({ label, section, settingKey, settings }: {
   label: string
@@ -127,6 +131,7 @@ export function MacroLoopRows({ rows, settings, drawnConfigured, held }: {
 export function MacroLoopsTable({ settings }: {
   settings: SettingSource
 }) {
+  useText('control-screens-not-probing')
   const [showUnused, setShowUnused] = useState(false)
   const held = useHeldRow()
   const hasProfile = MACRO_LOOP_ROWS.some((row) =>
@@ -143,7 +148,7 @@ export function MacroLoopsTable({ settings }: {
   const configured = MACRO_LOOP_ROWS.filter(drawnConfigured)
   const unused = MACRO_LOOP_ROWS.filter((row) => !drawnConfigured(row))
   const tableHead = (
-    <thead><tr><th>slot</th><th>autorun</th><th>macro number</th></tr></thead>
+    <thead><tr><th>{controlText('AutomationFields.text030')}</th><th>{controlText('AutomationFields.text031')}</th><th>{controlText('AutomationFields.text032')}</th></tr></thead>
   )
 
   return (
@@ -151,11 +156,7 @@ export function MacroLoopsTable({ settings }: {
       <div
         data-testid="machine-def-panel-macro-loop-safety"
         style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-      >
-        An autorun macro can execute without an operator pressing anything. Editing these boxes
-        changes this machine's record only - nothing here arms a macro, and nothing in this
-        section gates or delays a stop.
-      </div>
+      >{controlText('AutomationFields.text033')}</div>
       {configured.length > 0 && (
         <table
           className="mform-axis-table"
@@ -167,9 +168,7 @@ export function MacroLoopsTable({ settings }: {
         </table>
       )}
       {hasProfile && configured.length === 0 && (
-        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-          No macro loops are configured in this profile.
-        </div>
+        <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('AutomationFields.text034')}</div>
       )}
       <details
         data-testid="machine-def-panel-macro-loops-unused"
@@ -178,8 +177,8 @@ export function MacroLoopsTable({ settings }: {
       >
         <summary style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
           {hasProfile
-            ? `${unused.length} unused macro loop slot${unused.length === 1 ? '' : 's'}`
-            : 'This record carries no imported macro loop values'}
+            ? controlText('AutomationFields.text035', { value1: String(unused.length), value2: String(unused.length === 1 ? '' : 's') })
+            : controlText('AutomationFields.text036')}
         </summary>
         {/* BUILT WHEN IT IS OPENED, for the reason the trigger slots are.
             46 unused slots are 138 boxes behind a shut disclosure, rebuilt on

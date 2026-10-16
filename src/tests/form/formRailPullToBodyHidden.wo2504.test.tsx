@@ -56,9 +56,10 @@ it('keeps the hidden tool out of Form Help after the WO-2626 wording corrections
   const hiddenSentence = ' Pull to body pulls the skin at the selected points onto the body selected in the tree.'
   expect(JSON.stringify(before.topics)).toContain(hiddenSentence)
   // WO-2626 corrected starter fields, display fields and Model-tab wording.
+  // WO-2508 / WO-2755 intentionally added Rotate help and its verified picture.
   // Retain an exact Help snapshot and both independent Pull assertions.
-  const golden = path.resolve(__dirname, '../evidence/WO-2650/form-help.after.json')
-  if (process.env.WO2650_RECORD === '1') writeFileSync(golden, JSON.stringify(topics, null, 2) + '\n')
+  const golden = path.resolve(__dirname, '../evidence/WO-2805/form-help.after.json')
+  if (process.env.WO2805_RECORD === '1') writeFileSync(golden, JSON.stringify(topics, null, 2) + '\n')
   expect(topics).toEqual(JSON.parse(readFileSync(golden, 'utf8')))
   expect(JSON.stringify(topics)).not.toContain('Pull to body')
   expect(JSON.stringify(topics)).toContain('Pull moves the cage so the smooth skin passes through the selected points where they are now.')

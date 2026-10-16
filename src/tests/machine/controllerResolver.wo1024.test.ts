@@ -307,7 +307,9 @@ describe('WO-1024 post boundaries', () => {
     act(() => useCamStore.getState().openModal('post-process'))
 
     expect(screen.getByText(UNDECLARED_CONTROLLER_REASON)).toBeTruthy()
-    expect(screen.getByText(/CONTROLLER_UNDECLARED/)).toBeTruthy()
+    // WO-2880: the code is row metadata, never on-screen text.
+    expect(document.querySelector('[data-code="CONTROLLER_UNDECLARED"]')).toBeTruthy()
+    expect(screen.queryByText(/CONTROLLER_UNDECLARED/)).toBeNull()
   })
 
   it('refuses ProgramPanel post-to-control with the resolver reason', async () => {

@@ -11,12 +11,12 @@
 // MISSING_TOOL_ID for callers/tests that want to detect it directly.
 
 import { machineRapidRate } from '../../types'
-import type { Operation, Project, Setup, Tool } from '../../types'
+import type { Operation, OperatorStopAction, Project, Setup, Tool } from '../../types'
 import { resolveFeedrates } from '../cam/feedrates'
 import { collectToolpathSections } from '../cam/nesting/nestRuntime'
 import { operationGenerationIsCurrent } from '../cam/generationFingerprint'
 import { resolveCoolant, resolveSpindle } from './resolve'
-import type { PostInput, PostOperation, PostOperatorStop } from './types'
+import type { PostInput, PostMachineAction, PostOperation, PostOperatorStop } from './types'
 import { resolveSetupWorkOffset } from './workOffsets'
 import { postToolNumbersOf } from './toolNumbers'
 
@@ -112,13 +112,45 @@ export function operatorStopsFromActions(
 ): Array<{ beforeOpId: string | null; message: string }> | undefined {
   if (!Array.isArray(actions)) return undefined
   const stops = actions
-    .filter((action) => action.kind === 'operator_stop' && action.enabled !== false)
+    .filter((action): action is OperatorStopAction => action.kind === 'operator_stop' && action.enabled !== false)
     .map((action) => {
       const at = action.afterOpId === null ? -1 : orderedOpIds.indexOf(action.afterOpId)
       const beforeOpId = action.afterOpId !== null && at < 0 ? null : orderedOpIds[at + 1] ?? null
       return { beforeOpId, message: action.message }
     })
   return stops.length > 0 ? stops : undefined
+}
+
+/** Preserve action payloads while moving a boundary past omitted operations. */
+export function resolveMachineActions(
+  orderedOpIds: readonly string[],
+  emitted: ReadonlySet<string>,
+  actions: readonly PostMachineAction[] | undefined,
+): PostMachineAction[] | undefined {
+  return actions?.map((action) => {
+    const from = action.beforeOpId === null ? -1 : orderedOpIds.indexOf(action.beforeOpId)
+    const beforeOpId = from < 0 ? null : orderedOpIds.slice(from).find((id) => emitted.has(id)) ?? null
+    return { ...action, beforeOpId }
+  })
+}
+
+/** Keep the list's order, including actions whose boundaries collapse when
+ *  disabled/omitted operations are removed. Legacy stop-only output is unchanged. */
+function machineActionsForPost(orderedOpIds: readonly string[], actions: Setup['machineActions']): PostMachineAction[] | undefined {
+  if (!Array.isArray(actions) || !actions.some((action) => action.kind === 'run_macro' && action.enabled !== false)) return undefined
+  const boundary = (afterOpId: string | null) => {
+    if (afterOpId === null) return 0
+    const index = orderedOpIds.indexOf(afterOpId)
+    return index < 0 ? orderedOpIds.length : index + 1
+  }
+  return actions.filter((action) => action.enabled !== false)
+    .sort((a, b) => boundary(a.afterOpId) - boundary(b.afterOpId))
+    .map((action): PostMachineAction => {
+      const beforeOpId = orderedOpIds[boundary(action.afterOpId)] ?? null
+      return action.kind === 'run_macro'
+        ? { kind: action.kind, beforeOpId, macroId: action.macroId, name: action.name }
+        : { kind: action.kind, beforeOpId, message: action.message }
+    })
 }
 
 export function buildPostInput(project: Project, setup: Setup): PostInput {
@@ -274,10 +306,15 @@ export function buildPostInput(project: Project, setup: Setup): PostInput {
     new Set(operations.map((o) => o.op.id)),
     operatorStopsFromActions(orderedOpIds, resolvedSetup.machineActions),
   )
+  const machineActions = resolveMachineActions(
+    orderedOpIds,
+    new Set(operations.map((operation) => operation.op.id)),
+    machineActionsForPost(orderedOpIds, resolvedSetup.machineActions),
+  )
 
   return {
     machine: project.machine,
-    setup: { wcs: resolvedSetup.wcs, operations, ...(operatorStops ? { operatorStops } : {}) },
+    setup: { wcs: resolvedSetup.wcs, operations, ...(operatorStops ? { operatorStops } : {}), ...(machineActions ? { machineActions } : {}) },
     stocks: project.stocks,
     setupId: setup.id,
   }

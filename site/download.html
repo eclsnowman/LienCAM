@@ -34,6 +34,7 @@
     <section class="download-intro" aria-labelledby="download-heading">
       <h1 id="download-heading">Download LienCAM</h1>
       <p>Sketch to CNC, on your own computer. Choose a file for your platform below.</p>
+      <p>Windows downloads require Windows 10 or 11 (64-bit). The macOS build is for Apple Silicon only (M1 and later); it does not run on Intel Macs.</p>
       <p class="alpha-note">Linux and macOS builds are untested. Desktop installers are unsigned.</p>
       <!-- releases:start -->
       <p class="release-version">Alpha / prerelease: <strong>0.36.0-alpha.1</strong></p>
@@ -61,6 +62,7 @@
             <p class="file-size">x64 - 44 bytes</p>
             <p class="checksum">SHA-256 <code>0bdbc73839b9b8b8d5e132a1f59111606f68445103eabb360eb0668ec686152b</code></p>
           </div>
+          <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Install-on-Linux">Linux installation guide</a></p>
         </div>
 <div class="download-cell" data-platform="linux" data-kind="archive" data-available="true">
           <h3>tar.gz</h3>
@@ -69,6 +71,7 @@
             <p class="file-size">x64 - 43 bytes</p>
             <p class="checksum">SHA-256 <code>1c95ff44cc2796f6c60b90d9146bfa91ed36ff7ee0e8157f82977c44ed795848</code></p>
           </div>
+          <p><a href="https://github.com/eclsnowman/LienCAM/wiki/Install-on-Linux">Linux installation guide</a></p>
         </div>
 <div class="download-cell" data-platform="linux" data-kind="gateway" data-available="true">
           <h3>LinuxCNC gateway</h3>
@@ -100,12 +103,13 @@
             <li>Open the downloaded .exe. If SmartScreen shows "Windows protected your PC", select <strong>More info</strong>.</li>
             <li>Check that the file is the LienCAM download you chose, then select <strong>Run anyway</strong>. Follow the installer steps, or open the portable app.</li>
           </ol>
+          <p>The portable program can travel on a USB stick, but settings and saved app data stay in <code>%APPDATA%\LienCAM</code> on that PC, shared with an installed copy. Use <a href="{{route:docs}}/Install-on-Windows#updating-or-moving-to-another-pc">backup and restore</a> to move your setup.</p>
           <p><a href="https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/">Microsoft's SmartScreen guide</a></p>
         </div>
         <div>
           <h3 id="macos-install">macOS</h3>
           <ol aria-labelledby="macos-install">
-            <li>Download the disk image for your Mac's architecture. Open the .dmg and drag LienCAM into Applications.</li>
+            <li>On an Apple Silicon Mac (M1 and later), download the arm64 disk image. Open the .dmg and drag LienCAM into Applications.</li>
             <li>Try opening LienCAM. If Gatekeeper blocks the unsigned app, open <strong>System Settings</strong>, then <strong>Privacy &amp; Security</strong>.</li>
             <li>Find the message about LienCAM and select <strong>Open Anyway</strong>. Confirm with <strong>Open</strong>, and authenticate if asked.</li>
           </ol>

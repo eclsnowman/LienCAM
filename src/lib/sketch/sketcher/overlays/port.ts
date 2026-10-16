@@ -105,6 +105,11 @@ export interface SketcherOverlaysPort {
   getTextEditId(): string | null
   /** Null until the mount has a live surface (first render, or after unmount). */
   getSurface(): SketcherOverlaySurface | null
+  /** Active measurement connector only: sketch-LOCAL mm -> overlay-local pixels,
+   *  including the host's display pose. Omit when the surface already projects
+   *  local coordinates (workbench plane). Null means no live surface. This does
+   *  not change the existing final-label/editor projection contract. */
+  projectDimensionPreview?(point: Vec2): Vec2 | null
 
   // ---- Dimension commands --------------------------------------------------------------------
 

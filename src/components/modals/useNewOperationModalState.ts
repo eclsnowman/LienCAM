@@ -1,6 +1,6 @@
 import { textFor } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, useCamStore } from '../../store'
 import { DEFAULT_ADAPTIVE3D_PARAMS, type Adaptive3dParams } from '../../cam3d/integration/adaptive3dOperation'
 import { DEFAULT_PARALLEL3D_PARAMS, type Parallel3dParams } from '../../cam3d/integration/parallel3dOperation'
@@ -15,6 +15,7 @@ import {
   type RestMachiningSettings,
 } from '../../cam3d/integration/rest3dOperation'
 import { normalizePocketEntryForFillStrategy } from '../../lib/cam/pocketEntryPolicy'
+import { normalizeLoopSelection } from '../../lib/cam/meshChainInstances'
 import { deriveContourMode } from '../../lib/cam/types'
 import type {
   ACParams, BoreParams, ChamferParams, ContourCuttingStrategy, ContourParams,
@@ -87,6 +88,15 @@ function libraryStepoverMm(tool: Pick<Tool, 'feedsAndSpeeds'>): number | undefin
   return typeof stepover === 'number' && Number.isFinite(stepover) && stepover > 0 ? stepover : undefined
 }
 
+/** WO-2859: a chain family's draft setter that keeps its STL instance
+ *  bindings inside its picks (meshChainInstances.ts). Stable identity. */
+function useLoopSelectionSetter<T extends { geometryId?: string; loopIds?: string[] }>(
+  setDraft: Dispatch<SetStateAction<T>>,
+): Dispatch<SetStateAction<T>> {
+  return useCallback((update: SetStateAction<T>) => setDraft((previous) =>
+    normalizeLoopSelection(typeof update === 'function' ? (update as (prev: T) => T)(previous) : update)), [setDraft])
+}
+
 export function useNewOperationModalState() {
   const activeModal      = useCamStore(s => s.activeModal)
   const closeModal       = useCamStore(s => s.closeModal)
@@ -127,12 +137,18 @@ export function useNewOperationModalState() {
   const [customEndCondition, setCustomEndCondition] = useState(false)
   const [passes,       setPasses]       = useState<PassParams>(defaultPasses)
   const [linking,      setLinking]      = useState<LinkingParams>(defaultLinking)
-  const [contour,      setContour]      = useState<ContourParams>(defaultContourParams)
+  // WO-2859: every draft write of a chain family (Contour, Pocket, Adaptive)
+  // runs `normalizeLoopSelection`, so a per-instance STL binding can never
+  // outlive its pick - whichever writer (Source change, Stock, path type,
+  // reset, edit-open hydrate, row tick, viewport) last changed `loopIds`.
+  const [contour,      setContourDraft] = useState<ContourParams>(defaultContourParams)
+  const setContour = useLoopSelectionSetter(setContourDraft)
   const [contourHeightDraft, setContourHeightDraft] = useState<ContourSmartHeightDraft>({
     mode: 'selected_feature', explicitTargetWcsMm: -5, throughAllowanceMm: 0.5,
   })
   const [contourHeightAuthority, setContourHeightAuthority] = useState<'new' | 'smart_v2'>('new')
-  const [pocket,       setPocket]       = useState<PocketParams>(defaultPocketParams)
+  const [pocket,       setPocketDraft]  = useState<PocketParams>(defaultPocketParams)
+  const setPocket = useLoopSelectionSetter(setPocketDraft)
   const [drill,        setDrill]        = useState<DrillParams>(defaultDrillParams)
   const [bore,         setBore]         = useState<BoreParams>(defaultBoreParams)
   const [drillBoreHeightDraft, setDrillBoreHeightDraft] = useState<DrillBoreSmartHeightDraft>({
@@ -152,7 +168,8 @@ export function useNewOperationModalState() {
   // flat-clearing mode 'tool'; the dialog creates that sibling operation.
   const [vcarve,       setVCarve]       = useState<VCarveParams>(defaultVCarveParams)
   const [vcarveClearingToolId, setVCarveClearingToolId] = useState('')
-  const [adaptive,     setAdaptive]     = useState<ACParams>(defaultACParams)
+  const [adaptive,     setAdaptiveDraft] = useState<ACParams>(defaultACParams)
+  const setAdaptive = useLoopSelectionSetter(setAdaptiveDraft)
   // parallel_3d (3D finish): the raster params ride op.params; the source solid
   // (mesh/brep) is picked separately and stored as the single geometrySelection.
   const [parallel3d,   setParallel3d]   = useState<Parallel3dParams>(DEFAULT_PARALLEL3D_PARAMS)

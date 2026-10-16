@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // ControlPage - the machine-control workspace (MACHINE-CONTROL plan, stage 3).
 // Hosts the GRBL sender UI. Mounted lazily on first entry and then RETAINED
 // (display:none, never unmounted) by App.tsx so a live serial session and its
@@ -126,7 +130,7 @@ export function controlConnectionKinds(
 }
 
 /** WO-1987: LinuxCNC's own connection - gateway.py on this computer. */
-const LINUXCNC_GATEWAY_LABEL = 'LinuxCNC gateway'
+const LINUXCNC_GATEWAY_LABEL = controlText('ControlPage.text001')
 
 /** The declared controller's own default when it is offered (UCCNC: the bridge,
  *  GRBL: serial - both first in their lists, as before; LinuxCNC: its gateway
@@ -196,9 +200,9 @@ export function formatControlConsoleTime(at: number): string {
 }
 
 const SWITCHED_NO_DATUM_CONSOLE_TEXT =
-  'Not homed yet - machine coordinates unknown. Press Home All, or type a machine coordinate to set it.'
+  controlText('ControlPage.text002')
 const SWITCHED_NO_DATUM_COLLAPSED_TEXT =
-  'Not homed - position unknown. Press Home All or set machine coordinate.'
+  controlText('ControlPage.text003')
 
 function controlConsoleDisplayText(text: string, collapsed: boolean): string {
   // WO-1343: retain the full event in expanded history, but use equivalent
@@ -358,6 +362,7 @@ function DroAxisRow({
   attemptGoto: (frame: GotoFrame, axis: ControlAxis, text: string) => boolean | void
   attemptSetDatum: (axis: ControlAxis, text: string) => boolean | void
 }) {
+  useText('control-screens-not-probing')
   /**
    * WO-994 - Operator'S DISAMBIGUATION RULE, WRITTEN WHERE IT IS ENFORCED:
    *
@@ -383,8 +388,8 @@ function DroAxisRow({
   */
   const machineCellIsDatumEntry = machine === null && machineUndefined
   const machineCellIntent = machineCellIsDatumEntry
-    ? `Typing sets ${axis} position.`
-    : `Typing moves ${axis} to this coordinate.`
+    ? controlText('ControlPage.text004', { value1: String(axis) })
+    : controlText('ControlPage.text005', { value1: String(axis) })
   // NumCell remounts its uncontrolled input whenever this string changes.
   // Keep the affordances in the same dependency so a normal MOVE readout
   // update cannot replace the titled input with a bare one.
@@ -405,7 +410,7 @@ function DroAxisRow({
     <div className="control-dro-row" data-testid={`control-dro-${axis.toLowerCase()}`}>
       <span
         className={`control-dro-axis ${homed ? 'control-dro-axis-homed' : ''}`}
-        title={`${axis} ${homed ? 'homed this session' : 'not homed'}`}
+        title={`${axis} ${homed ? controlText('ControlPage.text006') : controlText('ControlPage.text007')}`}
       >
         {axis}
       </span>
@@ -433,7 +438,7 @@ function DroAxisRow({
         disabled={zeroGate.disabled}
         aria-disabled={writeBusy || undefined}
         data-testid={`control-zero-${axis.toLowerCase()}`}
-        data-tooltip={zeroGate.refusal ?? `Set work ${axis} zero here (G10 L20)`}
+        data-tooltip={zeroGate.refusal ?? controlText('ControlPage.text008', { value1: String(axis) })}
         onClick={() => zeroWorkAxes([axis])}
       >
         0
@@ -489,6 +494,7 @@ function GotoConfirmDialog({
   onConfirm: (dontAskAgain: boolean) => void
   onCancel: () => void
 }) {
+  useText('control-screens-not-probing')
   const [dontAskAgain, setDontAskAgain] = useState(false)
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -498,7 +504,7 @@ function GotoConfirmDialog({
     }
   }
 
-  const frameLabel = pending.frame === 'work' ? 'WORK' : 'MACHINE'
+  const frameLabel = pending.frame === 'work' ? controlText('ControlPage.text009') : controlText('ControlPage.text010')
   const shownUnit = axisUnit(pending.axis, units)
   // The machine column is a machine-frame coordinate - G53 is the standard
   // non-modal prefix that makes a G0 address the machine frame instead of
@@ -512,19 +518,19 @@ function GotoConfirmDialog({
     <div
       className="modal-container"
       role="alertdialog"
-      aria-label={`Move ${pending.axis} axis`}
+      aria-label={controlText('ControlPage.text011', { value1: String(pending.axis) })}
       data-testid="control-goto-confirm"
       style={{ marginTop: 8 }}
       onKeyDown={onKeyDown}
     >
       <div className="modal-header">
         <AlertTriangle size={15} className="modal-header-icon" style={{ color: 'var(--text-danger)' }} />
-        <span className="modal-title">Move the {pending.axis} axis?</span>
+        <span className="modal-title">{catalogChildren(controlText('ControlPage.text012', { value1: '\u0000value1\u0000' }), { value1: pending.axis })}</span>
         <button
           className="modal-close-btn"
           data-testid="control-goto-confirm-close"
           onClick={onCancel}
-          aria-label="Cancel"
+          aria-label={controlText('ControlPage.text013')}
         >
           <X size={14} />
         </button>
@@ -534,24 +540,15 @@ function GotoConfirmDialog({
         data-testid="control-goto-confirm-body"
         style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}
       >
-        <div>
-          Typing a {frameLabel} coordinate MOVES the machine - the same as an MDI {mdiEquivalent}{' '}
-          command.
-        </div>
-        <div style={{ marginTop: 8 }}>
-          {pending.axis} is at {fmtAxis(currentMm, pending.axis, units)} {shownUnit}; it will rapid to{' '}
-          {fmtAxis(pending.targetMm, pending.axis, units)} {shownUnit}
-          {distanceMm === null ? '' : ` - a move of ${fmtAxis(distanceMm, pending.axis, units)} ${shownUnit}`}.
-        </div>
+        <div>{catalogChildren(controlText('ControlPage.text014', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: frameLabel, value2: mdiEquivalent, value3: ' ' })}</div>
+        <div style={{ marginTop: 8 }}>{catalogChildren(controlText('ControlPage.text016', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000', value5: '\u0000value5\u0000', value6: '\u0000value6\u0000', value7: '\u0000value7\u0000' }), { value1: pending.axis, value2: fmtAxis(currentMm, pending.axis, units), value3: shownUnit, value4: ' ', value5: fmtAxis(pending.targetMm, pending.axis, units), value6: shownUnit, value7: distanceMm === null ? '' : controlText('ControlPage.text015', { value1: String(fmtAxis(distanceMm, pending.axis, units)), value2: String(shownUnit) }) })}</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
           <input
             type="checkbox"
             checked={dontAskAgain}
             data-testid="control-goto-confirm-suppress"
             onChange={(e) => setDontAskAgain(e.currentTarget.checked)}
-          />
-          Do not ask again
-        </label>
+          />{controlText('ControlPage.text017')}</label>
       </div>
       <div
         className="modal-footer"
@@ -562,17 +559,13 @@ function GotoConfirmDialog({
           className="modal-btn modal-btn-ghost"
           data-testid="control-goto-confirm-cancel"
           onClick={onCancel}
-        >
-          Cancel
-        </button>
+        >{controlText('ControlPage.text018')}</button>
         <button
           type="button"
           className="modal-btn modal-btn-primary"
           data-testid="control-goto-confirm-move"
           onClick={() => onConfirm(dontAskAgain)}
-        >
-          Move
-        </button>
+        >{controlText('ControlPage.text019')}</button>
       </div>
     </div>
   )
@@ -604,6 +597,7 @@ export function PositionPanel({
   workLiveRegardlessOfHoming = false,
   twoDecimalMm = false,
 }: { announceNoDatum?: boolean; workLiveRegardlessOfHoming?: boolean; twoDecimalMm?: boolean } = {}) {
+  useText('control-screens-not-probing')
   // WO-2261 changes Control Main only; Probing shares this panel and keeps
   // the standard precision, independently of its live-before-homing policy.
   const formatAxis = twoDecimalMm ? fmtDroAxis : fmtAxis
@@ -630,7 +624,10 @@ export function PositionPanel({
   const activeWcs = useMachineControl((s) => s.activeWcs)
   const storedWorkOffsets = useCamStore((s) => s.machineWorkOffsets[controlMachine(s).id])
   const activeStoredWorkOffset = activeWcs ? storedWorkOffsets?.[activeWcs] : undefined
-  const activeTool = useMachineControl((s) => s.activeTool)
+  // WO-2878: the chip names the tool the TOOL glance names - the same hook,
+  // so mid-run it follows the last T word streamed instead of the $G report
+  // (polled only between jobs; the 10-16 sweep caught chip T0 vs glance T2).
+  const { currentTool: activeTool } = useCurrentTool()
   const parserModal = useMachineControl((s) => s.parserModal)
   const homed = useMachineControl((s) => s.homed)
   const settings = useMachineControl((s) => s.settings)
@@ -702,8 +699,8 @@ export function PositionPanel({
       && Object.values(resolvedHomedAxes).some((axisHomed) => axisHomed === false))
   const noDatumText = connected && machineCoordsUnknown && noDatumAdviceConfirmed
     ? noHomeSwitches
-      ? 'No home switches - machine coordinates unknown. Working in work '
-        + 'coordinates. Type a machine coordinate to set it.'
+      ? controlText('ControlPage.text020')
+        + controlText('ControlPage.text021')
       : SWITCHED_NO_DATUM_CONSOLE_TEXT
     : null
   const noDatumAnnounced = useRef<string | null>(null)
@@ -732,7 +729,7 @@ export function PositionPanel({
   /** WO-994: `what` names the gesture that was refused, because the machine
    *  column now has two of them - a GOTO and a datum SET - and a console line
    *  that says "Goto" about a refused datum entry names the wrong gesture. */
-  const setGotoRefusal = (text: string | null, what: 'Goto' | 'Set' = 'Goto') => {
+  const setGotoRefusal = (text: string | null, what: 'Goto' | 'Set' = controlText('ControlPage.text022')) => {
     if (!text) return
     const line = `${what} ${text}`
     if (line === gotoRefusalAnnounced.current) return
@@ -773,16 +770,16 @@ export function PositionPanel({
    */
   const evaluateGoto = (frame: GotoFrame, axis: ControlAxis, targetMm: number): GotoEval => {
     const ctrl = getMachineController()
-    if (machineState === 'alarm') return { ok: false, reason: 'the machine is in alarm.' }
-    if (ctrl.hasActiveJob()) return { ok: false, reason: 'a program is running.' }
+    if (machineState === 'alarm') return { ok: false, reason: controlText('ControlPage.text023') }
+    if (ctrl.hasActiveJob()) return { ok: false, reason: controlText('ControlPage.text024') }
     if (frame === 'machine' && !homed) {
       return {
         ok: false,
         reason: noHomeSwitches
           ? noHomeSwitchesRefusal(
-              'machine coordinates are unknown - type the target in the Work column instead.',
+              controlText('ControlPage.text025'),
             )
-          : 'home the machine ($H) first - machine coordinates are unreferenced.',
+          : controlText('ControlPage.text026'),
       }
     }
     if (frame === 'work') {
@@ -792,7 +789,7 @@ export function PositionPanel({
 
     const axisId = axisKey(axis)
     const currentMm = frame === 'work' ? pick(wpos, axisId) : pick(mpos, axisId)
-    if (currentMm === null) return { ok: false, reason: 'position unknown.' }
+    if (currentMm === null) return { ok: false, reason: controlText('ControlPage.text027') }
 
     // WO-2213: under a rotated work system a work X or Y step is a diagonal on
     // the machine (machine = O + Rot(R)(work), docs/design/WCS-ROTATION.md), so
@@ -829,8 +826,8 @@ export function PositionPanel({
             return {
               ok: false,
               reason:
-                `machine ${key.toUpperCase()} ${fmtMachineLength(mm, units)} ${unitLabel(units)} is outside the machine's travel ` +
-                `(${fmtMachineLength(range.min, units)} to ${fmtMachineLength(range.max, units)} ${unitLabel(units)}).`,
+                controlText('ControlPage.text028', { value1: String(key.toUpperCase()), value2: String(fmtMachineLength(mm, units)), value3: String(unitLabel(units)) }) +
+                controlText('ControlPage.text029', { value1: String(fmtMachineLength(range.min, units)), value2: String(fmtMachineLength(range.max, units)), value3: String(unitLabel(units)) }),
             }
           }
         }
@@ -851,14 +848,14 @@ export function PositionPanel({
         return {
           ok: false,
           reason:
-            `${fmtMachineLength(machineTargetMm, units)} ${unitLabel(units)} is outside the machine's travel ` +
-            `(${fmtMachineLength(axisEnvelope.min, units)} to ${fmtMachineLength(axisEnvelope.max, units)} ${unitLabel(units)}).`,
+            controlText('ControlPage.text030', { value1: String(fmtMachineLength(machineTargetMm, units)), value2: String(unitLabel(units)) }) +
+            controlText('ControlPage.text031', { value1: String(fmtMachineLength(axisEnvelope.min, units)), value2: String(fmtMachineLength(axisEnvelope.max, units)), value3: String(unitLabel(units)) }),
         }
       }
     }
 
     if (!ctrl.verifiedIdle()) {
-      return { ok: false, reason: 'the machine is moving - wait for it to stop, then try again.' }
+      return { ok: false, reason: controlText('ControlPage.text032') }
     }
 
     return { ok: true, currentMm, deltaMm: targetMm - currentMm, ...(workXY ? { workXY } : {}) }
@@ -871,7 +868,7 @@ export function PositionPanel({
    */
   const heldByEstopLatch = (frame: GotoFrame, axis: ControlAxis): boolean => {
     if (!estopLatched) return false
-    setGotoRefusal(`${axis} ${frame}: not sent - the E-STOP needs CLEAR first.`)
+    setGotoRefusal(controlText('ControlPage.text033', { value1: String(axis), value2: String(frame) }))
     return true
   }
 
@@ -895,14 +892,14 @@ export function PositionPanel({
 
     const result = evaluateGoto(frame, axis, targetMm)
     if (!result.ok) {
-      setGotoRefusal(`${axis} ${frame}: refused - ${result.reason}`)
+      setGotoRefusal(controlText('ControlPage.text034', { value1: String(axis), value2: String(frame), value3: String(result.reason) }))
       return false
     }
     if (heldByEstopLatch(frame, axis)) return false
 
     if (gotoSkipConfirm) {
       if (!sendGoto(axis, result)) {
-        setGotoRefusal(`${axis} ${frame}: refused - the controller declined the move.`)
+        setGotoRefusal(controlText('ControlPage.text035', { value1: String(axis), value2: String(frame) }))
         return false
       }
       clearGotoRefusal()
@@ -924,8 +921,8 @@ export function PositionPanel({
 
     if (!mpos) {
       setGotoRefusal(
-        `${axis} machine position: refused - the controller has not reported a position yet.`,
-        'Set',
+        controlText('ControlPage.text036', { value1: String(axis) }),
+        controlText('ControlPage.text037'),
       )
       return false
     }
@@ -933,13 +930,13 @@ export function PositionPanel({
     const axisId = axisKey(axis)
     const result = setMachinePosition({ ...mpos, [axisId]: valueMm })
     if (!result.ok) {
-      setGotoRefusal(`${axis} machine position: refused - ${result.reason}`, 'Set')
+      setGotoRefusal(controlText('ControlPage.text038', { value1: String(axis), value2: String(result.reason) }), controlText('ControlPage.text039'))
       return false
     }
     clearGotoRefusal()
     useMachineControl.getState().pushConsole(
       'tx',
-      `Set ${axis} machine position to ${fmtAxis(valueMm, axis, units)} ${axisUnit(axis, units)}.`,
+      controlText('ControlPage.text040', { value1: String(axis), value2: String(fmtAxis(valueMm, axis, units)), value3: String(axisUnit(axis, units)) }),
       'info',
     )
     return
@@ -952,13 +949,13 @@ export function PositionPanel({
     const result = evaluateGoto(pendingGoto.frame, pendingGoto.axis, pendingGoto.targetMm)
     setPendingGoto(null)
     if (!result.ok) {
-      setGotoRefusal(`${pendingGoto.axis} ${pendingGoto.frame}: refused - ${result.reason}`)
+      setGotoRefusal(controlText('ControlPage.text041', { value1: String(pendingGoto.axis), value2: String(pendingGoto.frame), value3: String(result.reason) }))
       return
     }
     if (heldByEstopLatch(pendingGoto.frame, pendingGoto.axis)) return
 
     if (!sendGoto(pendingGoto.axis, result)) {
-      setGotoRefusal(`${pendingGoto.axis} ${pendingGoto.frame}: refused - the controller declined the move.`)
+      setGotoRefusal(controlText('ControlPage.text042', { value1: String(pendingGoto.axis), value2: String(pendingGoto.frame) }))
     } else {
       clearGotoRefusal()
     }
@@ -971,44 +968,36 @@ export function PositionPanel({
   return (
     <section className="panel control-panel">
       <div className="panel-header">
-        <span className="panel-title">Position</span>
+        <span className="panel-title">{controlText('ControlPage.text043')}</span>
         <span className="control-dro-header-meta">
           <span className="control-units-chips" data-testid="control-units-chips">
             <button
               className={`control-chip-btn ${unitsPref === 'default' ? 'control-chip-active' : ''}`}
               data-testid="control-units-auto"
-              data-tooltip="Follow Settings > Display units"
+              data-tooltip={controlText('ControlPage.text044')}
               onClick={() => setUnitsPref('default')}
-            >
-              Auto
-            </button>
+            >{controlText('ControlPage.text045')}</button>
             <button
               className={`control-chip-btn ${unitsPref === 'mm' ? 'control-chip-active' : ''}`}
               data-testid="control-units-mm"
-              data-tooltip="Metric (sends G21)"
+              data-tooltip={controlText('ControlPage.text046')}
               onClick={() => setUnitsPref('mm')}
-            >
-              mm
-            </button>
+            >{controlText('ControlPage.text047')}</button>
             <button
               className={`control-chip-btn ${unitsPref === 'inch' ? 'control-chip-active' : ''}`}
               data-testid="control-units-inch"
-              data-tooltip="Imperial (sends G20)"
+              data-tooltip={controlText('ControlPage.text048')}
               onClick={() => setUnitsPref('inch')}
-            >
-              in
-            </button>
+            >{controlText('ControlPage.text049')}</button>
           </span>
           {activeTool !== null && (
-            <span className="control-tool-chip" data-testid="control-active-tool">
-              T{activeTool}
-            </span>
+            <span className="control-tool-chip" data-testid="control-active-tool">{catalogChildren(controlText('ControlPage.text050', { value1: '\u0000value1\u0000' }), { value1: activeTool })}</span>
           )}
           <span
             className={`control-wcs-active ${activeWcs ? '' : 'control-wcs-unknown'}`}
             data-testid="control-active-wcs"
             {...workOffsetMarkerAttributes(activeStoredWorkOffset?.state)}
-            data-tooltip="Active work coordinate system"
+            data-tooltip={controlText('ControlPage.text051')}
           >
             {activeWcs ?? 'WCS?'}
           </span>
@@ -1016,8 +1005,8 @@ export function PositionPanel({
         <ControlPanelCollapseToggle
           panel="position"
           testId="control-position-toggle"
-          collapseTip="Collapse the DRO to a compact readout"
-          expandTip="Show the full position panel"
+          collapseTip={controlText('ControlPage.text052')}
+          expandTip={controlText('ControlPage.text053')}
         />
       </div>
       {positionPanelCollapsed ? (
@@ -1030,18 +1019,14 @@ export function PositionPanel({
               </span>
             ))}
             <span>{unitLabel(units)}</span>
-            <span data-testid="control-position-compact-feed">
-              F {feed === null ? '---' : fmtFeed(feed, units, 0)} {feedLabel(units)}
-            </span>
+            <span data-testid="control-position-compact-feed">{catalogChildren(controlText('ControlPage.text054', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: feed === null ? '---' : fmtFeed(feed, units, 0), value2: feedLabel(units) })}</span>
           </div>
         </div>
       ) : (
       <div className="panel-body">
         <div className="control-dro-head">
           <span className="control-dro-axis" />
-          <span className="control-dro-work">
-            Work ({unitLabel(units)}{controlAxes.some(isRotaryAxis) ? '; rotary deg' : ''})
-          </span>
+          <span className="control-dro-work">{catalogChildren(controlText('ControlPage.text056', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: unitLabel(units), value2: controlAxes.some(isRotaryAxis) ? controlText('ControlPage.text055') : '' })}</span>
           <span
             className="control-dro-machine"
             data-testid="control-dro-machine-head"
@@ -1049,15 +1034,13 @@ export function PositionPanel({
               machineCoordsUnknown
                 ? noHomeSwitches
                     ? noHomeSwitchesRefusal(
-                        'machine coordinates are unknown - type one in to set it.',
+                        controlText('ControlPage.text057'),
                       )
-                    : 'Not homed yet this session - machine coordinates are unknown. '
-                      + 'Press Home All, or type a machine coordinate in to set it.'
+                    : controlText('ControlPage.text058')
+                      + controlText('ControlPage.text059')
                 : undefined
             }
-          >
-            Machine
-          </span>
+          >{controlText('ControlPage.text060')}</span>
           <span />
         </div>
         {controlAxes.map((axis) => {
@@ -1096,15 +1079,13 @@ export function PositionPanel({
           />
         )}
         <div className="control-live-row">
-          <span>
-            Feed {feed === null ? '---' : fmtFeed(feed, units, 0)} {feedLabel(units)}
-          </span>
-          <span>Spindle {spindleRpm === null ? '---' : Math.round(spindleRpm)} rpm</span>
+          <span>{catalogChildren(controlText('ControlPage.text061', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: feed === null ? '---' : fmtFeed(feed, units, 0), value2: feedLabel(units) })}</span>
+          <span>{catalogChildren(controlText('ControlPage.text062', { value1: '\u0000value1\u0000' }), { value1: spindleRpm === null ? '---' : Math.round(spindleRpm) })}</span>
           {offNominalOverrides.length > 0 && (
             <span
               className="control-override-flag"
               data-testid="control-override-flag"
-              data-tooltip="An override is not 100% - set it in the Overrides panel"
+              data-tooltip={controlText('ControlPage.text063')}
             >
               {offNominalOverrides.join(' ')}
             </span>
@@ -1122,20 +1103,17 @@ export function PositionPanel({
             aria-disabled={offsetWriteBusy || undefined}
             data-testid="control-zero-all"
             data-tooltip={zeroGate.refusal
-              ?? `Set ${describeAxisList(controlAxes)} zero at the current position in the ACTIVE work coordinate system (G10 L20)`}
+              ?? controlText('ControlPage.text065', { value1: String(describeAxisList(controlAxes)) })}
             onClick={() => zeroWorkAxes(controlAxes)}
-          >
-            Zero all{activeWcs ? ` (${activeWcs})` : ''}
-          </button>
+          >{catalogChildren(controlText('ControlPage.text064', { value1: '\u0000value1\u0000' }), { value1: activeWcs ? ` (${activeWcs})` : '' })}</button>
           <button
             className="control-jog-btn control-goto-xy control-motion-outline"
             disabled={gotoGate.disabled}
             data-testid="control-goto-xy0"
-            data-tooltip={gotoGate.refusal ?? 'Move to work X0 Y0 - Z does not move'}
+            data-tooltip={gotoGate.refusal ?? controlText('ControlPage.text066')}
             onClick={() => gotoWorkXYZero(controlMachine(useCamStore.getState()).rapidRate ?? 3000)}
           >
-            <Crosshair size={13} /> Goto XY0
-          </button>
+            <Crosshair size={13} />{controlText('ControlPage.text067')}</button>
         </div>
       </div>
       )}
@@ -1205,19 +1183,20 @@ const MDI_RECALL_LIMIT = 20
 // or remounting Control must not announce it again (including StrictMode).
 let demoNoticeAnnounced = false
 
-const MACHINE_SUB_TABS: Array<[MachineSubTab, string]> = [
-  ['definition', 'Definition'],
-  ['macros', 'Macros'],
-  ['diagnostics', 'Diagnostics'],
-]
+const MACHINE_SUB_TABS: Array<[MachineSubTab, string]> = liveCatalog(() => ([
+  ['definition', controlText('ControlPage.text068')],
+  ['macros', controlText('ControlPage.text069')],
+  ['diagnostics', controlText('ControlPage.text070')],
+]))
 
 export function ControlPage() {
+  useText('control-screens-not-probing')
   useEffect(() => {
     if (!isDemoBuild() || demoNoticeAnnounced) return
     demoNoticeAnnounced = true
     useMachineControl.getState().pushConsole(
       'rx',
-      'This is the browser demo. To run a real machine, install the desktop app.',
+      controlText('ControlPage.text071'),
       'info',
     )
   }, [])
@@ -1228,17 +1207,17 @@ export function ControlPage() {
   /* WO-2066: only a UCCNC machine is offered the bridge, and the bridge drives
      exactly the UCCNC it declares, so the choice names the declared controller
      (WO-1843's "via UCCNC bridge backend" had no route left to name). */
-  const bridgeConnectionLabel = `Machine bridge (${controllerDisplayName(machine.controller)}`
+  const bridgeConnectionLabel = controlText('ControlPage.text072', { value1: String(controllerDisplayName(machine.controller)) })
     + `${statedBoardName ? ` / ${statedBoardName}` : ''})`
   // Operator 10-09 (release card item 1): one label for each choice; the select's hover tip shows the
   // selected one in full, so a long machine name cut to "..." is still readable.
   const connectionKindLabel = (connection: MachineConnectionKind) => connection === 'serial'
-    ? `${isGrblFamily(machine.controller) ? controllerDisplayName(machine.controller) : 'GRBL'} (USB serial)`
+    ? controlText('ControlPage.text090', { value1: String(isGrblFamily(machine.controller) ? controllerDisplayName(machine.controller) : 'GRBL') })
     : connection === 'bridge'
       ? bridgeConnectionLabel
       : connection === 'gateway'
         ? LINUXCNC_GATEWAY_LABEL
-        : `Simulate ${machine.name}`
+        : controlText('ControlPage.text091', { value1: String(machine.name) })
   const hasBridgeSurface = controllerSurface(machine).bridgeSettings
   // WO-917: the SAME store field ViewportOverlay.tsx:136 sets, so
   // Machine > Definition and the viewport's machine chip land on the one
@@ -1266,8 +1245,8 @@ export function ControlPage() {
     ['Z', 'Z limit', inputs?.limits?.z ?? null],
   ]
   const otherInputLamps: Array<[string, string, boolean | null]> = [
-    ['DOOR', 'Door', inputs?.door ?? null],
-    ['HOLD', 'Hold', inputs?.hold ?? null],
+    ['DOOR', controlText('ControlPage.text073'), inputs?.door ?? null],
+    ['HOLD', controlText('ControlPage.text074'), inputs?.hold ?? null],
   ]
   // WO-1633: the probe is the input an operator actively tests by touch, so
   // it gets two labelled lamps at the head of this row (in place of the old
@@ -1415,8 +1394,8 @@ export function ControlPage() {
       .pushConsole(
         'tx',
         value === '0'
-          ? 'Soft limits are OFF in GRBL settings ($20=0) - travel is not bounded by the controller.'
-          : `Soft limits are ON in GRBL settings ($20=${value}).`,
+          ? controlText('ControlPage.text075')
+          : controlText('ControlPage.text076', { value1: String(value) }),
         'info',
       )
   }, [phase, settings])
@@ -1521,7 +1500,7 @@ export function ControlPage() {
   useEffect(() => {
     const end = consoleEndRef.current
     if (end && typeof end.scrollIntoView === 'function') end.scrollIntoView({ block: 'nearest' })
-  }, [consoleLines.length])
+  }, [consoleLines.length, activeView, consoleCollapsed])
 
   const onConnect = async () => {
     setConnectError(null)
@@ -1551,7 +1530,7 @@ export function ControlPage() {
         if (prepared.kind === 'started') {
           useMachineControl.getState().pushConsole(
             'rx',
-            prepared.again ? 'Restarted the machine connection.' : 'Started the machine connection.',
+            prepared.again ? controlText('ControlPage.text077') : controlText('ControlPage.text078'),
             'info',
           )
           window.dispatchEvent(new Event('liencam:bridge-lifecycle'))
@@ -1565,7 +1544,7 @@ export function ControlPage() {
         // WO-414 batch 3 (R30): the reason lands in the console too, so it
         // survives the next click; the panel keeps one short red line.
         setConnectError(message)
-        useMachineControl.getState().pushConsole('rx', `Connect failed: ${message}`, 'error')
+        useMachineControl.getState().pushConsole('rx', controlText('ControlPage.text079', { value1: String(message) }), 'error')
       }
     } finally {
       setBusy(false)
@@ -1585,7 +1564,7 @@ export function ControlPage() {
     const text = mdi.trim()
     if (!text) return
     if (mdiLockedByProgram) {
-      useMachineControl.getState().pushConsole('tx', 'A program is running - MDI is locked out.', 'error')
+      useMachineControl.getState().pushConsole('tx', controlText('ControlPage.text080'), 'error')
       return
     }
     // The typed line becomes a `>` row BEFORE the send, so every reply the
@@ -1624,6 +1603,96 @@ export function ControlPage() {
     setMdi(next === -1 ? '' : lines[next])
   }
 
+  // WO-2665: one console definition and one mounted instance. Moving it
+  // between Main and Probing preserves the existing history, MDI and prefs.
+  // The owner's WO-2665 appearance revision: collapsed Probing is just the latest
+  // line. Expand to use the same history/MDI; Main keeps its existing MDI row.
+  const compactProbeConsole = activeView === 'probing' && consoleCollapsed
+  const machineConsole = (
+          <section
+            className={`panel control-panel control-console-panel ${
+              consoleCollapsed ? 'control-console-collapsed' : ''
+            }`}
+          >
+            {/* WO-038: collapsed = EXACTLY the latest line + the MDI row. The
+                panel header ("Console", Clear) only exists expanded; collapsed,
+                the expand chevron rides inline on the latest-line row so the
+                header's vertical slot is released to the program preview. */}
+            {!consoleCollapsed && (
+              <div className="panel-header">
+                <span className="panel-title">{controlText('ControlPage.text107')}</span>
+                <button
+                  className="panel-action-btn"
+                  data-testid="control-console-toggle"
+                  onClick={() => useUiPrefs.setState({ machineConsoleCollapsed: true })}
+                  data-tooltip={controlText('ControlPage.text108')}
+                  aria-label={controlText('ControlPage.text109')}
+                >
+                  <ChevronDown size={13} />
+                </button>
+                <button className="panel-action-btn" onClick={clearConsole} data-tooltip={controlText('ControlPage.text110')}>
+                  {controlText('ControlPage.text111')}
+                </button>
+              </div>
+            )}
+            <div className="panel-body control-console-body" data-testid="control-console">
+              {consoleLines.length === 0 ? (
+                <div className="panel-empty">
+                  {connected
+                    ? controlText('ControlPage.text112')
+                    : controlText('ControlPage.text113', { value1: String(machine.name) })}
+                </div>
+              ) : (
+                <ControlConsoleLines lines={consoleLines} collapsed={consoleCollapsed} />
+              )}
+              {consoleCollapsed && (
+                <button
+                  className="panel-action-btn"
+                  data-testid="control-console-toggle"
+                  onClick={() => useUiPrefs.setState({ machineConsoleCollapsed: false })}
+                  data-tooltip={controlText('ControlPage.text114')}
+                  aria-label={controlText('ControlPage.text115')}
+                >
+                  <ChevronUp size={13} />
+                </button>
+              )}
+              {!consoleCollapsed && <div ref={consoleEndRef} />}
+            </div>
+            {!compactProbeConsole && <div className="control-mdi-row">
+              <input
+                className="mform-input mform-input-mono control-mdi-input"
+                data-testid="control-mdi-input"
+                placeholder={
+                  mdiLockedByProgram
+                    ? m0HoldLine !== null
+                      ? controlText('ControlPage.mdiHeld', { value1: String(m0HoldLine) })
+                      : controlText('ControlPage.text116')
+                    : connected
+                      ? controlText('ControlPage.text117')
+                      : controlText('ControlPage.text118')
+                }
+                value={mdi}
+                disabled={authorize('mdiInput', authorityFacts).disabled}
+                onChange={(e) => setMdi(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onMdiSubmit()
+                  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    onMdiRecall(e.key === 'ArrowUp' ? 1 : -1)
+                  }
+                }}
+              />
+              <button
+                className="modal-btn modal-btn-ghost"
+                disabled={authorize('mdiSend', authorityFacts).disabled}
+                onClick={onMdiSubmit}
+              >
+                {controlText('ControlPage.text119')}
+              </button>
+            </div>}
+          </section>
+  )
+
   return (
     <div className="control-page" data-testid="control-page">
       {/* Q-95: ONE Control-specific strip - and per the approved WO-048
@@ -1657,7 +1726,7 @@ export function ControlPage() {
           <div className="control-col-scroll">
           <section className="panel control-panel">
             <div className="panel-header">
-              <span className="panel-title" style={{ flexShrink: 0 }}>Machine</span>
+              <span className="panel-title" style={{ flexShrink: 0 }}>{controlText('ControlPage.text081')}</span>
               {/* WO-184: folded, this panel used to show NOTHING - and it is
                   the one the whole tab depends on. The collapsed header keeps
                   the answer to "am I even talking to the machine": which
@@ -1687,14 +1756,14 @@ export function ControlPage() {
                     .join(' ')}
                   {' - '}
                   {phase === 'connected'
-                    ? 'Connected'
+                    ? controlText('ControlPage.text082')
                     : phase === 'connecting'
                       ? 'Connecting...'
-                      : 'Not connected'}
+                      : controlText('ControlPage.text083')}
                   {/* WO-448 SAFETY: folding this panel must never hide the
                       one fact that motion is refused here - same rule as the
                       alarm line just below. */}
-                  {bridgeReadOnly ? ' - READ ONLY' : ''}
+                  {bridgeReadOnly ? controlText('ControlPage.text084') : ''}
                 </ControlCollapsedReadout>
               )}
               {!machinePanelCollapsed && (
@@ -1702,8 +1771,8 @@ export function ControlPage() {
                   type="button"
                   className="panel-action-btn"
                   data-testid="control-controller-setup"
-                  data-tooltip="Controller setup (this computer)"
-                  aria-label="Controller setup (this computer)"
+                  data-tooltip={controlText('ControlPage.text085')}
+                  aria-label={controlText('ControlPage.text086')}
                   onClick={() => {
                     setActiveView('machine')
                     setMachineTab('definition')
@@ -1716,8 +1785,8 @@ export function ControlPage() {
               <ControlPanelCollapseToggle
                 panel="machine"
                 testId="control-machine-toggle"
-                collapseTip="Collapse the connection and status details"
-                expandTip="Show connection, pin and homing status"
+                collapseTip={controlText('ControlPage.text087')}
+                expandTip={controlText('ControlPage.text088')}
               />
             </div>
             {/* WO-116 SAFETY, still honoured but no longer by unfolding this
@@ -1760,8 +1829,7 @@ export function ControlPage() {
                           onClick={() => void onDisconnect()}
                         >
                           {/* WO-1648: the picker beside it already names the connection kind. */}
-                          <PlugZap size={13} /> Disconnect
-                        </button>
+                          <PlugZap size={13} />{controlText('ControlPage.text092')}</button>
                       ) : (
                         <button
                           className="modal-btn modal-btn-primary control-connect-btn"
@@ -1771,16 +1839,13 @@ export function ControlPage() {
                         >
                           {/* Operator 09-19: the kind select already says "Simulate ..." - the
                               button says Connect, never "simulated" a second time. */}
-                          <Plug size={13} /> {phase === 'connecting' ? 'Connecting...' : 'Connect'}
+                          <Plug size={13} /> {phase === 'connecting' ? 'Connecting...' : controlText('ControlPage.text093')}
                         </button>
                       )}
                     </div>
                   </div>
                   {!supported && (
-                    <div className="control-connect-detail">
-                      USB serial needs Chrome or Edge on desktop - the Simulator
-                      works everywhere.
-                    </div>
+                    <div className="control-connect-detail">{controlText('ControlPage.text094')}</div>
                   )}
                   {connectError && (
                     <div
@@ -1808,7 +1873,7 @@ export function ControlPage() {
                         <div className="control-led-row" data-testid="control-pin-leds">
                           <ProbeLamp kind="probe" value={probeSignals.probe} testId="control-lamp-probe" />
                           <ProbeLamp kind="probing" value={probeSignals.probeCycle} testId="control-lamp-probing" />
-                          <span className="control-led-caption" aria-hidden="true">LIMIT</span>
+                          <span className="control-led-caption" aria-hidden="true">{controlText('ControlPage.text095')}</span>
                           {[...limitLamps, ...otherInputLamps].map(([letter, label, value]) => (
                             <span
                               key={letter}
@@ -1821,10 +1886,10 @@ export function ControlPage() {
                               }`}
                               data-tooltip={
                                 value === true
-                                  ? `${label} input TRIGGERED`
+                                  ? controlText('ControlPage.text096', { value1: String(label) })
                                   : value === null
-                                    ? `${label} input not available on this controller`
-                                    : `${label} input clear`
+                                    ? controlText('ControlPage.text097', { value1: String(label) })
+                                    : controlText('ControlPage.text098', { value1: String(label) })
                               }
                             >
                               {letter}
@@ -1835,14 +1900,12 @@ export function ControlPage() {
                             data-testid="control-homed-led"
                             data-tooltip={
                               homed
-                                ? 'Homing cycle completed this session'
+                                ? controlText('ControlPage.text099')
                                 : settings[22] === '0'
-                                  ? 'Homing is disabled in GRBL settings ($22=0)'
-                                  : 'Not homed yet this session - machine position is unreferenced'
+                                  ? controlText('ControlPage.text100')
+                                  : controlText('ControlPage.text101')
                             }
-                          >
-                            HOME
-                          </span>
+                          >{controlText('ControlPage.text102')}</span>
                         </div>
                       </>
                     )}
@@ -1856,10 +1919,7 @@ export function ControlPage() {
                   failure this WO exists to prevent. Rendered even while the
                   panel is otherwise collapsed (see the fold condition above). */}
               {bridgeReadOnly && (
-                <div className="control-connect-detail control-bridge-readonly" data-testid="control-bridge-readonly">
-                  This bridge is READ-ONLY: it will refuse every jog, home, probe and program-start call.
-                  Connect proves the link only, not motion.
-                </div>
+                <div className="control-connect-detail control-bridge-readonly" data-testid="control-bridge-readonly">{controlText('ControlPage.text103')}</div>
               )}
               {/* The spindle-link line is GONE (2026-08-23, Operator at the machine:
                   "Remove your safety check for the dongle pull... I do not wish
@@ -1909,7 +1969,7 @@ export function ControlPage() {
 
           <section className="panel control-panel control-tool-panel">
             <div className="panel-header">
-              <span className="panel-title">Tool</span>
+              <span className="panel-title">{controlText('ControlPage.text104')}</span>
               {/* WO-184: folded, this panel kept its "Change tool" BUTTON and
                   lost the tool - a control survived, the information did not,
                   which is the rule backwards (Operator's red arrow). The button
@@ -1931,8 +1991,8 @@ export function ControlPage() {
               <ControlPanelCollapseToggle
                 panel="tool"
                 testId="control-tool-toggle"
-                collapseTip="Collapse the tool glance"
-                expandTip="Show the tool glance"
+                collapseTip={controlText('ControlPage.text105')}
+                expandTip={controlText('ControlPage.text106')}
               />
             </div>
             {!toolPanelCollapsed && (
@@ -1967,88 +2027,7 @@ export function ControlPage() {
               <ControlStepRow />
             </>
           )}
-          <section
-            className={`panel control-panel control-console-panel ${
-              consoleCollapsed ? 'control-console-collapsed' : ''
-            }`}
-          >
-            {/* WO-038: collapsed = EXACTLY the latest line + the MDI row. The
-                panel header ("Console", Clear) only exists expanded; collapsed,
-                the expand chevron rides inline on the latest-line row so the
-                header's vertical slot is released to the program preview. */}
-            {!consoleCollapsed && (
-              <div className="panel-header">
-                <span className="panel-title">Console</span>
-                <button
-                  className="panel-action-btn"
-                  data-testid="control-console-toggle"
-                  onClick={() => useUiPrefs.setState({ machineConsoleCollapsed: true })}
-                  data-tooltip="Collapse to the latest line"
-                  aria-label="Collapse the console"
-                >
-                  <ChevronDown size={13} />
-                </button>
-                <button className="panel-action-btn" onClick={clearConsole} data-tooltip="Clear console">
-                  Clear
-                </button>
-              </div>
-            )}
-            <div className="panel-body control-console-body" data-testid="control-console">
-              {consoleLines.length === 0 ? (
-                <div className="panel-empty">
-                  {connected
-                    ? 'Connected. Commands and controller responses appear here.'
-                    : `Connect to ${machine.name} or simulate it to begin.`}
-                </div>
-              ) : (
-                <ControlConsoleLines lines={consoleLines} collapsed={consoleCollapsed} />
-              )}
-              {consoleCollapsed && (
-                <button
-                  className="panel-action-btn"
-                  data-testid="control-console-toggle"
-                  onClick={() => useUiPrefs.setState({ machineConsoleCollapsed: false })}
-                  data-tooltip="Expand the console"
-                  aria-label="Expand the console"
-                >
-                  <ChevronUp size={13} />
-                </button>
-              )}
-              {!consoleCollapsed && <div ref={consoleEndRef} />}
-            </div>
-            <div className="control-mdi-row">
-              <input
-                className="mform-input mform-input-mono control-mdi-input"
-                data-testid="control-mdi-input"
-                placeholder={
-                  mdiLockedByProgram
-                    ? m0HoldLine !== null
-                      ? `Program held at line ${m0HoldLine} - MDI is locked until it ends or you press Stop/Reset`
-                      : 'A program is running - MDI is locked out.'
-                    : connected
-                      ? 'MDI - type a g-code line, Enter to send'
-                      : 'Connect first'
-                }
-                value={mdi}
-                disabled={authorize('mdiInput', authorityFacts).disabled}
-                onChange={(e) => setMdi(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') onMdiSubmit()
-                  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                    e.preventDefault()
-                    onMdiRecall(e.key === 'ArrowUp' ? 1 : -1)
-                  }
-                }}
-              />
-              <button
-                className="modal-btn modal-btn-ghost"
-                disabled={authorize('mdiSend', authorityFacts).disabled}
-                onClick={onMdiSubmit}
-              >
-                Send
-              </button>
-            </div>
-          </section>
+          {activeView !== 'probing' && machineConsole}
         </main>
 
         <ControlColResizer side="right" />
@@ -2100,9 +2079,9 @@ export function ControlPage() {
             minSize={offsetsSplitPx.minPx}
             maxSize={offsetsSplitPx.maxPx}
             fillMinSize={offsetsSplitPx.workspaceMinPx}
-            label="Resize the quick offsets and offsets workspace panels"
+            label={controlText('ControlPage.text120')}
             first={
-              <aside className="control-offsets-quick-card" aria-label="Quick work offsets">
+              <aside className="control-offsets-quick-card" aria-label={controlText('ControlPage.text121')}>
                 <OffsetsPanel />
               </aside>
             }
@@ -2110,7 +2089,7 @@ export function ControlPage() {
           />
         )}
         {activeView === 'tools' && <ToolsProbePanel />}
-        {activeView === 'probing' && <ProbingPanel />}
+        {activeView === 'probing' && <ProbingPanel machineConsole={machineConsole} />}
         {/* WO-411: the routine library / editor / preview / run in its own
             view. No program transport row here (Operator 2026-08-21); the run
             panel carries its own E-STOP while a routine is in motion. */}
@@ -2123,7 +2102,7 @@ export function ControlPage() {
             <div
               className="control-strip-nav"
               role="tablist"
-              aria-label="Machine sub-views"
+              aria-label={controlText('ControlPage.text122')}
               data-testid="control-machine-subnav"
               style={{ flex: '0 0 auto', marginBottom: 8 }}
             >

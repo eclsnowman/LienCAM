@@ -304,9 +304,13 @@ describe('SolidsWorkbenchPage: sketch on face (WO SKC-5, real occt-wasm kernel +
 
     await waitFor(() => expect(screen.getByTestId('solids-workbench-plane-hover-readout')).toBeTruthy())
     const readoutText = screen.getByTestId('solids-workbench-plane-hover-readout').textContent ?? ''
-    expect(readoutText).toMatch(/^Face \S+ on /)
-    const hoveredFaceId = readoutText.match(/^Face (\S+) on/)?.[1]
-    expect(hoveredFaceId).not.toBeUndefined()
+    // WO-2858: the readout describes the face and names its body, never its key;
+    // the hovered key is the one face the pick highlight paints.
+    expect(readoutText).toBe('flat face facing up at Z 20.00 mm on Extrude F1 - click to sketch on it')
+    const hovered = (hooks().getBodyFaceIds('F1') ?? []).filter((id) => hooks().getPickHighlightState(id) === 'hovered')
+    expect(hovered).toHaveLength(1)
+    const hoveredFaceId = hovered[0]
+    expect(readoutText).not.toContain(hoveredFaceId)
     expect(canvas.style.cursor).toBe('crosshair')
     expect(hooks().getPickHighlightState(hoveredFaceId!)).toBe('hovered')
 
@@ -377,8 +381,8 @@ describe('SolidsWorkbenchPage: sketch on face (WO SKC-5, real occt-wasm kernel +
     expect(screen.getByTestId('workbench-finish-package-sketch')).toBeTruthy()
     // FAILS-IF the unified pick refused the face: the base-plane refusal hint would still be up.
     expect(screen.queryByTestId('solids-workbench-plane-pick-hint')).toBeNull()
-    // Contextual-feedback: the completion line names the FACE the sketch started on.
-    expect(workbenchConsoleMessages().some((m) => /New sketch started on Face .* of /.test(m))).toBe(true)
+    // Contextual-feedback: the completion line names the FACE the sketch started on (WO-2858: described).
+    expect(workbenchConsoleMessages()).toContain('New sketch started on flat face facing up at Z 20.00 mm of Extrude F1.')
 
     fireEvent.click(screen.getByTestId('workbench-cancel-package-sketch'))
     await waitFor(() => expect(screen.queryByTestId('feature-row-sketch3d:SK2')).toBeNull(), { timeout: 20_000 })

@@ -1,3 +1,4 @@
+import { useText } from '../../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { Ruler, Eye } from 'lucide-react'
 import { useSketcherTool } from '../useSketcherTool'
@@ -5,6 +6,8 @@ import { sketcherToolStore } from '../toolStore'
 import { useSelectAllOnClick } from '../../../../components/ui/selectAllOnClick'
 import { dimensionDisplay } from '../sketchLayer'
 import { dimPreview } from '../../tools/dimTool'
+import { resolveDimPlacement } from '../../tools/dimPlacement'
+import { dimPreviewConnector } from '../../tools/dimPreviewConnector'
 import { toDisplay, unitLabel, type Units } from '../../../ui/unitFormat'
 import { isEquationInput, previewDimInput, resolveDimInput } from '../../dimExpr'
 import type { SketchDimension } from '../../types'
@@ -46,6 +49,7 @@ function trimNum(v: number): string {
 export function DimValueInput(
   { port, dim, units }: { port: SketcherOverlaysPort; dim: SketchDimension; units: Units },
 ) {
+  useText('sketch-and-model-workbench')
   if (dim.kind === 'd1xd2') {
     return <ChamferSetbackInputs port={port} dim={dim} units={units} />
   }
@@ -67,13 +71,14 @@ function ChamferSetbackInputs(
     units: Units
   },
 ) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <>
       <button
         className={`sketch-dim-drive-toggle${dim.driving ? '' : ' sketch-dim-drive-toggle-ref'}`}
         data-tooltip={dim.driving
-          ? 'Driving dimension - click to make it reference (driven)'
-          : 'Reference dimension - click to make it driving'}
+          ? workbenchText('SketchDimensionOverlay.drivingDimensionClickToMakeItReferenceDriven')
+          : workbenchText('SketchDimensionOverlay.referenceDimensionClickToMakeItDriving')}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => port.toggleDimensionDriving(dim.id)}
       >
@@ -100,6 +105,7 @@ function ChamferSetbackHalfInput(
     autoFocus?: boolean
   },
 ) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const inputRef = useRef<HTMLInputElement>(null)
   const skipBlurCommitRef = useRef(false)
   const selectAll = useSelectAllOnClick()
@@ -122,8 +128,8 @@ function ChamferSetbackHalfInput(
         disabled={!dim.driving}
         data-dim-half={half}
         data-tooltip={dim.driving
-          ? (half === 'd2' ? 'Setback 2 (d2) from the theoretical corner' : 'Setback 1 (d1) from the theoretical corner')
-          : 'Reference dimension tracks the measured value'}
+          ? (half === 'd2' ? workbenchText('SketchDimensionOverlay.setback2D2FromTheTheoreticalCorner') : workbenchText('SketchDimensionOverlay.setback1D1FromTheTheoreticalCorner'))
+          : workbenchText('SketchDimensionOverlay.referenceDimensionTracksTheMeasuredValue')}
         onChange={(e) => setEquationPreview(previewDimInput(e.target.value, false, units))}
         onKeyDown={(e) => {
           e.stopPropagation()
@@ -172,6 +178,7 @@ function ChamferSetbackHalfInput(
 function DrivableDimValueInput(
   { port, dim, units }: { port: SketcherOverlaysPort; dim: SketchDimension; units: Units },
 ) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const inputRef = useRef<HTMLInputElement>(null)
   // Escape always resolves the edit itself (cancel) and a successful Enter
   // commits + explicitly blurs; the blur that follows in either case must NOT
@@ -209,8 +216,8 @@ function DrivableDimValueInput(
       <button
         className={`sketch-dim-drive-toggle${dim.driving ? '' : ' sketch-dim-drive-toggle-ref'}`}
         data-tooltip={dim.driving
-          ? 'Driving dimension - click to make it reference (driven)'
-          : 'Reference dimension - click to make it driving'}
+          ? workbenchText('SketchDimensionOverlay.drivingDimensionClickToMakeItReferenceDriven')
+          : workbenchText('SketchDimensionOverlay.referenceDimensionClickToMakeItDriving')}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => port.toggleDimensionDriving(dim.id)}
       >
@@ -227,7 +234,7 @@ function DrivableDimValueInput(
         defaultValue={initial}
         disabled={!dim.driving}
         data-tooltip={dim.driving ? undefined
-          : 'Reference dimension tracks the measured value'}
+          : workbenchText('SketchDimensionOverlay.referenceDimensionTracksTheMeasuredValue')}
         onChange={(e) => setEquationPreview(previewDimInput(e.target.value, isAngle, units))}
         onKeyDown={(e) => {
           e.stopPropagation()
@@ -287,7 +294,7 @@ function DrivableDimValueInput(
         onFocus={selectAll.onFocus}
         onMouseUp={selectAll.onMouseUp}
       />
-      <span className="sketch-dim-unit">{isAngle ? 'deg' : unitLabel(units)}</span>
+      <span className="sketch-dim-unit">{isAngle ? workbenchText('SketchDimensionOverlay.deg') : unitLabel(units)}</span>
       {equationPreview && (
         <span
           className={`sketch-dim-eq-preview${equationPreview.isError ? ' sketch-dim-eq-preview-error' : ''}`}
@@ -301,6 +308,7 @@ function DrivableDimValueInput(
 }
 
 export function SketchDimensionOverlay({ port }: Props) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeSketch = port.useSketch()
   const isSketch = port.useIsSketchActive()
   const selectedIds = port.useSelectedIds()
@@ -324,6 +332,7 @@ export function SketchDimensionOverlay({ port }: Props) {
   // the resolved orientation without a React re-render per pointermove.
   const previewValueRef = useRef<HTMLSpanElement>(null)
   const previewModeRef = useRef<HTMLSpanElement>(null)
+  const connectorRef = useRef<SVGLineElement>(null)
 
   // Smart-dim live preview: the inferred dimension type/value for the
   // accumulated operand set, as a label beside the cursor. Its TEXT only
@@ -369,6 +378,42 @@ export function SketchDimensionOverlay({ port }: Props) {
     refreshText()
     return () => window.removeEventListener('pointermove', onMove)
   }, [preview !== null, sketchToolChain, displayUnits, port])
+
+  // Interaction-only presentation. Sample the same live placement as toolOverlay and
+  // the host's projection each frame, so camera-only zoom and badge/mode resizing work
+  // without changing cursor positioning, final anchors or the tool's gesture owner.
+  useEffect(() => {
+    if (!isSketch || !preview || dimEditor) return
+    let raf = 0
+    const tick = () => {
+      raf = requestAnimationFrame(tick)
+      const line = connectorRef.current
+      if (!line) return
+      line.style.display = 'none'
+      const root = rootRef.current, badge = previewRef.current, surface = port.getSurface()
+      const sk = port.getSketch(), state = sketcherToolStore.getState()
+      const cursor = surface?.getLastSketchCursor()
+      if (!root || !badge || !surface || !sk || !cursor || state.tool !== 'smart-dimension'
+        || state.chain?.kind !== 'dim') return
+      // Match the existing guide route, including its unsupported/incomplete cases.
+      // Constraints are deliberately not added here: toolOverlay does not supply them.
+      const placement = resolveDimPlacement(sk.entities, state.chain.operandIds, cursor,
+        { forceOrientation: state.chain.forceMode ?? null, clampInitial: true })
+      if (!placement) return
+      const r = root.getBoundingClientRect(), b = badge.getBoundingClientRect()
+      const link = dimPreviewConnector(placement, p => port.projectDimensionPreview
+        ? port.projectDimensionPreview(p) ?? { x: NaN, y: NaN }
+        : surface.worldToScreen(p.x, p.y),
+        { left: b.left - r.left, top: b.top - r.top, right: b.right - r.left, bottom: b.bottom - r.top },
+        { left: 0, top: 0, right: r.width, bottom: r.height })
+      if (!link) return
+      line.setAttribute('x1', String(link.guide.x)); line.setAttribute('y1', String(link.guide.y))
+      line.setAttribute('x2', String(link.badge.x)); line.setAttribute('y2', String(link.badge.y))
+      line.style.display = ''
+    }
+    tick()
+    return () => cancelAnimationFrame(raf)
+  }, [isSketch, preview !== null, dimEditor, port])
 
   // Per-frame position sync: world anchor -> screen px.
   useEffect(() => {
@@ -421,6 +466,13 @@ export function SketchDimensionOverlay({ port }: Props) {
 
   return (
     <div className="sketch-dim-layer" ref={rootRef}>
+      {preview && !dimEditor && (
+        <svg className="sketch-dim-preview-connector" aria-hidden="true"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'hidden', pointerEvents: 'none' }}>
+          <line ref={connectorRef} stroke="var(--sketch-dimension)" strokeWidth="1" opacity="0.75"
+            style={{ display: 'none', pointerEvents: 'none' }} />
+        </svg>
+      )}
       {activeSketch.dimensions.map((d) => {
         const disp = dimensionDisplay(activeSketch, d, displayUnits)
         if (!disp) return null
@@ -489,8 +541,8 @@ export function SketchDimensionOverlay({ port }: Props) {
           {preview.showTabHint && (
             <span className="sketch-dim-preview-tabhint">
               {preview.mode === 'Radius' || preview.mode === 'Arc length'
-                ? 'Tab: Radius / Arc length'
-                : 'Tab: H / V / Aligned'}
+                ? workbenchText('SketchDimensionOverlay.tabRadiusArcLength')
+                : workbenchText('SketchDimensionOverlay.tabHVAligned')}
             </span>
           )}
         </div>

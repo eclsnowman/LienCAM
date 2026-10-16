@@ -1,5 +1,5 @@
-import { PROBE_ROUTINES } from './probe-planner.js?v=10';
-import { renderProbeDiagram } from './probe-diagrams.js?v=10';
+import { PROBE_ROUTINES, firstStepSentence } from './probe-planner.js?v=12';
+import { renderProbeDiagram } from './probe-diagrams.js?v=12';
 
 const MM_PER_INCH = 25.4;
 const query = new URLSearchParams(window.location.search);
@@ -30,6 +30,9 @@ let routine = 'bore';
 let touches = {};
 let lastResult = null;
 let theme = 'default';
+let probeSetup = null;
+let previewPending = false;
+let previewAt = 0;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -230,6 +233,8 @@ function initBridge() {
 }
 
 function paintBridgeError(message) {
+  probeSetup = null;
+  renderDiagram();
   const pill = $('#hdr-state');
   pill.textContent = 'OFFLINE';
   pill.className = 'pill st-alarm';
@@ -255,6 +260,7 @@ function initSSE() {
 }
 
 function paint() {
+  refreshProbeSetup();
   const pill = $('#hdr-state');
   pill.textContent = status.state.toUpperCase();
   pill.className = `pill st-${status.state.toLowerCase()}`;
@@ -430,25 +436,35 @@ function initProbe() {
       document.querySelectorAll('.probe-tile').forEach((t) => t.classList.remove('active'));
       tile.classList.add('active');
       routine = r.id;
+      probeSetup = null;
+      previewAt = 0;
       touches = {};
       updateProbeForm();
       renderDiagram();
+      refreshProbeSetup();
     });
     grid.appendChild(tile);
   });
 
   updateProbeForm();
   renderDiagram();
+  if (bridgeMode) {
+    $('#inp-tip').value = '';
+    $('#inp-size').value = '';
+    $('#inp-tip').placeholder = 'Screen';
+    $('#inp-size').placeholder = 'Screen';
+  }
+  for (const selector of ['#sel-edge', '#inp-tip', '#inp-size']) {
+    $(selector).addEventListener('input', () => { probeSetup = null; previewAt = 0; renderDiagram(); refreshProbeSetup(); });
+  }
 
   $('#btn-probe-start').addEventListener('click', async () => {
-    const params = {
-      probeFeed: parseFloat($('#inp-feed').value) || 80,
-      searchTravel: parseFloat($('#inp-travel').value) || 20,
-      tipRadius: parseFloat($('#inp-tip').value) || 2,
-      nominalSize: parseFloat($('#inp-size').value) || 30,
-      edgeAxis: $('#sel-edge').value.charAt(0),
-      edgeDirection: $('#sel-edge').value.charAt(1),
-    };
+    if (!bridgeMode && routine !== 'zSurface') {
+      const message = 'The standalone phone simulator cannot run the machine-screen probing method.';
+      paintProbeProgress({ error: message, message, stepIndex: 0, totalSteps: 1 });
+      return;
+    }
+    const params = phoneProbeParams();
     touches = {};
     $('#probe-exec').hidden = false;
     $('#probe-result').hidden = true;
@@ -483,18 +499,64 @@ function updateProbeForm() {
   const r = PROBE_ROUTINES.find((x) => x.id === routine);
   $('#params-title').textContent = `${r.name.toUpperCase()} PARAMETERS`;
   $('#diagram-title').textContent = `${r.name.toUpperCase()} DIAGRAM`;
-  const round = ['bore', 'boss', 'rectPocket', 'rectBoss'].includes(routine);
+  const round = ['bore', 'boss'].includes(routine);
+  const rect = ['rectPocket', 'rectBoss'].includes(routine);
   const edge = ['edge', 'angle'].includes(routine);
-  $('#field-size').style.display = round ? 'flex' : 'none';
+  // WO-2809: a feature routine runs on the machine's probe settings, as the
+  // Probing screen's does; this feed and search travel are Z surface's only.
+  const zSurface = routine === 'zSurface';
+  $('#field-feed').style.display = zSurface ? 'flex' : 'none';
+  $('#field-travel').style.display = zSurface ? 'flex' : 'none';
+  $('#field-size').style.display = round || rect || routine === 'angle' ? 'flex' : 'none';
+  $('#lbl-size').textContent = round ? 'Nominal Dia (mm)' : rect ? 'Size X = Y override (mm)' : 'Touch Spacing (mm)';
   $('#field-edge').style.display = edge ? 'flex' : 'none';
 }
 
 function renderDiagram(activeStep = -1) {
   const params = {
+    ...probeSetup,
     edgeAxis: $('#sel-edge').value.charAt(0),
     edgeDirection: $('#sel-edge').value.charAt(1),
   };
+  const info = $('#probe-setup');
+  if (info) info.textContent = probeSetup ? `Depth ${probeSetup.depthBelowTopMm} mm. Clearance ${probeSetup.clearanceMm} mm. X ${probeSetup.nominalSizeXmm} / Y ${probeSetup.nominalSizeYmm} mm. Probe X ${probeSetup.tipRadiusXmm} / Y ${probeSetup.tipRadiusYmm} mm.` : '';
   $('#probe-diagram').innerHTML = renderProbeDiagram(routine, params, activeStep, touches);
+  // WO-2809: step 1 in the machine Probing screen's words.
+  $('#probe-where').textContent = bridgeMode && routine !== 'zSurface' && !probeSetup ? 'Reading the machine screen probing setup...' : firstStepSentence(routine, { ...params, wcs: status.activeWcs });
+}
+
+function phoneProbeParams() {
+  const inheritedNumber = (selector, fallback) => $(selector).value.trim() === '' && bridgeMode
+    ? -1 : Number($(selector).value || fallback);
+  return {
+    probeFeed: Number($('#inp-feed').value || 80),
+    searchTravel: Number($('#inp-travel').value || 20),
+    tipRadius: inheritedNumber('#inp-tip', 1.5),
+    nominalSize: inheritedNumber('#inp-size', 25),
+    edgeAxis: $('#sel-edge').value.charAt(0),
+    edgeDirection: $('#sel-edge').value.charAt(1),
+  };
+}
+
+// Readback of the desktop-resolved setup using a non-confirmed command:
+// it returns setup data and moves nothing. Keep the path confirmation for Run.
+async function refreshProbeSetup() {
+  if (!$('#pane-probe').classList.contains('active')) return;
+  if (!bridgeMode || routine === 'zSurface' || previewPending || Date.now() - previewAt < 1000) return;
+  if (!bridgeSocket || bridgeSocket.readyState !== WebSocket.OPEN) return;
+  const selected = routine;
+  const params = phoneProbeParams();
+  const key = JSON.stringify(params);
+  previewPending = true;
+  previewAt = Date.now();
+  try {
+    const result = await bridgeApi('probe/start', { routineId: selected, params, pathClearConfirmed: false });
+    if (selected !== routine || key !== JSON.stringify(phoneProbeParams())) return;
+    probeSetup = result.data || null;
+    renderDiagram();
+  } finally {
+    previewPending = false;
+  }
 }
 
 function paintProbeProgress(d) {

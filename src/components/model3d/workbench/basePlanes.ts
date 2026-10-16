@@ -25,6 +25,8 @@
 // suppress/delete/reorder/rollback consumer reads. That cost is paid ONCE, by name, in
 // src/doc/genesis.ts + the guards in dag.ts -- not by each consumer guessing.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { CommandHistory, FeatureDag } from '../../../doc'
 import {
   BASE_PLANE_XY_NODE_ID,
@@ -82,7 +84,7 @@ function basePlanePayload(kind: BasePlaneKind): BasePlaneDatumPayload {
 }
 
 function originPayload(): OriginDatumPayload {
-  return { datumType: 'origin', name: 'Origin' }
+  return { datumType: 'origin', name: workbenchText('basePlanes.origin') }
 }
 
 /** True once every genesis node exists. Cheap; the seeder is idempotent regardless. */
@@ -130,6 +132,6 @@ export function seedGenesisNodesOutsideHistory(dag: FeatureDag, history: Command
   const before = history.canUndo()
   seedGenesisNodes(dag)
   if (history.canUndo() !== before) {
-    throw new Error('seedGenesisNodes must not push onto CommandHistory -- Origin is not undoable.')
+    throw new Error(workbenchText('basePlanes.seedgenesisnodesMustNotPushOntoCommandHistoryOriginIsNot'))
   }
 }

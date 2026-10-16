@@ -2,6 +2,10 @@
 // jsdom cannot prove element bounds, overflow, or hit-test reachability, so
 // this test drives the real app in Chromium at every required and responsive
 // boundary width.
+//
+// WO-2849: WO-2831 (About button, landed 2026-10-15) made the header 17
+// controls and moved the utility labels' return to 1730px (5 labels). The
+// 960px floor still fits with every control reachable; pins follow it.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
@@ -11,7 +15,10 @@ import { chromium, type Browser, type Page } from 'playwright'
 const PORT = 4264
 const BASE = `http://localhost:${PORT}/`
 const HEIGHT = 900
-const WIDTHS = [960, 1280, 1433, 1434, 1440, 1441, 1442, 1501, 1599, 1600, 1639, 1640, 1648, 1649, 1650, 1920] as const
+const WIDTHS = [960, 1280, 1433, 1434, 1440, 1441, 1442, 1475, 1479, 1480, 1501, 1599, 1600, 1639, 1640, 1648, 1649, 1650, 1726, 1729, 1730, 1920] as const
+const CONTROLS = 17
+const UTILITY_LABELS = 5
+const UTILITY_LABELS_FROM = 1730
 
 interface ControlMeasurement {
   name: string
@@ -129,8 +136,8 @@ describe('WO-064 header supported-width floor', () => {
       if (result.scrollWidth > result.clientWidth) {
         failures.push(`w=${result.width}: scrollWidth=${result.scrollWidth} clientWidth=${result.clientWidth}`)
       }
-      if (result.controls.length !== 16) {
-        failures.push(`w=${result.width}: expected 16 controls, found ${result.controls.length}`)
+      if (result.controls.length !== CONTROLS) {
+        failures.push(`w=${result.width}: expected ${CONTROLS} controls, found ${result.controls.length}`)
       }
       for (const control of result.controls) {
         if (!control.insideHeader || (!control.disabled && !control.hitTarget)) {
@@ -147,13 +154,13 @@ describe('WO-064 header supported-width floor', () => {
   it('sheds labels only inside the two declared responsive ranges', async () => {
     if (!page) throw new Error('browser page not initialized')
     const measurements = new Map<number, HeaderMeasurement>()
-    for (const width of [1433, 1434, 1439, 1440, 1441, 1639, 1640, 1648, 1649, 1650, 1920]) {
+    for (const width of [1433, 1434, 1439, 1440, 1441, 1639, 1640, 1648, 1649, 1650, 1729, 1730, 1920]) {
       measurements.set(width, await measure(page, width))
     }
 
     for (const [width, result] of measurements) {
       expect(result.tabLabelsShown, `w=${width}: workflow label boundary`).toBe(width < 1440 ? 0 : 8)
-      expect(result.rightLabelsShown, `w=${width}: utility label boundary`).toBe(width < 1650 ? 0 : 4)
+      expect(result.rightLabelsShown, `w=${width}: utility label boundary`).toBe(width < UTILITY_LABELS_FROM ? 0 : UTILITY_LABELS)
     }
   }, 60_000)
 })

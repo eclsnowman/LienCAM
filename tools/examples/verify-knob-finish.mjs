@@ -4,7 +4,7 @@ import path from 'node:path'
 import { BufferGeometry, Float32BufferAttribute, Vector3 } from 'three'
 import { MeshBVH } from 'three-mesh-bvh'
 import { createHash } from 'node:crypto'
-import { withExampleDriver } from './lib/drive.mjs'
+import { openProjectFile, withExampleDriver } from './lib/drive.mjs'
 import { captureSourceProvenance } from '../capture/lib/provenance.mjs'
 
 const folder = path.resolve('examples/06-knob-handwheel')
@@ -100,11 +100,7 @@ export async function verifyKnobFinish() {
       // Keep software-rendering cost down during CAM compute on the shared
       // desk; restore the required whole-frame viewport before every capture.
       await page.setViewportSize({ width: 1280, height: 720 })
-      await driver.step('Open shipped knob', async p => {
-        const chooser = p.waitForEvent('filechooser')
-        await p.getByRole('button', { name: 'Open project', exact: true }).click()
-        await (await chooser).setFiles(file)
-      }, s => s.project.id === source.id && s.project.setups[0].operations.every(o => o.status === 'ready'), { timeoutMs: 120_000 })
+      await driver.step('Open shipped knob', p => openProjectFile(p, file), s => s.project.id === source.id && s.project.setups[0].operations.every(o => o.status === 'ready'), { timeoutMs: 120_000 })
       await page.getByTestId('mode-tab-toolpath').click()
       await page.locator('.tree-setup-header').click()
       if (!await page.locator('.tree-op').count()) await page.locator('.tree-setup-header').click()
@@ -253,7 +249,7 @@ export async function verifyKnobFinish() {
         // stock with its real holding through the production Compare controls.
         await page.getByTestId('sim-display-compare').click()
         await page.getByTestId('sim-stock-opacity').press('End')
-        await page.locator('.tree-geo-block').filter({ has: page.getByTestId('tree-name-geometry').filter({ hasText: /^Lobed knob$/ }) })
+        await page.locator('.tree-geo-block').filter({ has: page.getByTestId('tree-name-geometry').filter({ hasText: /(^| - )Lobed knob$/ }) })
           .getByRole('button', { name: 'Hide model', exact: true }).click()
         await page.screenshot({ path: driver.output('simulation-with-vise.png') })
         const compare = await driver.browser.newPage({ viewport: { width: 1920, height: 610 } })
@@ -274,11 +270,7 @@ export async function verifyKnobFinish() {
         // recipe before Post so that display edit cannot invalidate CAM paths.
         await page.context().close()
         await driver.open()
-        await driver.step('Reopen unchanged recipe for Post', async p => {
-          const chooser = p.waitForEvent('filechooser')
-          await p.getByRole('button', { name: 'Open project', exact: true }).click()
-          await (await chooser).setFiles(file)
-        }, s => s.project.id === source.id && s.project.setups[0].operations.every(o => o.status === 'ready'), { timeoutMs: 120_000 })
+        await driver.step('Reopen unchanged recipe for Post', p => openProjectFile(p, file), s => s.project.id === source.id && s.project.setups[0].operations.every(o => o.status === 'ready'), { timeoutMs: 120_000 })
         await publishWalkthrough(driver)
       }
       console.log(JSON.stringify(report, null, 2))

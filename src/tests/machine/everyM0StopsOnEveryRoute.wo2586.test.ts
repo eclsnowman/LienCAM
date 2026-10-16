@@ -154,6 +154,7 @@ const {
   __resetEstopInterlockForTest,
   cancelGuidedToolChange,
   connectMachine,
+  continueClampPause,
   disconnectMachine,
   getMachineController,
   loadGcodeTextToolpathProgram,
@@ -379,7 +380,8 @@ for (const backend of ['simulator', 'bridge'] as const) for (const route of (bac
     await advance(5000)
     expect(useMachineControl.getState().consoleLines.map(l => l.text).join('\n')).toContain('running this machine')
     expect(useMachineControl.getState().mpos?.x).toBeCloseTo(25, 1)
-    expect(await executeOperatorCycleStart(), useMachineControl.getState().consoleLines.map(l => l.text).join('\n')).toBe(true)
+    // WO-2773: the clamp card's Continue is its one door.
+    expect(continueClampPause(), useMachineControl.getState().consoleLines.map(l => l.text).join('\n')).toBe(true)
     await advance(5000)
     expect(useMachineControl.getState().job.phase).toBe('complete')
     expect(useMachineControl.getState().mpos?.x).toBeCloseTo(35, 1)

@@ -26,6 +26,7 @@ import type {
   MeshEditRecord,
 } from '../types';
 import { rebuildWithMovedVertices } from './sharpEdgeRestoration';
+import { resizeWallBlend, wallBlendOf } from './wallBlendEdits';
 
 export const CHANGE_BLEND_RADIUS_KIND = 'change-blend-radius';
 export const CHANGE_BLEND_RADIUS_VERSION = 1;
@@ -57,7 +58,16 @@ export function changeBlendRadius(
   if (!Number.isFinite(radiusMm) || radiusMm <= 0) {
     throw new Error(`"${String(radiusMm)}" is not a radius LienCAM can put on an edge. Nothing was changed.`);
   }
-  const prepared = prepareEdgeBlend(mesh, facets);
+  let prepared: PreparedEdgeBlend;
+  try {
+    prepared = prepareEdgeBlend(mesh, facets);
+  } catch (err) {
+    // WO-2798: a fillet round a wall standing square to its face - a boss
+    // foot, a chain round a top, a pocket's floor fillets.
+    const wall = wallBlendOf(mesh, facets);
+    if (wall === null) throw err;
+    return resizeWallBlend(mesh, wall, radiusMm);
+  }
   if (prepared.kind !== 'fillet' || prepared.radiusMm === undefined) {
     throw new Error(
       'This is a flat chamfer, not a round, so it has no radius to change. Nothing was changed.',

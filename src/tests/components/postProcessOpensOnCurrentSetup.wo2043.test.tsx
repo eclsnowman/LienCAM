@@ -31,6 +31,14 @@ function fullSuiteWithOnlySetup1Generated(): Project {
   )) as Project
   const setup = project.setups[0]
   project.activeSetupId = setup.id
+  // The shipped example carries every setup's results (WO-2861); this scenario
+  // is the one where only Setup 1 has been generated.
+  for (const other of project.setups.slice(1)) {
+    for (const operation of other.operations) {
+      operation.status = 'pending'
+      operation.toolpathMoves = undefined
+    }
+  }
 
   setup.operations.forEach((operation) => {
     operation.status = 'ready'
@@ -120,9 +128,12 @@ describe('WO-2043 Post Process scope', () => {
       '3D Finish 3',
       'Contour 2',
     ]
-    const omissionCode = await screen.findByText((text) => text.includes('OPS_NOT_GENERATED.'))
-    const omission = omissionCode.closest('.diag-row')
+    // The row is found by its sentence; the raw code stays off screen (WO-2880).
+    const omissionText = await screen.findByText((text) => text.includes('Generate them first.'))
+    const omission = omissionText.closest('.diag-row')
     if (!omission) throw new Error('OPS_NOT_GENERATED diagnostic row is missing')
+    expect(omission.getAttribute('data-code')).toBe('OPS_NOT_GENERATED')
+    expect(omission.textContent).not.toContain('OPS_NOT_GENERATED')
     for (const name of pendingNames) expect(omission.textContent).toContain(name)
     expect(omission.textContent?.match(/Generate them first\./g)).toHaveLength(1)
     expect(Array.from(document.querySelectorAll('.diag-err')).map((row) => row.textContent)).toEqual([])

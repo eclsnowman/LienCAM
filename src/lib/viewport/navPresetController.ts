@@ -67,6 +67,38 @@ export interface NavPresetControllerOptions {
   zoomToCursor?: boolean
 }
 
+/** WO-2728: press-order browsers open the menu before the right-drag starts.
+ * Observe that opening gesture without intercepting OrbitControls' events.
+ * Window capture also sees movement retargeted to the menu/overlay or captured
+ * by the canvas. A release/cancel/new press ends this gesture permanently. */
+export function dismissContextMenuOnRightDrag(
+  at: { x: number; y: number },
+  onDismiss: () => void,
+): () => void {
+  const stop = () => {
+    window.removeEventListener('pointermove', onMove, true)
+    window.removeEventListener('pointerup', stop, true)
+    window.removeEventListener('pointercancel', stop, true)
+    window.removeEventListener('pointerdown', stop, true)
+    window.removeEventListener('blur', stop)
+  }
+  const onMove = (event: PointerEvent) => {
+    if ((event.buttons & 2) === 0) { stop(); return }
+    const dx = event.clientX - at.x
+    const dy = event.clientY - at.y
+    if (dx * dx + dy * dy > 10 * 10) {
+      stop()
+      onDismiss()
+    }
+  }
+  window.addEventListener('pointermove', onMove, true)
+  window.addEventListener('pointerup', stop, true)
+  window.addEventListener('pointercancel', stop, true)
+  window.addEventListener('pointerdown', stop, true)
+  window.addEventListener('blur', stop)
+  return stop
+}
+
 /** Build a controller bound to one OrbitControls + its DOM element. Every
  *  consumer (CNCViewport's main 2D/3D viewport, model3d's sketch scene
  *  runtime) constructs its own controller instance per-controls, but every

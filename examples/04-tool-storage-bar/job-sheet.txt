@@ -20,7 +20,7 @@ Setup: "Top - G54" (G54)
    NC lines: 4-11
 
 2. "Bore 2"
-   Tool: T1 "3 mm flat end mill" dia 3mm flute length 15mm
+   Tool: T1 "3 mm flat end mill, 15 mm flutes" dia 3mm flute length 15mm
    Spindle: 10000 RPM
    Feed: cutting 450mm/min, plunge 150mm/min
    Z range: -12.5 to 15 mm

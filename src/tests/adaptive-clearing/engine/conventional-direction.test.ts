@@ -297,26 +297,6 @@ function expectRadialMaterialSide(
   throw new Error('helix travel has no non-zero XY segment')
 }
 
-function nearestMaterialNormal(pt: Pt, loops: Loops): Pt {
-  let best = { x: 0, y: 0, d2: Infinity }
-  for (const loop of loops) {
-    for (let i = 0; i < loop.length; i++) {
-      const a = loop[i], b = loop[(i + 1) % loop.length]
-      const dx = b.x - a.x, dy = b.y - a.y
-      const lengthSq = dx * dx + dy * dy
-      const t = lengthSq > 1e-12
-        ? Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / lengthSq))
-        : 0
-      const q = { x: a.x + t * dx, y: a.y + t * dy }
-      const candidate = { x: q.x - pt.x, y: q.y - pt.y }
-      const d2 = candidate.x * candidate.x + candidate.y * candidate.y
-      if (d2 < best.d2) best = { ...candidate, d2 }
-    }
-  }
-  const length = Math.hypot(best.x, best.y)
-  return { x: best.x / length, y: best.y / length }
-}
-
 // WO-1896: this file used to pin the reversed belief that climb keeps the material on the
 // cutter's LEFT. For a clockwise (M3) spindle climb keeps it on the RIGHT: the tooth enters
 // the wall at full chip thickness (G41 with M3 = climb). Every material-side expectation
@@ -460,10 +440,12 @@ describe('Adaptive Clearing physical milling direction', () => {
         millingDirection,
       )
       expect(engage).not.toBeNull()
-      const materialNormal = nearestMaterialNormal(engage!.pt, [square])
-      const cross = engage!.dir.x * materialNormal.y - engage!.dir.y * materialNormal.x
-      // cross > 0 = material on the left of the heading: conventional (WO-1896).
-      expect(Math.sign(cross)).toBe(millingDirection === 'climb' ? -1 : 1)
+      const { pt, dir } = engage!
+      const cut = tool.cutArea(pt, { x: pt.x + .1 * dir.x, y: pt.y + .1 * dir.y }, clearedSeed)
+      // WO-2752: the footprint is a machining limit, not the fresh stock frontier.
+      // Measure the actual cut against the known cleared half-plane (y <= 15).
+      expect(cut.area).toBeGreaterThan(0)
+      expect(Math.sign(cut.sideBalance)).toBe(millingDirection === 'climb' ? -1 : 1)
     }
   })
 

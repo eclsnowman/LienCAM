@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 //
-// WO-1005: THE APP MUST STOP ISSUING AN UNCONDITIONAL "PRESS HOME ALL".
+// WO-2817, the operator's 2026-10-15 card: approved brief Home guidance replaces
+// WO-1005's off-switch prerequisite. The historical incident notes below
+// explain the original oracle; revert 313b6a630c proved normal re-homing
+// starts on the switches. Keep the switch-reading negative controls.
 //
 // HARDWARE DAMAGE, 2026-08-25 evening. Operator's Z endstop was driven into twice
 // and physically damaged. Incident write-up:
@@ -128,35 +131,25 @@ const chip = () => screen.queryByTestId('control-datum-chip')
 // 1. THE CHIP CONTRACT, PURE
 // ---------------------------------------------------------------------------
 
-describe('WO-1005 the chip stops issuing a bare imperative', () => {
-  it('THE HEADLINE: "Press Home All" is gone from the chip, text and tooltip both', () => {
+describe('WO-1005 chip guidance reconciled with WO-2817', () => {
+  it('invites Home All without an off-switch prerequisite', () => {
     const c = deriveDatumChip({ connected: true, homed: false, noHomeSwitches: false })!
     const whole = `${c.text} ${c.title}`
-    // The exact sentence that pointed at the exact action that damaged the
-    // stop. Its absence is the acceptance item, so it is asserted as a string
-    // and not as a shape.
-    expect(whole).not.toContain('Press Home All')
-    expect(whole).not.toMatch(/press home all/i)
-    // Nor any other bare "just go and home it" phrasing that would be the
-    // same sentence wearing different words.
-    expect(whole).not.toMatch(/home (all )?(the machine )?before moving/i)
+    // WO-2817, the operator's 2026-10-15 card: Press Home All is approved.
+    expect(c.title).toContain('Press Home All')
+    // WO-2817, the operator's 2026-10-15 card: no off-switch operator step.
+    expect(whole).not.toMatch(/check.*switch|off.*home switch|driven into/i)
   })
 
-  it('names homing as what establishes a datum, WITH the precondition in the same breath', () => {
+  it('names homing as what establishes a datum before a work-coordinate action', () => {
     const c = deriveDatumChip({ connected: true, homed: false, noHomeSwitches: false })!
-    // Still the condition, still the remedy (WO-990's acceptance).
     expect(c.text).toMatch(/no datum/i)
     expect(c.text).toMatch(/home first/i)
     expect(c.title).toContain('Home All')
-    // ...and now the precondition, attached to the suggestion rather than left
-    // for the operator to already know: the cycle drives TOWARDS the switch,
-    // so an axis already on one gets driven into it.
-    expect(c.title).toMatch(/towards its switch/i)
-    expect(c.title).toMatch(/driven into/i)
-    // The check to run before pressing anything, on the visible chip itself -
-    // the tooltip needs a hover, and the operator standing at the machine may
-    // never take one.
-    expect(c.text).toMatch(/check switches/i)
+    // WO-2817, the operator's 2026-10-15 card: brief approved datum-first wording.
+    expect(c.title).toContain('to establish the machine datum before choosing a work-coordinate action.')
+    // WO-2817, the operator's 2026-10-15 card: the chip adds no switch-check step.
+    expect(c.text).not.toMatch(/check switches/i)
   })
 
   it('THE CHIP SURVIVES TRUNCATION: no prefix of it claims anything about a switch', () => {
@@ -175,7 +168,7 @@ describe('WO-1005 the chip stops issuing a bare imperative', () => {
     }
   })
 
-  it('the precondition is UNCONDITIONAL - it does not wait for evidence the app cannot have', () => {
+  it('the guidance does not depend on session history the app cannot retain', () => {
     // The order allowed a narrower sentence IF the app could tell a machine
     // parked on its switches from a cold one. It cannot: `homed` and the
     // parked position live only in the machine-control store, which never
@@ -218,20 +211,23 @@ describe('WO-1005 on screen, connected to a machine that may be sitting on its s
     vi.restoreAllMocks()
   })
 
-  it('the operator reads BOTH facts off the strip: no datum, and homing can drive in', () => {
+  it('the operator reads no datum and the approved Home remedy off the strip', () => {
     render(<ControlTransportBar />)
     const el = chip()!
     expect(el.getAttribute('data-datum-mode')).toBe('needs-home')
     expect(el.textContent).toMatch(/no datum/i)
     const title = el.getAttribute('title') ?? ''
-    expect(title).toMatch(/towards its switch/i)
-    expect(title).toMatch(/driven into/i)
+    // WO-2817, the operator's 2026-10-15 card: show the remedy without an off-switch step.
+    expect(title).toContain('Press Home All to establish the machine datum')
+    // WO-2817, the operator's 2026-10-15 card: no superseded switch prerequisite.
+    expect(title).not.toMatch(/check.*switch|off.*home switch|driven into/i)
   })
 
-  it('and the rendered chip carries no "Press Home All" either', () => {
+  it('and the rendered chip carries the approved Home All invitation', () => {
     render(<ControlTransportBar />)
     const el = chip()!
-    expect(`${el.textContent} ${el.getAttribute('title')}`).not.toMatch(/press home all/i)
+    // WO-2817, the operator's 2026-10-15 card: Press Home All is approved in the chip.
+    expect(`${el.textContent} ${el.getAttribute('title')}`).toMatch(/press home all/i)
   })
 })
 
@@ -335,9 +331,11 @@ describe('WO-1005 nothing in these strings reports a switch as pressed or clear'
     }
   })
 
-  it('the two strings with room for it say outright that the app cannot see the switches', () => {
-    expect(DATUM_CHIP.needsHome.title).toMatch(/cannot see the switches/i)
-    expect(HOME_PRECONDITION).toMatch(/cannot see the switches/i)
+  it('keeps the brief chip and Home hint free of invented switch prerequisites', () => {
+    // WO-2817, the operator's 2026-10-15 card: neither approved hint needs a switch step.
+    for (const text of [DATUM_CHIP.needsHome.title, HOME_PRECONDITION]) {
+      expect(text).not.toMatch(/switch/i)
+    }
   })
 
   it('and none of them says the machine is safe to home, or homed, or referenced', () => {
@@ -356,16 +354,16 @@ describe('WO-1005 nothing in these strings reports a switch as pressed or clear'
 // the chip and these controls invite the press, so only these carry it.
 // ---------------------------------------------------------------------------
 
-/** The precondition, checked for what it must actually say rather than for
- *  being present - a constant can be gutted and still be spliced in. */
-function expectsPrecondition(tooltip: string | null): void {
+/** Keep substantive shared guidance on every Home control. */
+function expectsHomeGuidance(tooltip: string | null): void {
   expect(tooltip ?? '').toContain(HOME_PRECONDITION)
-  expect(HOME_PRECONDITION).toMatch(/towards its switch/i)
-  expect(HOME_PRECONDITION).toMatch(/driven into it/i)
-  expect(HOME_PRECONDITION).toMatch(/off its home switch/i)
+  // WO-2817, the operator's 2026-10-15 card: datum guidance replaces the prerequisite.
+  expect(HOME_PRECONDITION).toBe('Homing establishes the machine datum.')
+  // WO-2817, the operator's 2026-10-15 card: no added switch step on any Home route.
+  expect(tooltip ?? '').not.toMatch(/check.*switch|off.*home switch|driven into/i)
 }
 
-describe('WO-1005 the Home controls say what has to be true before they are pressed', () => {
+describe('WO-1005 the Home controls retain approved datum guidance', () => {
   beforeEach(async () => {
     useCamStore.getState().newProject()
     useUiPrefs.setState({
@@ -393,7 +391,7 @@ describe('WO-1005 the Home controls say what has to be true before they are pres
     // so on a Z,X,Y machine it starts a full-length X seek. This is the press
     // the old chip sentence was sending the operator to.
     render(<JogPanel />)
-    expectsPrecondition(screen.getByTestId('control-home').getAttribute('data-tooltip'))
+    expectsHomeGuidance(screen.getByTestId('control-home').getAttribute('data-tooltip'))
   })
 
   it('...without losing WO-914: Home All still names the order it will run', () => {
@@ -407,7 +405,7 @@ describe('WO-1005 the Home controls say what has to be true before they are pres
     render(<JogPanel />)
     for (const axis of ['Z', 'X', 'Y'] as const) {
       const btn = screen.getByTestId(`control-home-${axis.toLowerCase()}`)
-      expectsPrecondition(btn.getAttribute('data-tooltip'))
+      expectsHomeGuidance(btn.getAttribute('data-tooltip'))
       // ...and WO-931's own words survive underneath it.
       expect(btn.getAttribute('data-tooltip')).toContain(`Home ${axis} ALONE`)
     }
@@ -419,11 +417,12 @@ describe('WO-1005 the Home controls say what has to be true before they are pres
       .map((id) => screen.getByTestId(id).getAttribute('data-tooltip') ?? '')
     for (const tip of tips) {
       for (const pattern of CLAIMS_A_READING) expect(tip).not.toMatch(pattern)
-      expect(tip).toMatch(/cannot see the switches/i)
+      // WO-2817, the operator's 2026-10-15 card: brief datum guidance, no switch reading.
+      expect(tip).toContain('Homing establishes the machine datum.')
     }
   })
 
-  it('a controller that runs its own cycle ($H) carries it as well - one Home All, same warning', () => {
+  it('a controller that runs its own cycle ($H) carries it as well - one Home All, same guidance', () => {
     // GRBL: perAxisHoming is false, the per-axis buttons are absent (WO-927's
     // guarantee, untouched), and the ONE remaining home control is the one
     // that sends a whole-machine $H. It is the most dangerous button on that
@@ -439,7 +438,7 @@ describe('WO-1005 the Home controls say what has to be true before they are pres
     render(<JogPanel />)
     expect(screen.queryByTestId('control-home-z')).toBeNull()
     const tip = screen.getByTestId('control-home').getAttribute('data-tooltip')
-    expectsPrecondition(tip)
+    expectsHomeGuidance(tip)
     expect(tip).toMatch(/chooses its own axis order/)
   })
 

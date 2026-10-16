@@ -2,7 +2,7 @@
 // the operations, their toolpaths and the posted G-code must come back identical.
 import { existsSync, statSync } from 'node:fs'
 import { assert, waitUntil } from '../lib/harness.mjs'
-import { answerMachineChoice, discardIfAsked, revisitModel } from '../lib/app.mjs'
+import { answerMachineChoice, openProjectFile, revisitModel } from '../lib/app.mjs'
 import { bringAllReady, expandSetups, operationStatuses } from './cam-steps.mjs'
 import { postToFile } from './post-steps.mjs'
 
@@ -62,15 +62,9 @@ export async function saveCloseReopen(ctx) {
   await journey.close()
   page = await journey.launch(profileDir)
   await answerMachineChoice(journey)
-  const [chooser] = await Promise.all([
-    page.waitForEvent('filechooser', { timeout: 10_000 }),
-    page.getByRole('button', { name: 'Open project' }).click(),
-  ])
-  journey.log(`FILE-DIALOG answer ${projectFile}`)
-  await chooser.setFiles(projectFile)
-  // Open asks Save / Discard / Cancel after the file is chosen (WO-2704); its Save
-  // would open a Save dialog, so answer Discard before any other confirmation.
-  await discardIfAsked(journey)
+  // Open asks Save / Discard / Cancel (WO-2704); its Save would open a Save
+  // dialog, so openProjectFile answers Discard before any other confirmation.
+  await openProjectFile(journey, projectFile)
   const confirm = page.getByTestId('confirm-dialog-confirm')
   if (await confirm.isVisible({ timeout: 2_000 }).catch(() => false)) {
     journey.log(`CONFIRM ${await page.getByTestId('confirm-dialog').innerText()}`)

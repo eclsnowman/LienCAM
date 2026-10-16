@@ -14,7 +14,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'The window is one scrolling list of titled sections: STL Projection, Units, DXF Import, Nesting, Navigation, Theme, Performance, Stock Simulation, Startup, User Data, and About. Startup holds one checkbox, Show splash screen on startup. User Data lists what LienCAM keeps on this computer and backs it up (see "Backing up your data"). About shows the App version, the Project file format, and the exact Build (commit, branch, and date).',
+        text: 'The window is one scrolling list of titled sections: Opening projects, STL Projection, Units, DXF Import, Nesting, Navigation, Theme, Performance, Stock Simulation, Startup, User Data, and About. Opening projects holds Always go straight to the file browser, which skips the project picker when you click Open. Startup holds one checkbox, Show splash screen on startup. User Data lists what LienCAM keeps on this computer and backs it up (see "Backing up your data"). About shows the App version, the Project file format, and the exact Build (commit, branch, and date).',
       },
       {
         kind: 'paragraph',
@@ -23,6 +23,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         kind: 'tip',
         text: 'When reporting a problem, copy the App version and Build lines from the About section - they identify exactly which build you are running.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'About in the header opens About LienCAM, with the version, build information, credits and licenses, plus GitHub project and Releases links. The desktop app checks for a newer published release shortly after launch and posts a notice with its link in the Console if one is available. Download and install the update yourself; the check does not install it. Offline or unavailable checks stay silent.',
       },
       { kind: 'image', slot: 'settings-window' },
     ],
@@ -57,6 +61,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         kind: 'tip',
         text: 'All three apply as soon as you change them, so you can try each one with a part on screen and keep whichever reads best on your monitor.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Color code program moves is on by default. It gives rapid, feed, arc, tool-change and M-code rows distinct colors in the Control listing and dims comments. Turn it off here to remove move colors; comments stay dimmed and your choice is remembered. These are display colors only and do not change the program or authorize motion.',
       },
       { kind: 'image', slot: 'display-section' },
     ],
@@ -211,7 +219,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'The Controller field (UCCNC, GRBL, grblHAL, LinuxCNC, Generic (linear only), or a post you imported) decides which G-code dialect Post Process writes, so changing the project\'s machine changes the G-code. Axis Feed Limits hold the fastest cutting and rapid feed for each axis; cycle-time estimates use these rapid speeds when the machine\'s control setup states none of its own. "Set up machine control (walkthrough)" starts the guided setup for driving this machine from the Control tab, or opens its machine settings there once it has been set up.',
+        text: 'The Controller field (UCCNC, GRBL, grblHAL, LinuxCNC, Generic, or a post you imported) decides which G-code dialect Post Process writes, so changing the project\'s machine changes the G-code. Axis Feed Limits hold the fastest cutting and rapid feed for each axis; cycle-time estimates use these rapid speeds when the machine\'s control setup states none of its own. "Set up machine control (walkthrough)" starts the guided setup for driving this machine from the Control tab, or opens its machine settings there once it has been set up.',
       },
       {
         kind: 'paragraph',
@@ -220,6 +228,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         kind: 'tip',
         text: 'Save Changes stores your edits; switching to another machine or closing the window also keeps them, so you never lose a half-finished definition.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Examples adds an editable machine from published specifications, without a controller connection. Each example includes three hidden macros: Example - Part swap (M300), Example - Spindle warm-up (M301), and Example - Part trace (M302). Hidden means off: review the body and show it in Edit macros before calling its M-code. Part swap asks for a safe machine Z and a back-of-travel park before M0; warm-up asks for starting and final RPM; part trace asks for a safe machine Z and the work-coordinate rectangle. The examples do not invent a home position or stock size.',
       },
       { kind: 'image', slot: 'machine-modal' },
     ],

@@ -1,4 +1,5 @@
-(LienCAM 0.36.0-alpha.1 - 07 Relief medallion - generic)
+(LienCAM 0.36.0-alpha.2 - 07 Relief medallion - generic)
+G90 G21
 ( Setup 1 )
 G54
 ( Drill 1 )

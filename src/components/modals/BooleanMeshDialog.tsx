@@ -9,6 +9,7 @@
 // CAM holds no live kernel handle, so a Model body always arrives pre-tessellated
 // at its display fidelity - a tolerance slider would be a dead control).
 
+import { useText } from '../../i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Combine, MousePointer2, Loader2 } from 'lucide-react'
 import { useCamStore } from '../../store'
@@ -31,6 +32,7 @@ const OPS: MeshBooleanOperation[] = ['difference', 'union', 'intersect']
 const MUTED = { color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' } as const
 
 export function BooleanMeshDialog() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeModal = useCamStore((s) => s.activeModal)
   const geometry = useCamStore((s) => s.project.geometry)
   const preselectMeshId = useCamStore((s) => s.booleanMeshMeshGeoId)
@@ -106,7 +108,7 @@ export function BooleanMeshDialog() {
     const selected = role === 'mesh' ? meshGeoId : modelGeoId
     useCamStore.getState().addConsoleEvent({
       severity: 'info', source: 'boolean',
-      message: `Click the ${role === 'mesh' ? 'imported mesh' : 'model body'} in the viewport - eligible parts highlight.`,
+      message: workbenchText('BooleanMeshDialog.clickTheInTheViewportEligiblePartsHighlight', { value1: String(role === 'mesh' ? workbenchText('BooleanMeshDialog.importedMesh') : workbenchText('BooleanMeshDialog.modelBody2')) }),
     })
     vp.setPartPickMode(
       (id) => {
@@ -117,7 +119,7 @@ export function BooleanMeshDialog() {
         const label = geometry.find((g) => g.id === id)?.name ?? id
         useCamStore.getState().addConsoleEvent({
           severity: 'success', source: 'boolean',
-          message: `${role === 'mesh' ? 'Mesh operand' : 'Model body'} selected: ${label}.`,
+          message: workbenchText('BooleanMeshDialog.selected', { value1: String(role === 'mesh' ? workbenchText('BooleanMeshDialog.meshOperand') : workbenchText('BooleanMeshDialog.modelBody')), label: String(label) }),
         })
       },
       rows.map((g) => g.id),
@@ -128,7 +130,7 @@ export function BooleanMeshDialog() {
         const label = geometry.find((g) => g.id === id)?.name ?? id
         useCamStore.getState().addConsoleEvent({
           severity: 'info', source: 'boolean',
-          message: `Hovering ${role === 'mesh' ? 'mesh operand' : 'model body'}: ${label}.`,
+          message: workbenchText('BooleanMeshDialog.hovering', { value1: String(role === 'mesh' ? workbenchText('BooleanMeshDialog.meshOperand2') : workbenchText('BooleanMeshDialog.modelBody2')), label: String(label) }),
         })
       },
     )
@@ -171,8 +173,8 @@ export function BooleanMeshDialog() {
 
   if (!open) return null
 
-  const meshName = meshGeoId ? geometry.find((g) => g.id === meshGeoId)?.name ?? '(none)' : '(none)'
-  const modelName = modelGeoId ? geometry.find((g) => g.id === modelGeoId)?.name ?? '(none)' : '(none)'
+  const meshName = meshGeoId ? geometry.find((g) => g.id === meshGeoId)?.name ?? workbenchText('BooleanMeshDialog.none') : workbenchText('BooleanMeshDialog.none')
+  const modelName = modelGeoId ? geometry.find((g) => g.id === modelGeoId)?.name ?? workbenchText('BooleanMeshDialog.none') : workbenchText('BooleanMeshDialog.none')
 
   const operand = (
     label: string,
@@ -196,8 +198,8 @@ export function BooleanMeshDialog() {
           }}
         >
           <MousePointer2 size={13} /> {pickRole === role
-            ? (role === 'mesh' ? 'Click a mesh...' : 'Click a body...')
-            : 'Pick in viewport'}
+            ? (role === 'mesh' ? workbenchText('BooleanMeshDialog.clickAMesh') : workbenchText('BooleanMeshDialog.clickABody'))
+            : workbenchText('BooleanMeshDialog.pickInViewport')}
         </button>
       </div>
       <div
@@ -216,18 +218,18 @@ export function BooleanMeshDialog() {
       <div className="modal-container" style={{ margin: 0, width: '100%', maxWidth: '100%' }} data-testid="boolean-mesh-dialog" ref={dialogFocusRef}>
         <div className="modal-header">
           <Combine size={15} className="modal-header-icon" />
-          <span className="modal-title">{editResultId ? 'Edit boolean result' : 'Boolean: mesh vs model body'}</span>
-          <button className="modal-close-btn" onClick={handleClose} data-tooltip="Close" aria-label="Close">
+          <span className="modal-title">{editResultId ? workbenchText('BooleanMeshDialog.editBooleanResult') : workbenchText('BooleanMeshDialog.booleanMeshVsModelBody')}</span>
+          <button className="modal-close-btn" onClick={handleClose} data-tooltip={workbenchText('BooleanMeshDialog.close')} aria-label={workbenchText('BooleanMeshDialog.close')}>
             <X size={14} />
           </button>
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {operand('Mesh operand', meshName, 'mesh', meshRows.length === 0, 'boolean-mesh-pick-mesh')}
-          {operand('Model body', modelName, 'model', modelRows.length === 0, 'boolean-mesh-pick-model')}
+          {operand(workbenchText('BooleanMeshDialog.meshOperand'), meshName, 'mesh', meshRows.length === 0, 'boolean-mesh-pick-mesh')}
+          {operand(workbenchText('BooleanMeshDialog.modelBody'), modelName, 'model', modelRows.length === 0, 'boolean-mesh-pick-model')}
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ ...MUTED, width: 90 }}>Operation</span>
+            <span style={{ ...MUTED, width: 90 }}>{workbenchText('BooleanMeshDialog.operation')}</span>
             <select
               data-testid="boolean-mesh-op"
               value={op}
@@ -240,10 +242,10 @@ export function BooleanMeshDialog() {
           </label>
 
           <details>
-            <summary style={{ ...MUTED, cursor: 'pointer' }}>Choose from lists</summary>
+            <summary style={{ ...MUTED, cursor: 'pointer' }}>{workbenchText('BooleanMeshDialog.chooseFromLists')}</summary>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ ...MUTED, width: 90 }}>Mesh</span>
+                <span style={{ ...MUTED, width: 90 }}>{workbenchText('BooleanMeshDialog.mesh')}</span>
                 <select
                   data-testid="boolean-mesh-mesh-select"
                   value={meshGeoId ?? ''}
@@ -251,12 +253,12 @@ export function BooleanMeshDialog() {
                   disabled={busy}
                   style={{ flex: 1 }}
                 >
-                  {meshRows.length === 0 && <option value="">(no imported meshes)</option>}
+                  {meshRows.length === 0 && <option value="">{workbenchText('BooleanMeshDialog.noImportedMeshes')}</option>}
                   {meshRows.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ ...MUTED, width: 90 }}>Model body</span>
+                <span style={{ ...MUTED, width: 90 }}>{workbenchText('BooleanMeshDialog.modelBody')}</span>
                 <select
                   data-testid="boolean-mesh-model-select"
                   value={modelGeoId ?? ''}
@@ -264,7 +266,7 @@ export function BooleanMeshDialog() {
                   disabled={busy}
                   style={{ flex: 1 }}
                 >
-                  {modelRows.length === 0 && <option value="">(no model bodies)</option>}
+                  {modelRows.length === 0 && <option value="">{workbenchText('BooleanMeshDialog.noModelBodies')}</option>}
                   {modelRows.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               </label>
@@ -281,8 +283,8 @@ export function BooleanMeshDialog() {
                 paddingTop: 8,
               }}
             >
-              <strong>Result will be {fidelityWord(approximate).toUpperCase()}</strong>
-              <span style={{ color: 'var(--text-muted)' }}> - {fidelityExplanation(approximate)}</span>
+              <strong>{workbenchText('BooleanMeshDialog.resultWillBe')}{fidelityWord(approximate).toUpperCase()}</strong>
+              <span style={{ color: 'var(--text-muted)' }}>{workbenchText('BooleanMeshDialog.value')}{fidelityExplanation(approximate)}</span>
             </div>
           )}
 
@@ -294,7 +296,7 @@ export function BooleanMeshDialog() {
         </div>
 
         <div className="modal-footer">
-          <button className="modal-btn modal-btn-ghost" onClick={handleClose} disabled={busy}>Cancel</button>
+          <button className="modal-btn modal-btn-ghost" onClick={handleClose} disabled={busy}>{workbenchText('BooleanMeshDialog.cancel')}</button>
           <button
             className="modal-btn modal-btn-primary"
             data-testid="boolean-mesh-run"
@@ -302,8 +304,8 @@ export function BooleanMeshDialog() {
             disabled={!canRun}
           >
             {busy
-              ? <><Loader2 size={13} className="modal-spin" /> Running...</>
-              : (editResultId ? 'Re-run' : 'Run boolean')}
+              ? <><Loader2 size={13} className="modal-spin" />{workbenchText('BooleanMeshDialog.running')}</>
+              : (editResultId ? workbenchText('BooleanMeshDialog.reRun') : workbenchText('BooleanMeshDialog.runBoolean'))}
           </button>
         </div>
       </div>

@@ -322,19 +322,16 @@ describe('WO INT-13B (spec 3.2 step 1 / B3): an armed tool disarms on suspend an
    *  they have long since forgotten picking. So it is bound here rather than refused
    *  by name -- there is no reason to refuse something reachable. */
   it('clears the stale push-pull refusal text, so re-arming after a round trip starts clean', async () => {
-    // Drive a REAL refusal through the real pick path: handlePushPullPick refuses a
-    // non-planar face by surface TYPE (:4238), reading classifyFace -- the one seam
-    // that branch actually consults. Wrapped exactly as UI-5's own #4 cone case wraps
-    // it (SolidsWorkbenchPage.pushPull.test.tsx:13-18), because this page owns no UI
-    // affordance that BUILDS a curved face.
-    const runtime = await boot({}, (c) => ({ ...c, classifyFace: async () => 'cylinder' as const }))
+    // WO-2813 accepts cylinder/cone picks. Use the still-unsupported sphere
+    // classification to retain this test's refusal-reset contract.
+    const runtime = await boot({}, (c) => ({ ...c, classifyFace: async () => 'sphere' as const }))
     await buildBox()
 
     fireEvent.click(screen.getByTestId('workbench-push-pull'))
     runtime.rayOverride = { origin: { x: 0, y: 0, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
     fireEvent.click(canvas())
 
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-pushpull-hint').textContent).toMatch(/planar faces only/i))
+    await waitFor(() => expect(screen.getByTestId('solids-workbench-pushpull-hint').textContent).toMatch(/cannot offset a sphere face yet/i))
 
     suspendWorkspace()
     expect(screen.queryByTestId('solids-workbench-pushpull-hint')).toBeNull()
@@ -345,7 +342,7 @@ describe('WO INT-13B (spec 3.2 step 1 / B3): an armed tool disarms on suspend an
     fireEvent.click(screen.getByTestId('workbench-push-pull'))
     const hint = screen.getByTestId('solids-workbench-pushpull-hint')
     expect(hint.textContent).toMatch(/Click a planar face to push\/pull/i)
-    expect(hint.textContent).not.toMatch(/planar faces only/i)
+    expect(hint.textContent).not.toMatch(/cannot offset a sphere face yet/i)
   }, 60_000)
 })
 

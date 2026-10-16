@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useRef, useState } from 'react'
 import type { ControllerType, MachineConfig, MachineKind } from '../../../../../types'
 import { AXIS_NAMES, createDefaultControllerDefinition } from '../../../../../types'
@@ -28,6 +31,7 @@ function ensureDefinition(editDraft: Step1Props['editDraft']): void {
 }
 
 export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Props) {
+  useText('control-screens-not-probing')
   const fileRef = useRef<HTMLInputElement>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -42,7 +46,7 @@ export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Prop
       const imported = importUccncProfile(text)
       if (!imported.definition) {
         setBusy(false)
-        setMessage(`Could not read ${file.name} as a UCCNC profile. Nothing was changed.`)
+        setMessage(controlText('Step1WhatIsThisMachine.text001', { value1: String(file.name) }))
         return
       }
       editDraft((m) => withImportedUccncToolSetter({
@@ -54,25 +58,25 @@ export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Prop
         unsentSettings: imported.unsent,
       }, imported.toolSetter))
       setBusy(false)
-      setMessage(`Imported ${file.name}: ${imported.issues.length} row${imported.issues.length === 1 ? '' : 's'} could not be read as-is.`)
+      setMessage(controlText('Step1WhatIsThisMachine.text002', { value1: String(file.name), value2: String(imported.issues.length), value3: String(imported.issues.length === 1 ? '' : 's') }))
       onFilled(['axes', 'home', 'spindle', 'outputs', 'probing'])
     }
     reader.onerror = () => {
       setBusy(false)
-      setMessage(`Could not read ${file.name}. Nothing was changed.`)
+      setMessage(controlText('Step1WhatIsThisMachine.text003', { value1: String(file.name) }))
     }
     reader.readAsText(file)
   }
 
   const handleReadBoard = async () => {
     setBusy(true)
-    setMessage('Reading the connected board...')
+    setMessage(controlText('Step1WhatIsThisMachine.text004'))
     try {
       ensureDefinition(editDraft)
       const result = await readConnectedGrblSettings()
       const readback = Object.fromEntries(result)
       editDraft((m) => recordGrblSettings(m, readback))
-      setMessage(`Read back ${result.size} settings from the board.`)
+      setMessage(controlText('Step1WhatIsThisMachine.text005', { value1: String(result.size) }))
       onFilled(['axes'])
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
@@ -83,30 +87,26 @@ export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Prop
 
   const handleStartBlank = () => {
     ensureDefinition(editDraft)
-    setMessage('Starting blank. Every step below keeps a sensible default until you change it.')
+    setMessage(controlText('Step1WhatIsThisMachine.text006'))
   }
 
   return (
     <div data-testid="setup-step-what" style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420 }}>
-      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>What is this machine?</p>
+      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{controlText('Step1WhatIsThisMachine.text007')}</p>
 
-      <label className="mform-label" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        Name
-        <input
+      <label className="mform-label" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{controlText('Step1WhatIsThisMachine.text008')}<input
           type="text"
           className="mform-input"
-          aria-label="Machine name"
+          aria-label={controlText('Step1WhatIsThisMachine.text009')}
           data-testid="setup-step-what-name"
           value={draft.name}
           onChange={(e) => { editDraft((m) => ({ ...m, name: e.target.value })) }}
         />
       </label>
 
-      <label className="mform-label" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        Kind
-        <select
+      <label className="mform-label" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{controlText('Step1WhatIsThisMachine.text010')}<select
           className="mform-select"
-          aria-label="Machine kind"
+          aria-label={controlText('Step1WhatIsThisMachine.text011')}
           data-testid="setup-step-what-kind"
           value={draft.kind ?? 'router'}
           onChange={(e) => { editDraft((m) => ({ ...m, kind: e.target.value as MachineKind })) }}
@@ -115,11 +115,9 @@ export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Prop
         </select>
       </label>
 
-      <label className="mform-label" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        Controller
-        <select
+      <label className="mform-label" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{controlText('Step1WhatIsThisMachine.text012')}<select
           className="mform-select"
-          aria-label="Controller"
+          aria-label={controlText('Step1WhatIsThisMachine.text013')}
           data-testid="setup-step-what-controller"
           value={draft.controller}
           onChange={(e) => { editDraft((m) => ({ ...m, controller: e.target.value as ControllerType })) }}
@@ -135,9 +133,7 @@ export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Prop
           data-testid="setup-step-what-import-pro"
           disabled={busy}
           onClick={() => fileRef.current?.click()}
-        >
-          Import a UCCNC .pro
-        </button>
+        >{controlText('Step1WhatIsThisMachine.text014')}</button>
         <input
           ref={fileRef}
           type="file"
@@ -152,18 +148,14 @@ export function Step1WhatIsThisMachine({ draft, editDraft, onFilled }: Step1Prop
           data-testid="setup-step-what-read-board"
           disabled={busy}
           onClick={() => { void handleReadBoard() }}
-        >
-          Read from the connected board
-        </button>
+        >{controlText('Step1WhatIsThisMachine.text015')}</button>
         <button
           type="button"
           className="control-chip-btn"
           data-testid="setup-step-what-start-blank"
           disabled={busy}
           onClick={handleStartBlank}
-        >
-          Start blank
-        </button>
+        >{controlText('Step1WhatIsThisMachine.text016')}</button>
       </div>
 
       {message && (

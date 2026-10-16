@@ -122,6 +122,10 @@ import {
 // rulings are declared here and merged, so every check below sees one combined table. Each was
 // adjudicated by reading the authoring site and the app.css rule it uses.
 const EXTRA_SURFACE_DISPOSITIONS: typeof COMMITTED_SURFACE_DISPOSITIONS = {
+  'components/model3d/dialogs/MoveHoleEntry.tsx:MoveHoleEntry > div.wb-dialog': {
+    verdict: 'COHESIVE',
+    reason: 'WO-2804 Move Hole, restored by WO-2838: both STEP and STL routes render this same compact nonblocking entry over the Model viewport. Uses the defined --surface-2 raised-panel background like AnchoredValueEntry, --border-subtle and shared modal-btn controls; inline position only places it at the right of the viewport. Escape/Cancel dismiss and Apply uses the existing tool path. No raw colour or new motion.',
+  },
   'components/gcode/GcodeLineMenu.tsx:GcodeLineMenu > div.gce-line-menu.sketch-context-menu': {
     verdict: 'COHESIVE',
     reason: 'WO-2651: Control and Post share the existing sketch-context-menu surface: --bg-panel, --border-light, --radius-md and --font-size-sm; gce-line-menu adds only minimum width. Pointer coordinates place the transient menu, with Escape/outside dismissal and focus return. It uses the same context-menu family as the sketch tools.',
@@ -146,9 +150,30 @@ const EXTRA_SURFACE_DISPOSITIONS: typeof COMMITTED_SURFACE_DISPOSITIONS = {
     verdict: 'MODAL-GOVERNED',
     reason: 'The About dialog: the shared fixed .modal-backdrop scrim (app.css:4098) with a modal-container child, data-ui78-sanctioned, role=dialog aria-modal and a focus ref - the same shell as every sibling modal, governed by the modal standard rather than the overlay standard.',
   },
-  'components/modals/DemoExamplePickerModal.tsx:DemoExamplePickerModal > div.modal-backdrop': {
+  // WO-2784 RE-PIN: WO-2725 (f9019502e5, merged 9a94ae6559) turned the demo picker into the shared
+  // "Open a project" window and added the project-picker-backdrop class to the same backdrop; re-keyed.
+  'components/modals/DemoExamplePickerModal.tsx:DemoExamplePickerModal > div.modal-backdrop.project-picker-backdrop': {
     verdict: 'MODAL-GOVERNED',
-    reason: 'The startup demo-example picker: the shared fixed .modal-backdrop scrim with a modal-container child (role=dialog aria-modal, data-ui78-sanctioned, Escape closes). Its inline width/maxHeight only size the card; same shell as every sibling modal.',
+    reason: 'The "Open a project" window (WO-2725; formerly the startup demo-example picker): the shared fixed .modal-backdrop scrim with a modal-container child (role=dialog aria-modal, data-ui78-sanctioned, Escape closes). project-picker-backdrop has no rule of its own (ProjectPicker.css styles only the card and its contents); same shell as every sibling modal.',
+  },
+  // WO-2784 RE-PIN: WO-2759 (2d220dbd0b) added Help > Report a problem -- a genuinely new modal surface.
+  'components/modals/ReportProblemModal.tsx:ReportProblemDialog > div.modal-backdrop.report-problem-backdrop': {
+    verdict: 'MODAL-GOVERNED',
+    reason: 'WO-2759 Help > Report a problem: the shared fixed .modal-backdrop scrim with a modal-container child (role=dialog, aria-modal, aria-labelledby, data-ui78-sanctioned, useDialogFocus ref, outside-press closes). report-problem-backdrop adds only z-index 570 (ReportProblemModal.css) so it can sit over Help-as-overlay. Same shell as every sibling modal. (Its body CSS references the undefined --text-warning token; that is reported by the phantom-token check, not adjudicated here.)',
+  },
+  // WO-2784 RE-PIN: WO-2748 (33879cedf3) added the smart-dimension preview connector -- a new surface.
+  'lib/sketch/sketcher/overlays/SketchDimensionOverlay.tsx:SketchDimensionOverlay > svg.sketch-dim-preview-connector': {
+    verdict: 'COHESIVE',
+    reason: 'WO-2748 placement-preview leader: an aria-hidden svg inline position:absolute inset:0 filling the already-COHESIVE .sketch-dim-layer, pointer-events none, no background, border or z-index. It paints one 1px line stroked var(--sketch-dimension) (a defined sketch token) (tokens.css) at 0.75 opacity, display:none until placed. No raw hex.',
+  },
+  // WO-2784 RE-PIN: WO-2616 (4d60c51a8a, landed 5211ea829b) added the sketch pattern editor -- two new surfaces.
+  'lib/sketch/sketcher/overlays/SketchPatternEditor.tsx:SketchPatternEditor > div.sketch-context-overlay': {
+    verdict: 'COHESIVE',
+    reason: 'WO-2616 Edit pattern: the shared transparent .sketch-context-overlay scrim (app.css, fixed/inset) behind the editor form; a pointer-down closes the editor. It paints no chrome of its own and is the same overlay already dispositioned COHESIVE for SketchContextMenu and GcodeLineMenu.',
+  },
+  'lib/sketch/sketcher/overlays/SketchPatternEditor.tsx:SketchPatternEditor > form.sketch-context-menu': {
+    verdict: 'COHESIVE',
+    reason: 'WO-2616 Edit pattern form: reuses the shared .sketch-context-menu surface (--bg-panel, --border-light, --radius-md, --font-size-sm), which COHESION-STANDARD.md section 3 names a sanctioned context-menu model; its Apply/Cancel use the established .sketch-prompt-btn classes (ba1c17b3cb). Inline style only places and sizes it (left 50%, top 30%, maxHeight 60vh, padding 12) -- no colour, border, shadow or z-index literals.',
   },
   'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > div': {
     verdict: 'STRUCTURAL',
@@ -165,6 +190,14 @@ EXTRA_SURFACE_DISPOSITIONS['components/machine/ProgramPreview.tsx:IntendedStockR
   verdict: 'COHESIVE',
   reason: 'The eye toggle of the intended-stock card: an ordinary in-flow .panel-action-btn. It is NOT positioned in the app - WO-2431 positions .panel-action-btn only under .control-offsets-view-folded (app.css:10844, the Offsets folded strip), which this button is never inside; the scanner reads the rule by class alone.',
 }
+// WO-2882: WO-2865 (9eb36100fd) gave the Shell command strip three refusal lines
+// (reference, apply, refused preview) that wrap onto their own row.
+const SHELL_REFUSAL_LINE = 'WO-2865 Shell refusal line inside the already-dispositioned command strip: an in-flow span. Its inline REFUSAL_LINE_STYLE (ShellDialog.tsx:57) carries only flex layout - order 1, flexBasis 100%, maxWidth none, whiteSpace normal, overflow visible - so the line wraps onto its own row; no position, inset, colour, border or z-index, so the static walk marks it indeterminate. The look is .fillet-command-status + .fillet-command-status--error (app.css:8708/8714): --text-muted/--text-danger and --font-size-xs, the same tokens as the Fillet/Chamfer status lines. No raw hex.'
+for (const key of [
+  'components/model3d/dialogs/ShellDialog.tsx:ShellDialog > span.fillet-command-status.fillet-command-status--error',
+  'components/model3d/dialogs/ShellDialog.tsx:ShellDialog > span.fillet-command-status.fillet-command-status--error#2',
+  'components/model3d/dialogs/ShellDialog.tsx:ShellDialog > span.fillet-command-status.fillet-command-status--error#3',
+]) EXTRA_SURFACE_DISPOSITIONS[key] = { verdict: 'COHESIVE', reason: SHELL_REFUSAL_LINE }
 const SURFACE_DISPOSITIONS = { ...COMMITTED_SURFACE_DISPOSITIONS, ...EXTRA_SURFACE_DISPOSITIONS }
 const JOG_PLATE_UNRENDERED = "WO-2063 Probing screen v2 mounts the shared JogPanel in the probing tab; this positioned class is part of the Jog panel's own wedge cluster (JogPanel.tsx), absolute within that cluster in the right column - out of the viewport domain by design, same as control-jog-wedge, so no censused surface claims it."
 const UNRENDERED_CLASSES: Record<string, string> = {
@@ -453,7 +486,8 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
         // buttons (one new .sketch-prompt-btn authoring-site key), COHESIVE.
         // 73 -> 74 (WO-1586): Seat in vise's re-hosted command strip, COHESIVE
         // (same sanctioned sketch-confirm-overlay family as Fillet/Chamfer/Shell).
-        COHESIVE: 80, // WO-2651 adds the line menu and its shared transparent dismissal scrim. // 77 -> 78 WO-2431: intended-stock eye button (class-based scan of the folded-strip rule). // WO-2305 independent reference-image editor (+1); 75 -> 77 WO-2458: intended-stock line + badge.
+        // WO-2784 RE-PIN 80 -> 83: WO-2748 preview connector svg, WO-2616 pattern-editor scrim + form.
+        COHESIVE: 87, // WO-2882: +3 WO-2865 Shell refusal lines. // WO-2838: +1 WO-2804 MoveHoleEntry. // WO-2651 adds the line menu and its shared transparent dismissal scrim. // 77 -> 78 WO-2431: intended-stock eye button (class-based scan of the folded-strip rule). // WO-2305 independent reference-image editor (+1); 75 -> 77 WO-2458: intended-stock line + badge.
         'RESTYLE-NEEDED': 12, // 11 -> 12 WO-2458: ReferenceImagePlacement corner handle (booked).
         // 4 -> 11 (WO-1088 census catch-up): WO-1062 added seven in-flow
         // feed-summary layout wrappers that paint no floating surface.
@@ -473,7 +507,8 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
         // 28 -> 26 (Form stage 51): the Relief palette and height map dock the
         // same way, one column beside the rail.
         // WO-2318: +1 shared scrim for both sketch file windows.
-        'MODAL-GOVERNED': 30, // 29 -> 30 WO-2448 (e56294822): ExportModal's shared scrim.
+        // WO-2784 RE-PIN 30 -> 31: WO-2759 (2d220dbd0b) ReportProblemDialog's shared scrim.
+        'MODAL-GOVERNED': 31, // 29 -> 30 WO-2448 (e56294822): ExportModal's shared scrim.
         'DEV-ROUTE': 13,
       })
       // 85 -> 86 (CAM-BINDING Stage 1 census reconciliation, 2026-07-22): the
@@ -574,8 +609,13 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
       // (the census table's own header lists them).
       // 143 -> 144 (WO-2448, e56294822): ExportModal adds one shared modal-backdrop, MODAL-GOVERNED above.
       // 144 -> 145 (WO-2431): intended-stock eye button, COHESIVE above (class-based scan of the folded-strip rule).
-      expect(domain.length, 'overlay census derives 147 in-viewport surfaces').toBe(147)
-      expect(Object.keys(SURFACE_DISPOSITIONS).length, 'one disposition per in-viewport surface, exactly').toBe(147)
+      // WO-2784 RE-PIN 147 -> 151: +1 ReportProblemDialog backdrop (WO-2759, MODAL-GOVERNED), +1 the
+      // smart-dimension preview connector svg (WO-2748, COHESIVE), +2 SketchPatternEditor scrim + form
+      // (WO-2616, COHESIVE); the Help and project-picker backdrops were re-keyed, not added. Each above.
+      // WO-2838: WO-2804 adds the MoveHoleEntry authoring site (STEP/STL share it).
+      // WO-2882 RE-PIN 152 -> 155: WO-2865's three Shell refusal lines, COHESIVE above.
+      expect(domain.length, 'overlay census derives 155 in-viewport surfaces').toBe(155)
+      expect(Object.keys(SURFACE_DISPOSITIONS).length, 'one disposition per in-viewport surface, exactly').toBe(155)
       // MERGE-SEAM NOTE (main 52ec79e9): 117 -> 119. Both new surfaces are the
       // UI-73 "restore floating tabs" portal-target divs in App.tsx (line 93,
       // FloatingModeTabs's own fallback; line 208, CamApp's Part-workspace

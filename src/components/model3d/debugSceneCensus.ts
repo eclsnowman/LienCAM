@@ -53,6 +53,8 @@ export const STATE_CENSUS: Readonly<Record<string, CensusEntry>> = {
     ruling: 'skip-when-live',
     note: "Which UI-4 tool (measure/appearance) is armed -- toolbar pressed-state, and gates repaintUi4Overlays' body-tint branch. Named in skipped[] whenever not 'none'.",
   },
+  kernelCancelEpochRef: { ruling: 'internal', note: "WO-2796: Cancel generation counter - read before Import's async solid-count probe, checked after it, bumped on Cancel so a cancelled import never commits. No scene effect." },
+  resizeHoleEditResolveRef: { ruling: 'internal', note: 'WO-2795: token that discards a stale owner-body hole recognition when the Resize Hole edit is begun, finished or re-picked. No scene effect.' },
   activeUi4ToolRef: { ruling: 'internal', note: 'ref mirror of activeUi4Tool kept current for an async effect closure -- see activeUi4Tool.' },
   selectedBodyRowId: {
     ruling: 'skip-when-live',

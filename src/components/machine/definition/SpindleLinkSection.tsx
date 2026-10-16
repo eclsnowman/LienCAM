@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useRef, useState } from 'react'
 import { type VfdDefinition } from '../../../lib/machine/vfd'
 import { type VfdLink } from '../../../lib/machine/vfd'
@@ -212,26 +216,26 @@ export type VfdRow = [string, string | null, VfdPath?]
 
 export function vfdLinkRows(link: VfdLink): VfdRow[] {
   const timing: VfdRow[] = [
-    ['slave address', vfdText(link.slaveAddress), ['link', 'slaveAddress']],
-    ['poll interval (ms)', vfdText(link.pollIntervalMs), ['link', 'pollIntervalMs']],
-    ['retry count', vfdText(link.retryCount), ['link', 'retryCount']],
-    ['timeout (ms)', vfdText(link.timeoutMs), ['link', 'timeoutMs']],
+    [controlText('SpindleLinkSection.text001'), vfdText(link.slaveAddress), ['link', 'slaveAddress']],
+    [controlText('SpindleLinkSection.text002'), vfdText(link.pollIntervalMs), ['link', 'pollIntervalMs']],
+    [controlText('SpindleLinkSection.text003'), vfdText(link.retryCount), ['link', 'retryCount']],
+    [controlText('SpindleLinkSection.text004'), vfdText(link.timeoutMs), ['link', 'timeoutMs']],
   ]
   if (link.transport === 'tcp') {
     return [
       ['transport', vfdText(link.transport), ['link', 'transport']],
       ['host', vfdText(link.host), ['link', 'host']],
-      ['TCP port', vfdText(link.tcpPort), ['link', 'tcpPort']],
+      [controlText('SpindleLinkSection.text005'), vfdText(link.tcpPort), ['link', 'tcpPort']],
       ...timing,
     ]
   }
   return [
     ['transport', vfdText(link.transport), ['link', 'transport']],
-    ['serial port', vfdText(link.port), ['link', 'port']],
-    ['baud rate', vfdText(link.baud), ['link', 'baud']],
-    ['data bits', vfdText(link.dataBits), ['link', 'dataBits']],
+    [controlText('SpindleLinkSection.text006'), vfdText(link.port), ['link', 'port']],
+    [controlText('SpindleLinkSection.text007'), vfdText(link.baud), ['link', 'baud']],
+    [controlText('SpindleLinkSection.text008'), vfdText(link.dataBits), ['link', 'dataBits']],
     ['parity', vfdText(link.parity), ['link', 'parity']],
-    ['stop bits', vfdText(link.stopBits), ['link', 'stopBits']],
+    [controlText('SpindleLinkSection.text009'), vfdText(link.stopBits), ['link', 'stopBits']],
     ['RS485 wiring', vfdText(link.rs485), ['link', 'rs485']],
     ...timing,
   ]
@@ -250,9 +254,9 @@ export function vfdLinkRows(link: VfdLink): VfdRow[] {
  */
 export function vfdProtocolRows(definition: Pick<VfdDefinition, 'protocol'>): VfdRow[] {
   return [
-    ['read function', vfdText(definition.protocol?.readFunction), ['protocol', 'readFunction']],
-    ['write function', vfdText(definition.protocol?.writeFunction), ['protocol', 'writeFunction']],
-    ['word order', vfdText(definition.protocol?.wordOrder), ['protocol', 'wordOrder']],
+    [controlText('SpindleLinkSection.text010'), vfdText(definition.protocol?.readFunction), ['protocol', 'readFunction']],
+    [controlText('SpindleLinkSection.text011'), vfdText(definition.protocol?.writeFunction), ['protocol', 'writeFunction']],
+    [controlText('SpindleLinkSection.text012'), vfdText(definition.protocol?.wordOrder), ['protocol', 'wordOrder']],
   ]
 }
 
@@ -296,12 +300,12 @@ export function vfdCommandRows(table: VfdCommandTable): VfdRow[] {
       // The word a command starts from before this link has written one. It is
       // as much this drive's fact as any mask is, so it is edited here and not
       // only in hand-authored JSON.
-      ['idle word', vfdText(table.idle), ['commands', 'idle']],
+      [controlText('SpindleLinkSection.text013'), vfdText(table.idle), ['commands', 'idle']],
       ...Object.entries(table.commands)
         .filter(([, spec]) => spec !== undefined)
         .flatMap(([command, spec]): VfdRow[] => [
-          [`${command} mask`, vfdText(spec?.mask), ['commands', 'commands', command, 'mask']],
-          [`${command} value`, vfdText(spec?.value), ['commands', 'commands', command, 'value']],
+          [controlText('SpindleLinkSection.text014', { value1: String(command) }), vfdText(spec?.mask), ['commands', 'commands', command, 'mask']],
+          [controlText('SpindleLinkSection.text015', { value1: String(command) }), vfdText(spec?.value), ['commands', 'commands', command, 'value']],
         ]),
     ]
   }
@@ -379,6 +383,7 @@ function VfdLinkBlock({ machineId, definition, edit }: {
   definition: VfdDefinition | MachineSpindleLinkDefinition
   edit: VfdEditContext
 }) {
+  useText('control-screens-not-probing')
   const [draft, setDraft] = useState<VfdTransportDraft | null>(null)
   const [transportTyped, setTransportTyped] = useState<string | null>(null)
   const stored = definition.link.transport
@@ -450,7 +455,7 @@ function VfdLinkBlock({ machineId, definition, edit }: {
 
   return (
     <VfdRows
-      title="Serial link"
+      title={controlText('SpindleLinkSection.text016')}
       summary="How the bridge reaches the inverter, and how long it waits"
       testId="machine-def-panel-vfd-serial"
       slug="serial"
@@ -468,15 +473,16 @@ function VfdLinkBlock({ machineId, definition, edit }: {
  *  here or in the link block is one edit to one fact, and the stored keypad
  *  text is restated from the link on every store. Over TCP a serial-only row
  *  has no link field to follow and stands as its own text. */
-const FOLLOWED_FIELD_LABEL: Record<string, string> = {
-  slaveAddress: 'slave address', baud: 'baud rate', dataBits: 'data bits', parity: 'parity', stopBits: 'stop bits',
-}
+const FOLLOWED_FIELD_LABEL: Record<string, string> = liveCatalog(() => ({
+  slaveAddress: controlText('SpindleLinkSection.text017'), baud: controlText('SpindleLinkSection.text018'), dataBits: controlText('SpindleLinkSection.text019'), parity: 'parity', stopBits: controlText('SpindleLinkSection.text020'),
+}))
 
 function VfdRequiredParameters({ machineId, definition, edit }: {
   machineId: string | null
   definition: VfdDefinition | MachineSpindleLinkDefinition
   edit: VfdEditContext
 }) {
+  useText('control-screens-not-probing')
   const rows = (definition.requiredParameters ?? []) as VfdRequiredParameterRow[]
   const link = definition.link as unknown as Record<string, unknown>
   const store = (next: VfdRequiredParameterRow[], what: string): void => {
@@ -487,7 +493,7 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
   return (
     <div data-testid="machine-def-panel-vfd-required" style={{ marginTop: 10 }}>
       <SectionHead
-        title="Set these on the inverter itself"
+        title={controlText('SpindleLinkSection.text021')}
         summary="This link cannot set them and cannot check them - they are yours to enter on the keypad"
         testId="machine-def-panel-vfd-required-head"
       />
@@ -497,11 +503,11 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
           data-testid="machine-def-panel-vfd-required-table"
           style={{ width: 'max-content', minWidth: '100%' }}
         >
-          <thead><tr><th>parameter</th><th>value</th><th>why</th><th /></tr></thead>
+          <thead><tr><th>{controlText('SpindleLinkSection.text022')}</th><th>{controlText('SpindleLinkSection.text023')}</th><th>{controlText('SpindleLinkSection.text024')}</th><th /></tr></thead>
           <tbody>
             {rows.map((required, index) => {
               const slug = required.parameter === '' ? `new-${index}` : required.parameter
-              const name = required.parameter === '' ? `row ${index + 1}` : required.parameter
+              const name = required.parameter === '' ? controlText('SpindleLinkSection.text025', { value1: String(index + 1) }) : required.parameter
               const followed = required.follows === undefined
                 ? []
                 : vfdFollowedFields(definition.link, required.follows)
@@ -512,7 +518,7 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
                       label="" value={vfdText(required.parameter)}
                       testId={`machine-def-vfd-required-${slug}-parameter`}
                       path={['requiredParameters', index, 'parameter']}
-                      ariaLabel={`${name} parameter`}
+                      ariaLabel={controlText('SpindleLinkSection.text026', { value1: String(name) })}
                       edit={edit}
                     />
                   </td>
@@ -520,7 +526,7 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
                     data-testid={`machine-def-vfd-required-${slug}-value`}
                     {...(followed.length > 0 ? { 'data-follows': required.follows } : {})}
                     data-tooltip={followed.length > 0
-                      ? `The link's own ${followed.map((field) => FOLLOWED_FIELD_LABEL[field]).join(', ')} - one value, edited here or in the link above`
+                      ? controlText('SpindleLinkSection.text027', { value1: String(followed.map((field) => FOLLOWED_FIELD_LABEL[field]).join(', ')) })
                       : undefined}
                   >
                     {followed.length > 0 ? (
@@ -543,7 +549,7 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
                         label="" value={vfdText(required.value)}
                         testId={`machine-def-vfd-required-${slug}-value-text`}
                         path={['requiredParameters', index, 'value']}
-                        ariaLabel={`${name} value`}
+                        ariaLabel={controlText('SpindleLinkSection.text028', { value1: String(name) })}
                         edit={edit}
                       />
                     )}
@@ -553,7 +559,7 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
                       label="" value={vfdText(required.why)}
                       testId={`machine-def-vfd-required-${slug}-why`}
                       path={['requiredParameters', index, 'why']}
-                      ariaLabel={`${name} why`}
+                      ariaLabel={controlText('SpindleLinkSection.text029', { value1: String(name) })}
                       width={420}
                       edit={edit}
                     />
@@ -563,17 +569,15 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
                       type="button"
                       className="control-chip-btn"
                       data-testid={`machine-def-vfd-required-${slug}-remove`}
-                      aria-label={`Remove ${name}`}
-                      data-tooltip={`Remove ${name} from this machine's keypad parameters`}
+                      aria-label={controlText('SpindleLinkSection.text030', { value1: String(name) })}
+                      data-tooltip={controlText('SpindleLinkSection.text031', { value1: String(name) })}
                       disabled={edit.disabled}
                       aria-disabled={edit.disabled}
                       onClick={() => store(
                         rows.filter((_, at) => at !== index),
-                        `keypad parameter ${name} removed`,
+                        controlText('SpindleLinkSection.text032', { value1: String(name) }),
                       )}
-                    >
-                      Remove
-                    </button>
+                    >{controlText('SpindleLinkSection.text033')}</button>
                   </td>
                 </tr>
               )
@@ -585,17 +589,15 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
         type="button"
         className="control-chip-btn"
         data-testid="machine-def-vfd-required-add"
-        data-tooltip="Add a parameter the operator has to set on the inverter's keypad"
+        data-tooltip={controlText('SpindleLinkSection.text034')}
         disabled={edit.disabled}
         aria-disabled={edit.disabled}
         style={{ marginTop: 6 }}
         onClick={() => store(
           [...rows, { parameter: '', value: '', why: '' }],
-          'keypad parameter added',
+          controlText('SpindleLinkSection.text035'),
         )}
-      >
-        Add parameter
-      </button>
+      >{controlText('SpindleLinkSection.text036')}</button>
     </div>
   )
 }
@@ -604,12 +606,12 @@ function VfdRequiredParameters({ machineId, definition, edit }: {
  *  answer, not a blank - it means "the definition's own fault rule, applied to
  *  this register's word", which is what most drives with a fault-code register
  *  want and what a newly stated register starts as. */
-const FAULT_RULE_CHOICES: { value: '' | VfdFaultRule['kind']; label: string }[] = [
-  { value: '', label: "The definition's fault rule" },
-  { value: 'nonZero', label: 'Any value but 0' },
-  { value: 'equals', label: 'Equals one value' },
-  { value: 'mask', label: 'A bit is set' },
-]
+const FAULT_RULE_CHOICES: { value: '' | VfdFaultRule['kind']; label: string }[] = liveCatalog(() => ([
+  { value: '', label: controlText('SpindleLinkSection.text037') },
+  { value: 'nonZero', label: controlText('SpindleLinkSection.text038') },
+  { value: 'equals', label: controlText('SpindleLinkSection.text039') },
+  { value: 'mask', label: controlText('SpindleLinkSection.text040') },
+]))
 
 /**
  * WO-1735 - THE DRIVE'S OWN FAULT REGISTER, stated, edited and removed here.
@@ -630,6 +632,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
   definition: VfdDefinition | MachineSpindleLinkDefinition
   edit: VfdEditContext
 }) {
+  useText('control-screens-not-probing')
   const register = definition.registers?.faultCode
   // Null means "show what the document states"; a string is what is being
   // typed, held here until the completed-edit boundary the readouts use.
@@ -656,7 +659,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
       // An empty address is not half a register: it is a definition that
       // states none, and the fault goes back to the operating-state word.
       if (register === undefined) { setAddressText(null); return }
-      void store(undefined, 'fault register removed').then((outcome) => {
+      void store(undefined, controlText('SpindleLinkSection.text041')).then((outcome) => {
         if (outcome.stored) { setAddressText(null); setWordsText(null); setRuleDraft(null) }
       })
       return
@@ -667,7 +670,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
     const next: VfdFaultCodeRegister = register === undefined
       ? { address, count }
       : { ...register, address }
-    void store(next, register === undefined ? 'fault register stated' : 'fault register address changed')
+    void store(next, register === undefined ? controlText('SpindleLinkSection.text042') : controlText('SpindleLinkSection.text043'))
       .then((outcome) => { if (outcome.stored) setAddressText(null) })
   }
 
@@ -675,7 +678,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
     if (register === undefined) return
     const count = whole(text, 1, 125)
     if (count === null || count === register.count) return
-    void store({ ...register, count }, 'fault register word count changed')
+    void store({ ...register, count }, controlText('SpindleLinkSection.text044'))
       .then((outcome) => { if (outcome.stored) setWordsText(null) })
   }
 
@@ -686,7 +689,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
     const rule: VfdFaultRule = next.kind === 'equals'
       ? { kind: 'equals', value }
       : { kind: 'mask', mask: value }
-    void store({ ...register, rule }, 'fault register rule changed').then((outcome) => {
+    void store({ ...register, rule }, controlText('SpindleLinkSection.text045')).then((outcome) => {
       if (outcome.stored) setRuleDraft((current) => (current === next ? null : current))
     })
   }
@@ -696,20 +699,20 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
   return (
     <div data-testid="machine-def-panel-vfd-fault-register" style={{ marginTop: 10 }}>
       <SectionHead
-        title="Fault register"
+        title={controlText('SpindleLinkSection.text046')}
         summary="The register this drive reports faults in. Empty: it has none, and the fault is read from the operating-state word"
         testId="machine-def-panel-vfd-fault-register-head"
       />
       <div style={{ overflowX: 'auto', paddingBottom: 2 }}>
         <table className="mform-axis-table" style={{ width: '100%' }}>
-          <thead><tr><th>address</th><th>words</th><th>a fault is</th><th>value</th></tr></thead>
+          <thead><tr><th>{controlText('SpindleLinkSection.text047')}</th><th>{controlText('SpindleLinkSection.text048')}</th><th>{controlText('SpindleLinkSection.text049')}</th><th>{controlText('SpindleLinkSection.text050')}</th></tr></thead>
           <tbody>
             <tr data-testid="machine-def-vfd-fault-register-row">
               <td>
                 <input
                   data-wired=""
                   className="mform-input mform-input-mono"
-                  aria-label="fault register address"
+                  aria-label={controlText('SpindleLinkSection.text051')}
                   data-testid="machine-def-vfd-fault-register-address"
                   value={addressText ?? (register === undefined ? '' : String(register.address))}
                   disabled={edit.disabled}
@@ -728,7 +731,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
                 <input
                   data-wired=""
                   className="mform-input mform-input-mono"
-                  aria-label="fault register words"
+                  aria-label={controlText('SpindleLinkSection.text052')}
                   data-testid="machine-def-vfd-fault-register-words"
                   value={wordsText ?? (register === undefined ? '' : String(register.count))}
                   disabled={edit.disabled || register === undefined}
@@ -747,7 +750,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
                 <select
                   data-wired=""
                   className="mform-select"
-                  aria-label="fault register rule"
+                  aria-label={controlText('SpindleLinkSection.text053')}
                   data-testid="machine-def-vfd-fault-register-rule"
                   value={chosenKind}
                   disabled={edit.disabled || register === undefined}
@@ -765,7 +768,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
                     const next = { ...register }
                     if (kind === '') delete next.rule
                     else next.rule = { kind: 'nonZero' }
-                    void store(next, 'fault register rule changed')
+                    void store(next, controlText('SpindleLinkSection.text054'))
                   }}
                 >
                   {FAULT_RULE_CHOICES.map((choice) => (
@@ -778,7 +781,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
                   <input
                     data-wired=""
                     className="mform-input mform-input-mono"
-                    aria-label="fault register rule value"
+                    aria-label={controlText('SpindleLinkSection.text055')}
                     data-testid="machine-def-vfd-fault-register-rule-value"
                     value={ruleDraft.text}
                     disabled={edit.disabled}
@@ -798,7 +801,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
                     value={vfdText(register.rule.value)}
                     path={['registers', 'faultCode', 'rule', 'value']}
                     edit={edit}
-                    ariaLabel="fault register rule value"
+                    ariaLabel={controlText('SpindleLinkSection.text056')}
                     testId="machine-def-vfd-fault-register-rule-value"
                   />
                 ) : register?.rule?.kind === 'mask' ? (
@@ -807,7 +810,7 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
                     value={vfdText(register.rule.mask)}
                     path={['registers', 'faultCode', 'rule', 'mask']}
                     edit={edit}
-                    ariaLabel="fault register rule value"
+                    ariaLabel={controlText('SpindleLinkSection.text057')}
                     testId="machine-def-vfd-fault-register-rule-value"
                   />
                 ) : null}
@@ -820,14 +823,14 @@ function VfdFaultCodeRegisterSection({ machineId, definition, edit }: {
   )
 }
 
-const RUN_STATE_MEANING_LABEL: Record<VfdRunStateMeaning, string> = {
-  running: 'Running',
-  runningForward: 'Running forward',
-  runningReverse: 'Running reverse',
-  stopped: 'Stopped',
-  faulted: 'Faulted',
-  poweredOff: 'Powered off',
-}
+const RUN_STATE_MEANING_LABEL: Record<VfdRunStateMeaning, string> = liveCatalog(() => ({
+  running: controlText('SpindleLinkSection.text058'),
+  runningForward: controlText('SpindleLinkSection.text059'),
+  runningReverse: controlText('SpindleLinkSection.text060'),
+  stopped: controlText('SpindleLinkSection.text061'),
+  faulted: controlText('SpindleLinkSection.text062'),
+  poweredOff: controlText('SpindleLinkSection.text063'),
+}))
 
 interface VfdRunStateDraft {
   value: string
@@ -848,6 +851,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
   definition: VfdDefinition | MachineSpindleLinkDefinition
   edit: VfdEditContext
 }) {
+  useText('control-screens-not-probing')
   const rows = definition.registers.runState.values ?? []
   const [draft, setDraft] = useState<VfdRunStateDraft | null>(null)
   const store = (next: VfdRunStateValue[], what: string) => setMachineVfdRunStateValues(
@@ -862,7 +866,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
       || value > 65535
       || next.meaning === ''
     ) return
-    void store([...rows, { value, meaning: next.meaning }], 'run-state value added')
+    void store([...rows, { value, meaning: next.meaning }], controlText('SpindleLinkSection.text064'))
       .then((outcome) => {
         if (outcome.stored) setDraft((current) => (current === next ? null : current))
       })
@@ -871,13 +875,13 @@ function VfdRunStateValues({ machineId, definition, edit }: {
   return (
     <div data-testid="machine-def-panel-vfd-run-state-values" style={{ marginTop: 10 }}>
       <SectionHead
-        title="Run-state values"
+        title={controlText('SpindleLinkSection.text065')}
         summary="What each value read from the operating-state register means"
         testId="machine-def-panel-vfd-run-state-values-head"
       />
       <div style={{ overflowX: 'auto', paddingBottom: 2 }}>
         <table className="mform-axis-table" style={{ width: '100%' }}>
-          <thead><tr><th>value</th><th>meaning</th><th /></tr></thead>
+          <thead><tr><th>{controlText('SpindleLinkSection.text066')}</th><th>{controlText('SpindleLinkSection.text067')}</th><th /></tr></thead>
           <tbody>
             {rows.map((entry, index) => (
               <tr key={`${entry.value}:${index}`} data-testid={`machine-def-vfd-run-state-${index + 1}-row`}>
@@ -887,7 +891,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                     value={vfdText(entry.value)}
                     path={['registers', 'runState', 'values', index, 'value']}
                     edit={edit}
-                    ariaLabel={`run-state row ${index + 1} value`}
+                    ariaLabel={controlText('SpindleLinkSection.text068', { value1: String(index + 1) })}
                     testId={`machine-def-vfd-run-state-${index + 1}-value`}
                   />
                 </td>
@@ -895,7 +899,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                   <select
                     data-wired=""
                     className="mform-select"
-                    aria-label={`run-state row ${index + 1} meaning`}
+                    aria-label={controlText('SpindleLinkSection.text069', { value1: String(index + 1) })}
                     data-testid={`machine-def-vfd-run-state-${index + 1}-meaning`}
                     value={entry.meaning}
                     disabled={edit.disabled}
@@ -904,7 +908,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                       const meaning = event.target.value as VfdRunStateMeaning
                       void store(
                         rows.map((row, at) => (at === index ? { ...row, meaning } : row)),
-                        `run-state row ${index + 1} meaning changed`,
+                        controlText('SpindleLinkSection.text070', { value1: String(index + 1) }),
                       )
                     }}
                   >
@@ -918,18 +922,16 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                     type="button"
                     className="control-chip-btn"
                     data-testid={`machine-def-vfd-run-state-${index + 1}-remove`}
-                    aria-label={`Remove run-state row ${index + 1}`}
+                    aria-label={controlText('SpindleLinkSection.text071', { value1: String(index + 1) })}
                     disabled={edit.disabled}
                     aria-disabled={edit.disabled}
                     onClick={() => {
                       void store(
                         rows.filter((_, at) => at !== index),
-                        `run-state row ${index + 1} removed`,
+                        controlText('SpindleLinkSection.text072', { value1: String(index + 1) }),
                       )
                     }}
-                  >
-                    Remove
-                  </button>
+                  >{controlText('SpindleLinkSection.text073')}</button>
                 </td>
               </tr>
             ))}
@@ -939,7 +941,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                   <input
                     data-wired=""
                     className="mform-input mform-input-mono"
-                    aria-label="new run-state value"
+                    aria-label={controlText('SpindleLinkSection.text074')}
                     data-testid="machine-def-vfd-run-state-draft-value"
                     value={draft.value}
                     disabled={edit.disabled}
@@ -958,7 +960,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                   <select
                     data-wired=""
                     className="mform-select"
-                    aria-label="new run-state meaning"
+                    aria-label={controlText('SpindleLinkSection.text075')}
                     data-testid="machine-def-vfd-run-state-draft-meaning"
                     value={draft.meaning}
                     disabled={edit.disabled}
@@ -976,7 +978,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                       commitDraft(next)
                     }}
                   >
-                    <option value="">Choose meaning</option>
+                    <option value="">{controlText('SpindleLinkSection.text076')}</option>
                     {VFD_RUN_STATE_MEANINGS.map((meaning) => (
                       <option key={meaning} value={meaning}>{RUN_STATE_MEANING_LABEL[meaning]}</option>
                     ))}
@@ -994,9 +996,7 @@ function VfdRunStateValues({ machineId, definition, edit }: {
                     // commits the completed draft, and Cancel arrives too late.
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => setDraft(null)}
-                  >
-                    Cancel
-                  </button>
+                  >{controlText('SpindleLinkSection.text077')}</button>
                 </td>
               </tr>
             )}
@@ -1007,14 +1007,12 @@ function VfdRunStateValues({ machineId, definition, edit }: {
         type="button"
         className="control-chip-btn"
         data-testid="machine-def-vfd-run-state-add"
-        data-tooltip="Add a value named by this inverter's operating-state register"
+        data-tooltip={controlText('SpindleLinkSection.text078')}
         disabled={edit.disabled || draft !== null}
         aria-disabled={edit.disabled || draft !== null}
         style={{ marginTop: 6 }}
         onClick={() => setDraft({ value: '', meaning: '' })}
-      >
-        Add run-state value
-      </button>
+      >{controlText('SpindleLinkSection.text079')}</button>
     </div>
   )
 }
@@ -1150,6 +1148,7 @@ export function SpindleDrivePicker({
   onDriveChange?: (drive: MachineSpindleDriveDefinition | undefined) => void
   onDriveRefused?: (drive: MachineSpindleDriveDefinition | undefined) => void
 }) {
+  useText('control-screens-not-probing')
   const committedValue = driveValue(definition, storedDrive)
   const [pendingValue, setPendingValue] = useState<string | null>(null)
   const changeSequence = useRef(0)
@@ -1159,7 +1158,7 @@ export function SpindleDrivePicker({
   const shownKind = storedDrive === undefined ? legacyKind : storedSpindleDriveKind(storedDrive)
   const legacyLabel = SPINDLE_DRIVE_KIND_LABEL[shownKind]
   const boardPwmLabel = committedValue === DRIVE_LEGACY && shownKind === 'pwm-board'
-    ? `${SPINDLE_DRIVE_KIND_LABEL['board-pwm']} (save this choice)`
+    ? controlText('SpindleLinkSection.text080', { value1: String(SPINDLE_DRIVE_KIND_LABEL['board-pwm']) })
     : SPINDLE_DRIVE_KIND_LABEL['board-pwm']
 
   const requestDriveChange = (next: string): void => {
@@ -1217,7 +1216,7 @@ export function SpindleDrivePicker({
       <select
         data-wired=""
         className="mform-select"
-        aria-label="Spindle drive"
+        aria-label={controlText('SpindleLinkSection.text081')}
         data-testid="machine-def-area-spindle-drive-value"
         value={value}
         disabled={disabled}
@@ -1237,12 +1236,12 @@ export function SpindleDrivePicker({
         <option value={DRIVE_RELAY}>{SPINDLE_DRIVE_KIND_LABEL.relay}</option>
         {value === DRIVE_CURRENT && (
           <option value={DRIVE_CURRENT}>
-            {`Modbus VFD - ${vfdText(definition?.name) ?? 'unnamed inverter'}`}
+            {controlText('SpindleLinkSection.text083', { value1: String(vfdText(definition?.name) ?? controlText('SpindleLinkSection.text082')) })}
           </option>
         )}
         {VFD_MODEL_TEMPLATES.map((template) => (
           <option key={template.id} value={`vfd:${template.id}`}>
-            {`Modbus VFD - ${template.label}`}
+            {controlText('SpindleLinkSection.text084', { value1: String(template.label) })}
           </option>
         ))}
       </select>
@@ -1287,6 +1286,7 @@ export function SpindleLinkSection({
    *  Legacy tab keeps the page exactly as it stood (WO-1687) and does not. */
   showDrive?: boolean
 }) {
+  useText('control-screens-not-probing')
   const owner = machineId ?? null
   const definition = resolvedSpindleLink({ link, foreign, stored, storedIsStated })
   const applied = definition !== null && definition !== undefined
@@ -1295,20 +1295,14 @@ export function SpindleLinkSection({
   return (
     <div data-testid="machine-def-panel-vfd-link" style={{ marginBottom: 14 }}>
       <SectionHead
-        title="Spindle link (Modbus VFD)"
+        title={controlText('SpindleLinkSection.text085')}
         summary="This machine's editable inverter definition"
         testId="machine-def-panel-vfd-link-head"
       />
       <div
         data-testid="machine-def-panel-vfd-link-boundary"
         style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-      >
-        This machine's definition is the one copy of its inverter settings. The bridge for this
-        machine is handed it on connect, and every accepted edit is sent to it immediately; every
-        edit clears commissioning verification. Applied means the bridge holds this document;
-        verified means commissioning proved it against the inverter. Required keypad parameters
-        below are separate and are never sent.
-      </div>
+      >{controlText('SpindleLinkSection.text086')}</div>
 
       {showDrive && (
         <SpindleDrivePicker machineId={owner} definition={definition} disabled={edit.disabled} />
@@ -1320,20 +1314,20 @@ export function SpindleLinkSection({
           style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}
         >
           {showDrive
-            ? 'This machine has no VFD link. Choose a Modbus VFD under Drive to declare one; every '
-              + 'field is then editable here.'
-            : 'This machine has no VFD link. Declare one under Drive in the Spindle area.'}
+            ? controlText('SpindleLinkSection.text087')
+              + controlText('SpindleLinkSection.text088')
+            : controlText('SpindleLinkSection.text089')}
         </div>
       ) : (
         <>
           <div data-testid="machine-def-panel-vfd-apply-state" style={{ display: 'flex', gap: 16 }}>
             <VfdReadout
-              label="applied by bridge"
+              label={controlText('SpindleLinkSection.text090')}
               value={applied ? 'yes' : 'no'}
               testId="machine-def-vfd-applied"
             />
             <VfdReadout
-              label="verified against inverter"
+              label={controlText('SpindleLinkSection.text091')}
               value={definition.verified ? 'yes' : 'no'}
               testId="machine-def-vfd-verified"
             />
@@ -1348,16 +1342,14 @@ export function SpindleLinkSection({
             <input
               data-wired=""
               type="checkbox"
-              aria-label="Reverse spindle direction"
+              aria-label={controlText('SpindleLinkSection.text092')}
               checked={'directionInverted' in definition && definition.directionInverted === true}
               disabled={edit.disabled}
               aria-disabled={edit.disabled}
               onChange={(event) => edit.onDirectionChange(event.target.checked)}
-            />
-            Reverse spindle direction in software
-          </label>
+            />{controlText('SpindleLinkSection.text093')}</label>
           <VfdRows
-            title="Inverter"
+            title={controlText('SpindleLinkSection.text094')}
             summary="Which definition the bridge is running, and where it came from"
             testId="machine-def-panel-vfd-identity"
             slug="identity"
@@ -1378,7 +1370,7 @@ export function SpindleLinkSection({
             edit={edit}
           />
           <VfdRows
-            title="Modbus protocol"
+            title={controlText('SpindleLinkSection.text095')}
             summary="Function codes, and which half of a two-register value goes first"
             testId="machine-def-panel-vfd-protocol"
             slug="protocol"
@@ -1388,7 +1380,7 @@ export function SpindleLinkSection({
 
           <div data-testid="machine-def-panel-vfd-registers" style={{ marginTop: 10 }}>
             <SectionHead
-              title="Registers"
+              title={controlText('SpindleLinkSection.text096')}
               summary={
                 'Where each value lives on the inverter, how many registers it spans '
                 + '(the setpoint is 1 for a 16-bit drive, 2 for a 32-bit one) and how the '
@@ -1404,8 +1396,8 @@ export function SpindleLinkSection({
               >
                 <thead>
                   <tr>
-                    <th>role</th><th>address</th><th>words</th>
-                    <th>scale</th><th>rounding</th><th>minimum</th><th>maximum</th>
+                    <th>{controlText('SpindleLinkSection.text097')}</th><th>{controlText('SpindleLinkSection.text098')}</th><th>{controlText('SpindleLinkSection.text099')}</th>
+                    <th>{controlText('SpindleLinkSection.text100')}</th><th>{controlText('SpindleLinkSection.text101')}</th><th>{controlText('SpindleLinkSection.text102')}</th><th>{controlText('SpindleLinkSection.text103')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1453,7 +1445,7 @@ export function SpindleLinkSection({
           />
 
           <VfdRows
-            title="Commands"
+            title={controlText('SpindleLinkSection.text104')}
             summary="What the bridge writes to run and to stop"
             testId="machine-def-panel-vfd-commands"
             slug="command"
@@ -1463,7 +1455,7 @@ export function SpindleLinkSection({
 
           {(definition.resetSequence?.length ?? 0) > 0 && (
             <VfdRows
-              title="Fault reset sequence"
+              title={controlText('SpindleLinkSection.text105')}
               summary="What clearing a fault writes, and how long it waits between steps"
               testId="machine-def-panel-vfd-reset"
               slug="reset"
@@ -1477,7 +1469,7 @@ export function SpindleLinkSection({
 
           <div data-testid="machine-def-panel-vfd-status" style={{ marginTop: 10 }}>
             <SectionHead
-              title="Telemetry"
+              title={controlText('SpindleLinkSection.text106')}
               summary="Which words of the status block become which reading"
               testId="machine-def-panel-vfd-status-head"
             />
@@ -1488,7 +1480,7 @@ export function SpindleLinkSection({
                 style={{ width: 'max-content', minWidth: '100%' }}
               >
                 <thead>
-                  <tr><th>reading</th><th>source</th><th>word offset</th><th>scale</th></tr>
+                  <tr><th>{controlText('SpindleLinkSection.text107')}</th><th>{controlText('SpindleLinkSection.text108')}</th><th>{controlText('SpindleLinkSection.text109')}</th><th>{controlText('SpindleLinkSection.text110')}</th></tr>
                 </thead>
                 <tbody>
                   {(definition.status ?? []).map((field) => (
@@ -1533,7 +1525,7 @@ export function SpindleLinkSection({
           </div>
 
           <VfdRows
-            title="Fault rule and constants"
+            title={controlText('SpindleLinkSection.text111')}
             summary="What counts as a fault, and the named numbers the scales may use"
             testId="machine-def-panel-vfd-fault"
             slug="fault"
@@ -1555,7 +1547,7 @@ export function SpindleLinkSection({
           {vfdText(definition.notes) !== null && (
             <div data-testid="machine-def-panel-vfd-notes" style={{ marginTop: 10 }}>
               <SectionHead
-                title="Notes"
+                title={controlText('SpindleLinkSection.text112')}
                 summary="What the definition's author wrote about this inverter"
                 testId="machine-def-panel-vfd-notes-head"
               />

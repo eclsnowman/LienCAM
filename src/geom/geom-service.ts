@@ -417,7 +417,11 @@ export type FeatureClass =
   | 'throughHole' | 'blindHole' | 'counterboreStack'
   | 'pocket' | 'engravedText' | 'boss'
   | 'filletPlanar' | 'chamferPlanar'
-  | 'filletCurvedCorner' | 'sliver';
+  | 'filletCurvedCorner' | 'sliver'
+  /** WO-2766: a whole tangent chain of fillet / chamfer faces on an imported
+   *  body (a boss-foot torus, a top-edge loop, a pocket's floor fillets),
+   *  removed by the kernel's RemoveFeatures and re-dressed by Change size. */
+  | 'filletChain' | 'chamferChain';
 
 /** A recognized feature with its stable-id face set + measured parameters. */
 export interface FeatureVerdict {
@@ -437,6 +441,10 @@ export interface FeatureVerdict {
   neighbourIds: StableId[];
   /** measured params for rule queries + UI (axis, diameter, depth, radius…). */
   params: Record<string, number | string>;
+  /** WO-2762: a counterbored hole's counterbore wall face(s) - a subset of
+   *  `faceIds`. A Resize Hole pick on one of these edits that step alone
+   *  (`params.counterboreDiameter` / `params.counterboreDepth`). */
+  counterboreFaceIds?: StableId[];
 }
 
 /** Rule-based batch selection criteria (the SW-2024 / SpaceClaim Power-Select
@@ -495,7 +503,7 @@ export interface DefeatureResult extends OpResult {
   report?: DefeatureReport;
 }
 
-/** v0.6 — move/offset ONE planar face along its normal (or a resize of a hole
+/** Move/offset one planar face or a cylindrical/conical hole face (or resize a hole
  *  diameter / pocket depth). Same heal + validity discipline as defeatureBatch. */
 export interface FaceEditRequest {
   featureId: string;
@@ -503,9 +511,11 @@ export interface FaceEditRequest {
   /** the feature to resize (a featureKey from recognizeFeatures). */
   featureKey: string;
   /** the edit: signed offset of the feature (hole diameter delta, pocket depth
-   *  delta, or planar-face offset), in mm. */
+   *  delta, or face offset), in mm. Positive curved-hole offsets grow the opening. */
   delta: number;
-  kind: 'holeDiameter' | 'pocketDepth' | 'faceOffset';
+  kind: 'holeDiameter' | 'pocketDepth' | 'faceOffset' | 'holeMove';
+  /** WO-2804: whole-hole translation, perpendicular to its recognized axis. */
+  translation?: [number, number, number];
 }
 
 // ---------- tessellation (transferable-friendly) ----------

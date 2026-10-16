@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as THREE from 'three'
@@ -30,6 +31,7 @@ export function ReferenceImageCalibration({ payload, frame, runtime, canvas, uni
   initialPoints?: ImagePoint[]
   onCommit(payload: ReferenceImagePayload): void; onCancel(): void
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [points, setPoints] = useState<ImagePoint[]>(() => initialPoints ?? selectedLine(frame))
   const [entryVersion, setEntryVersion] = useState(0)
   const [distance, setDistance] = useState<number | null>(null)
@@ -39,7 +41,7 @@ export function ReferenceImageCalibration({ payload, frame, runtime, canvas, uni
   const resetInvalidDistance = (draft: string): boolean => {
     const value = parseDimToMm(draft, units)
     if (value > 0 && Number.isFinite(value)) return false
-    useCamStore.getState().addConsoleEvent({ severity: 'info', source: 'input', message: `Real distance: ${draft} - set to ${fmtDim(measured, units)} ${unitLabel(units)}` })
+    useCamStore.getState().addConsoleEvent({ severity: 'info', source: 'input', message: workbenchText('ReferenceImageCalibration.realDistanceSetTo', { draft: String(draft), value2: String(fmtDim(measured, units)), value3: String(unitLabel(units)) }) })
     setDistance(measured); setEntryVersion((v) => v + 1)
     return true
   }
@@ -108,11 +110,11 @@ export function ReferenceImageCalibration({ payload, frame, runtime, canvas, uni
   if (payload.scaleLocked) return null
   return createPortal(<>
     {points.length < 2 && <WorkbenchConfirmBar testId="reference-image-calibration-prompt"
-      message={points.length === 0 ? 'Pick the first mark on the picture' : 'Pick the second mark on the picture'}
-      actions={[{ testId: 'reference-image-calibration-cancel', label: 'Cancel', onClick: onCancel }]} />}
+      message={points.length === 0 ? workbenchText('ReferenceImageCalibration.pickTheFirstMarkOnThePicture') : workbenchText('ReferenceImageCalibration.pickTheSecondMarkOnThePicture')}
+      actions={[{ testId: 'reference-image-calibration-cancel', label: workbenchText('ReferenceImageCalibration.cancel'), onClick: onCancel }]} />}
     {points.length === 2 && <AnchoredValueEntry key={entryVersion} testId="reference-image-distance-entry"
       anchorWorldPoint={localToWorld(frame, { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 })}
-      projectToCanvas={(p) => runtime.projectToCanvas(p)} title="Calibrate reference image"
+      projectToCanvas={(p) => runtime.projectToCanvas(p)} title={workbenchText('ReferenceImageCalibration.calibrateReferenceImage')}
       currentValueLabel="Current distance" currentValueText={`${fmtDim(measured, units)} ${unitLabel(units)}`}
       valueLabel="Real distance" deltaLabel="Scale" initialDraft={fmtDim(distance ?? measured, units)}
       numeric={{ valueMm: parseDimToMm(fmtDim(distance ?? measured, units), units), units, onBlurDraft: resetInvalidDistance }} unitSuffix={unitLabel(units)}

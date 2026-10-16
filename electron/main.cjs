@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, powerSaveBlocker, protocol, screen } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, powerSaveBlocker, protocol, screen, shell } = require('electron')
 const { execFile, spawn } = require('node:child_process')
 const { createHash } = require('node:crypto')
 const { existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('node:fs')
@@ -1500,6 +1500,96 @@ ipcMain.handle('liencam:choose-machine-path', async (event, kind) => {
   })
   return result.canceled ? null : result.filePaths[0] ?? null
 })
+ipcMain.handle('liencam:open-project-link', async (event, url) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return
+  if (!['https://github.com/eclsnowman/LienCAM', 'https://github.com/eclsnowman/LienCAM/releases'].includes(url)) {
+    throw new Error('Unknown project link.')
+  }
+  await shell.openExternal(url)
+})
+// WO-2759 Help > Report a problem: open the bug-report form only, and only with
+// the prefill fields the renderer showed the user (version, os, controller).
+// Anything else in the address is refused rather than passed to the browser.
+const ISSUE_FORM_FIELDS = new Set(['template', 'version', 'os', 'controller'])
+ipcMain.handle('liencam:open-issue-form', async (event, url) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return
+  let parsed
+  try { parsed = new URL(url) } catch { throw new Error('Unknown issue form address.') }
+  if (parsed.origin !== 'https://github.com' || parsed.pathname !== '/eclsnowman/LienCAM/issues/new' || parsed.hash !== ''
+    || parsed.username !== '' || parsed.password !== ''
+    || [...parsed.searchParams.keys()].some((key) => !ISSUE_FORM_FIELDS.has(key))
+    || [...parsed.searchParams.values()].some((value) => value.length > 120)) {
+    throw new Error('Unknown issue form address.')
+  }
+  await shell.openExternal(parsed.href)
+})
+// WO-2725 desktop recent projects. Only dialog-selected/saved or already-recent
+// paths may be read by the renderer; listing uses stat, never project-file reads.
+const selectedProjectPaths = new Set()
+let recentProjectWrites = Promise.resolve()
+function recentProjectsPath() { return path.join(app.getPath('userData'), 'recent-projects.json') }
+function projectPathKey(value) { return process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value) }
+function cleanProjectThumbnail(value) {
+  return typeof value === 'string' && value.length <= 400000 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : undefined
+}
+async function readRecentProjects() {
+  try {
+    const saved = JSON.parse(await readFile(recentProjectsPath(), 'utf8'))
+    return Array.isArray(saved) ? saved.filter((item) => item && typeof item.path === 'string' && path.isAbsolute(item.path) && /\.camproject$/i.test(item.path) && typeof item.name === 'string' && typeof item.openedAt === 'string')
+      .slice(0, 10).map((item) => ({ path: item.path, name: item.name, openedAt: item.openedAt, thumbnail: cleanProjectThumbnail(item.thumbnail) })) : []
+  } catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return []; throw error }
+}
+function updateRecentProjects(update) {
+  const write = recentProjectWrites.catch(() => {}).then(async () => {
+    const next = update(await readRecentProjects())
+    const target = recentProjectsPath()
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(`${target}.tmp`, JSON.stringify(next), 'utf8')
+    await rename(`${target}.tmp`, target)
+  })
+  recentProjectWrites = write
+  return write
+}
+ipcMain.handle('liencam:recent-projects', async (event) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return []
+  await recentProjectWrites.catch(() => {})
+  return (await readRecentProjects()).map((item) => {
+    let missing = false
+    try { missing = !statSync(item.path).isFile() } catch { missing = true }
+    return { ...item, missing }
+  })
+})
+ipcMain.handle('liencam:open-project-file', async (event, requestedPath) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return null
+  let selected = requestedPath
+  if (selected === undefined) {
+    const result = await dialog.showOpenDialog(mainWindow, { title: 'Open a project', properties: ['openFile'], filters: [{ name: 'LienCAM projects', extensions: ['camproject'] }] })
+    if (result.canceled || !result.filePaths[0]) return null
+    selected = result.filePaths[0]
+    selectedProjectPaths.add(projectPathKey(selected))
+  } else {
+    if (typeof selected !== 'string') throw new Error('Invalid project path.')
+    await recentProjectWrites.catch(() => {})
+    if (!(await readRecentProjects()).some((item) => projectPathKey(item.path) === projectPathKey(selected))) throw new Error('Choose this project with Browse first.')
+  }
+  return { path: selected, text: await readFile(selected, 'utf8') }
+})
+ipcMain.handle('liencam:remember-project', async (event, item) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return
+  if (!item || typeof item.path !== 'string' || !path.isAbsolute(item.path) || !/\.camproject$/i.test(item.path) || typeof item.name !== 'string') throw new Error('Invalid recent project.')
+  return updateRecentProjects((entries) => {
+    const key = projectPathKey(item.path)
+    if (!selectedProjectPaths.has(key) && !entries.some((entry) => projectPathKey(entry.path) === key)) throw new Error('Choose this project with Browse first.')
+    return [{ path: item.path, name: item.name.slice(0, 500), openedAt: new Date().toISOString(), thumbnail: cleanProjectThumbnail(item.thumbnail) },
+      ...entries.filter((entry) => projectPathKey(entry.path) !== key)].slice(0, 10)
+  })
+})
+ipcMain.handle('liencam:remove-recent-project', async (event, selected) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents || typeof selected !== 'string') return
+  return updateRecentProjects((entries) => entries.filter((entry) => projectPathKey(entry.path) !== projectPathKey(selected)))
+})
+// End WO-2725 recent projects.
+
 // the operator 09-25 at the machine: Export .nc, project Save and every other download
 // did nothing in the desktop app. The renderer hands the bytes here; the operator
 // picks where they go. Answers the saved path, or null when the operator cancels.
@@ -1515,6 +1605,7 @@ ipcMain.handle('liencam:save-file', async (event, filename, data) => {
   })
   if (result.canceled || !result.filePath) return null
   await writeFile(result.filePath, data)
+  if (/\.camproject$/i.test(result.filePath)) selectedProjectPaths.add(projectPathKey(result.filePath))
   return result.filePath
 })
 ipcMain.on('liencam:set-job-wake-lock', (event, active) => {

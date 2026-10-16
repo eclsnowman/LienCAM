@@ -20,6 +20,8 @@
 // degenerate triangle is what actually rejects the hit. Slightly less
 // efficient than a refit, never incorrect.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import * as THREE from 'three'
 import type { CachedBody } from '../../../viewport3d'
 import type { StableId } from '../../../geom/geom-service'
@@ -104,7 +106,7 @@ export function deriveHiddenEdgeIds(edgeIds: readonly StableId[], isFaceHidden: 
 export function applyGeometryVisibility(body: CachedBody, pristine: PristineGeometrySnapshot, mask: VisibilityMask): void {
   const posAttr = body.geometry.getAttribute('position') as THREE.BufferAttribute
   const index = body.geometry.getIndex()
-  if (index === null) throw new Error('geometryVisibility: body.geometry has no index buffer')
+  if (index === null) throw new Error(workbenchText('geometryVisibility.geometryvisibilityBodyGeometryHasNoIndexBuffer'))
 
   ;(posAttr.array as Float32Array).set(pristine.position)
   if (mask.hiddenFaceIds.size > 0) {

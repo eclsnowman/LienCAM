@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { AXIS_NAMES } from '../../../../../types'
 import { DefNumber } from '../../DefinitionFields'
 import { StepsPerMm } from '../StepsPerMm'
@@ -20,19 +23,18 @@ type Step2Props = Pick<MachineDefinitionPanelState, 'draft' | 'patchAxis' | 'pat
 }
 
 export function Step2AxesAndTravel({ def, patchAxis, patchAxisSoftLimit, toggleAxisEnabled }: Step2Props) {
+  useText('control-screens-not-probing')
   return (
     <div data-testid="setup-step-axes">
-      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>
-        Which axes does this machine have, and how far may each travel?
-      </p>
+      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>{controlText('Step2AxesAndTravel.text001')}</p>
       <table className="mform-axis-table" data-testid="setup-step-axes-table" style={{ width: 'auto' }}>
         <thead>
           <tr>
-            <th>Axis</th>
-            <th>steps/mm</th>
+            <th>{controlText('Step2AxesAndTravel.text002')}</th>
+            <th>{controlText('Step2AxesAndTravel.text003')}</th>
             <th></th>
-            <th>travel from</th>
-            <th>travel to</th>
+            <th>{controlText('Step2AxesAndTravel.text004')}</th>
+            <th>{controlText('Step2AxesAndTravel.text005')}</th>
           </tr>
         </thead>
         <tbody>
@@ -42,7 +44,7 @@ export function Step2AxesAndTravel({ def, patchAxis, patchAxisSoftLimit, toggleA
               return (
                 <tr key={name} data-testid={`setup-step-axes-absent-${name}`}>
                   <td>{name}</td>
-                  <td colSpan={4} style={{ color: 'var(--text-muted)' }}>not carried in this record</td>
+                  <td colSpan={4} style={{ color: 'var(--text-muted)' }}>{controlText('Step2AxesAndTravel.text006')}</td>
                 </tr>
               )
             }
@@ -52,7 +54,7 @@ export function Step2AxesAndTravel({ def, patchAxis, patchAxisSoftLimit, toggleA
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <input
                       type="checkbox"
-                      aria-label={`${name} axis enabled`}
+                      aria-label={controlText('Step2AxesAndTravel.text007', { value1: String(name) })}
                       data-testid={`setup-step-axes-enabled-${name}`}
                       checked={a.enabled}
                       onChange={(e) => toggleAxisEnabled(name, e.target.checked)}

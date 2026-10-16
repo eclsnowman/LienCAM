@@ -254,7 +254,8 @@ describe('WO-216 extrude end conditions', () => {
     await waitFor(() => expect(canvas.style.cursor).toBe('crosshair'))
     expect(hooks().getPickHighlightState(topFaceId!)).toBe('hovered')
     fireEvent.click(canvas)
-    await waitFor(() => expect(screen.getByTestId('extrude-end-target-name').textContent).toContain(topFaceId!))
+    // WO-2858: the target reads as the face's shape and body; its stable key stays in the request.
+    await waitFor(() => expect(screen.getByTestId('extrude-end-target-name').textContent).toBe('Flat face facing up at Z 5.00 mm on Extrude F1'))
     expect(reqs.at(-1)?.end).toMatchObject({ kind: 'toFace', target: { identity: { bodyFeatureId: 'F1', subshape: { kind: 'face', stableId: topFaceId } } } })
 
     selectEndCondition('toVertex')
@@ -264,11 +265,12 @@ describe('WO-216 extrude end conditions', () => {
     fireEvent.pointerMove(canvas)
     await waitFor(() => expect(canvas.style.cursor).toBe('crosshair'))
     fireEvent.click(canvas)
-    await waitFor(() => expect(screen.getByTestId('extrude-end-target-name').textContent).toMatch(/vertex \(.+\)/))
+    await waitFor(() => expect(screen.getByTestId('extrude-end-target-name').textContent).toBe('Extrude F1 / vertex'))
     const vertexEnd = reqs.at(-1)?.end
     expect(vertexEnd?.kind).toBe('toVertex')
     if (vertexEnd?.kind !== 'toVertex' || !('body' in vertexEnd.target)) throw new Error('vertex request missing')
     expect(vertexEnd.target.identity.subshape).toMatchObject({ kind: 'vertex', stableId: expect.stringMatching(/^\(.+\)$/) })
+    expect(screen.getByTestId('extrude-end-target-name').textContent).not.toContain(vertexEnd.target.identity.subshape?.stableId ?? '(')
     fireEvent.click(screen.getByTestId('dialog-shell-cancel'))
     expect(hooks().getPickHighlightState(topFaceId!)).toBe('none')
   })

@@ -56,6 +56,9 @@ type ToolChangeStep = NonNullable<TransportInput['toolChange']>['step']
 const MACHINE_ID = 'wo2031-simulator'
 const PARK = { id: 'm6-pad', label: 'Fixed tool probe', x: 5, y: 5, z: -2 }
 const PROGRAM = ['G21', 'G90', 'T1 M6', 'G1 X2 F6000', 'T2 M6', 'G1 X4 F6000', 'M30'].join('\n')
+// WO-2764: WO-2478 runs a macro bound to M6 at every M6, the same-tool T1 M6 too;
+// the M6-macro cases preselect T1 so their first held change is still the T2 M6.
+const M6_BOUND_PROGRAM = PROGRAM.replace('T1 M6', 'T1')
 const RUNNING = /^Program is running|^Program checks passed|^Cycle complete/
 // A part boundary with no tool change: M700 runs this machine's "Note" macro.
 const NOTE_PROGRAM = ['G21', 'G90', 'G1 X2 F6000', 'M700', 'G1 X4 F6000', 'M30'].join('\n')
@@ -277,7 +280,7 @@ describe('WO-2031 a guided tool change hold points at Continue', () => {
       tools.recordProbedZ(MACHINE_ID, 1, -42, 1)
       tools.setReference(MACHINE_ID, 1)
       if (singleBlock) act(() => { setMachineSingleBlock(false) })
-      await runToT2Hold()
+      await runToT2Hold(M6_BOUND_PROGRAM)
       if (singleBlock) act(() => { setMachineSingleBlock(true) })
 
       // The prelude waits at hold(): no card yet, the program is held.
@@ -326,7 +329,7 @@ describe('WO-2031 a guided tool change hold points at Continue', () => {
     await advance(200)
     expect(activeMacroRun()).toMatchObject({ name: 'Wait here', phase: 'held' })
 
-    await runToT2Hold()
+    await runToT2Hold(M6_BOUND_PROGRAM)
     const evidence = readback()
     const state = useMachineControl.getState()
     expect(state.toolChange, JSON.stringify(evidence)).toBeNull()

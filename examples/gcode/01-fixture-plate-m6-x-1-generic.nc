@@ -1,4 +1,5 @@
-(LienCAM 0.36.0-alpha.1 - 01 Fixture plate - M6 x 1 - generic)
+(LienCAM 0.36.0-alpha.2 - 01 Fixture plate - M6 x 1 - generic)
+G90 G21
 ( Setup 1 )
 G54
 ( Face 1 )

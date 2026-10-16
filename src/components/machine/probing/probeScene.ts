@@ -1,3 +1,6 @@
+import { textFor } from '../../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-2063 - the Probing screen's steps, built from the routine's own plan.
 //
 // docs/design/PROBING-SCREEN-V2.md, "One source of truth": the routine's setup
@@ -306,31 +309,31 @@ export function moveLength(move: StepMove): number {
 /** The face a touch in this direction meets, in words. */
 function faceName(axis: WorkProbeAxis, direction: WorkProbeDirection, inside: boolean): string {
   // Moving X+ meets the LEFT face of material (outside) or the RIGHT wall of a hole (inside).
-  const plus = axis === 'X' ? (inside ? 'right' : 'left') : (inside ? 'back' : 'front')
-  const minus = axis === 'X' ? (inside ? 'left' : 'right') : (inside ? 'front' : 'back')
-  return `${direction === '+' ? plus : minus} ${inside ? 'wall' : 'face'}`
+  const plus = axis === 'X' ? (inside ? probeText('probeScene1') : probeText('probeScene2')) : (inside ? probeText('probeScene3') : probeText('probeScene4'))
+  const minus = axis === 'X' ? (inside ? probeText('probeScene5') : probeText('probeScene6')) : (inside ? probeText('probeScene7') : probeText('probeScene8'))
+  return `${direction === '+' ? plus : minus} ${inside ? probeText('probeScene9') : probeText('probeScene10')}`
 }
 
 function cornerName(x: WorkProbeDirection, y: WorkProbeDirection, inside: boolean): string {
   // Outside: X+ touches the left face, Y+ the front. Inside: X- touches the left wall, Y- the front.
   const left = inside ? x === '-' : x === '+'
   const front = inside ? y === '-' : y === '+'
-  return `${front ? 'front' : 'back'}-${left ? 'left' : 'right'}`
+  return `${front ? probeText('probeScene11') : probeText('probeScene12')}-${left ? probeText('probeScene13') : probeText('probeScene14')}`
 }
 
 const ROUTINE_NAME: Record<ProbingRoutine, string> = {
   workZero: 'Z0',
-  edge: 'Edge',
-  outsideCorner: 'Outside corner',
-  insideCorner: 'Inside corner',
-  angle: 'Angle',
-  bore: 'Bore',
-  boss: 'Boss',
-  rectPocket: 'Rect pocket',
-  rectBoss: 'Rect boss',
-  zSurface: 'Z surface',
-  toolZ: 'Tool Z',
-  calibrate: 'Calibrate',
+  edge: probeText('probeScene15'),
+  outsideCorner: probeText('probeScene16'),
+  insideCorner: probeText('probeScene17'),
+  angle: probeText('probeScene18'),
+  bore: probeText('probeScene19'),
+  boss: probeText('probeScene20'),
+  rectPocket: probeText('probeScene21'),
+  rectBoss: probeText('probeScene22'),
+  zSurface: probeText('probeScene23'),
+  toolZ: probeText('probeScene24'),
+  calibrate: probeText('probeScene25'),
 }
 
 export function routineName(routine: ProbingRoutine): string {
@@ -454,23 +457,23 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
   const mm = setup.units ?? ((v: number) => `${fmt1(v)} mm`)
   const name = setup.calibration ? ROUTINE_NAME.calibrate : ROUTINE_NAME[setup.routine]
   const sensedBy = setup.plateMm > 0
-    ? `A plate ${mm(setup.plateMm)} thick held against the face; the probe touches the plate.`
-    : 'The probe touches the part itself.'
+    ? probeText('probeScene26', { value1: String(mm(setup.plateMm)) })
+    : probeText('probeScene27')
   const searchSection = (what: string) => ({
-    heading: 'The probing sequence',
+    heading: probeText('probeScene28'),
     lines: [
-      `Search: ${fmt1(cfg.fastFeed)} mm/min until it touches`,
-      `Back off: ${mm(cfg.retract)}`,
-      `Slow touch: ${fmt1(cfg.slowFeed)} mm/min (this one is recorded)`,
+      probeText('probeScene29', { value1: String(fmt1(cfg.fastFeed)) }),
+      probeText('probeScene30', { value1: String(mm(cfg.retract)) }),
+      probeText('probeScene31', { value1: String(fmt1(cfg.slowFeed)) }),
       ...(what ? [what] : []),
     ],
   })
   const missSection = (overMm: number, what: string) => ({
-    heading: 'If nothing is touched',
-    lines: [`Stops if: nothing touched ${mm(overMm)} past the ${what}`, 'The console says why; nothing is written.'],
+    heading: probeText('probeScene32'),
+    lines: [probeText('probeScene33', { value1: String(mm(overMm)), value2: String(what) }), probeText('probeScene34')],
   })
   const senseSection = (result: string) => ({
-    heading: setup.plateMm > 0 ? 'How the face is sensed (plate)' : 'How the face is sensed',
+    heading: setup.plateMm > 0 ? probeText('probeScene35') : probeText('probeScene36'),
     lines: [sensedBy, result],
   })
 
@@ -486,26 +489,26 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
     const zone: Zone = {
       x0: -12, x1: 12, y0: -12, y1: 12, z0: Math.max(contactZ, 1), z1: Math.min(wz.maxTravelMm, 30) + contactZ,
       dim: null,
-      say: ['over the stock', '', `up to ${mm(wz.maxTravelMm)}`, 'above the top'],
+      say: [probeText('probeScene37'), '', probeText('probeScene38', { value1: String(mm(wz.maxTravelMm)) }), probeText('probeScene39')],
       height: `< ${mm(wz.maxTravelMm)}`,
     }
-    you(w, `Jog the probe over the stock, less than ${mm(wz.maxTravelMm)} above it.`, 'X', { zone })
-    you(w, `Press Start probing to run ${name}.`, 'X')
-    machine(w, 'Probes down until it touches the top.', 'X', [{ ...mv(w.pos, { z: contactZ }, 'probe'), searchMm: wz.maxTravelMm }], {
+    you(w, probeText('probeScene40', { value1: String(mm(wz.maxTravelMm)) }), 'X', { zone })
+    you(w, probeText('probeScene41', { value1: String(name) }), 'X')
+    machine(w, probeText('probeScene42'), 'X', [{ ...mv(w.pos, { z: contactZ }, 'probe'), searchMm: wz.maxTravelMm }], {
       touch: { x: 0, y: 0, z: contactZ },
-      more: [searchSection(''), missSection(wz.maxTravelMm, 'start (maximum travel)'), senseSection(wz.plateMm > 0 ? `Z0 = touch - plate ${mm(wz.plateMm)}` : 'Z0 = the touch')],
+      more: [searchSection(''), missSection(wz.maxTravelMm, probeText('probeScene43')), senseSection(wz.plateMm > 0 ? probeText('probeScene44', { value1: String(mm(wz.plateMm)) }) : probeText('probeScene45'))],
     })
     const up = mv(w.pos, { z: contactZ + wz.retractMm })
     const down = mv(up.to, { z: contactZ }, 'probe')
-    machine(w, `Backs off ${mm(wz.retractMm)} and touches again, slowly. That touch is Z0.`, 'X', [up, down], {
+    machine(w, probeText('probeScene46', { value1: String(mm(wz.retractMm)) }), 'X', [up, down], {
       touch: { x: 0, y: 0, z: contactZ },
     })
     w.found = [{ x: 0, y: 0, z: 0 }]
     // WO-2123: Z0 writes at once (no Confirm); its last step shows the Z0 it set.
-    machine(w, `Rises to safe height (Z0 + ${fmt1(wz.clearanceMm)}) and stops. Z0 is set.`, 'X', [mv(w.pos, { z: endZ })], { confirm: true })
+    machine(w, probeText('probeScene47', { value1: String(fmt1(wz.clearanceMm)) }), 'X', [mv(w.pos, { z: endZ })], { confirm: true })
     return finish(setup, w, [{ kind: 'rect', x0: -200, x1: 200, y0: -200, y1: 200, top: 0, bottom: -30 }], [
-      { kind: 'safe', z: endZ, label: `safe +${fmt1(endZ)} · tip clearance` },
-      { kind: 'top', z: 0, label: 'top' },
+      { kind: 'safe', z: endZ, label: probeText('probeScene48', { value1: String(fmt1(endZ)) }) },
+      { kind: 'top', z: 0, label: probeText('probeScene49') },
     ], { x: 0, y: 0, z: ZS })
   }
 
@@ -513,7 +516,7 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
   if (setup.routine === 'zSurface') {
     const pts = setup.mesh?.points ?? []
     if (pts.length < 2) {
-      return emptyScene(setup, 'Load a program to derive the mesh grid.')
+      return emptyScene(setup, probeText('probeScene50'))
     }
     const p1 = pts[0]
     const p2 = pts[1]
@@ -549,61 +552,61 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
     // points - each of its steps says which plan step it shows as.
     const every = setup.everyPoint === true
     const at = (point: number | undefined, chip: number): Partial<WalkStep> => (every ? { point, chip } : point === undefined ? {} : { point })
-    you(w, `Load the program. Jog up to a safe start height, clear of the clamps and less than ${mm(cfg.maxTravel)} above the top. The routine moves over point 1 itself.`, view, {
+    you(w, probeText('probeScene51', { value1: String(mm(cfg.maxTravel)) }), view, {
       zone: {
         x0: minX, x1: maxX, y0: minY, y1: maxY, z0: clear, z1: Math.max(clear, Math.min(26, cfg.maxTravel)), zMax: cfg.maxTravel,
-        dim: null, say: ['a safe height', 'clear of the clamps', `less than ${mm(cfg.maxTravel)}`, 'above the top'], height: `< ${mm(cfg.maxTravel)}`,
+        dim: null, say: [probeText('probeScene52'), probeText('probeScene53'), probeText('probeScene54', { value1: String(mm(cfg.maxTravel)) }), probeText('probeScene55')], height: `< ${mm(cfg.maxTravel)}`,
       },
       more: [{
-        heading: 'The grid',
+        heading: probeText('probeScene56'),
         lines: [
-          `${mesh.count} = ${pts.length} points, ${spacing} apart`,
-          `Over X ${mm(minX)} to ${mm(maxX)}, Y ${mm(minY)} to ${mm(maxY)}`,
-          'Probed row by row, each row back the other way',
-          ...(mesh.cut ? ['The thin outline is where the program cuts'] : []),
+          probeText('probeScene57', { value1: String(mesh.count), value2: String(pts.length), value3: String(spacing) }),
+          probeText('probeScene58', { value1: String(mm(minX)), value2: String(mm(maxX)), value3: String(mm(minY)), value4: String(mm(maxY)) }),
+          probeText('probeScene59'),
+          ...(mesh.cut ? [probeText('probeScene60')] : []),
         ],
       }],
       ...at(undefined, 1),
     })
-    you(w, `Press Start probing to run ${name}.`, view, at(undefined, 2))
-    machine(w, 'Touches point 1. That becomes work Z0.', view, [{ ...mv(w.pos, { z: 0 }, 'probe'), searchMm: cfg.maxTravel }], {
+    you(w, probeText('probeScene61', { value1: String(name) }), view, at(undefined, 2))
+    machine(w, probeText('probeScene62'), view, [{ ...mv(w.pos, { z: 0 }, 'probe'), searchMm: cfg.maxTravel }], {
       touch: { x: p1.x, y: p1.y, z: 0 },
-      more: [searchSection(''), missSection(cfg.maxTravel, 'start (maximum travel)')],
+      more: [searchSection(''), missSection(cfg.maxTravel, probeText('probeScene63'))],
       ...at(1, 3),
     })
     w.found = [{ x: p1.x, y: p1.y, z: 0 }]
-    machine(w, `Rises to Z0 + ${fmt1(clear)}. Every move between points is at that height.`, view, [mv(w.pos, { z: clear })], at(1, 4))
+    machine(w, probeText('probeScene64', { value1: String(fmt1(clear)) }), view, [mv(w.pos, { z: clear })], at(1, 4))
     // The preview shows point 2 and says the rest repeat; a run follows the
     // machine through every point (the tracker can only follow moves it has).
     for (const [i, p] of (every ? pts.slice(1) : [p2]).entries()) {
       const k = i + 2
-      machine(w, every ? `Moves to point ${k} of ${pts.length} at that height.` : 'Moves to the next point at that height.', view, [mv(w.pos, { x: p.x, y: p.y })], at(k, 5))
-      machine(w, `Probes down at ${every ? `point ${k}` : 'that point'}, at most ${mm(searchMm)}.`, view, [{ ...mv(w.pos, { z: 0 }, 'probe'), searchMm }], {
+      machine(w, every ? probeText('probeScene65', { value1: String(k), value2: String(pts.length) }) : probeText('probeScene66'), view, [mv(w.pos, { x: p.x, y: p.y })], at(k, 5))
+      machine(w, probeText('probeScene69', { value1: String(every ? probeText('probeScene67', { value1: String(k) }) : probeText('probeScene68')), value2: String(mm(searchMm)) }), view, [{ ...mv(w.pos, { z: 0 }, 'probe'), searchMm }], {
         touch: { x: p.x, y: p.y, z: 0 },
-        more: [searchSection(''), missSection(searchMm - clear, 'expected height (largest height change)')],
+        more: [searchSection(''), missSection(searchMm - clear, probeText('probeScene70'))],
         ...at(k, 6),
       })
       w.found = [...w.found, { x: p.x, y: p.y, z: 0 }]
       if (!every) {
-        machine(w, `Rises to Z0 + ${fmt1(clear)}. The last three steps repeat for every point (${pts.length} in all).`, view, [mv(w.pos, { z: clear })], at(k, 7))
+        machine(w, probeText('probeScene71', { value1: String(fmt1(clear)), value2: String(pts.length) }), view, [mv(w.pos, { z: clear })], at(k, 7))
       } else if (k < pts.length) {
-        machine(w, `Rises to Z0 + ${fmt1(clear)}.`, view, [mv(w.pos, { z: clear })], at(k, 7))
+        machine(w, probeText('probeScene72', { value1: String(fmt1(clear)) }), view, [mv(w.pos, { z: clear })], at(k, 7))
       }
     }
     if (every) {
-      machine(w, `After the last point: rises to Z0 + ${fmt1(clear)}. The mesh is armed.`, view, [mv(w.pos, { z: clear })], at(pts.length, 8))
+      machine(w, probeText('probeScene73', { value1: String(fmt1(clear)) }), view, [mv(w.pos, { z: clear })], at(pts.length, 8))
     } else {
       w.found = pts.map((p) => ({ x: p.x, y: p.y, z: 0 }))
       const last = pts[pts.length - 1]
       w.pos = { x: last.x, y: last.y, z: clear }
-      machine(w, `After the last point: rises to Z0 + ${fmt1(clear)}. The mesh is armed.`, view, [], at(pts.length, 8))
+      machine(w, probeText('probeScene74', { value1: String(fmt1(clear)) }), view, [], at(pts.length, 8))
     }
     const margin = 15
     const scene = finish(setup, w, [{
       kind: 'rect', x0: minX - margin, x1: maxX + margin, y0: minY - margin, y1: maxY + margin, top: 0, bottom: -30,
     }], [
-      { kind: 'safe', z: clear, label: `safe +${fmt1(clear)} · tip clearance` },
-      { kind: 'top', z: 0, label: 'top (point 1 = Z0)' },
+      { kind: 'safe', z: clear, label: probeText('probeScene75', { value1: String(fmt1(clear)) }) },
+      { kind: 'top', z: 0, label: probeText('probeScene76') },
     ], { x: p1.x, y: p1.y, z: ZS })
     scene.mesh = mesh
     return scene
@@ -623,28 +626,28 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
     // WO-2180 (Operator 09-29: "it says no jogging. So does it assume you already
     // set wcs zero...? how does the user know"): it uses the setter's saved
     // machine position and never the part's work Z0 - said once, briefly.
-    you(w, "Put the tool in the spindle and press Start probing. It goes to the setter's saved position itself and measures the tool length. Work Z0 is not needed or changed.", 'X')
-    machine(w, 'Rises straight up until the tool tip is at the crossing Z.', 'X', [scaled(mv(w.pos, { z: crossing }), real?.riseMm)])
-    machine(w, 'Crosses to the setter with the tool tip at the crossing Z.', 'X', [scaled(mv(w.pos, { x: setterX }), real?.crossMm)])
-    machine(w, 'Probes down until it touches the setter. Stops early if the tool is longer than the table says.', 'X', [scaled({ ...mv(w.pos, { z: setterTop }, 'probe'), searchMm: cfg.maxTravel }, real?.downMm)], {
+    you(w, probeText('probeScene77'), 'X')
+    machine(w, probeText('probeScene78'), 'X', [scaled(mv(w.pos, { z: crossing }), real?.riseMm)])
+    machine(w, probeText('probeScene79'), 'X', [scaled(mv(w.pos, { x: setterX }), real?.crossMm)])
+    machine(w, probeText('probeScene80'), 'X', [scaled({ ...mv(w.pos, { z: setterTop }, 'probe'), searchMm: cfg.maxTravel }, real?.downMm)], {
       touch: { x: setterX, y: 0, z: setterTop },
-      more: [searchSection(''), missSection(cfg.maxTravel, 'start (maximum travel)')],
+      more: [searchSection(''), missSection(cfg.maxTravel, probeText('probeScene81'))],
     })
     const up = mv(w.pos, { z: setterTop + cfg.retract })
     const down = mv(up.to, { z: setterTop }, 'probe')
-    machine(w, `Backs off ${mm(cfg.retract)} and touches again, slowly. That touch is the tool length.`, 'X', [up, down], {
+    machine(w, probeText('probeScene82', { value1: String(mm(cfg.retract)) }), 'X', [up, down], {
       touch: { x: setterX, y: 0, z: setterTop },
     })
     w.found = [{ x: setterX, y: 0, z: setterTop }]
     // WO-2123: Tool Z stores at once (no Confirm); its last step shows what it stored.
-    machine(w, 'Rises back to the crossing Z. The tool length is stored.', 'X', [{ ...scaled(mv(w.pos, { z: crossing }), real?.downMm), ...(real ? { machineMmFromTouch: true } : {}) }], { confirm: true })
+    machine(w, probeText('probeScene83'), 'X', [{ ...scaled(mv(w.pos, { z: crossing }), real?.downMm), ...(real ? { machineMmFromTouch: true } : {}) }], { confirm: true })
     return finish(setup, w, [
       { kind: 'rect', x0: -200, x1: 30, y0: -200, y1: 200, top: -8, bottom: -30 },
       // WO-2180: the setter is round (Operator 09-29: "Round is more common").
       { kind: 'circle', cx: setterX, cy: 0, r: 8, top: setterTop, bottom: -30 },
     ], [
-      { kind: 'crossing', z: crossing, label: 'crossing Z · tool tip' },
-      { kind: 'top', z: -8, label: 'part top' },
+      { kind: 'crossing', z: crossing, label: probeText('probeScene84') },
+      { kind: 'top', z: -8, label: probeText('probeScene85') },
     ], { x: 0, y: 0, z: 2 }, true)
   }
 
@@ -784,9 +787,9 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
   const where = whereSentence(setup, sd, clear, mm, topMm, plan.fromTop?.knownTop?.source === 'workZero')
   you(w, where, firstAxis, {
     zone,
-    more: [{ heading: 'Where to put the probe', lines: [[zone.say[0], zone.say[1]].filter(Boolean).join(' ') + ', ' + zone.say[2] + ' ' + zone.say[3], 'Jog here with the pad on the right.', 'Change the setup on the left and the pictures follow.'] }],
+    more: [{ heading: probeText('probeScene86'), lines: [[zone.say[0], zone.say[1]].filter(Boolean).join(' ') + ', ' + zone.say[2] + ' ' + zone.say[3], probeText('probeScene87'), probeText('probeScene88')] }],
   })
-  you(w, `Press Start probing to run ${name}.`, firstAxis)
+  you(w, probeText('probeScene89', { value1: String(name) }), firstAxis)
   openGroup()
 
   const fromTop = plan.fromTop ?? null
@@ -800,17 +803,17 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
     const topFast: StepMove = { ...mv(w.pos, { z: 0 }, 'probe'), searchMm: top, searchLabel: true, touches: true }
     const topBack = mv(topFast.to, { z: cfg.retract })
     const topSlow: StepMove = { ...mv(topBack.to, { z: 0 }, 'probe'), searchMm: 2 * cfg.retract }
-    machine(w, `Touches the top, searching down up to ${mm(top)}, then again slowly. That is the top for this probe.`, firstAxis, [topFast, topBack, topSlow], {
+    machine(w, probeText('probeScene90', { value1: String(mm(top)) }), firstAxis, [topFast, topBack, topSlow], {
       touch: { x: w.pos.x, y: w.pos.y, z: 0 },
-      more: [searchSection(`Search: up to ${mm(top)} down from the start`), {
-        heading: 'If nothing is touched',
-        lines: [`Stops after ${mm(top)}: no top found within ${mm(top)}`, 'The console says so; nothing is written.'],
+      more: [searchSection(probeText('probeScene91', { value1: String(mm(top)) })), {
+        heading: probeText('probeScene92'),
+        lines: [probeText('probeScene93', { value1: String(mm(top)), value2: String(mm(top)) }), probeText('probeScene94')],
       }],
-      phrase: `touches the top, searching down up to ${mm(top)} (fast, then slow)`,
+      phrase: probeText('probeScene95', { value1: String(mm(top)) }),
     })
     groupHasTouch = true
-    machine(w, `Rises to safe height (top + ${fmt1(fromTop.clearanceMm)}).`, firstAxis, [mv(w.pos, { z: fromTop.clearanceMm })], {
-      phrase: `then rises to safe height (top + ${fmt1(fromTop.clearanceMm)})`,
+    machine(w, probeText('probeScene96', { value1: String(fmt1(fromTop.clearanceMm)) }), firstAxis, [mv(w.pos, { z: fromTop.clearanceMm })], {
+      phrase: probeText('probeScene97', { value1: String(fmt1(fromTop.clearanceMm)) }),
     })
   }
 
@@ -840,16 +843,16 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
       // is a step of its own (the Bore video's steps 3 and 8).
       openGroup()
       const view: WorkProbeAxis = w.steps.at(-1)?.view ?? firstAxis
-      if (w.pos.z < safeZ - 1e-6) machine(w, `Rises to safe height (top + ${fmt1(safeZ)}).`, view, [mv(w.pos, { z: safeZ })], { phrase: `rises to safe height (top + ${fmt1(safeZ)})` })
+      if (w.pos.z < safeZ - 1e-6) machine(w, probeText('probeScene98', { value1: String(fmt1(safeZ)) }), view, [mv(w.pos, { z: safeZ })], { phrase: probeText('probeScene99', { value1: String(fmt1(safeZ)) }) })
       if (step.kind === 'rise') continue
       const target = fromMachine(step.target)
       const over = mv(w.pos, { x: target.x, y: target.y })
-      if (moveLength(over) > 1e-6) machine(w, `Moves over the start (${moveLabel(over, mm)}).`, view, [over], { phrase: `moves over the start (${moveLabel(over, mm)})` })
-      machine(w, `Descends to probing depth (top - ${fmt1(-depthZ)}). Stops if it touches anything.`, view, [{ ...mv(w.pos, { z: depthZ }, 'probe'), searchMm: w.pos.z - depthZ }], {
-        more: [{ heading: 'This move', lines: ['A probe move: it stops the moment it touches.', `Search feed: ${fmt1(cfg.fastFeed)} mm/min`, 'The top is work Z0.'] }, {
-          heading: 'If it touches on the way down', lines: ['It stops there and the console says so - start over the open hole.'],
+      if (moveLength(over) > 1e-6) machine(w, probeText('probeScene100', { value1: String(moveLabel(over, mm)) }), view, [over], { phrase: probeText('probeScene101', { value1: String(moveLabel(over, mm)) }) })
+      machine(w, probeText('probeScene102', { value1: String(fmt1(-depthZ)) }), view, [{ ...mv(w.pos, { z: depthZ }, 'probe'), searchMm: w.pos.z - depthZ }], {
+        more: [{ heading: probeText('probeScene103'), lines: [probeText('probeScene104'), probeText('probeScene105', { value1: String(fmt1(cfg.fastFeed)) }), probeText('probeScene106')] }, {
+          heading: probeText('probeScene107'), lines: [probeText('probeScene108')],
         }],
-        phrase: 'descends to probing depth',
+        phrase: probeText('probeScene109'),
       })
       openGroup()
       continue
@@ -870,7 +873,7 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
       // the next face starts that face's step.
       if (/^Finish above/i.test(step.label) || (groupHasTouch && !wayBack(step.label))) openGroup()
       machine(w, positionSentence(setup, step.label, m, i === plan.steps.length - 1, touchIndex === touchCount), view, [m], {
-        more: [{ heading: 'This move', lines: [`Positioning feed: ${fmt1(cfg.positioningFeed)} mm/min`, 'It does not probe: nothing is touched on the way.'] }],
+        more: [{ heading: probeText('probeScene110'), lines: [probeText('probeScene111', { value1: String(fmt1(cfg.positioningFeed)) }), probeText('probeScene112')] }],
         phrase: positionPhrase(step.label, m, mm),
       })
       continue
@@ -886,18 +889,18 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
       // height it steps out where it stands and descends the whole way (the
       // runner's rule, as a hole routine's way down).
       const fromAbove = !fromTop?.topTouch && w.pos.z > safeZ + 1e-6
-      if (!fromAbove && Math.abs(w.pos.z - safeZ) > 1e-6) machine(w, `Rises to safe height (top + ${fmt1(safeZ)}).`, step.axis, [mv(w.pos, { z: safeZ })], { phrase: 'rises to safe height' })
+      if (!fromAbove && Math.abs(w.pos.z - safeZ) > 1e-6) machine(w, probeText('probeScene113', { value1: String(fmt1(safeZ)) }), step.axis, [mv(w.pos, { z: safeZ })], { phrase: probeText('probeScene114') })
       const out = mv(w.pos, { x: expected.x, y: expected.y })
       if (moveLength(out) > 1e-6) {
         const face = faceName(step.axis, step.direction, inside)
         const lead = setup.routine === 'outsideCorner'
-          ? (touchIndex === 1 ? `${cap(face)} first: steps` : `${cap(face)} now: steps`)
+          ? (touchIndex === 1 ? probeText('probeScene115', { value1: String(cap(face)) }) : probeText('probeScene116', { value1: String(cap(face)) }))
           : 'Steps'
-        machine(w, `${lead} out past the ${lead === 'Steps' ? face : 'face'} (${moveLabel(out, mm)}).`, step.axis, [out], {
-          more: [{ heading: 'This move', lines: [`${fromAbove ? 'At the height it stands (above safe height)' : `At safe height (top + ${fmt1(safeZ)})`}, ${fmt1(cfg.positioningFeed)} mm/min`, boss
-            ? `Out = half the ${step.axis} size ${mm((step.axis === 'X' ? setup.sizeXmm : setup.sizeYmm) / 2)} + tip radius ${mm(senseR)} + clearance ${mm(clear)}`
-            : `Out = start within ${mm(sd)} + tip radius ${mm(senseR)} + clearance ${mm(clear)}`] }],
-          phrase: `steps out ${moveLabel(out, mm)}`,
+        machine(w, probeText('probeScene118', { value1: String(lead === 'Steps' ? probeText('sceneStepsLead') : lead), value2: String(lead === 'Steps' ? face : probeText('probeScene117')), value3: String(moveLabel(out, mm)) }), step.axis, [out], {
+          more: [{ heading: probeText('probeScene119'), lines: [probeText('probeScene122', { value1: String(fromAbove ? probeText('probeScene120') : probeText('probeScene121', { value1: String(fmt1(safeZ)) })), value2: String(fmt1(cfg.positioningFeed)) }), boss
+            ? probeText('probeScene123', { value1: String(step.axis), value2: String(mm((step.axis === 'X' ? setup.sizeXmm : setup.sizeYmm) / 2)), value3: String(mm(senseR)), value4: String(mm(clear)) })
+            : probeText('probeScene124', { value1: String(mm(sd)), value2: String(mm(senseR)), value3: String(mm(clear)) })] }],
+          phrase: probeText('probeScene125', { value1: String(moveLabel(out, mm)) }),
         })
       }
       // Calibrate borrows the Boss plan but keeps its approved words (WO-2166).
@@ -909,16 +912,15 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
       if (outsideMm !== null && w.group !== undefined) {
         // Keep the sentence within its existing row at 1440x900. The picture
         // and More sections still show the complete touch/back-off/rise path.
-        const plate = setup.plateMm > 0 ? ` + Plate ${mm(setup.plateMm)}` : ''
+        const plate = setup.plateMm > 0 ? probeText('probeScene126', { value1: String(mm(setup.plateMm)) }) : ''
         bossFaceSentences.set(w.group,
-          `${cap(faceName(step.axis, step.direction, inside))}: steps out ${moveLabel(out, mm)}; comes down with probe centre ${mm(outsideMm)} outside the face `
-          + `(Tip radius ${mm(R)}${plate} + Clearance ${mm(clear)}; Clearance sets it).`)
+          probeText('probeScene129', { value1: String(cap(faceName(step.axis, step.direction, inside))), value2: String(moveLabel(out, mm)), value3: String(mm(outsideMm)), value4: String(mm(R)), value5: String(plate), value6: String(mm(clear)) }))
       }
-      machine(w, `Descends to probing depth (top - ${fmt1(-depthZ)}). Stops if it touches anything.`, step.axis, [{ ...mv(w.pos, { z: depthZ }, 'probe'), searchMm: (fromAbove ? w.pos.z : safeZ) - depthZ }], {
-        more: [{ heading: 'This move', lines: ['A probe move: it stops the moment it touches.', `Search feed: ${fmt1(cfg.fastFeed)} mm/min`, ...(fromTop?.knownTop?.source === 'workZero' ? ['The top is work Z0.'] : [])] }, {
-          heading: 'If it touches on the way down', lines: [`It stops there and the console says so - ${boss ? 'check the boss size' : 'start closer to the edge'}.`],
+      machine(w, probeText('probeScene130', { value1: String(fmt1(-depthZ)) }), step.axis, [{ ...mv(w.pos, { z: depthZ }, 'probe'), searchMm: (fromAbove ? w.pos.z : safeZ) - depthZ }], {
+        more: [{ heading: probeText('probeScene131'), lines: [probeText('probeScene132'), probeText('probeScene133', { value1: String(fmt1(cfg.fastFeed)) }), ...(fromTop?.knownTop?.source === 'workZero' ? [probeText('probeScene134')] : [])] }, {
+          heading: probeText('probeScene135'), lines: [probeText('probeScene138', { value1: String(boss ? probeText('probeScene136') : probeText('probeScene137')) })],
         }],
-        phrase: 'descends to probing depth',
+        phrase: probeText('probeScene139'),
       })
     }
     const face = faceAt(step.axis, step.direction, w.pos)
@@ -932,40 +934,40 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
     const touchPoint: P3 = { ...contact, [k]: face }
     const faceWords = faceName(step.axis, step.direction, inside)
     const resultLine = round
-      ? `Result: centre = middle of the two ${step.axis} touches (tip radius ${mm(senseR)} each side)`
-      : `Result: ${step.axis} face = touch ${step.direction === '+' ? '+' : '-'} tip radius ${mm(senseR)}`
+      ? probeText('probeScene140', { value1: String(step.axis), value2: String(mm(senseR)) })
+      : probeText('probeScene141', { value1: String(step.axis), value2: String(step.direction === '+' ? '+' : '-'), value3: String(mm(senseR)) })
     // The search's reach past the face is the plan's (WO-2182: from Angle's
     // square face - the drawn angle is not to scale).
     const planContact = setup.routine === 'angle' ? contactCentre(w.pos, step.axis, step.direction, 0, senseR) : contact
     const over = step.travelMm - Math.abs(planContact[k] - w.pos[k])
     const probeSentence = setup.routine === 'angle'
-      ? `Probes ${step.axis}${step.direction} to the face: point ${touchIndex}`
+      ? probeText('probeScene142', { value1: String(step.axis), value2: String(step.direction), value3: String(touchIndex) })
       : setup.routine === 'edge'
-        ? `Probes ${step.axis}${step.direction} toward the face until it touches`
-        : `Probes ${step.axis}${step.direction} to the ${faceWords} until it touches`
+        ? probeText('probeScene143', { value1: String(step.axis), value2: String(step.direction) })
+        : probeText('probeScene144', { value1: String(step.axis), value2: String(step.direction), value3: String(faceWords) })
     const touchMore = [
       searchSection(''),
-      missSection(Math.max(0, over), inside ? 'wall' : 'face'),
+      missSection(Math.max(0, over), inside ? probeText('probeScene145') : probeText('probeScene146')),
       senseSection(resultLine),
     ]
-    const lead = setup.routine === 'angle' ? `Point ${touchIndex}` : cap(faceWords)
-    const probePhrase = `probes ${step.axis}${step.direction} until it touches (fast, then slow)`
+    const lead = setup.routine === 'angle' ? probeText('probeScene147', { value1: String(touchIndex) }) : cap(faceWords)
+    const probePhrase = probeText('probeScene148', { value1: String(step.axis), value2: String(step.direction) })
     if (step.descendFromTop && safeZ !== null) {
-      machine(w, `${probeSentence}, then again slowly.`, step.axis, [fast, retract, slow], { touch: touchPoint, more: touchMore, lead, phrase: probePhrase })
+      machine(w, probeText('probeScene149', { value1: String(probeSentence) }), step.axis, [fast, retract, slow], { touch: touchPoint, more: touchMore, lead, phrase: probePhrase })
       w.found = [...w.found, touchPoint]
       const back = mv(w.pos, { [k]: r4(w.pos[k] - sgn(step.direction) * cfg.retract) } as Partial<P3>)
       const rise = mv(back.to, { z: safeZ })
       // Boss (WO-2058) still moves back over the middle after its last touch:
       // that move says what it found, not this one.
       const last = touchIndex === touchCount && !plan.steps.slice(i + 1).some((s) => s.kind === 'position')
-      machine(w, `Backs off ${mm(cfg.retract)}, then rises to safe height.${last && !grouped ? finalShow(setup) : ''}`, step.axis, [back, rise], {
-        phrase: 'backs off and rises',
+      machine(w, probeText('probeScene150', { value1: String(mm(cfg.retract)), value2: String(last && !grouped ? finalShow(setup) : '') }), step.axis, [back, rise], {
+        phrase: probeText('probeScene151'),
       })
     } else {
       // Beside-the-face touches: the two passes, then the runner's own back-off.
       const back = mv(slow.to, { [k]: r4(slow.to[k] - sgn(step.direction) * cfg.retract) } as Partial<P3>)
-      machine(w, `${probeSentence}, then again slowly, and backs off ${mm(cfg.retract)}.`, step.axis, [fast, retract, slow, back], {
-        touch: touchPoint, more: touchMore, lead, phrase: `${probePhrase}, backs off`,
+      machine(w, probeText('probeScene152', { value1: String(probeSentence), value2: String(mm(cfg.retract)) }), step.axis, [fast, retract, slow, back], {
+        touch: touchPoint, more: touchMore, lead, phrase: probeText('probeScene153', { value1: String(probePhrase) }),
       })
       w.found = [...w.found, touchPoint]
     }
@@ -1003,15 +1005,15 @@ export function buildProbeScene(setup: SceneSetup): ProbeScene {
 
   const heights: HeightLine[] = []
   if (fromTop) {
-    heights.push({ kind: 'safe', z: fromTop.clearanceMm, label: `safe +${fmt1(fromTop.clearanceMm)} · tip clearance` })
-    heights.push({ kind: 'top', z: 0, label: 'top' })
-    heights.push({ kind: 'depth', z: -fromTop.depthMm, label: `depth -${fmt1(fromTop.depthMm)} · probe tip` })
+    heights.push({ kind: 'safe', z: fromTop.clearanceMm, label: probeText('probeScene154', { value1: String(fmt1(fromTop.clearanceMm)) }) })
+    heights.push({ kind: 'top', z: 0, label: probeText('probeScene155') })
+    heights.push({ kind: 'depth', z: -fromTop.depthMm, label: probeText('probeScene156', { value1: String(fmt1(fromTop.depthMm)) }) })
   } else {
-    heights.push({ kind: 'top', z: 0, label: 'top' })
-    heights.push({ kind: 'start', z: start.z, label: 'your height · tip' })
+    heights.push({ kind: 'top', z: 0, label: probeText('probeScene157') })
+    heights.push({ kind: 'start', z: start.z, label: probeText('probeScene158') })
     if (setup.routine === 'boss' || setup.routine === 'rectBoss') {
       const cross = plan.review.clearMotion.kind === 'boss-cross-over' ? plan.review.clearMotion.liftMm : cfg.crossOverLift
-      heights.unshift({ kind: 'crossing', z: r4(start.z + cross), label: `cross-over +${fmt1(cross)}` })
+      heights.unshift({ kind: 'crossing', z: r4(start.z + cross), label: probeText('probeScene159', { value1: String(fmt1(cross)) }) })
     }
   }
   const scene = finish(setup, w, shapes, heights, start)
@@ -1116,86 +1118,86 @@ function cap(text: string): string {
 }
 
 function finalShow(setup: SceneSetup): string {
-  if (setup.calibration) return ' Shows the X and Y radius it found.'
+  if (setup.calibration) return probeText('probeScene160')
   switch (setup.routine) {
-    case 'edge': return ` Shows the ${setup.edgeAxis} face it found.`
+    case 'edge': return probeText('probeScene161', { value1: String(setup.edgeAxis) })
     case 'outsideCorner':
-    case 'insideCorner': return ' Shows the corner it found (X and Y).'
-    case 'angle': return ' Shows the angle of the line through the two points.'
+    case 'insideCorner': return probeText('probeScene162')
+    case 'angle': return probeText('probeScene163')
     case 'bore':
-    case 'boss': return ' Shows the centre and diameter it found.'
+    case 'boss': return probeText('probeScene164')
     case 'rectPocket':
-    case 'rectBoss': return ' Shows the centre and size it found.'
+    case 'rectBoss': return probeText('probeScene165')
     default: return ''
   }
 }
 
 function confirmSentence(setup: SceneSetup): string {
-  if (setup.calibration) return `Press Confirm to write the X and Y radius to ${setup.calibration.tool ?? 'the loaded Probe tool'}.`
+  if (setup.calibration) return probeText('probeScene167', { value1: String(setup.calibration.tool ?? probeText('probeScene166')) })
   switch (setup.routine) {
-    case 'edge': return `Press Confirm to set ${setup.edgeAxis}0 on the face (${setup.wcs}).`
+    case 'edge': return probeText('probeScene168', { value1: String(setup.edgeAxis), value2: String(setup.wcs) })
     case 'outsideCorner':
-    case 'insideCorner': return `Press Confirm to set X0 Y0 at the corner (${setup.wcs}).`
-    default: return `Press Confirm to set X0 Y0 on the centre (${setup.wcs}).`
+    case 'insideCorner': return probeText('probeScene169', { value1: String(setup.wcs) })
+    default: return probeText('probeScene170', { value1: String(setup.wcs) })
   }
 }
 
 function whereSentence(setup: SceneSetup, sd: number, clear: number, mm: (v: number) => string, topMm: number | null = null, fromWorkZero = false): string {
   // WO-2108: the top touch searches only so far down.
-  const above = topMm === null ? 'above the top' : `less than ${mm(topMm)} above the top`
+  const above = topMm === null ? probeText('probeScene171') : probeText('probeScene172', { value1: String(mm(topMm)) })
   // WO-2114: a hole routine touches no top - it descends from this part's
   // work Z0, so that must be set on this part before it runs.
-  const jog = fromWorkZero ? `Set Z0 on this part first (${setup.wcs}): the probe descends from it. Then jog` : 'Jog'
+  const jog = fromWorkZero ? probeText('probeScene173', { value1: String(setup.wcs) }) : probeText('probeScene174')
   switch (setup.routine) {
-    case 'edge': return `Jog the probe over the stock, within ${mm(sd)} of the ${faceName(setup.edgeAxis, setup.edgeDirection, false)}, ${above}.`
-    case 'outsideCorner': return `Jog over the stock near the ${cornerName(setup.cornerXDirection, setup.cornerYDirection, false)} corner, within ${mm(sd)} of both faces${topMm === null ? '' : `, ${above}`}.`
+    case 'edge': return probeText('probeScene175', { value1: String(mm(sd)), value2: String(faceName(setup.edgeAxis, setup.edgeDirection, false)), value3: String(above) })
+    case 'outsideCorner': return probeText('probeScene176', { value1: String(cornerName(setup.cornerXDirection, setup.cornerYDirection, false)), value2: String(mm(sd)), value3: String(topMm === null ? '' : `, ${above}`) })
     case 'angle': {
       const probeAxis: WorkProbeAxis = setup.angleNominalAxis === 'X' ? 'Y' : 'X'
-      return `Jog over the stock within ${mm(sd)} of the ${faceName(probeAxis, setup.angleProbeDirection, false)}, at point 1${topMm === null ? '' : `, ${above}`}.`
+      return probeText('probeScene177', { value1: String(mm(sd)), value2: String(faceName(probeAxis, setup.angleProbeDirection, false)), value3: String(topMm === null ? '' : `, ${above}`) })
     }
-    case 'insideCorner': return `${jog} over the ${cornerName(setup.cornerXDirection, setup.cornerYDirection, true)} corner of the pocket, within ${mm(clear)} of both walls, above the top.`
-    case 'bore': return `${jog} over the middle of the ${setup.calibration ? 'reference' : 'bore'} (by eye is fine), above the top.`
-    case 'rectPocket': return `${jog} over the middle of the pocket (by eye is fine), above the top.`
+    case 'insideCorner': return probeText('probeScene178', { value1: String(jog), value2: String(cornerName(setup.cornerXDirection, setup.cornerYDirection, true)), value3: String(mm(clear)) })
+    case 'bore': return probeText('probeScene181', { value1: String(jog), value2: String(setup.calibration ? probeText('probeScene179') : probeText('probeScene180')) })
+    case 'rectPocket': return probeText('probeScene182', { value1: String(jog) })
     case 'boss':
-    case 'rectBoss': return `${jog} over the middle of the ${setup.calibration ? 'reference' : 'boss'} (by eye is fine), ${above}.`
-    default: return 'Jog the probe to the start.'
+    case 'rectBoss': return probeText('probeScene185', { value1: String(jog), value2: String(setup.calibration ? probeText('probeScene183') : probeText('probeScene184')), value3: String(above) })
+    default: return probeText('probeScene186')
   }
 }
 
 /** A positioning move's words inside a face's step. */
 function positionPhrase(label: string, m: StepMove, mm: (v: number) => string): string {
-  if (/back over the stock/i.test(label)) return 'goes back over the stock'
-  if (/along face/i.test(label)) return `moves ${moveLabel(m, mm)} along the face`
-  if (/around beside/i.test(label)) return `goes around beside the face (${moveLabel(m, mm)})`
-  if (/back around/i.test(label)) return 'goes back around to the start'
-  if (/^Position inside/i.test(label)) return `moves ${moveLabel(m, mm)} toward the wall`
-  if (/Return toward start/i.test(label)) return 'returns toward the start'
-  if (/^Finish above/i.test(label)) return 'stops over the middle at safe height'
-  return `moves ${moveLabel(m, mm)}`
+  if (/back over the stock/i.test(label)) return probeText('probeScene187')
+  if (/along face/i.test(label)) return probeText('probeScene188', { value1: String(moveLabel(m, mm)) })
+  if (/around beside/i.test(label)) return probeText('probeScene189', { value1: String(moveLabel(m, mm)) })
+  if (/back around/i.test(label)) return probeText('probeScene190')
+  if (/^Position inside/i.test(label)) return probeText('probeScene191', { value1: String(moveLabel(m, mm)) })
+  if (/Return toward start/i.test(label)) return probeText('probeScene192')
+  if (/^Finish above/i.test(label)) return probeText('probeScene193')
+  return probeText('probeScene194', { value1: String(moveLabel(m, mm)) })
 }
 
 function positionSentence(setup: SceneSetup, label: string, m: StepMove, lastStep: boolean, allTouched: boolean): string {
   const dz = m.to.z - m.from.z
   const horiz = Math.hypot(m.to.x - m.from.x, m.to.y - m.from.y)
-  if (/back over the stock/i.test(label)) return 'Goes back over the stock to the start.'
-  if (/along face/i.test(label)) return `Moves ${moveLabel(m)} along the face to point 2, at safe height.`
-  if (/around beside/i.test(label)) return `Goes around beside the face (${moveLabel(m)}).`
-  if (/back around/i.test(label)) return 'Goes back around to the start.'
-  if (/^Position inside/i.test(label)) return `Moves ${moveLabel(m)} toward the wall, stopping short of it.`
-  if (/Return toward start/i.test(label)) return allTouched && lastStep ? 'Goes back toward the start.' : 'Goes back toward the start.'
-  if (/^Lift clear/i.test(label)) return `Lifts ${moveLabel(m)} to clear the ${setup.routine === 'rectBoss' ? 'boss' : 'boss'}.`
-  if (/^Cross above/i.test(label)) return `Crosses over the boss to the other side (${moveLabel(m)}).`
-  if (/^Lower outside/i.test(label)) return `Lowers to the probing height (${moveLabel(m)}).`
-  if (/^Finish above/i.test(label)) return 'Stops over the middle at safe height.'
-  if (Math.abs(dz) > 1e-6 && horiz < 1e-6) return `${dz > 0 ? 'Rises' : 'Lowers'} ${moveLabel(m)}.`
-  return `Moves ${moveLabel(m)}.`
+  if (/back over the stock/i.test(label)) return probeText('probeScene195')
+  if (/along face/i.test(label)) return probeText('probeScene196', { value1: String(moveLabel(m)) })
+  if (/around beside/i.test(label)) return probeText('probeScene197', { value1: String(moveLabel(m)) })
+  if (/back around/i.test(label)) return probeText('probeScene198')
+  if (/^Position inside/i.test(label)) return probeText('probeScene199', { value1: String(moveLabel(m)) })
+  if (/Return toward start/i.test(label)) return allTouched && lastStep ? probeText('probeScene200') : probeText('probeScene201')
+  if (/^Lift clear/i.test(label)) return probeText('probeScene204', { value1: String(moveLabel(m)), value2: String(setup.routine === 'rectBoss' ? probeText('probeScene202') : probeText('probeScene203')) })
+  if (/^Cross above/i.test(label)) return probeText('probeScene205', { value1: String(moveLabel(m)) })
+  if (/^Lower outside/i.test(label)) return probeText('probeScene206', { value1: String(moveLabel(m)) })
+  if (/^Finish above/i.test(label)) return probeText('probeScene207')
+  if (Math.abs(dz) > 1e-6 && horiz < 1e-6) return `${dz > 0 ? probeText('probeScene208') : probeText('probeScene209')} ${moveLabel(m)}.`
+  return probeText('probeScene210', { value1: String(moveLabel(m)) })
 }
 
 function startZone(setup: SceneSetup, senseR: number, clear: number, mm: (v: number) => string, topMm: number | null = null): Zone {
   const zone = startZoneAnyHeight(setup, senseR, clear, mm)
   if (topMm === null) return zone
   // WO-2108: less than the top search above the top, never any height.
-  return { ...zone, z1: Math.min(zone.z1, topMm), zMax: topMm, say: [zone.say[0], zone.say[1], `less than ${mm(topMm)}`, 'above the top'], height: `< ${mm(topMm)}` }
+  return { ...zone, z1: Math.min(zone.z1, topMm), zMax: topMm, say: [zone.say[0], zone.say[1], probeText('probeScene211', { value1: String(mm(topMm)) }), probeText('probeScene212')], height: `< ${mm(topMm)}` }
 }
 
 function startZoneAnyHeight(setup: SceneSetup, senseR: number, clear: number, mm: (v: number) => string): Zone {
@@ -1212,18 +1214,18 @@ function startZoneAnyHeight(setup: SceneSetup, senseR: number, clear: number, mm
       const box = setup.edgeAxis === 'X'
         ? { x0: a0, x1: a1, y0: -across, y1: across }
         : { x0: -across, x1: across, y0: a0, y1: a1 }
-      return { ...box, z0: 2, z1: 22, dim: { axis: setup.edgeAxis, from: a0, to: a1, label: mm(sd) }, say: [`within ${mm(sd)}`, 'of the face', 'any height', 'above the top'] }
+      return { ...box, z0: 2, z1: 22, dim: { axis: setup.edgeAxis, from: a0, to: a1, label: mm(sd) }, say: [probeText('probeScene213', { value1: String(mm(sd)) }), probeText('probeScene214'), probeText('probeScene215'), probeText('probeScene216')] }
     }
     case 'outsideCorner': {
       const [x0, x1] = band('X', setup.cornerXDirection)
       const [y0, y1] = band('Y', setup.cornerYDirection)
-      return { x0, x1, y0, y1, z0: 2, z1: 22, dim: { axis: 'X', from: x0, to: x1, label: mm(sd) }, say: [`within ${mm(sd)}`, 'of both faces', 'any height', 'above the top'] }
+      return { x0, x1, y0, y1, z0: 2, z1: 22, dim: { axis: 'X', from: x0, to: x1, label: mm(sd) }, say: [probeText('probeScene217', { value1: String(mm(sd)) }), probeText('probeScene218'), probeText('probeScene219'), probeText('probeScene220')] }
     }
     case 'angle': {
       const probeAxis: WorkProbeAxis = setup.angleNominalAxis === 'X' ? 'Y' : 'X'
       const [a0, a1] = band(probeAxis, setup.angleProbeDirection)
       const box = probeAxis === 'Y' ? { x0: -6, x1: 6, y0: a0, y1: a1 } : { x0: a0, x1: a1, y0: -6, y1: 6 }
-      return { ...box, z0: 2, z1: 22, dim: { axis: probeAxis, from: a0, to: a1, label: mm(sd) }, say: [`point 1: within ${mm(sd)}`, 'of the face', 'any height', 'above the top'] }
+      return { ...box, z0: 2, z1: 22, dim: { axis: probeAxis, from: a0, to: a1, label: mm(sd) }, say: [probeText('probeScene221', { value1: String(mm(sd)) }), probeText('probeScene222'), probeText('probeScene223'), probeText('probeScene224')] }
     }
     case 'insideCorner': {
       const sx = sgn(setup.cornerXDirection)
@@ -1234,7 +1236,7 @@ function startZoneAnyHeight(setup: SceneSetup, senseR: number, clear: number, mm
         x0: sx > 0 ? x0 : senseR, x1: sx > 0 ? -senseR : clear + senseR, y0: sy > 0 ? y0 : senseR, y1: sy > 0 ? -senseR : clear + senseR,
         z0: 2, z1: 22,
         dim: { axis: 'X', from: sx > 0 ? -clear - senseR : senseR, to: sx > 0 ? -senseR : clear + senseR, label: mm(clear) },
-        say: [`within ${mm(clear)}`, 'of both walls', 'any height', 'above the top'],
+        say: [probeText('probeScene225', { value1: String(mm(clear)) }), probeText('probeScene226'), probeText('probeScene227'), probeText('probeScene228')],
       }
     }
     default: {
@@ -1247,7 +1249,7 @@ function startZoneAnyHeight(setup: SceneSetup, senseR: number, clear: number, mm
       return {
         x0: -r, x1: r, y0: -r, y1: r, z0: 2, z1: 22, round,
         dim: { axis: 'X', from: -r, to: r, label: round ? `Ø ${fmt1(2 * r)}` : mm(2 * r) },
-        say: [`within ${mm(r)}`, 'of the centre', 'any height', 'above the top'],
+        say: [probeText('probeScene229', { value1: String(mm(r)) }), probeText('probeScene230'), probeText('probeScene231'), probeText('probeScene232')],
       }
     }
   }

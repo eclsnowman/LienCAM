@@ -53,7 +53,7 @@
   "toolLibrary": [
     {
       "id": "fe630978-545c-430a-afa0-e8833e140aeb",
-      "name": "3 mm flat end mill",
+      "name": "3 mm flat end mill, 15 mm flutes",
       "type": "flat_end_mill",
       "diameter": 3,
       "shankDiameter": 6,
@@ -2551,7 +2551,7 @@
               "role": "rapid"
             }
           ],
-          "computeTimeMs": 1201,
+          "computeTimeMs": 319,
           "resolvedHeights": {
             "version": 1,
             "wcs": {
@@ -11428,7 +11428,7 @@
               "role": "rapid"
             }
           ],
-          "computeTimeMs": 1997,
+          "computeTimeMs": 433,
           "resolvedHeights": {
             "version": 1,
             "wcs": {
@@ -11609,7 +11609,7 @@
             ]
           },
           "dependsOnPredecessors": true,
-          "generationFingerprint": "camgen-v3-f2960a21758ed0ad"
+          "generationFingerprint": "camgen-v3-54b756d0e1f55064"
         },
         {
           "id": "1d725168-4b02-4f17-b4cd-40b40fb0bf5c",
@@ -19359,7 +19359,7 @@
               "role": "rapid"
             }
           ],
-          "computeTimeMs": 1688,
+          "computeTimeMs": 323,
           "resolvedHeights": {
             "version": 1,
             "wcs": {
@@ -19659,7 +19659,7 @@
               "Fixture/clamp clearance is unverified."
             ]
           },
-          "generationFingerprint": "camgen-v3-0d3f07f751309e5b",
+          "generationFingerprint": "camgen-v3-e6e3e81531156f79",
           "dependsOnPredecessors": true
         }
       ],
@@ -27500,7 +27500,7 @@
               "role": "rapid"
             }
           ],
-          "computeTimeMs": 1877,
+          "computeTimeMs": 356,
           "resolvedHeights": {
             "version": 1,
             "wcs": {

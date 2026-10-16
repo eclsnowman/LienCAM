@@ -44,15 +44,17 @@ import type {
   Vec3,
 } from '../geom-service.ts'
 
-/** Runtime metadata for replacing a recognized imported fillet through the
- * existing Fillet production entry point. Ordinary authored fillets omit it. */
-interface ImportedFilletRequest extends FilletRequest {
+/** Runtime metadata for replacing a recognized imported fillet (or, WO-2766,
+ * an imported fillet or chamfer chain) through the existing Fillet/Chamfer
+ * production entry points. Ordinary authored fillets and chamfers omit it. */
+interface ImportedBlendRequest {
+  featureId: string
+  body: BodyHandle
   importedFeatureKey: string
 }
 
-function isImportedFilletRequest(req: FilletRequest): req is ImportedFilletRequest {
-  const candidate = req as Partial<ImportedFilletRequest>
-  return typeof candidate.importedFeatureKey === 'string' && candidate.importedFeatureKey.length > 0
+function isImportedBlendRequest(req: { importedFeatureKey?: unknown }): req is ImportedBlendRequest {
+  return typeof req.importedFeatureKey === 'string' && req.importedFeatureKey.length > 0
 }
 
 type ImportedFilletBuildResult =
@@ -159,6 +161,7 @@ import {
   gatherFaces,
   releaseFaceRecs,
   recognizeFeatures as recognizeFeaturesCore,
+  measureFaceTangency,
   healRemoval,
   type RecognizedFeature,
   type FaceRec,
@@ -183,6 +186,20 @@ import type {
 export interface HoleDepthEditRequest extends Omit<FaceEditRequest, 'kind'> {
   kind: 'holeDepth'
   through?: boolean
+  /** WO-2762: 'counterbore' = the counterbore step's depth (from the entry
+   *  opening to its shoulder); the pilot keeps its depth. */
+  step?: HoleStep
+}
+
+/** WO-2762: one step of a counterbored hole. Absent = the pilot (the hole). */
+export type HoleStep = 'counterbore'
+
+/** WO-2762: a hole diameter edit of ONE step - `delta` changes the counterbore
+ *  diameter and the pilot is left alone. Rides editFeature beside the
+ *  service's FaceEditRequest, like HoleDepthEditRequest. */
+export interface HoleStepDiameterEditRequest extends Omit<FaceEditRequest, 'kind'> {
+  kind: 'holeDiameter'
+  step: HoleStep
 }
 
 /** WO-2171: lay an image relief into a flat face (docs/design/IMAGE-RELIEF-PLAN.md
@@ -253,10 +270,19 @@ function pointsOnPlane(meshes: readonly (FaceTriangles | null)[], frame: DetailF
 }
 
 /** Every request editFeature accepts. */
-export type EngineFaceEditRequest = FaceEditRequest | HoleDepthEditRequest | ReliefEditRequest
+export type EngineFaceEditRequest = FaceEditRequest | HoleStepDiameterEditRequest | HoleDepthEditRequest | ReliefEditRequest
+
+/** WO-2762: an entry cone whose top diameter is at least this many times the
+ *  bore it opens into, when first seen, is a countersink (its top diameter is
+ *  kept when the bore under it is resized); a smaller one is an edge chamfer
+ *  (carried). See #entryConeKind. */
+const COUNTERSINK_TOP_RATIO = 1.5
 
 /** Hash upper bound for hashCode() — matches the Stage-0 spikes. */
 const HM = 1 << 30
+/** WO-2766: the normal deviation below which two faces meet at a smooth seam,
+ * not a sharp edge - defeature.ts FILLET_BAND_TANGENT_TOL, measured there. */
+const SMOOTH_SEAM_TOL = 1e-6
 
 /** WO-2107: what the Shell-by-construction route found on the part (see
  *  GeomEngine #applyShellByConstruction). Handles are owned by `own`'s
@@ -803,6 +829,11 @@ export class GeomEngine {
    *  caught kernel exception; with ~900 per worker lifetime (measured), the
    *  search may use at most this share. Spent -> the refusal names no value. */
   #dressUpProbeFailuresLeft = 128
+  /** WO-2762: what each hole entry cone IS - countersink (keeps its top) or
+   *  edge chamfer (keeps its size) - decided on the geometry the cone first
+   *  had, keyed by its stable face id (a re-cut cone keeps its id). See
+   *  #entryConeKind. */
+  #entryCones = new Map<StableId, { countersink: boolean; topR: number; axialDepth: number; halfAngle: number }>()
   /** Transient (non-body) shapes currently held mid-op — e.g. the fused tool of
    *  a multi-tool cut. Every entry is released in applyBoolean's finally block on
    *  BOTH the success and throw paths, so this set is empty between ops. Exposed
@@ -1123,8 +1154,37 @@ export class GeomEngine {
         unownedResult = resultShape
       }
 
-      const records = decodeEvolution(evo.modified)
       const resultFaces = this.#faceProbes(resultShape)
+      // WO-2821: a complete subtraction is a valid EMPTY compound in OCCT,
+      // not a usable body. Refuse before minting/lineage publication; finally
+      // releases the unowned result, leaving target/tools intact. No faces
+      // alone is NOT empty: IGES imports can contain only edges or vertices.
+      // Preserve all surviving topology without a volume/solid-count gate.
+      let emptyCut = req.op === 'cut' && resultFaces.length === 0
+      if (emptyCut) {
+        for (const type of ['edge', 'vertex'] as const) {
+          const subs = k.getSubShapes(resultShape, type)
+          // getSubShapes returns caller-owned handles, even when only counted.
+          for (const sub of subs) {
+            try { k.release(sub) } catch { /* already released */ }
+          }
+          if (subs.length > 0) {
+            emptyCut = false
+            break
+          }
+        }
+      }
+      if (emptyCut) {
+        return {
+          ok: false,
+          diagnostics: [{
+            code: 'KERNEL_OP_FAILED',
+            severity: 'error',
+            params: { op: req.op, reason: 'Subtraction removes the whole target; nothing would be left.' },
+          }],
+        }
+      }
+      const records = decodeEvolution(evo.modified)
       const opCode = req.op === 'cut' ? 'CUT' : req.op === 'fuse' ? 'FUS' : 'INT'
       const assign = assignCutFaceIds(req.featureId, target.faceMap, records, resultFaces, target.aliases, opCode)
       const handle = this.#mint({ shape: resultShape as number, faceMap: assign.faceMap, snapshots: assign.snapshots , aliases: target.aliases })
@@ -2795,6 +2855,12 @@ export class GeomEngine {
     const faces = k.getSubShapes(target.shape as ShapeHandle, 'face')
     let faceHandle: ShapeHandle | undefined
     let faceNormal: Vec3T = [0, 0, 1]
+    // WO-2794 (audit HO-2): on a curved face every point drills along the
+    // outward surface normal AT THAT POINT, from the point projected onto the
+    // face. One normal per face is right only for a plane, which keeps it (and
+    // its points as given) so flat-face holes stay byte-identical.
+    const starts: Vec3T[] = req.points.map((p) => [p.x, p.y, p.z])
+    const normals: Array<Vec3T | null> = req.points.map(() => null)
     try {
       // UI-57-R1 blocker 2: the SHARED resolver, not a raw faceMap inversion —
       // a merged-away (healed) id must find its winner's live face here, not
@@ -2813,6 +2879,8 @@ export class GeomEngine {
           faceNormal = normalize([nn.x, nn.y, nn.z])
         } catch { /* keep default */ }
       }
+      let planar = true
+      try { planar = k.surfaceType(faceHandle) === 'plane' } catch { /* unreadable: keep the one face normal */ }
       // Validate every point lies ON the face BEFORE building any geometry.
       const bboxDiag = this.#diagOf(target.shape as ShapeHandle)
       const onFaceTol = Math.max(1e-4, bboxDiag * 0.001)
@@ -2832,6 +2900,10 @@ export class GeomEngine {
         if (k.classifyPointOnFace(faceHandle, u, v) === 'out') {
           return fail(`hole point index ${i} (${p.x}, ${p.y}, ${p.z}) is coplanar with face ${req.face} but lies OUTSIDE its trimmed boundary -- every hole placement must be inside the starting face`)
         }
+        if (!planar) {
+          starts[i] = [cp.x, cp.y, cp.z]
+          normals[i] = this.#outwardNormalAt(target.shape as ShapeHandle, faceHandle, u, v, starts[i], faceNormal, onFaceTol)
+        }
       }
     } finally {
       for (const f of faces) {
@@ -2839,8 +2911,8 @@ export class GeomEngine {
       }
     }
 
-    // Drill direction = INTO the material = opposite the outward face normal.
-    const drill = scale(faceNormal, -1)
+    // Drill direction = INTO the material = opposite the outward normal.
+    const faceDrill = scale(faceNormal, -1)
     // Blind/throughAll depth (throughAll: overshoot the whole body along drill).
     const bodyDepth = this.#diagOf(target.shape as ShapeHandle) + 10
     const depth = req.depth.kind === 'blind' ? req.depth.distance : bodyDepth
@@ -2851,8 +2923,10 @@ export class GeomEngine {
 
     let tool: ShapeHandle | null = null
     try {
-      for (const p of req.points) {
-        const center: Vec3T = [p.x, p.y, p.z]
+      for (let pointIdx = 0; pointIdx < req.points.length; pointIdx++) {
+        const center = starts[pointIdx]
+        const pointNormal = normals[pointIdx]
+        const drill = pointNormal === null ? faceDrill : scale(pointNormal, -1)
         // For throughAll, start slightly ABOVE the surface so the top is open.
         const top = add(center, scale(drill, -throughMargin))
         const drillLen = depth + throughMargin
@@ -2941,6 +3015,32 @@ export class GeomEngine {
         try { k.release(s) } catch { /* already released */ }
       }
     }
+  }
+
+  /** WO-2794: the unit OUTWARD surface normal of `face` at (u, v). The kernel
+   *  reports the surface's own normal, which a reversed face points inward, so
+   *  the side is settled by probing the solid just either side of `at`; when
+   *  the probe cannot tell (a sliver thinner than the probe), it takes the
+   *  side of the face's one stored normal. Null when the kernel gives none. */
+  #outwardNormalAt(solid: ShapeHandle, face: ShapeHandle, u: number, v: number, at: Vec3T, faceNormal: Vec3T, tol: number): Vec3T | null {
+    const k = this.#k()
+    let n: Vec3T
+    try {
+      const raw = k.surfaceNormal(face, u, v)
+      if (!(Math.hypot(raw.x, raw.y, raw.z) > 1e-12)) return null
+      n = normalize([raw.x, raw.y, raw.z])
+    } catch { return null }
+    if (!n.every(Number.isFinite)) return null
+    const probe = (d: number): boolean | null => {
+      try {
+        const q = add(at, scale(n, d))
+        return k.containsPoint(solid, { x: q[0], y: q[1], z: q[2] })
+      } catch { return null }
+    }
+    const inBehind = probe(-tol), inFront = probe(tol)
+    if (inBehind === true && inFront === false) return n
+    if (inBehind === false && inFront === true) return scale(n, -1)
+    return dot(n, faceNormal) >= 0 ? n : scale(n, -1)
   }
 
   /** A cylindrical drill tool: circle of `radius` at `apex` swept `length` along
@@ -3465,8 +3565,8 @@ export class GeomEngine {
     failCode: 'FILLET_RADIUS_TOO_LARGE' | 'CHAMFER_FAILED',
     invoke: (shape: ShapeHandle, edges: ShapeHandle[], inputHashes: number[], value: number) => EvolutionData,
   ): Promise<OpResult> {
-    if (opCode === 'FIL' && isImportedFilletRequest(req as FilletRequest)) {
-      const changed = this.#editImportedFilletRadius(this.#rec(req.body), req as ImportedFilletRequest)
+    if (isImportedBlendRequest(req)) {
+      const changed = this.#editImportedBlend(this.#rec(req.body), req, opCode === 'FIL' ? 'fillet' : 'chamfer', param)
       if (!changed.ok) return changed
       return {
         ok: true,
@@ -3929,10 +4029,9 @@ export class GeomEngine {
    * every retained face keeps its id, and each new wall is the `:inner`
    * companion of the source face it lies the wall thickness away from.
    *
-   * When the walls cannot join up (blind depressions shallower than the floor
-   * at a thin wall), the result would be several separate pieces; the shell
-   * then fails with a message naming the piece count
-   * and the thinnest wall the software measured to keep it one piece.
+   * WO-2799: if construction fails, try the exact closed inward offset through the
+   * selected planar opening. This preserves filleted pocket offsets. If the
+   * opening disconnects the skins, keep every valid solid in one body compound.
    *
    * Returns null when the route does not apply or the kernel cannot build it,
    * leaving the caller's own failure message in place. Never mutates the body.
@@ -3947,57 +4046,66 @@ export class GeomEngine {
     const source = target.shape as ShapeHandle
     try {
       if (removeHandles.length !== 1) return null
-      const plan = this.#shellConstructionPlan(source, removeHandles[0], sourceFaces, own, ownAll)
-      if (plan === null) return null
+      const removed = removeHandles[0]
+      if (k.surfaceType(removed) !== 'plane') return null
+      const sample = this.#faceInteriorSample(removed)
+      if (sample === null) return null
+      let n = sample.n
+      if (!k.containsPoint(source, { x: sample.p.x - n.x * 1e-3, y: sample.p.y - n.y * 1e-3, z: sample.p.z - n.z * 1e-3 })) {
+        n = { x: -n.x, y: -n.y, z: -n.z }
+      }
+      const removedHash = k.hashCode(removed, HM)
+      const retainedFaces = sourceFaces.filter(f => k.hashCode(f, HM) !== removedHash)
       const inputHashes = [...target.faceMap.keys()]
-      const retained = plan.retainedHashes
-
-      // The route is trusted only while it opens the removed face and leaves
-      // every other face of the part exactly as it was.
-      const keepsRetainedFaces = (shape: ShapeHandle, ownFn: typeof own): boolean => {
-        const present = new Set(k.getSubShapes(shape, 'face').map((f) => k.hashCode(ownFn(f), HM)))
-        for (const h of retained) if (!present.has(h)) return false
-        return true
+      const keepsRetainedFaces = (shape: ShapeHandle): boolean => {
+        const present = new Set(ownAll(k.getSubShapes(shape, 'face')).map(f => k.hashCode(f, HM)))
+        return retainedFaces.every(f => present.has(k.hashCode(f, HM)))
       }
-
-      let evo: EvolutionData
+      let evo: EvolutionData | null = null
+      const cutCavity = (cavity: ShapeHandle): EvolutionData | null => {
+        const cut = k.cutWithHistory(source, cavity, inputHashes, HM)
+        own(cut.result)
+        if (!k.isValid(cut.result) || !keepsRetainedFaces(cut.result)) return null
+        const pieces = ownAll(k.getSubShapes(cut.result, 'solid'))
+        if (pieces.length === 0 || pieces.some(s => !k.isValid(s) || !(k.getVolume(s) > 0))) return null
+        if (!(k.getVolume(source) - k.getVolume(cut.result) > k.getVolume(source) * 1e-9)) return null
+        return cut
+      }
+      // Preserve the established construction result whenever it works.
       try {
-        const cavity = this.#shellConstructionCavity(plan, t, own)
-        if (cavity === null) return null
-        evo = k.cutWithHistory(source, cavity, inputHashes, HM)
-        own(evo.result)
-      } catch {
-        return null
-      }
-      if (!k.isValid(evo.result) || !keepsRetainedFaces(evo.result, own)) return null
-      const solids = ownAll(k.getSubShapes(evo.result, 'solid'))
-      if (solids.length === 0) return null
-
-      if (solids.length > 1) {
-        const onePiece = this.#shellOnePieceThickness(plan, t, source, keepsRetainedFaces)
-        const faces = req.removeFaces.join(', ')
-        const fix = onePiece !== null
-          ? `The thinnest wall that keeps it one piece is ${onePiece} mm.`
-          : 'No wall thickness Shell can build keeps it in one piece.'
-        return {
-          ok: false,
-          diagnostics: [{
-            code: 'SHELL_FAILED',
-            severity: 'error',
-            params: {
-              faces,
-              thickness: t,
-              pieces: solids.length,
-              ...(onePiece !== null ? { onePieceThickness: onePiece } : {}),
-              reason: `a ${t} mm shell opening ${faces} would split this part into ${solids.length} separate pieces: once that face is open, the ${t} mm walls round some of its holes or pockets touch nothing else. ${fix} The body was left unchanged.`,
-            },
-          }],
+        const plan = this.#shellConstructionPlan(source, removed, sourceFaces, own, ownAll)
+        if (plan !== null) {
+          const cavity = this.#shellConstructionCavity(plan, t, own)
+          if (cavity !== null) evo = cutCavity(cavity)
         }
+      } catch { /* exact offset below can handle filleted depressions */ }
+      if (evo === null) {
+        try {
+          const offset = own(k.offset(source, -t, 1e-6))
+          if (k.isValid(offset) && k.getVolume(offset) > 0 && k.getVolume(offset) < k.getVolume(source)) {
+            // Only the offset of the selected plane can open the cavity. The
+            // original face and the pocket floor are not substituted for it.
+            const offsetFaces = ownAll(k.getSubShapes(offset, 'face'))
+            const opening = offsetFaces.filter(f => {
+              if (k.surfaceType(f) !== 'plane') return false
+              const at = this.#faceInteriorSample(f)
+              if (at === null) return false
+              const distance = (sample.p.x - at.p.x) * n.x + (sample.p.y - at.p.y) * n.y + (sample.p.z - at.p.z) * n.z
+              return Math.abs(distance - t) < 1e-5 && Math.abs(at.n.x * n.x + at.n.y * n.y + at.n.z * n.z) > .999
+            })
+            if (opening.length === 1) {
+              const reach = t + 1e-4
+              const cavity = own(k.fuse(offset, own(k.extrude(opening[0], n.x * reach, n.y * reach, n.z * reach))))
+              evo = cutCavity(cavity)
+            }
+          }
+        } catch { /* caller reports the native Shell failure */ }
       }
-
-      const solid = solids[0]
-      const targetVolume = k.getVolume(source)
-      if (!(targetVolume - k.getVolume(solid) > targetVolume * 1e-9)) return null
+      if (evo === null) return null
+      const solids = ownAll(k.getSubShapes(evo.result, 'solid'))
+      // Mint the entire result, not the first component: tree, tessellation,
+      // volume and STEP export already support compound body handles.
+      const result = solids.length === 1 ? solids[0] : evo.result
 
       // Opened-face evolution (a retrim to a rim, or a split) from the cut.
       const inputSet = new Set(inputHashes)
@@ -4007,9 +4115,9 @@ export class GeomEngine {
       // Every other new face is a wall: name it after the source face it lies
       // exactly the wall thickness away from, along its own normal.
       const spawned = new Map<number, number[]>()
-      const sourceBoxes = plan.retainedFaces.map((f) => ({ face: f, hash: k.hashCode(f, HM), box: k.getBoundingBox(f, false) }))
+      const sourceBoxes = retainedFaces.map((f) => ({ face: f, hash: k.hashCode(f, HM), box: k.getBoundingBox(f, false) }))
       const tol = 1e-3
-      for (const f of ownAll(k.getSubShapes(solid, 'face'))) {
+      for (const f of ownAll(k.getSubShapes(result, 'face'))) {
         const hash = k.hashCode(f, HM)
         if (inputSet.has(hash) || modifiedOuts.has(hash)) continue
         const sample = this.#faceInteriorSample(f)
@@ -4030,20 +4138,22 @@ export class GeomEngine {
         if (best !== undefined) spawned.set(best.hash, [...(spawned.get(best.hash) ?? []), hash])
       }
       const spawnedRecords = [...spawned].map(([inHash, outHashes]) => ({ inHash, outHashes }))
-      const assign = assignShellFaceIds(req.featureId, target.faceMap, removedRecords, spawnedRecords, this.#faceProbes(solid), target.aliases)
-      this.#nameShellBlends(req.featureId, assign, solid)
+      const assign = assignShellFaceIds(req.featureId, target.faceMap, removedRecords, spawnedRecords, this.#faceProbes(result), target.aliases)
+      this.#nameShellBlends(req.featureId, assign, result)
       // A wall no source face accounts for would need an id the design tree
       // could not re-derive (GEO-4-R1.4): do not persist it; the caller's own
       // shell-failed message stands.
       if (assign.unmapped.length > 0) return null
-      adopted = solid
-      const handle = this.#mint({ shape: solid as number, faceMap: assign.faceMap, snapshots: assign.snapshots, aliases: target.aliases })
+      adopted = result
+      const handle = this.#mint({ shape: result as number, faceMap: assign.faceMap, snapshots: assign.snapshots, aliases: target.aliases })
       const geometry = this.#sweepBooleanGeometry(assign, target)
       return {
         ok: true,
         body: handle,
         elementMap: { featureId: req.featureId, modified: assign.modified, generated: assign.generated, deleted: assign.deleted, geometry },
-        diagnostics: okDiag(),
+        diagnostics: solids.length > 1
+          ? [{ code: 'OK', severity: 'info', params: { pieces: solids.length, reason: `Shell left ${solids.length} separate pieces: with this face open the pocket no longer joins the outer walls` } }]
+          : okDiag(),
       }
     } catch {
       return null
@@ -4263,49 +4373,6 @@ export class GeomEngine {
     }
   }
 
-  /** WO-2107: the thinnest wall, on a 0.1 mm grid above `t`, at which the
-   *  construction is one piece; null when none the block can take is. */
-  #shellOnePieceThickness(
-    plan: ShellConstructionPlan,
-    t: number,
-    source: ShapeHandle,
-    keepsRetainedFaces: (shape: ShapeHandle, own: <T extends ShapeHandle>(h: T) => T) => boolean,
-  ): number | null {
-    const k = this.#k()
-    const piecesAt = (w: number): number | null => {
-      const scratch: ShapeHandle[] = []
-      const own = <T extends ShapeHandle>(h: T): T => { scratch.push(h); return h }
-      try {
-        const cavity = this.#shellConstructionCavity(plan, w, own)
-        if (cavity === null) return null
-        const result = own(k.cut(source, cavity))
-        if (!k.isValid(result) || !keepsRetainedFaces(result, own)) return null
-        return k.getSubShapes(result, 'solid').map((s) => own(s)).length
-      } catch {
-        return null
-      } finally {
-        for (const h of scratch) { try { k.release(h) } catch { /* already released */ } }
-      }
-    }
-    let lo = t
-    let hi: number | null = null
-    for (let w = Math.floor(t / 0.5 + 1e-9) * 0.5 + 0.5, tries = 0; tries < 24; w += 0.5, tries++) {
-      const pieces = piecesAt(w)
-      if (pieces === null) break
-      if (pieces === 1) { hi = w; break }
-      lo = w
-    }
-    if (hi === null) return null
-    let low = Math.floor(lo * 10 + 1e-9)
-    let high = Math.round(hi * 10)
-    while (high - low > 1) {
-      const mid = Math.floor((low + high) / 2)
-      if (piecesAt(mid / 10) === 1) high = mid
-      else low = mid
-    }
-    return high / 10
-  }
-
   /** WO-2107: a point inside a face's trimmed area and the unit surface normal
    *  there (orientation as the surface reports it). */
   #faceInteriorSample(face: ShapeHandle): { p: { x: number; y: number; z: number }; n: { x: number; y: number; z: number } } | null {
@@ -4324,6 +4391,162 @@ export class GeomEngine {
       }
     }
     return null
+  }
+
+  /** WO-2799: remove recognized constant-radius fillets in feature order,
+   * draft their sharp supports, then restore those same edges/radii in reverse.
+   * Runs only after the ordinary builder fails. Each removal/rebuild must be
+   * one valid solid; duplicate kernel edge handles are collapsed by hash.
+   * Recovered sharp edges are recorded before Draft and matched within its
+   * actual displacement budget. An ambiguous or lost edge leaves the source. */
+  #draftThroughFillets(shape: ShapeHandle, wall: ShapeHandle, angleRad: number, direction: { x: number; y: number; z: number }): { shape: ShapeHandle; restoredHashes: Set<number> } | null {
+    const k = this.#k()
+    const scratch: ShapeHandle[] = []
+    const own = <T extends ShapeHandle>(h: T): T => { scratch.push(h); return h }
+    const ownAll = (hs: ShapeHandle[]) => { scratch.push(...hs); return hs }
+    let adopted: ShapeHandle | undefined
+    const originalFaces = gatherFaces(k, shape)
+    try {
+      const wallSnapshot = this.#probeFace(wall).snapshot
+      if (wallSnapshot.type !== 'plane') return null
+      const bbox = this.#bodyBBox(shape)
+      const pull = normalize([direction.x, direction.y, direction.z])
+      let lo = 0, hi = 0
+      for (const i of [0,1,2] as const) {
+        const a = pull[i]*bbox.min[i], b = pull[i]*bbox.max[i]
+        lo += Math.min(a,b); hi += Math.max(a,b)
+      }
+      const budget = Math.abs(Math.tan(angleRad))*Math.max(Math.abs(lo),Math.abs(hi))
+      const uniqueEdges = (body: ShapeHandle) => [...new Map(ownAll(k.getSubShapes(body, 'edge')).map((e) => [k.hashCode(e, HM), e])).values()]
+      const single = (body: ShapeHandle): ShapeHandle | null => {
+        if (!k.isValid(body)) return null
+        const solids = ownAll(k.getSubShapes(body, 'solid'))
+        return solids.length === 1 && k.getVolume(solids[0]) > 1e-9 ? solids[0] : null
+      }
+      // Discover the connected blend region at the selected wall. Planes
+      // stop the flood, so an unrelated round elsewhere is never stripped.
+      const byHash = new Map(originalFaces.map((f) => [f.hash,f]))
+      const connected = new Set<number>()
+      const pending = [...(byHash.get(k.hashCode(wall,HM))?.neighbours ?? [])]
+      while (pending.length) {
+        const hash = pending.pop()!
+        const f = byHash.get(hash)
+        if (!f || connected.has(hash) || !['cylinder','torus'].includes(f.type)) continue
+        connected.add(hash)
+        pending.push(...f.neighbours)
+      }
+      const originalBands = originalFaces.filter((f) => connected.has(f.hash)).flatMap((f) => {
+        const sample = this.#faceInteriorSample(f.handle)
+        return sample === null ? [] : [{ ...f, witness:own(k.makeVertex(sample.p.x,sample.p.y,sample.p.z)) }]
+      })
+      const restoredHashes = new Set<number>()
+      let current = shape
+      const stages: Array<{ radius: number; edges: Array<{ center: Vec3T; tangent: Vec3T; length: number; hosts: GeometrySnapshot[] }> }> = []
+      for (let count = 0; count < 16; count++) {
+        const recs = gatherFaces(k, current)
+        try {
+          const chains = recognizeFeaturesCore(k, current, recs).filter((f) => f.removable && f.type.startsWith('fillet') && f.dropHashes.length > 0 &&
+            f.dropHashes.every((hash) => { const band=recs.find((r)=>r.hash===hash); return band !== undefined && originalBands.some((old)=>old.type===band.type &&
+              (old.radius === undefined || (band.radius !== undefined && Math.abs(old.radius-band.radius)<1e-5)) && k.distanceBetween(old.witness,band.handle)<1e-5) }))
+            .map((f) => ({ ...f, params: { ...f.params, radius: Number(f.params.radius) || this.#measureImportedFilletRadius(recs.find((r) => r.hash === f.dropHashes[0])!) } }))
+            .filter((f) => Number(f.params.radius) > 0)
+            .sort((a,b) => Number(a.params.radius)-Number(b.params.radius) || a.key.localeCompare(b.key))
+          if (chains.length === 0) break
+          const feature = chains[0]
+          const radius = Number(feature.params.radius)
+          const bands = recs.filter((f) => feature.dropHashes.includes(f.hash))
+          for (const old of originalBands) {
+            if (old.type === 'cylinder' && Math.abs((old.radius ?? 0)-radius) > 1e-5) continue
+            if (bands.some((band) => band.type === old.type && k.distanceBetween(old.witness,band.handle) < 1e-5)) restoredHashes.add(old.hash)
+          }
+          const previousEdges = new Set(uniqueEdges(current).map((e) => k.hashCode(e, HM)))
+          const stripped = single(own(k.defeature(current, bands.map((f) => f.handle), 1e-6)))
+          if (stripped === null) return null
+          const after = gatherFaces(k, stripped)
+          try {
+            const sharp: Array<{ handle: ShapeHandle; hosts: GeometrySnapshot[] }> = []
+            for (const edge of uniqueEdges(stripped)) {
+              if (previousEdges.has(k.hashCode(edge, HM)) || !bands.some((f) => k.distanceBetween(edge, f.handle) <= radius + 1e-4)) continue
+              // A corner round's removal also extends the rim/floor edges.
+              // Only its axial sharp seam is the edge that carried its radius.
+              if (bands.length === 1 && bands[0].type === 'cylinder' && bands[0].axis) {
+                const axis = bands[0].axis
+                const params = k.curveParameters(edge)
+                const tangent = k.curveTangent(edge,(params.first+params.last)/2)
+                if (Math.abs(dot(normalize([axis.x,axis.y,axis.z]),normalize([tangent.x,tangent.y,tangent.z]))) < .999999) continue
+              }
+              const hosts = after.filter((f) => {
+                const edges = ownAll(k.getSubShapes(f.handle,'edge'))
+                return edges.some((e) => k.hashCode(e, HM) === k.hashCode(edge, HM))
+              })
+              if (hosts.length !== 2) continue
+              const dev = measureFaceTangency(k, hosts[0], hosts[1])
+              if (dev !== null && dev <= SMOOTH_SEAM_TOL) continue
+              sharp.push({ handle:edge, hosts:hosts.map((f)=>this.#probeFace(f.handle).snapshot) })
+            }
+            if (sharp.length === 0) return null
+            stages.push({ radius, edges: sharp.map(({handle:e,hosts}) => {
+              const c=k.getLinearCenterOfMass(e), range=k.curveParameters(e), t=k.curveTangent(e,(range.first+range.last)/2)
+              return { center:[c.x,c.y,c.z], tangent:normalize([t.x,t.y,t.z]), length:k.curveLength(e), hosts }
+            }) })
+            current = stripped
+          } finally { releaseFaceRecs(k, after) }
+        } finally { releaseFaceRecs(k, recs) }
+      }
+      if (stages.length === 0 || stages.length === 16) return null
+      const strippedProbes = this.#faceProbes(current)
+      const wn = normalize(wallSnapshot.normal as Vec3T)
+      const candidates = strippedProbes.filter((p) => p.snapshot.type === 'plane' &&
+        Math.abs(dot(wn,normalize(p.snapshot.normal as Vec3T))-1) < 1e-6 &&
+        Math.abs(dot(wn,sub(p.snapshot.centroid as Vec3T,wallSnapshot.centroid as Vec3T))) < 1e-5)
+      if (candidates.length !== 1) return null
+      const faces = ownAll(k.getSubShapes(current,'face'))
+      const sharpWall = faces.find((f) => k.hashCode(f,HM) === candidates[0].hash)
+      if (sharpWall === undefined) return null
+      const drafted = single(own(k.draft(current,sharpWall,angleRad,direction)))
+      if (drafted === null) return null
+      current = drafted
+      const hostMatches = (old: GeometrySnapshot, probe: GeometrySnapshot): boolean => {
+        if (old.type !== probe.type) return false
+        if (old.type === 'plane') {
+          const n = normalize(old.normal as Vec3T)
+          const edited = Math.abs(dot(n,wn)-1) < 1e-6 && Math.abs(dot(n,sub(old.centroid as Vec3T,wallSnapshot.centroid as Vec3T))) < 1e-5
+          const want = edited ? add(scale(n,Math.cos(angleRad)),scale(pull,Math.sin(angleRad))) : n
+          const offset = dot(n,old.centroid as Vec3T)*(edited ? Math.cos(angleRad) : 1)
+          return dot(want,normalize(probe.normal as Vec3T)) > 1-1e-6 && Math.abs(dot(want,probe.centroid as Vec3T)-offset) < 1e-5
+        }
+        return (old.radius === undefined || (probe.radius !== undefined && Math.abs(old.radius-probe.radius) < 1e-5)) &&
+          len(sub(old.centroid as Vec3T,probe.centroid as Vec3T)) < 2*budget+1e-3
+      }
+      for (const stage of stages.reverse()) {
+        const edges = uniqueEdges(current)
+        const remaining = new Set(edges)
+        const selected: ShapeHandle[] = []
+        const faces = ownAll(k.getSubShapes(current,'face'))
+        const probes = new Map(faces.map((f) => [k.hashCode(f,HM),this.#probeFace(f).snapshot]))
+        const adjacency = this.#edgeAdjacency(current).adjacentFaces
+        for (const descriptor of stage.edges) {
+          const near = [...remaining].filter((edge) => {
+            const range=k.curveParameters(edge), tangent=k.curveTangent(edge,(range.first+range.last)/2)
+            if (Math.abs(dot(descriptor.tangent,normalize([tangent.x,tangent.y,tangent.z]))) < Math.cos(Math.abs(angleRad))-1e-5 ||
+                Math.abs(k.curveLength(edge)-descriptor.length) > 2*budget+1e-3) return false
+            const hosts = [...(adjacency.get(k.hashCode(edge,HM)) ?? [])].map((h)=>probes.get(h)).filter((p): p is GeometrySnapshot => p !== undefined)
+            return hosts.length === 2 && ((hostMatches(descriptor.hosts[0],hosts[0]) && hostMatches(descriptor.hosts[1],hosts[1])) ||
+              (hostMatches(descriptor.hosts[0],hosts[1]) && hostMatches(descriptor.hosts[1],hosts[0])))
+          }).map((edge) => { const c=k.getLinearCenterOfMass(edge); return { edge, d:len(sub([c.x,c.y,c.z],descriptor.center)) } }).sort((a,b) => a.d-b.d)
+          if (!near[0] || near[0].d > 2*budget+1e-3 || (near[1] && Math.abs(near[1].d-near[0].d) < 1e-7)) return null
+          selected.push(near[0].edge); remaining.delete(near[0].edge)
+        }
+        const rounded = single(own(k.fillet(current,selected,stage.radius)))
+        if (rounded === null) return null
+        current = rounded
+      }
+      adopted = current
+      return { shape: current, restoredHashes }
+    } catch { return null } finally {
+      releaseFaceRecs(k, originalFaces)
+      for (const h of scratch) if (h !== adopted) { try { k.release(h) } catch { /* */ } }
+    }
   }
 
   /**
@@ -4663,33 +4886,22 @@ export class GeomEngine {
           failDiag = { code: 'REFERENCE_UNRESOLVED', severity: 'error', params: { op: 'draft', id: faceId } }
           break
         }
-        let next: ShapeHandle
-        try {
-          next = k.draft(currentShape, faceHandle, angleRad, draftPullDir)
-        } catch {
-          failDiag = {
-            code: 'DRAFT_FAILED',
-            severity: 'error',
-            params: {
-              face: faceId,
-              angleDeg: req.angleDeg,
-              reason: `draft angle ${req.angleDeg} deg could not be applied to face ${faceId} -- the kernel could not construct a valid draft`,
-            },
-          }
-          break
-        }
-        if (!k.isValid(next)) {
-          try { k.release(next) } catch { /* already released */ }
-          const rebuilt = this.#draftThroughPlanarChamferCollar(currentShape, faceHandle, angleRad, draftPullDir)
-          if (rebuilt === null) {
-            failDiag = {
-              code: 'DRAFT_FAILED',
-              severity: 'error',
-              params: { face: faceId, angleDeg: req.angleDeg, reason: `draft angle ${req.angleDeg} deg produced an invalid result on face ${faceId}` },
-            }
+        let next: ShapeHandle | undefined
+        let restoredFilletHashes: Set<number> | undefined
+        try { next = k.draft(currentShape, faceHandle, angleRad, draftPullDir) } catch { /* rebuild below */ }
+        const kernelThrew = next === undefined
+        if (next === undefined || !k.isValid(next)) {
+          if (next !== undefined) { try { k.release(next) } catch { /* */ } }
+          const chamfer = this.#draftThroughPlanarChamferCollar(currentShape, faceHandle, angleRad, draftPullDir)
+          const fillets = chamfer === null ? this.#draftThroughFillets(currentShape, faceHandle, angleRad, draftPullDir) : null
+          const rebuilt = chamfer ?? fillets?.shape
+          if (rebuilt === undefined) {
+            failDiag = { code: 'DRAFT_FAILED', severity: 'error', params: { face: faceId, angleDeg: req.angleDeg,
+              reason: kernelThrew ? `draft angle ${req.angleDeg} deg could not be applied to face ${faceId} -- the kernel could not construct a valid draft` : `draft angle ${req.angleDeg} deg produced an invalid result on face ${faceId}` } }
             break
           }
           next = rebuilt
+          restoredFilletHashes = fillets?.restoredHashes
         }
         const probes = this.#faceProbes(next)
         const ids = [...currentFaceMap.values()].sort()
@@ -4710,7 +4922,37 @@ export class GeomEngine {
         }
         const maxDistToNeutral = Math.max(Math.abs(lo), Math.abs(hi))
         const motionBudget = Math.tan(angleRad) * maxDistToNeutral
-        const rebind = rebindDraftFaces(ids, currentSnapshots, probes, { editedId: faceId, angleRad, motionBudget })
+        const curvedIds = restoredFilletHashes ? [...currentFaceMap].filter(([hash]) => restoredFilletHashes!.has(hash)).map(([,id]) => id).sort() : []
+        const rebind = rebindDraftFaces(ids.filter((id) => !curvedIds.includes(id)), currentSnapshots, probes, { editedId: faceId, angleRad, motionBudget })
+        // Re-filleting may turn a torus into a rolling-ball spline or tilt a
+        // corner cylinder's axis. Host planes still use the strict draft
+        // signature. Curved members pair one-to-one only within the movement
+        // budget after the kernel rebuilt the measured original radii.
+        const remaining = new Set(probes.filter((p) => !rebind.faceMap.has(p.hash)))
+        for (const id of curvedIds) {
+          const old = currentSnapshots.get(id)!
+          const near = [...remaining].filter((p) => ['cylinder','torus','bspline'].includes(p.snapshot.type))
+            .map((p) => ({ p, d: len(sub(p.snapshot.centroid as Vec3T,old.centroid as Vec3T)) })).sort((a,b) => a.d-b.d)
+          if (!near[0] || near[0].d > Math.abs(motionBudget)+1e-3 || (near[1] && Math.abs(near[1].d-near[0].d) < 1e-7)) {
+            rebind.unresolved.push(id); continue
+          }
+          rebind.faceMap.set(near[0].p.hash,id); rebind.snapshots.set(id,near[0].p.snapshot); remaining.delete(near[0].p)
+        }
+        if (restoredFilletHashes && rebind.unresolved.length === 0) {
+          // Centroids alone cannot prove persistent blend identity. Require
+          // the complete source face adjacency graph after the one-to-one
+          // geometric bind, rooted in the strictly rebound host planes.
+          const oldFaces = gatherFaces(k,currentShape), newFaces = gatherFaces(k,next)
+          try {
+            const oldNeighbours = new Map(oldFaces.map((f) => [currentFaceMap.get(f.hash), f.neighbours.map((h)=>currentFaceMap.get(h)).sort().join('|')]))
+            if (probes.length !== currentFaceMap.size) rebind.unresolved.push(faceId)
+            for (const f of newFaces) {
+              const id = rebind.faceMap.get(f.hash)
+              const neighbours = f.neighbours.map((h)=>rebind.faceMap.get(h)).sort().join('|')
+              if (id === undefined || oldNeighbours.get(id) !== neighbours) rebind.unresolved.push(id ?? faceId)
+            }
+          } finally { releaseFaceRecs(k,oldFaces); releaseFaceRecs(k,newFaces) }
+        }
         if (rebind.unresolved.length > 0) {
           try { k.release(next) } catch { /* already released */ }
           failDiag = {
@@ -5156,6 +5398,7 @@ export class GeomEngine {
       faceIds: toIds(f.dropHashes),
       neighbourIds: toIds(f.neighbourHashes),
       params: f.params,
+      ...(f.counterboreHashes !== undefined ? { counterboreFaceIds: toIds(f.counterboreHashes) } : {}),
     }
   }
 
@@ -5440,6 +5683,7 @@ export class GeomEngine {
       switch (req.kind) {
         case 'faceOffset': return this.#editFaceOffset(rec, req)
         case 'pocketDepth': return this.#editPocketDepth(rec, req)
+        case 'holeMove':
         case 'holeDiameter': return this.#recutHole(rec, req)
         case 'holeDepth': return this.#recutHole(rec, req)
         case 'relief': return this.#applyRelief(rec, req)
@@ -5484,10 +5728,12 @@ export class GeomEngine {
    * coplanar/coaxial merge — the V1 stand-in for "untrim/extend + re-intersect".
    *
    * VERIFY gate (criterion 3): the result must be a valid isSolid, the signed
-   * volume delta must match the offset's sign, and |volumeDelta - area*offset|
-   * must fall inside tolerance. A face whose neighbours are NOT in the parallel
-   * planar/cylindrical class (e.g. a draft-angled wall) fails the volume-match
-   * and is REFUSED with the measured-vs-expected numbers naming the class miss.
+   * volume delta must match the offset's sign, and must match the prism less
+   * what the body already fills of it (WO-2760) inside tolerance. A face whose
+   * neighbour the straight prism cannot re-close (fillet, cone, draft) is
+   * REFUSED before the boolean by #prismNeighbourMiss, naming the neighbour,
+   * and after it by #prismWallLeft if the built result still keeps a piece
+   * of the prism wall beside such a neighbour (a groove, step or lip).
    */
   #offsetFaceBoolean(rec: BodyRecord, faceId: StableId, offset: number, fid: string, label: string): OpResult {
     const k = this.#k()
@@ -5496,6 +5742,9 @@ export class GeomEngine {
     }
     const found = this.#resolveFaceSnap(rec, faceId)
     if (!found) return this.#editRefusal(`${label}: face ${faceId} does not resolve on this body`, faceId, 'error')
+    if (label === 'faceOffset' && (found.snap.type === 'cylinder' || found.snap.type === 'cone')) {
+      return this.#offsetHoleFace(rec, faceId, found.hash, offset, fid)
+    }
     if (found.snap.type !== 'plane') {
       return this.#editRefusal(
         `${label} supports PLANAR faces only; face ${faceId} is a ${found.snap.type} surface (out-of-class: curved neighbours need the parallel-kernel untrim path) — refused in V1`,
@@ -5528,42 +5777,90 @@ export class GeomEngine {
       const prism = k.extrude(seed, v[0], v[1], v[2])
       scratch.push(prism)
       if (!k.isValid(prism)) return this.#editRefusal(`${label}: the offset prism for face ${faceId} was not a valid solid`, faceId, 'error')
+      // WO-2760: the prism's side walls run straight along the move, so they
+      // re-close the part only where each neighbour is square to the move or
+      // the space beside the prism is already right (the owner's dome: the sphere
+      // overhangs the plate top, so the raised top still meets it). A fillet,
+      // cone or draft beside the face would be left behind as a moat, plateau,
+      // well, groove or lip (WO-2757 PP-2/4/8/11/12) - refuse before building.
+      const wrongBeside = (miss: { kind: string; surface: string }) => this.#editRefusal(
+        `${label === 'pocketDepth' ? `This pocket's depth can't be changed yet: its floor meets ${miss.kind}` : `Push/Pull can't move this face yet: it meets ${miss.kind}`}, and moving the face alone would leave a groove or step beside it. Nothing was changed.`,
+        faceId, 'warning', { neighbour: miss.surface },
+      )
+      const { miss, besides } = this.#prismNeighbourMiss(rec.shape as ShapeHandle, faceHandle, prism, normal, offset)
       const originalVol = k.getVolume(rec.shape as ShapeHandle)
-      if (offset > 0) {
-        result = k.fuse(rec.shape as ShapeHandle, prism)
-      } else {
-        const inputHashes = [...rec.faceMap.keys()]
-        result = k.cutWithHistory(rec.shape as ShapeHandle, prism, inputHashes, HM).result
+      // WO-2767: where the straight prism can't re-close the part, the move
+      // carries the neighbours instead (#carryFaceMove): blend chains come
+      // off, the face moves, the chains go back at their own size; a drafted
+      // wall moves between its neighbours' planes; a boss standing in the
+      // face is met where it stands. Only a move none of those can build
+      // keeps the WO-2760 refusal.
+      let wrongAt = miss
+      let carriedMove = false
+      let expected: number | undefined
+      if (wrongAt === undefined) {
+        if (offset > 0) {
+          result = k.fuse(rec.shape as ShapeHandle, prism)
+        } else {
+          const inputHashes = [...rec.faceMap.keys()]
+          result = k.cutWithHistory(rec.shape as ShapeHandle, prism, inputHashes, HM).result
+        }
+        // Watertight gate (GEO-10-R1 finding 2): the edited body must be a valid,
+        // positive-volume, CLOSED SOLID — isSolid() is now a HARD success gate for
+        // faceOffset/pocketDepth, the WO's stated invariant. A boolean can wrap its
+        // solid in a compound (which isSolid() rejects), so normalize to the lone
+        // solid subshape first; zero or >1 closed solids (an emptied or split body)
+        // is out-of-class and refuses. This closes the "isValid but not solid"
+        // acceptance the auditor flagged at geom-engine.ts:3258-3263.
+        if (!k.isValid(result) || !(k.getVolume(result) > 1e-9)) {
+          return this.#editRefusal(`${label}: face ${faceId} offset by ${offset} did not yield a valid positive-volume result (out-of-class geometry)`, faceId, 'error')
+        }
+        const solidified = this.#editNonSolidFaultForTest
+          ? { ok: false, reason: 'injected non-solid fault (test)' }
+          : this.#asSingleSolid(result, scratch)
+        if (!solidified.ok || !solidified.shape) {
+          return this.#editRefusal(
+            `${label}: face ${faceId} offset by ${offset} did not yield a single closed solid (isSolid hard gate: ${solidified.reason}) — out-of-class`,
+            faceId, 'error', { reason: solidified.reason ?? 'not a solid' },
+          )
+        }
+        // #asSingleSolid may have unwrapped a new solid handle (pushing the old
+        // compound onto `scratch` for release) — carry it forward as `result`.
+        result = solidified.shape
+        // WO-2760 audit round 1: the probes sample the travel; the built result
+        // is the whole of it. A prism side wall beside a curved or angled
+        // neighbour that survives into the result is a wall the move left
+        // behind (the dome narrows back inside the plate-top rim above z 14, so
+        // a +4.2 mm pull kept a ring of the prism wall: a groove).
+        wrongAt = this.#prismWallLeft(result, prism, normal, besides)
+        if (wrongAt !== undefined) {
+          scratch.push(result)
+          result = undefined
+        } else {
+          // WO-2760: the exact change is the prism less what the body already
+          // fills of it (fuse), or what the body fills of it (cut). area*offset
+          // was right only when the body filled none of the prism, and refused
+          // The owner's correct dome-on-plate result (WO-2757 PP-1). If the overlap
+          // can't be measured, area*offset stays the expectation.
+          expected = this.#prismChange(rec.shape as ShapeHandle, prism, offset, scratch) ?? area * offset
+        }
       }
-      // Watertight gate (GEO-10-R1 finding 2): the edited body must be a valid,
-      // positive-volume, CLOSED SOLID — isSolid() is now a HARD success gate for
-      // faceOffset/pocketDepth, the WO's stated invariant. A boolean can wrap its
-      // solid in a compound (which isSolid() rejects), so normalize to the lone
-      // solid subshape first; zero or >1 closed solids (an emptied or split body)
-      // is out-of-class and refuses. This closes the "isValid but not solid"
-      // acceptance the auditor flagged at geom-engine.ts:3258-3263.
-      if (!k.isValid(result) || !(k.getVolume(result) > 1e-9)) {
-        return this.#editRefusal(`${label}: face ${faceId} offset by ${offset} did not yield a valid positive-volume result (out-of-class geometry)`, faceId, 'error')
+      if (wrongAt !== undefined) {
+        let carried = this.#carryFaceMove(rec.shape as ShapeHandle, faceHandle, found.hash, normal, offset, label, scratch)
+        // WO-2856: the dressings around it ride along with the face
+        if (!carried.ok && label === 'faceOffset') carried = this.#carryTopZone(rec.shape as ShapeHandle, faceHandle, found.hash, normal, offset, scratch)
+        if (!carried.ok) return wrongBeside(wrongAt)
+        result = carried.shape
+        expected = carried.expected
+        carriedMove = true
       }
-      const solidified = this.#editNonSolidFaultForTest
-        ? { ok: false, reason: 'injected non-solid fault (test)' }
-        : this.#asSingleSolid(result, scratch)
-      if (!solidified.ok || !solidified.shape) {
-        return this.#editRefusal(
-          `${label}: face ${faceId} offset by ${offset} did not yield a single closed solid (isSolid hard gate: ${solidified.reason}) — out-of-class`,
-          faceId, 'error', { reason: solidified.reason ?? 'not a solid' },
-        )
-      }
-      // #asSingleSolid may have unwrapped a new solid handle (pushing the old
-      // compound onto `scratch` for release) — carry it forward as `result`.
-      result = solidified.shape
+      if (result === undefined || expected === undefined) return wrongBeside(wrongAt ?? { kind: 'a face it cannot re-close', surface: 'unknown' })
       const newVol = k.getVolume(result)
       const volumeDelta = newVol - originalVol
-      const expected = area * offset
       const tol = Math.max(1e-2, Math.abs(expected) * 5e-3)
       if (volumeDelta * offset <= 0 || Math.abs(volumeDelta - expected) > tol) {
         return this.#editRefusal(
-          `${label}: face ${faceId} is not a rigid planar/cylindrical-neighbour offset (out-of-class): expected volume delta area*offset=${r3(expected)}, measured ${r3(volumeDelta)} (tol ${r3(tol)}) — neighbours did not re-close as a straight extend`,
+          `${label}: face ${faceId} offset by ${offset} changed the volume by ${r3(volumeDelta)} mm3 where the move means ${r3(expected)} mm3 (tol ${r3(tol)}) - the geometry engine did not build the move cleanly. Nothing was changed.`,
           faceId, 'warning', { expected: r3(expected), measured: r3(volumeDelta) },
         )
       }
@@ -5571,7 +5868,18 @@ export class GeomEngine {
       // matchFacesToOriginals; the translated face + any curved NEIGHBOUR walls (whose
       // height/area/centroid changed but axis + concentricity did not) keep their
       // ids via the pair-by-offset pass. resolve() -> 'exact' (GEO-10-R1 finding 3).
-      let assign = this.#assignEditedIds(rec, this.#faceProbes(result), fid, (remOrig, probes) => this.#pairByOffset(remOrig, probes))
+      const moved = { id: this.#resolveFaceId(rec, faceId), normal, level: dot(found.snap.centroid as Vec3T, normal) + offset }
+      // WO-2767: a carried move also translates whole faces (a blend chain
+      // re-dressed on the moved face); each keeps its id when it is the same
+      // face moved by the offset.
+      const shift = scale(normal, offset)
+      let assign = this.#assignEditedIds(rec, this.#faceProbes(result), fid, (remOrig, probes) => {
+        const pairs = this.#pairByOffset(remOrig, probes, moved)
+        if (!carriedMove) return pairs
+        const ids = new Set(pairs.map((q) => q.id))
+        const taken = new Set(pairs.map((q) => q.probe.hash))
+        return pairs.concat(this.#pairTranslated(remOrig.filter((o) => !ids.has(o.id)), probes.filter((p) => !taken.has(p.hash)), shift))
+      })
       if (!assign.ok) {
         // GEO-6X6-R3: a true total tie (or unreadable geometry) among mint
         // candidates — structured refusal, never a silent order-dependent bind.
@@ -5688,6 +5996,870 @@ export class GeomEngine {
       for (const f of faces) { try { k.release(f) } catch { /* */ } }
       for (const s of scratch) { try { k.release(s) } catch { /* */ } }
       if (result !== undefined) { try { k.release(result) } catch { /* */ } }
+    }
+  }
+
+  /** The exact volume change of moving a face with `prism`: the prism less
+   *  what `body` already fills of it (fuse), or what it fills (cut).
+   *  undefined when the overlap can't be measured. */
+  #prismChange(body: ShapeHandle, prism: ShapeHandle, offset: number, scratch: ShapeHandle[]): number | undefined {
+    const k = this.#k()
+    try {
+      const shared = k.common(body, prism)
+      scratch.push(shared)
+      const sharedVol = k.getVolume(shared)
+      const prismVol = k.getVolume(prism)
+      if (Number.isFinite(sharedVol) && Number.isFinite(prismVol)) return offset > 0 ? prismVol - sharedVol : -sharedVol
+    } catch { /* unmeasured */ }
+    return undefined
+  }
+
+  /** WO-2767: pair leftover original faces with result faces that are the
+   *  same face translated by `shift` (same kind, same area, centroid moved by
+   *  exactly the shift). Only a unique match pairs. */
+  #pairTranslated(
+    remOrig: Array<{ id: StableId; snap: GeometrySnapshot }>, probes: FaceProbe[], shift: Vec3T,
+  ): Array<{ id: StableId; probe: FaceProbe }> {
+    const pairs: Array<{ id: StableId; probe: FaceProbe }> = []
+    const used = new Set<number>()
+    for (const o of remOrig) {
+      const want = add(o.snap.centroid as Vec3T, shift)
+      const hits = probes.filter((p) => !used.has(p.hash) && p.snapshot.type === o.snap.type &&
+        Math.abs(p.snapshot.area - o.snap.area) <= Math.max(1e-4, o.snap.area * 1e-5) &&
+        len(sub(p.snapshot.centroid as Vec3T, want)) <= 1e-4)
+      if (hits.length !== 1) continue
+      pairs.push({ id: o.id, probe: hits[0] })
+      used.add(hits[0].hash)
+    }
+    return pairs
+  }
+
+  /** A point strictly inside a face (the first in-face sample of a UV grid). */
+  #pointInFace(face: ShapeHandle): Vec3T | undefined {
+    const k = this.#k()
+    try {
+      const uvb = k.uvBounds(face)
+      for (const fu of [0.5, 0.3, 0.7, 0.1, 0.9, 0.2, 0.8, 0.4, 0.6]) {
+        for (const fv of [0.5, 0.3, 0.7, 0.1, 0.9, 0.2, 0.8, 0.4, 0.6]) {
+          const u = uvb.uMin + fu * (uvb.uMax - uvb.uMin)
+          const v = uvb.vMin + fv * (uvb.vMax - uvb.vMin)
+          if (k.classifyPointOnFace(face, u, v) !== 'in') continue
+          const p = k.pointOnSurface(face, u, v)
+          return [p.x, p.y, p.z]
+        }
+      }
+    } catch { /* none */ }
+    return undefined
+  }
+
+  /** Is `p` on `face` (within the face's bounds, on its surface)? */
+  #onFace(face: ShapeHandle, p: Vec3T, tol = 1e-5): boolean {
+    const k = this.#k()
+    try {
+      const q = k.projectPointOnFace(face, { x: p[0], y: p[1], z: p[2] })
+      if (len(sub(p, [q.x, q.y, q.z])) > tol) return false
+      const uv = k.uvFromPoint(face, { x: p[0], y: p[1], z: p[2] })
+      return k.classifyPointOnFace(face, uv.u, uv.v) !== 'out'
+    } catch { return false }
+  }
+
+  /** The planar face of `shape` facing `n` that contains `p`. */
+  #planarFaceAt(shape: ShapeHandle, n: Vec3T, p: Vec3T, own: ShapeHandle[]): ShapeHandle | undefined {
+    const k = this.#k()
+    const faces = k.getSubShapes(shape, 'face')
+    own.push(...faces)
+    return faces.find((f) => {
+      try {
+        if (k.surfaceType(f) !== 'plane') return false
+        const uvb = k.uvBounds(f)
+        const m = k.surfaceNormal(f, (uvb.uMin + uvb.uMax) / 2, (uvb.vMin + uvb.vMax) / 2)
+        if (Math.abs(dot(normalize([m.x, m.y, m.z]), n)) < 1 - 1e-9) return false
+        return this.#onFace(f, p)
+      } catch { return false }
+    })
+  }
+
+  /**
+   * WO-2767: move a planar face whose neighbours the straight prism can't
+   * re-close (WO-2757 PP-2/4/8/11/12) - the move a machinist expects:
+   *
+   *  1. Blend chains beside the face (a boss-foot fillet, a top-edge fillet
+   *     or chamfer loop, a pocket's floor fillets) come off whole through the
+   *     kernel's RemoveFeatures (WO-2766), the face moves on the sharp-edged
+   *     part, and the edges the chains left are dressed again at the chains'
+   *     own radius / distance. The result must read back as the same chains
+   *     (same faces, same size) on those edges, or nothing is applied.
+   *  2. The face then moves by the first construction that re-closes it:
+   *     the straight prism (square neighbours), a prism whose sides lie in
+   *     the neighbouring planes (a drafted or angled wall: deck and floor
+   *     re-trim, no lip, no notch), or - pulling a face a boss stands in (a
+   *     cone, a dome) - the face's own region with the boss's foot filled, so
+   *     the face meets the boss where it now stands, no groove.
+   *
+   * `expected` is the volume change the move means: the moved face's own
+   * change on the part it was built on (each construction's exact
+   * prism-less-overlap), plus what lifting and re-dressing the chains
+   * measured. The caller still runs its volume, solid and id gates.
+   */
+  #carryFaceMove(
+    body: ShapeHandle, face: ShapeHandle, faceHash: number, n: Vec3T, offset: number, label: string, scratch: ShapeHandle[],
+  ): { ok: true; shape: ShapeHandle; expected: number } | { ok: false; reason: string } {
+    const k = this.#k()
+    const inside = this.#pointInFace(face)
+    if (inside === undefined) return { ok: false, reason: 'no point inside the face' }
+    const own: ShapeHandle[] = []
+    const recs = gatherFaces(k, body)
+    try {
+      // ---- 1. the blend chains that border the face come off
+      const chains: Array<{ kind: 'fillet' | 'chamfer'; size: number; faces: number; mids: Vec3T[] }> = []
+      let work = body
+      const feats = recognizeFeaturesCore(k, body, recs)
+      const touching = feats.filter((f) => f.key.startsWith('chain:') && f.removable && f.neighbourHashes.includes(faceHash) && !f.dropHashes.includes(faceHash))
+      if (touching.length > 0) {
+        for (const f of touching) {
+          const kind = f.params.chain === 'chamfer' ? 'chamfer' : 'fillet'
+          const size = Number(f.params[kind === 'fillet' ? 'radius' : 'distance'])
+          if (!(size > 1e-6)) return { ok: false, reason: `the ${kind} beside it has no single size to put back` }
+          chains.push({ kind, size, faces: f.dropHashes.length, mids: [] })
+        }
+        const removal = this.#healRemovalForEdit(k, body, touching, scratch, recs, label)
+        if (!removal.ok || removal.shape === undefined) return { ok: false, reason: `the blend beside it could not come off: ${removal.reason ?? 'heal failed'}` }
+        work = removal.shape
+        scratch.push(work)
+        // The sharp edges each chain left: edges of the lifted part whose
+        // two faces meet at an angle and that lie within the chain's size of
+        // its blend faces all along.
+        const byHash = new Map(recs.map((r) => [r.hash, r.handle] as const))
+        const workFaces = k.getSubShapes(work, 'face')
+        own.push(...workFaces)
+        const faceByHash = new Map(workFaces.map((f) => [k.hashCode(f, HM), f] as const))
+        const adjacency = this.#edgeAdjacency(work).adjacentFaces
+        const workEdges = k.getSubShapes(work, 'edge')
+        own.push(...workEdges)
+        const seen = new Set<number>()
+        for (const e of workEdges) {
+          const h = k.hashCode(e, HM)
+          if (seen.has(h)) continue
+          seen.add(h)
+          const sides = [...(adjacency.get(h) ?? [])].map((fh) => faceByHash.get(fh)).filter((f): f is ShapeHandle => f !== undefined)
+          if (sides.length !== 2) continue
+          let pts: Vec3T[]
+          try {
+            const { first, last } = k.curveParameters(e)
+            pts = [0.2, 0.5, 0.8].map((t) => { const p = k.curvePointAtParam(e, first + t * (last - first)); return [p.x, p.y, p.z] as Vec3T })
+          } catch { continue }
+          let sharp = false
+          try {
+            const m = pts[1]
+            const [a, b] = sides.map((f) => {
+              const uv = k.uvFromPoint(f, { x: m[0], y: m[1], z: m[2] })
+              const v = k.surfaceNormal(f, uv.u, uv.v)
+              return normalize([v.x, v.y, v.z])
+            })
+            sharp = Math.abs(dot(a, b)) < 1 - 1e-6
+          } catch { sharp = false }
+          if (!sharp) continue
+          touching.forEach((f, i) => {
+            const reach = chains[i].size + Math.max(1e-3, chains[i].size * 1e-3)
+            const blendFaces = f.dropHashes.map((dh) => byHash.get(dh)).filter((x): x is ShapeHandle => x !== undefined)
+            const near = pts.every((p) => {
+              const v = k.makeVertex(p[0], p[1], p[2])
+              try { return blendFaces.some((bf) => k.distanceBetween(v, bf) <= reach) } finally { try { k.release(v) } catch { /* */ } }
+            })
+            if (near) chains[i].mids.push(pts[1])
+          })
+        }
+        const bare = chains.find((c) => c.mids.length === 0)
+        if (bare !== undefined) return { ok: false, reason: `the ${bare.kind} beside it left no sharp edge to dress again` }
+      }
+
+      // ---- 2. the face moves on the (lifted) part
+      const target = touching.length === 0 ? face : this.#planarFaceAt(work, n, inside, own)
+      if (target === undefined) return { ok: false, reason: 'the face is not found once the blend is off' }
+      // The extended walls keep a seam where the face was. A blend whose
+      // edge would land exactly on that seam (a move as long as the blend is
+      // big) can't be dressed across it, so the face first steps back by a
+      // distance that keeps the seam clear of every blend's edge.
+      const travel = Math.abs(offset)
+      const clashes = (d: number) => chains.some((c) => Math.abs(d - (c.size - travel)) < Math.max(1e-3, c.size * 0.05))
+      let preShift = 0
+      if (clashes(0)) {
+        const small = Math.min(...chains.map((c) => c.size))
+        preShift = [0.5, 0.25, 0.75, 0.125].map((f) => f * small).find((d) => !clashes(d)) ?? 0
+      }
+      const moved = this.#moveFaceOn(work, target, n, offset, touching.length > 0, scratch, preShift)
+      if (!moved.ok) return moved
+      let shape = moved.shape
+      const level = dot(inside, n) + offset
+      const movedPoint = add(inside, scale(n, offset))
+      if (this.#planarFaceAt(shape, n, movedPoint, own) === undefined) return { ok: false, reason: `the face did not arrive at its new place (level ${r3(level)})` }
+
+      // ---- 3. the chains go back at their own size on the edges they left,
+      // carried with the face when the edge was on it
+      const startLevel = dot(inside, n)
+      const redressed: ShapeHandle[] = []
+      for (const c of chains) {
+        const wanted = c.mids.map((p) => Math.abs(dot(p, n) - startLevel) < 1e-6 ? add(p, scale(n, offset)) : p)
+        const edges = k.getSubShapes(shape, 'edge')
+        own.push(...edges)
+        const picked: ShapeHandle[] = []
+        const pickedHash = new Set<number>()
+        for (const p of wanted) {
+          const v = k.makeVertex(p[0], p[1], p[2])
+          try {
+            const e = edges.find((ed) => { try { return k.distanceBetween(v, ed) < 1e-5 } catch { return false } })
+            if (e === undefined) return { ok: false, reason: `the ${c.kind} edge at ${p.map(r3).join(', ')} is gone after the move` }
+            const h = k.hashCode(e, HM)
+            if (!pickedHash.has(h)) { pickedHash.add(h); picked.push(e) }
+          } finally { try { k.release(v) } catch { /* */ } }
+        }
+        let next: ShapeHandle
+        try {
+          next = c.kind === 'fillet' ? k.fillet(shape, picked, c.size) : k.chamfer(shape, picked, c.size)
+        } catch (e) {
+          return { ok: false, reason: `the ${c.kind} could not go back at ${r3(c.size)}: ${(e instanceof Error ? e.message : String(e)).slice(0, 100)}` }
+        }
+        const single = this.#asSingleSolid(next, scratch)
+        if (!single.ok || single.shape === undefined) { scratch.push(next); return { ok: false, reason: `the ${c.kind} put back at ${r3(c.size)} is not one solid` } }
+        scratch.push(single.shape)
+        if (!k.isValid(single.shape)) return { ok: false, reason: `the ${c.kind} put back at ${r3(c.size)} is not a valid solid` }
+        shape = single.shape
+        redressed.push(...picked)
+      }
+      if (chains.length > 0) {
+        // The same chains, read back: one chain of each kind and size with the
+        // same face count, every face of it on the edges dressed.
+        const resultFaces = gatherFaces(k, shape)
+        try {
+          const back = recognizeFeaturesCore(k, shape, resultFaces)
+          const faceByHash = new Map(resultFaces.map((f) => [f.hash, f.handle] as const))
+          for (const c of chains) {
+            const word = c.kind === 'fillet' ? 'radius' : 'distance'
+            const reach = c.size + Math.max(1e-3, c.size * 1e-3)
+            const found = back.some((f) => f.key.startsWith(`chain:${c.kind}:`) && f.dropHashes.length === c.faces &&
+              Math.abs(Number(f.params[word]) - c.size) <= Math.max(1e-4, c.size * 1e-4) &&
+              f.dropHashes.every((h) => {
+                const bf = faceByHash.get(h)
+                return bf !== undefined && redressed.some((e) => k.distanceBetween(e, bf) <= reach)
+              }))
+            if (!found) return { ok: false, reason: `the ${c.faces}-face ${c.kind} does not come back as the same ${c.kind} of ${word} ${r3(c.size)}` }
+          }
+        } finally { releaseFaceRecs(k, resultFaces) }
+      }
+      const bodyVol = k.getVolume(body)
+      const workVol = k.getVolume(work)
+      const movedVol = k.getVolume(moved.shape)
+      const resultVol = k.getVolume(shape)
+      // the move itself is gated exactly in #moveFaceOn; lifting and
+      // re-dressing the chains are what they measured
+      const expected = (workVol - bodyVol) + moved.expected + (resultVol - movedVol)
+      // the caller owns the result: keep it out of the scratch release
+      const at = scratch.lastIndexOf(shape)
+      if (at >= 0) scratch.splice(at, 1)
+      return { ok: true, shape, expected }
+    } catch (e) {
+      return { ok: false, reason: `kernel stopped: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}` }
+    } finally {
+      releaseFaceRecs(k, recs)
+      for (const s of own) { try { k.release(s) } catch { /* */ } }
+    }
+  }
+
+  /**
+   * WO-2767: build the move of planar `face` on `body` by `offset` along `n`
+   * with the first construction that re-closes the part (see
+   * #carryFaceMove). Returns the single solid and the move's exact volume
+   * change (each construction's prism less what the body fills of it).
+   * `straightFirst` tries the straight prism too (on a part whose blends
+   * just came off; on the imported part it already failed).
+   */
+  #moveFaceOn(
+    body: ShapeHandle, face: ShapeHandle, n: Vec3T, offset: number, straightFirst: boolean, scratch: ShapeHandle[], preShift = 0,
+  ): { ok: true; shape: ShapeHandle; expected: number } | { ok: false; reason: string } {
+    const k = this.#k()
+    const bb = k.getBoundingBox(body, false)
+    const bodyScale = Math.max(bb.xmax - bb.xmin, bb.ymax - bb.ymin, bb.zmax - bb.zmin, 1)
+    const overlap = Math.min(1e-4, Math.max(1e-7, bodyScale * 1e-7))
+    const sign = offset > 0 ? 1 : -1
+    // the face's prism over `distance` along n, with the GEO-10 microscopic
+    // overlap at the source face
+    const extrudeBy = (f: ShapeHandle, distance: number): ShapeHandle => {
+      const shift = -sign * overlap
+      const seed = k.translate(f, n[0] * shift, n[1] * shift, n[2] * shift)
+      scratch.push(seed)
+      const v = scale(n, distance + sign * overlap)
+      const prism = k.extrude(seed, v[0], v[1], v[2])
+      scratch.push(prism)
+      return prism
+    }
+    const extrudeFace = (f: ShapeHandle): ShapeHandle => extrudeBy(f, offset)
+    const applyOn = (base: ShapeHandle, tool: ShapeHandle, add: boolean): ShapeHandle | undefined => {
+      const raw = add ? k.fuse(base, tool) : k.cut(base, tool)
+      if (!k.isValid(raw) || !(k.getVolume(raw) > 1e-9)) { scratch.push(raw); return undefined }
+      // #asSingleSolid takes the compound wrapper into scratch itself
+      const single = this.#asSingleSolid(raw, scratch)
+      if (!single.ok || single.shape === undefined) { scratch.push(raw); return undefined }
+      scratch.push(single.shape)
+      return single.shape
+    }
+    const apply = (tool: ShapeHandle) => applyOn(body, tool, offset > 0)
+    const reasons: string[] = []
+    const own: ShapeHandle[] = []
+    try {
+      const straight = extrudeFace(face)
+      // (a) the straight prism, where every neighbour lets it
+      if (straightFirst) {
+        const probe = this.#prismNeighbourMiss(body, face, straight, n, offset)
+        const expected = probe.miss === undefined ? this.#prismChange(body, straight, offset, scratch) : undefined
+        if (probe.miss !== undefined) reasons.push(`the straight move meets ${probe.miss.kind}`)
+        else if (expected === undefined) reasons.push('the straight move could not be measured')
+        else {
+          let base: ShapeHandle | undefined = body
+          let from: ShapeHandle | undefined = face
+          if (preShift > 0) {
+            // step the face back by preShift first: the region behind it must
+            // be all material (a pull) or all open (a push), so stepping back
+            // and moving the whole way builds the same part as the move alone
+            base = undefined
+            const inside = this.#pointInFace(face)
+            const area = k.getSurfaceArea(face)
+            const back = k.extrude(face, ...(scale(n, -sign * preShift) as [number, number, number]))
+            scratch.push(back)
+            const stepped = inside === undefined ? undefined : applyOn(body, back, offset < 0)
+            if (stepped !== undefined && Math.abs(Math.abs(k.getVolume(stepped) - k.getVolume(body)) - area * preShift) <= Math.max(1e-3, area * preShift * 1e-6)) {
+              from = this.#planarFaceAt(stepped, n, add(inside as Vec3T, scale(n, -sign * preShift)), own)
+              base = from === undefined ? undefined : stepped
+            }
+          }
+          if (base === undefined || from === undefined) reasons.push('the face could not step back clear of the blend edge')
+          else {
+            const tool = preShift > 0 ? extrudeBy(from, offset + sign * preShift) : straight
+            const shape = applyOn(base, tool, offset > 0)
+            if (shape !== undefined && this.#prismWallLeft(shape, tool, n, probe.besides) === undefined &&
+              Math.abs(k.getVolume(shape) - k.getVolume(body) - expected) <= Math.max(1e-2, Math.abs(expected) * 5e-3)) {
+              return { ok: true, shape, expected }
+            }
+            reasons.push('the straight move left a wall')
+          }
+        }
+      }
+      // (b) sides in the neighbouring planes: a drafted or angled wall
+      const planar = this.#planeBoundPrism(body, face, n, offset, scratch)
+      if (planar.ok) {
+        const shape = apply(planar.prism)
+        const expected = shape === undefined ? undefined : this.#prismChange(body, planar.prism, offset, scratch)
+        if (shape !== undefined && expected !== undefined) return { ok: true, shape, expected }
+        reasons.push('the move between the neighbouring planes did not build')
+      } else reasons.push(planar.reason)
+      // (c) pulling a face a boss stands in: fill the boss's foot
+      if (offset > 0) {
+        const filled = this.#bossFootFill(body, face, n, offset, straight, extrudeFace, scratch)
+        if (filled.ok) {
+          const shape = apply(filled.tool)
+          if (shape !== undefined) return { ok: true, shape, expected: filled.expected }
+          reasons.push('the move up to the boss did not build')
+        } else reasons.push(filled.reason)
+      }
+      return { ok: false, reason: reasons.join('; ') }
+    } finally {
+      for (const f of own) { try { k.release(f) } catch { /* */ } }
+    }
+  }
+
+  /**
+   * WO-2856: move a planar face whose dressings none of #carryFaceMove's
+   * constructions re-close - the countersinks, edge chamfers and pocket-rim
+   * blends around the top of an imported part (Sample Parts/Step Test With
+   * Holes) - by carrying them with it, the way WO-2767 carries a blend chain:
+   * every dressing keeps its own size on the moved face.
+   *
+   * The dressings are the faces reached from `face` through faces that are
+   * not square to the move (a cone, chamfer, fillet); a square wall (hole,
+   * side wall, pocket wall) runs on down and ends the walk. Below the
+   * deepest dressing, a band one move long must cross only square walls:
+   * there the part is a straight prism, so taking that band out (a push) or
+   * stretching it (a pull) is the move itself. The part above the band
+   * rides along; the part below it stays.
+   *
+   * Refused (the caller keeps its WO-2760 line) when anything stands above
+   * the face, a dressing reaches past the band, or any other non-square face
+   * lies in it. `expected` is the band's own volume, signed.
+   */
+  #carryTopZone(
+    body: ShapeHandle, face: ShapeHandle, faceHash: number, n: Vec3T, offset: number, scratch: ShapeHandle[],
+  ): { ok: true; shape: ShapeHandle; expected: number } | { ok: false; reason: string } {
+    const k = this.#k()
+    const inside = this.#pointInFace(face)
+    if (inside === undefined) return { ok: false, reason: 'no point inside the face' }
+    const top = dot(inside, n)
+    const travel = Math.abs(offset)
+    const SQUARE = 1e-3 // the #prismNeighbourMiss threshold
+    const TOL = 1e-4
+    const recs = gatherFaces(k, body)
+    const own: ShapeHandle[] = []
+    // the level range of a face along n: its edges sampled densely (a
+    // face's extremes along a direction lie on its boundary unless it bulges,
+    // so its interior is sampled too). A box is too loose: OCCT's box of an
+    // imported countersink cone stands 0.036 mm above the face it meets.
+    const range = (f: ShapeHandle): { lo: number; hi: number } => {
+      let lo = Infinity
+      let hi = -Infinity
+      const take = (p: { x: number; y: number; z: number }) => {
+        const level = dot([p.x, p.y, p.z], n)
+        lo = Math.min(lo, level)
+        hi = Math.max(hi, level)
+      }
+      const edges = k.getSubShapes(f, 'edge')
+      try {
+        for (const e of edges) {
+          try {
+            const { first, last } = k.curveParameters(e)
+            for (let i = 0; i <= 24; i++) take(k.curvePointAtParam(e, first + (i / 24) * (last - first)))
+          } catch { /* a degenerate edge */ }
+        }
+      } finally {
+        for (const e of edges) { try { k.release(e) } catch { /* */ } }
+      }
+      try {
+        const uvb = k.uvBounds(f)
+        for (let i = 1; i < 8; i++) {
+          for (let j = 1; j < 8; j++) {
+            const uu = uvb.uMin + (i / 8) * (uvb.uMax - uvb.uMin)
+            const vv = uvb.vMin + (j / 8) * (uvb.vMax - uvb.vMin)
+            if (k.classifyPointOnFace(f, uu, vv) === 'in') take(k.pointOnSurface(f, uu, vv))
+          }
+        }
+      } catch { /* edges only */ }
+      return { lo, hi }
+    }
+    const isSquare = (f: ShapeHandle): boolean => {
+      try {
+        const uvb = k.uvBounds(f)
+        for (const fu of [0.05, 0.3, 0.5, 0.7, 0.95]) {
+          for (const fv of [0.05, 0.3, 0.5, 0.7, 0.95]) {
+            const m = k.surfaceNormal(f, uvb.uMin + fu * (uvb.uMax - uvb.uMin), uvb.vMin + fv * (uvb.vMax - uvb.vMin))
+            const mv: Vec3T = [m.x, m.y, m.z]
+            if (!(len(mv) > 1e-12) || Math.abs(dot(normalize(mv), n)) > SQUARE) return false
+          }
+        }
+        return true
+      } catch { return false }
+    }
+    try {
+      const info = new Map<number, { handle: ShapeHandle; square: boolean; lo: number; hi: number }>()
+      for (const r of recs) {
+        const { lo, hi } = range(r.handle)
+        info.set(r.hash, { handle: r.handle, square: r.hash !== faceHash && isSquare(r.handle), lo, hi })
+      }
+      for (const [h, f] of info) {
+        if (h !== faceHash && f.hi > top + TOL) return { ok: false, reason: 'the part stands above the face' }
+      }
+      // the dressings: reached from the face through non-square faces
+      const dressing = new Set<number>([faceHash])
+      const queue: ShapeHandle[] = [face]
+      while (queue.length > 0) {
+        const at = queue.shift() as ShapeHandle
+        const near = k.adjacentFaces(body, at)
+        own.push(...near)
+        for (const nb of near) {
+          const h = k.hashCode(nb, HM)
+          const f = info.get(h)
+          if (f === undefined || f.square || dressing.has(h)) continue
+          dressing.add(h)
+          queue.push(nb)
+        }
+      }
+      if (dressing.size === 1) return { ok: false, reason: 'no dressing beside the face to carry' }
+      let deepest = top
+      for (const h of dressing) deepest = Math.min(deepest, (info.get(h) as { lo: number }).lo)
+      const depth = top - deepest
+      const cut = deepest - Math.max(0.05, depth * 0.1) // the band's top
+      const floor = cut - travel // the band's bottom
+      for (const [h, f] of info) {
+        if (f.square || dressing.has(h)) continue
+        if (f.hi > floor - TOL) return { ok: false, reason: 'another curved or angled face lies where the carried part would move' }
+      }
+      // slabs across the whole part, square to n, between two levels
+      const bb = k.getBoundingBox(body, false)
+      const size = 2 * Math.hypot(bb.xmax - bb.xmin, bb.ymax - bb.ymin, bb.zmax - bb.zmin) + 10
+      const centre: Vec3T = [(bb.xmin + bb.xmax) / 2, (bb.ymin + bb.ymax) / 2, (bb.zmin + bb.zmax) / 2]
+      const ref: Vec3T = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
+      const u = normalize(cross(n, ref))
+      const w = cross(n, u)
+      const bottom = Math.min(...[bb.xmin, bb.xmax].flatMap((x) => [bb.ymin, bb.ymax].flatMap((y) => [bb.zmin, bb.zmax].map((z) => dot([x, y, z], n)))))
+      const slab = (from: number, to: number): ShapeHandle => {
+        const base = add(centre, scale(n, from - dot(centre, n)))
+        const corner = (a: number, b: number) => {
+          const p = add(base, add(scale(u, a * size), scale(w, b * size)))
+          return { x: p[0], y: p[1], z: p[2] }
+        }
+        const pts = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]
+        const edges = pts.map((p, i) => k.makeLineEdge(p, pts[(i + 1) % 4]))
+        own.push(...edges)
+        const wire = k.makeWire(edges)
+        own.push(wire)
+        const sheet = k.makeFace(wire)
+        own.push(sheet)
+        const v = scale(n, to - from)
+        const solid = k.extrude(sheet, v[0], v[1], v[2])
+        scratch.push(solid)
+        return solid
+      }
+      const band = k.common(body, slab(floor, cut))
+      scratch.push(band)
+      const bandVol = k.getVolume(band)
+      if (!(bandVol > 1e-9)) return { ok: false, reason: 'the band below the dressings has no volume' }
+      // a push keeps the part below the band and lowers the part above it;
+      // a pull keeps the part up to the band's top and raises the band and
+      // everything above it
+      const keep = k.common(body, slab(bottom - 1, offset < 0 ? floor : cut))
+      scratch.push(keep)
+      const ride = k.common(body, slab(offset < 0 ? cut : floor, top + 1))
+      scratch.push(ride)
+      const shift = scale(n, offset)
+      const moved = k.translate(ride, shift[0], shift[1], shift[2])
+      scratch.push(moved)
+      const raw = k.fuse(keep, moved)
+      if (!k.isValid(raw) || !(k.getVolume(raw) > 1e-9)) { scratch.push(raw); return { ok: false, reason: 'the carried part did not join back on' } }
+      const single = this.#asSingleSolid(raw, scratch)
+      if (!single.ok || single.shape === undefined) { scratch.push(raw); return { ok: false, reason: `the carried part is not one solid: ${single.reason ?? 'not a solid'}` } }
+      return { ok: true, shape: single.shape, expected: offset < 0 ? -bandVol : bandVol }
+    } catch (e) {
+      return { ok: false, reason: `kernel stopped: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}` }
+    } finally {
+      releaseFaceRecs(k, recs)
+      for (const x of own) { try { k.release(x) } catch { /* */ } }
+    }
+  }
+
+  /**
+   * WO-2767 (PP-11): the prism of a straight-edged planar face whose
+   * neighbours are all planes, with each side lying in the neighbour plane
+   * across that edge. Every corner moves to where the moved face's plane
+   * meets its two neighbours' planes, so a drafted wall moves and the deck
+   * and floor re-trim to it - no lip above the deck, no notch at the floor.
+   */
+  #planeBoundPrism(
+    body: ShapeHandle, face: ShapeHandle, n: Vec3T, offset: number, scratch: ShapeHandle[],
+  ): { ok: true; prism: ShapeHandle } | { ok: false; reason: string } {
+    const k = this.#k()
+    const own: ShapeHandle[] = []
+    const t3 = (p: { x: number; y: number; z: number }): Vec3T => [p.x, p.y, p.z]
+    const v3 = (p: Vec3T) => ({ x: p[0], y: p[1], z: p[2] })
+    try {
+      const wires = k.getSubShapes(face, 'wire')
+      own.push(...wires)
+      if (wires.length !== 1) return { ok: false, reason: 'the face has openings in it' }
+      const neighbours = k.adjacentFaces(body, face)
+      own.push(...neighbours)
+      // each straight edge of the face with the plane across it
+      const segs: Array<{ a: Vec3T; b: Vec3T; plane: { n: Vec3T; d: number } }> = []
+      for (const nb of neighbours) {
+        if (k.surfaceType(nb) !== 'plane') return { ok: false, reason: 'a neighbour is not flat' }
+        const uvb = k.uvBounds(nb)
+        const m = normalize(t3(k.surfaceNormal(nb, (uvb.uMin + uvb.uMax) / 2, (uvb.vMin + uvb.vMax) / 2)))
+        const o = t3(k.pointOnSurface(nb, (uvb.uMin + uvb.uMax) / 2, (uvb.vMin + uvb.vMax) / 2))
+        if (Math.abs(dot(m, n)) > 1 - 1e-6) return { ok: false, reason: 'a neighbour is parallel to the face' }
+        const shared = k.sharedEdges(face, nb)
+        own.push(...shared)
+        for (const e of shared) {
+          if (k.curveType(e) !== 'line') return { ok: false, reason: 'the face has a curved edge' }
+          const { first, last } = k.curveParameters(e)
+          segs.push({ a: t3(k.curvePointAtParam(e, first)), b: t3(k.curvePointAtParam(e, last)), plane: { n: m, d: dot(m, o) } })
+        }
+      }
+      const edgeCount = k.getSubShapes(wires[0], 'edge')
+      own.push(...edgeCount)
+      if (segs.length < 3 || segs.length !== edgeCount.length) return { ok: false, reason: 'the face is not bounded by flat neighbours all round' }
+      // order the edges into one loop
+      const same = (p: Vec3T, q: Vec3T) => len(sub(p, q)) < 1e-6
+      const loop = [segs[0]]
+      const rest = segs.slice(1)
+      while (rest.length > 0) {
+        const end = loop[loop.length - 1].b
+        const i = rest.findIndex((s) => same(s.a, end) || same(s.b, end))
+        if (i < 0) return { ok: false, reason: 'the face outline does not close' }
+        const s = rest.splice(i, 1)[0]
+        loop.push(same(s.a, end) ? s : { a: s.b, b: s.a, plane: s.plane })
+      }
+      if (!same(loop[loop.length - 1].b, loop[0].a)) return { ok: false, reason: 'the face outline does not close' }
+      // corner i joins edge i-1 and edge i; it moves to the three-plane point
+      const level = dot(loop[0].a, n) + offset
+      const meet = (p1: { n: Vec3T; d: number }, p2: { n: Vec3T; d: number }): Vec3T | undefined => {
+        const det = dot(n, cross(p1.n, p2.n))
+        if (Math.abs(det) < 1e-6) return undefined
+        return scale(add(add(scale(cross(p1.n, p2.n), level), scale(cross(p2.n, n), p1.d)), scale(cross(n, p1.n), p2.d)), 1 / det)
+      }
+      const bottom = loop.map((s) => s.a)
+      const top: Vec3T[] = []
+      for (let i = 0; i < loop.length; i++) {
+        const p = meet(loop[(i + loop.length - 1) % loop.length].plane, loop[i].plane)
+        if (p === undefined) return { ok: false, reason: 'two neighbours of a corner are parallel' }
+        top.push(p)
+      }
+      // a move long enough to fold the face over (an edge reversing) is not
+      // a face move any more
+      for (let i = 0; i < loop.length; i++) {
+        const j = (i + 1) % loop.length
+        if (!(dot(sub(top[j], top[i]), sub(bottom[j], bottom[i])) > 1e-9)) return { ok: false, reason: 'the move folds the face over' }
+      }
+      const polygon = (pts: Vec3T[]): ShapeHandle => {
+        const edges = pts.map((p, i) => k.makeLineEdge(v3(p), v3(pts[(i + 1) % pts.length])))
+        own.push(...edges)
+        const wire = k.makeWire(edges)
+        own.push(wire)
+        const f = k.makeFace(wire)
+        own.push(f)
+        return f
+      }
+      const faces = [polygon(bottom), polygon(top)]
+      for (let i = 0; i < loop.length; i++) {
+        const j = (i + 1) % loop.length
+        faces.push(polygon([bottom[i], bottom[j], top[j], top[i]]))
+      }
+      let prism = k.sewAndSolidify(faces, 1e-6)
+      scratch.push(prism)
+      // the shell's orientation follows the face loops; turn an inside-out
+      // solid the right way out
+      if (k.getVolume(prism) < 0) { prism = k.reverseShape(prism); scratch.push(prism) }
+      if (!k.isValid(prism) || !(k.getVolume(prism) > 1e-9)) return { ok: false, reason: 'the move between the neighbouring planes is not a valid solid' }
+      return { ok: true, prism }
+    } catch (e) {
+      return { ok: false, reason: `the move between the neighbouring planes stopped: ${(e instanceof Error ? e.message : String(e)).slice(0, 100)}` }
+    } finally {
+      for (const s of own) { try { k.release(s) } catch { /* */ } }
+    }
+  }
+
+  /**
+   * WO-2767 (PP-12): pulling a face that a boss stands in (a cone, a dome).
+   * The face's region with each boss's foot filled is extruded; what of it
+   * the part does not already fill, joined to the straight prism, is added -
+   * so the face rises to meet the boss where the boss now stands. A pocket
+   * of that region cut off from the straight prism (a boss's own bore) is
+   * left open. Holes in the face stay holes; their neighbours must still let
+   * the straight prism re-close them.
+   */
+  #bossFootFill(
+    body: ShapeHandle, face: ShapeHandle, n: Vec3T, offset: number, straight: ShapeHandle,
+    extrudeFace: (f: ShapeHandle) => ShapeHandle, scratch: ShapeHandle[],
+  ): { ok: true; tool: ShapeHandle; expected: number } | { ok: false; reason: string } {
+    const k = this.#k()
+    const own: ShapeHandle[] = []
+    const t3 = (p: { x: number; y: number; z: number }): Vec3T => [p.x, p.y, p.z]
+    const v3 = (p: Vec3T) => ({ x: p[0], y: p[1], z: p[2] })
+    try {
+      const outer = k.outerWire(face)
+      own.push(outer)
+      const wires = k.getSubShapes(face, 'wire')
+      own.push(...wires)
+      const eps = 0.01
+      const bossWires: ShapeHandle[] = []
+      const holeWires: ShapeHandle[] = []
+      const bossEdges = new Set<number>()
+      for (const w of wires) {
+        if (k.isSame(w, outer)) continue
+        const edges = k.getSubShapes(w, 'edge')
+        own.push(...edges)
+        if (edges.length === 0) continue
+        // just above the face, just inside the opening: material there is a
+        // boss standing in it, open space is a hole
+        const { first, last } = k.curveParameters(edges[0])
+        const t = (first + last) / 2
+        const p = t3(k.curvePointAtParam(edges[0], t))
+        const across = normalize(cross(n, normalize(t3(k.curveTangent(edges[0], t)))))
+        const a = add(p, scale(across, eps))
+        const onFaceSide = this.#onFace(face, a, 1e-6)
+        const intoOpening = onFaceSide ? scale(across, -1) : across
+        const probe = add(add(p, scale(intoOpening, eps)), scale(n, eps))
+        if (k.containsPoint(body, v3(probe))) {
+          bossWires.push(w)
+          for (const e of edges) bossEdges.add(k.hashCode(e, HM))
+        } else holeWires.push(w)
+      }
+      if (bossWires.length === 0) return { ok: false, reason: 'no boss stands in the face' }
+      // the other neighbours must still let the straight prism close them
+      const isBoss = (nb: ShapeHandle) => {
+        const shared = k.sharedEdges(face, nb)
+        try { return shared.some((e) => bossEdges.has(k.hashCode(e, HM))) } finally { for (const e of shared) { try { k.release(e) } catch { /* */ } } }
+      }
+      const probe = this.#prismNeighbourMiss(body, face, straight, n, offset, isBoss)
+      if (probe.miss !== undefined) return { ok: false, reason: `beside the boss it still meets ${probe.miss.kind}` }
+      let region = k.makeFace(outer)
+      own.push(region)
+      if (holeWires.length > 0) { region = k.addHolesInFace(region, holeWires); own.push(region) }
+      const slab = extrudeFace(region)
+      const gap = k.cut(slab, body)
+      scratch.push(gap)
+      const pieces = k.getSubShapes(gap, 'solid')
+      own.push(...pieces)
+      const kept = pieces.filter((s) => { try { return k.distanceBetween(s, straight) < 1e-6 } catch { return false } })
+      if (kept.length === 0) return { ok: false, reason: 'nothing to add beside the boss' }
+      let tool = kept[0]
+      for (const s of kept.slice(1)) { tool = k.fuse(tool, s); scratch.push(tool) }
+      if (tool === kept[0]) { tool = k.copy(kept[0]); scratch.push(tool) }
+      const expected = kept.reduce((sum, s) => sum + k.getVolume(s), 0)
+      if (!Number.isFinite(expected) || !(expected > 0)) return { ok: false, reason: 'the space beside the boss could not be measured' }
+      return { ok: true, tool, expected }
+    } catch (e) {
+      return { ok: false, reason: `the move up to the boss stopped: ${(e instanceof Error ? e.message : String(e)).slice(0, 100)}` }
+    } finally {
+      for (const s of own) { try { k.release(s) } catch { /* */ } }
+    }
+  }
+
+  /**
+   * WO-2760: can the straight prism re-close the part beside every neighbour
+   * of the moved face? A neighbour whose normal is square to the move all
+   * over (planes, cylinders and extrusions along the move) is continued by
+   * the prism's side wall exactly. For any other neighbour, probe just
+   * outside each prism side wall along the shared edges: a pull is right
+   * only where that space is already body (the neighbour overhangs the face,
+   * as the owner's dome does); a push only where it is already empty. Any other
+   * probe is a wall the move would leave behind. Returns the first such
+   * neighbour, named for the operator, as `miss`. The neighbours that passed
+   * the probes come back as `besides` (named, with points on the prism side
+   * wall beside them) for #prismWallLeft to check the built result against.
+   */
+  #prismNeighbourMiss(
+    body: ShapeHandle, face: ShapeHandle, prism: ShapeHandle, n: Vec3T, offset: number,
+    skip?: (neighbour: ShapeHandle) => boolean,
+  ): { miss?: { kind: string; surface: string }; besides: Array<{ kind: string; surface: string; at: Vec3T[] }> } {
+    const k = this.#k()
+    const SQUARE = 1e-3 // |cos| of the neighbour normal to the move: under 0.06 deg off square
+    const eps = Math.min(0.02, Math.max(1e-3, Math.abs(offset) * 0.01))
+    const v3 = (p: Vec3T) => ({ x: p[0], y: p[1], z: p[2] })
+    const t3 = (p: { x: number; y: number; z: number }): Vec3T => [p.x, p.y, p.z]
+    const neighbours = k.adjacentFaces(body, face)
+    const besides: Array<{ kind: string; surface: string; at: Vec3T[] }> = []
+    // Probe heights along the move: through the whole travel and up to the
+    // destination itself (just short of the prism's end cap).
+    const heights = [0.1, 0.35, 0.65, 0.9].map((f) => offset * f)
+      .concat(offset - Math.sign(offset) * Math.min(eps, Math.abs(offset) * 0.05))
+    try {
+      for (const nb of neighbours) {
+        // WO-2767: a neighbour the caller re-closes another way
+        if (skip?.(nb) === true) continue
+        const surface = String(k.surfaceType(nb))
+        const uvb = k.uvBounds(nb)
+        let square = true
+        for (const fu of [0.1, 0.5, 0.9]) {
+          for (const fv of [0.1, 0.5, 0.9]) {
+            try {
+              const m = t3(k.surfaceNormal(nb, uvb.uMin + fu * (uvb.uMax - uvb.uMin), uvb.vMin + fv * (uvb.vMax - uvb.vMin)))
+              if (!(len(m) > 1e-12) || Math.abs(dot(normalize(m), n)) > SQUARE) square = false
+            } catch { square = false } // unreadable: let the probes decide
+          }
+        }
+        if (square) continue
+        // A coplanar neighbour (an imported top split in two) stays put; the
+        // step the prism raises against it is the move itself.
+        if (surface === 'plane') {
+          const m = t3(k.surfaceNormal(nb, (uvb.uMin + uvb.uMax) / 2, (uvb.vMin + uvb.vMax) / 2))
+          if (len(m) > 1e-12 && Math.abs(dot(normalize(m), n)) > 1 - 1e-9) continue
+        }
+        let tangent = false
+        let decided = 0
+        let miss = false
+        const at: Vec3T[] = []
+        const edges =(() => { try { return k.sharedEdges(face, nb) } catch { return [] as ShapeHandle[] } })()
+        try {
+          for (const e of edges) {
+            const { first, last } = k.curveParameters(e)
+            for (const ft of [0.15, 0.5, 0.85]) {
+              const t = first + ft * (last - first)
+              const p = t3(k.curvePointAtParam(e, t))
+              const across = cross(n, normalize(t3(k.curveTangent(e, t))))
+              if (!(len(across) > 0.5)) continue
+              const w = normalize(across)
+              try {
+                const uv = k.uvFromPoint(nb, v3(p))
+                const m = t3(k.surfaceNormal(nb, uv.u, uv.v))
+                if (len(m) > 1e-12 && Math.abs(dot(normalize(m), n)) > 0.999) tangent = true
+              } catch { /* naming only */ }
+              at.push(add(p, scale(n, offset / 2)))
+              for (const h of heights) {
+                const base = add(p, scale(n, h))
+                const a = add(base, scale(w, eps))
+                const b = add(base, scale(w, -eps))
+                const inA = k.containsPoint(prism, v3(a))
+                if (inA === k.containsPoint(prism, v3(b))) continue
+                decided++
+                const besideIsBody = k.containsPoint(body, v3(inA ? b : a))
+                if (besideIsBody !== offset > 0) miss = true
+              }
+            }
+          }
+        } finally {
+          for (const e of edges) { try { k.release(e) } catch { /* */ } }
+        }
+        const kind = tangent || surface === 'torus' ? 'a fillet'
+          : surface === 'cone' ? 'a cone (taper or countersink)'
+            : surface === 'plane' ? 'an angled face (draft or chamfer)'
+              : surface === 'sphere' ? 'a sphere'
+                : 'a curved face'
+        if (miss || decided === 0) return { miss: { kind, surface }, besides }
+        besides.push({ kind, surface, at })
+      }
+      return { besides }
+    } finally {
+      for (const f of neighbours) { try { k.release(f) } catch { /* */ } }
+    }
+  }
+
+  /**
+   * WO-2760: did the built result keep any of the prism's side wall beside a
+   * neighbour that is not square to the move? That wall is right only where
+   * the neighbour swallows it (the dome overhanging the plate top); a result
+   * face lying on it is a groove, step or lip the move left behind. Returns
+   * that neighbour, named as #prismNeighbourMiss names it.
+   */
+  #prismWallLeft(
+    result: ShapeHandle, prism: ShapeHandle, n: Vec3T,
+    besides: Array<{ kind: string; surface: string; at: Vec3T[] }>,
+  ): { kind: string; surface: string } | undefined {
+    if (besides.length === 0) return undefined
+    const k = this.#k()
+    const ON = 1e-4 // mm: a boolean face built on the prism wall lies on it to kernel tolerance
+    const t3 = (p: { x: number; y: number; z: number }): Vec3T => [p.x, p.y, p.z]
+    const onFace = (f: ShapeHandle, p: Vec3T) => {
+      try { return len(sub(p, t3(k.projectPointOnFace(f, { x: p[0], y: p[1], z: p[2] })))) < ON } catch { return false }
+    }
+    const prismFaces = k.getSubShapes(prism, 'face')
+    const resultFaces = k.getSubShapes(result, 'face')
+    try {
+      const walls: Array<{ face: ShapeHandle; kind: string; surface: string }> = []
+      for (const pf of prismFaces) {
+        try {
+          const uvb = k.uvBounds(pf)
+          const m = t3(k.surfaceNormal(pf, (uvb.uMin + uvb.uMax) / 2, (uvb.vMin + uvb.vMax) / 2))
+          if (len(m) > 1e-12 && Math.abs(dot(normalize(m), n)) > 1 - 1e-6) continue // an end cap
+        } catch { /* treat as a side wall */ }
+        const nb = besides.find((b) => b.at.some((p) => onFace(pf, p)))
+        if (nb !== undefined) walls.push({ face: pf, kind: nb.kind, surface: nb.surface })
+      }
+      if (walls.length === 0) return undefined
+      for (const rf of resultFaces) {
+        const pts: Vec3T[] = []
+        try {
+          const uvb = k.uvBounds(rf)
+          for (const fu of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+            for (const fv of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+              const u = uvb.uMin + fu * (uvb.uMax - uvb.uMin)
+              const v = uvb.vMin + fv * (uvb.vMax - uvb.vMin)
+              if (k.classifyPointOnFace(rf, u, v) !== 'in') continue
+              pts.push(t3(k.pointOnSurface(rf, u, v)))
+            }
+          }
+        } catch { continue }
+        if (pts.length === 0) continue
+        const wall = walls.find((w) => pts.every((p) => onFace(w.face, p)))
+        if (wall !== undefined) return { kind: wall.kind, surface: wall.surface }
+      }
+      return undefined
+    } finally {
+      for (const f of prismFaces) { try { k.release(f) } catch { /* */ } }
+      for (const f of resultFaces) { try { k.release(f) } catch { /* */ } }
     }
   }
 
@@ -5874,7 +7046,33 @@ export class GeomEngine {
     }
   }
 
-  /** faceOffset: `featureKey` names the planar face StableId to push/pull. */
+  /** WO-2813: curved hole faces use the same heal/re-cut and lineage route as
+   * Resize Hole. A positive typed distance grows the opening. The selected
+   * cylinder keeps its depth; a cone keeps its angle and meets the unchanged
+   * pilot at its new intersection (distance / cos(halfAngle) at the mouth). */
+  #offsetHoleFace(rec: BodyRecord, faceId: StableId, hash: number, distance: number, fid: string): OpResult {
+    const k = this.#k()
+    const recs = gatherFaces(k, rec.shape as ShapeHandle)
+    try {
+      const face = recs.find(f => f.hash === hash)
+      const feature = recognizeFeaturesCore(k, rec.shape as ShapeHandle, recs).find(f =>
+        (f.type === 'throughHole' || f.type === 'blindHole' || f.type === 'counterboreStack') && f.dropHashes.includes(hash))
+      if (face === undefined || feature === undefined) {
+        return this.#editRefusal("Push/Pull cannot re-close this curved face's neighbours. Nothing was changed.", faceId, 'warning')
+      }
+      const pilotR = Number(feature.params.diameter) / 2
+      const counterbore = face.type === 'cylinder' && (face.radius ?? 0) > pilotR + 1e-4
+      return this.#recutHole(rec, {
+        featureId: fid, featureKey: feature.key,
+        kind: 'holeDiameter', delta: face.type === 'cylinder' ? 2 * distance : 0,
+        ...(counterbore ? { step: 'counterbore' as const } : {}),
+      }, { coneOffset: face.type === 'cone' ? distance : 0 })
+    } finally {
+      releaseFaceRecs(k, recs)
+    }
+  }
+
+  /** faceOffset: `featureKey` names the selected face StableId to push/pull. */
   #editFaceOffset(rec: BodyRecord, req: FaceEditRequest): OpResult {
     return this.#offsetFaceBoolean(rec, req.featureKey as StableId, req.delta, req.featureId, 'faceOffset')
   }
@@ -5917,11 +7115,16 @@ export class GeomEngine {
     }
   }
 
-  /** Remove exactly one recognized imported blend, find the one
-   * sharp edge that removal created, then dress that recovered edge at the new
-   * radius. The two kernel operations are assigned and minted once against the
-   * original body, so callers receive one edit delta and one undoable feature. */
-  #editImportedFilletRadius(rec: BodyRecord, req: ImportedFilletRequest): ImportedFilletBuildResult {
+  /** Remove one recognized imported blend, find the sharp edge(s) that removal
+   * created, then dress them at the new size. The two kernel operations are
+   * assigned and minted once against the original body, so callers receive one
+   * edit delta and one undoable feature.
+   *
+   * WO-2766: the blend may be a whole fillet or chamfer CHAIN (`chain:` keys -
+   * a boss-foot torus, a top-edge loop, a pocket's floor fillets). The chain
+   * comes out through the kernel's RemoveFeatures and every recovered sharp
+   * edge is dressed together, so the chain keeps its shape at the new size. */
+  #editImportedBlend(rec: BodyRecord, req: ImportedBlendRequest, kind: 'fillet' | 'chamfer', newSize: number): ImportedFilletBuildResult {
     const k = this.#k()
     const recs = gatherFaces(k, rec.shape as ShapeHandle)
     const scratch: ShapeHandle[] = []
@@ -5929,31 +7132,57 @@ export class GeomEngine {
     let result: ShapeHandle | undefined
     let originalEdgeHandles: ShapeHandle[] = []
     let healedEdgeHandles: ShapeHandle[] = []
+    let healedFaces: FaceRec[] = []
+    const label = kind === 'fillet' ? 'filletRadius' : 'chamferDistance'
+    const sizeWord = kind === 'fillet' ? 'radius' : 'distance'
     const refuse = (result: OpResult): ImportedFilletBuildResult => ({ ok: false, diagnostics: result.diagnostics })
     try {
       const feats = recognizeFeaturesCore(k, rec.shape as ShapeHandle, recs)
       const feature = feats.find((candidate) => candidate.key === req.importedFeatureKey)
       if (feature === undefined) {
-        return refuse(this.#editRefusal(`filletRadius: feature ${req.importedFeatureKey} not found on this body`, req.importedFeatureKey, 'error'))
+        return refuse(this.#editRefusal(`${label}: feature ${req.importedFeatureKey} not found on this body`, req.importedFeatureKey, 'error'))
       }
-      if (!feature.type.startsWith('fillet') || !feature.removable || feature.dropHashes.length !== 1) {
+      const chain = feature.key.startsWith('chain:') && feature.removable && feature.params.chain === kind
+      const singleFillet = kind === 'fillet' && feature.type.startsWith('fillet') && feature.removable && feature.dropHashes.length === 1 && !feature.key.startsWith('chain:')
+      if (!chain && !singleFillet) {
         return refuse(this.#editRefusal(
-          `filletRadius: feature ${req.importedFeatureKey} is not one independently removable imported fillet`,
+          kind === 'fillet'
+            ? `${label}: feature ${req.importedFeatureKey} is not one independently removable imported fillet`
+            : `${label}: feature ${req.importedFeatureKey} is not an imported chamfer this edit can change`,
           req.importedFeatureKey,
           'warning',
           { featureClass: feature.type },
         ))
       }
       const byHash = new Map(recs.map((face) => [face.hash, face] as const))
-      const band = byHash.get(feature.dropHashes[0])
-      const oldRadius = band === undefined ? undefined : this.#measureImportedFilletRadius(band)
-      if (oldRadius === undefined) {
-        return refuse(this.#editRefusal(`filletRadius: current radius for ${req.importedFeatureKey} could not be measured`, req.importedFeatureKey, 'error'))
+      let oldSize: number | undefined
+      // what the messages call the current size: one number, or an unequal-leg
+      // chamfer's two sides
+      let oldText: string | undefined
+      if (chain) {
+        const positive = (value: unknown): number | undefined =>
+          typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+        oldSize = positive(feature.params[sizeWord])
+        // An unequal-leg chamfer chain is re-dressed the same way: it comes
+        // out whole and its recovered edges are chamfered at the one distance
+        // asked for. Its old legs only feed the messages.
+        const legA = kind === 'chamfer' ? positive(feature.params.distanceA) : undefined
+        const legB = kind === 'chamfer' ? positive(feature.params.distanceB) : undefined
+        if (oldSize === undefined && legA !== undefined && legB !== undefined) {
+          oldSize = Math.min(legA, legB)
+          oldText = `${r3(legA)} x ${r3(legB)}`
+        }
+      } else {
+        const band = byHash.get(feature.dropHashes[0])
+        oldSize = band === undefined ? undefined : this.#measureImportedFilletRadius(band)
       }
-      const newRadius = req.radius
-      if (!Number.isFinite(newRadius) || !(newRadius > 1e-4)) {
+      if (oldSize === undefined) {
+        return refuse(this.#editRefusal(`${label}: current ${sizeWord} for ${req.importedFeatureKey} could not be measured`, req.importedFeatureKey, 'error'))
+      }
+      const current = oldText ?? r3(oldSize)
+      if (!Number.isFinite(newSize) || !(newSize > 1e-4)) {
         return refuse(this.#editRefusal(
-          `filletRadius: new radius ${r3(newRadius)} is not positive and finite (current ${r3(oldRadius)})`,
+          `${label}: new ${sizeWord} ${r3(newSize)} is not positive and finite (current ${current})`,
           req.importedFeatureKey,
           'warning',
         ))
@@ -5968,10 +7197,10 @@ export class GeomEngine {
           .filter((id): id is StableId => id !== undefined),
       )
 
-      const removal = this.#healRemovalForEdit(k, rec.shape as ShapeHandle, [feature], scratch, recs, 'filletRadius')
+      const removal = this.#healRemovalForEdit(k, rec.shape as ShapeHandle, [feature], scratch, recs, label)
       if (!removal.ok || removal.shape === undefined) {
         return refuse(this.#editRefusal(
-          `filletRadius: could not remove ${req.importedFeatureKey} before rebuilding it: ${removal.reason ?? 'heal failed'}`,
+          `${label}: could not remove ${req.importedFeatureKey} before rebuilding it: ${removal.reason ?? 'heal failed'}`,
           req.importedFeatureKey,
           'error',
         ))
@@ -5986,31 +7215,54 @@ export class GeomEngine {
       }
       const healedEdges = this.#edgeCandidates(healed, healedRec)
       healedEdgeHandles = healedEdges.allHandles
-      const recovered = healedEdges.candidates.filter((edge) =>
+      // A chain's removal may re-make a host face (the boss wall runs down to
+      // the plate once its foot fillet is gone); that face carries a new heal
+      // id, and the sharp edge it closes is still one the chain left.
+      if (chain) for (const id of healedAssign.generated) neighbourIds.add(id)
+      let recovered = healedEdges.candidates.filter((edge) =>
         !originalEdgeIds.has(edge.id) &&
         edge.faceIds.filter((faceId) => neighbourIds.has(faceId)).length >= 2,
       )
-      if (recovered.length !== 1) {
+      if (chain) {
+        // A re-made host face re-labels the SMOOTH seams it shares with its
+        // tangent neighbours too (an r6 corner round and the walls either
+        // side). Those are not edges the chain left and nobody asked to dress
+        // them; only the sharp ones are kept.
+        healedFaces = gatherFaces(k, healed)
+        const faceById = new Map(healedFaces.map((face) => [healedAssign.faceMap.get(face.hash), face] as const))
+        recovered = recovered.filter((edge) => {
+          const [a, b] = edge.faceIds.map((id) => faceById.get(id))
+          if (edge.faceIds.length !== 2 || a === undefined || b === undefined) return true
+          const dev = measureFaceTangency(k, a, b)
+          return dev === null || dev > SMOOTH_SEAM_TOL
+        })
+      }
+      if (chain ? recovered.length === 0 : recovered.length !== 1) {
         return refuse(this.#editRefusal(
-          `filletRadius: removal of ${req.importedFeatureKey} produced ${recovered.length} candidate sharp edges; expected exactly one`,
+          `${label}: removal of ${req.importedFeatureKey} produced ${recovered.length} candidate sharp edges; expected ${chain ? 'at least one' : 'exactly one'}`,
           req.importedFeatureKey,
           'error',
           { recoveredEdges: recovered.length },
         ))
       }
 
-      const evolution = k.filletWithHistory(
-        healed,
-        [recovered[0].handle],
-        newRadius,
-        [...healedRec.faceMap.keys()],
-        HM,
-      )
+      let evolution: EvolutionData
+      try {
+        evolution = kind === 'fillet'
+          ? k.filletWithHistory(healed, recovered.map((edge) => edge.handle), newSize, [...healedRec.faceMap.keys()], HM)
+          : k.chamferWithHistory(healed, recovered.map((edge) => edge.handle), newSize, [...healedRec.faceMap.keys()], HM)
+      } catch (e) {
+        return refuse(this.#editRefusal(
+          `${label}: the kernel could not ${kind === 'fillet' ? 'round' : 'chamfer'} the ${recovered.length} edge(s) of ${req.importedFeatureKey} at ${sizeWord} ${r3(newSize)} (current ${current}) - ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`,
+          req.importedFeatureKey,
+          'error',
+        ))
+      }
       result = evolution.result
       const resultVolume = k.getVolume(result)
       if (!k.isValid(result) || !Number.isFinite(resultVolume) || !(resultVolume > 1e-9)) {
         return refuse(this.#editRefusal(
-          `filletRadius: rebuilding ${req.importedFeatureKey} at radius ${r3(newRadius)} did not yield a valid positive-volume result`,
+          `${label}: rebuilding ${req.importedFeatureKey} at ${sizeWord} ${r3(newSize)} did not yield a valid positive-volume result`,
           req.importedFeatureKey,
           'error',
         ))
@@ -6018,29 +7270,74 @@ export class GeomEngine {
       const solidified = this.#asSingleSolid(result, scratch)
       if (!solidified.ok || solidified.shape === undefined) {
         return refuse(this.#editRefusal(
-          `filletRadius: rebuilding ${req.importedFeatureKey} at radius ${r3(newRadius)} did not yield a single closed solid (${solidified.reason})`,
+          `${label}: rebuilding ${req.importedFeatureKey} at ${sizeWord} ${r3(newSize)} did not yield a single closed solid (${solidified.reason})`,
           req.importedFeatureKey,
           'error',
         ))
       }
       result = solidified.shape
+      if (chain) {
+        // The kernel can build a valid solid whose blend is not the asked one
+        // (an r7 round on a loop with r6 corners folds the corners). The
+        // rebuilt chain must read back as one chain of the same faces at the
+        // new size, or nothing is applied.
+        // It must be THIS chain: another chain on the body may already be an
+        // n-face blend of the new size, so every face of the one read back
+        // must sit on the recovered edges (a blend face lies within its size
+        // of the sharp edge it rounds; another chain is farther off).
+        const n = feature.dropHashes.length
+        const reach = newSize + Math.max(1e-3, newSize * 1e-3)
+        let rebuilt = false
+        const resultFaces = gatherFaces(k, result)
+        try {
+          const faceByHash = new Map(resultFaces.map((face) => [face.hash, face] as const))
+          rebuilt = recognizeFeaturesCore(k, result, resultFaces).some((f) =>
+            f.key.startsWith(`chain:${kind}:`) &&
+            f.dropHashes.length === n &&
+            Math.abs(Number(f.params[sizeWord]) - newSize) <= Math.max(1e-4, newSize * 1e-4) &&
+            f.dropHashes.every((hash) => {
+              const face = faceByHash.get(hash)
+              return face !== undefined && recovered.some((edge) => k.distanceBetween(edge.handle, face.handle) <= reach)
+            }))
+        } catch { rebuilt = false } finally { releaseFaceRecs(k, resultFaces) }
+        if (!rebuilt) {
+          return refuse(this.#editRefusal(
+            `${label}: at ${sizeWord} ${r3(newSize)} the ${n}-face ${kind} does not come back as one ${kind} of that ${sizeWord} - it would run past the faces round it (current ${sizeWord} ${current}); nothing was changed`,
+            req.importedFeatureKey,
+            'warning',
+          ))
+        }
+      }
 
-      const targetFaceId = rec.faceMap.get(feature.dropHashes[0])
-      const targetSnapshot = targetFaceId === undefined ? undefined : rec.snapshots.get(targetFaceId)
+      const memberIds = feature.dropHashes
+        .map((hash) => rec.faceMap.get(hash))
+        .filter((id): id is StableId => id !== undefined)
+      const memberSnapshots = new Map(memberIds.map((id) => [id, rec.snapshots.get(id)] as const))
+      // The rebuilt blend faces keep the ids of the faces they replace: each
+      // original member pairs with the nearest new face of a blend kind.
+      const blendKinds = kind === 'fillet' ? ['cylinder', 'torus'] : ['plane', 'cone']
       const assign = this.#assignEditedIds(rec, this.#faceProbes(result), req.featureId, (remainingOriginals, probes) => {
-        if (targetFaceId === undefined || targetSnapshot === undefined) return []
-        const original = remainingOriginals.find((entry) => entry.id === targetFaceId)
-        if (original === undefined) return []
-        const candidates = probes.filter((probe) =>
-          probe.snapshot.type === 'cylinder' &&
-          probe.snapshot.radius !== undefined &&
-          Math.abs(probe.snapshot.radius - newRadius) <= Math.max(1e-5, newRadius * 1e-5),
-        )
-        if (candidates.length === 0) return []
-        candidates.sort((a, b) => len(sub(a.snapshot.centroid, targetSnapshot.centroid)) - len(sub(b.snapshot.centroid, targetSnapshot.centroid)))
-        return [{ id: targetFaceId, probe: candidates[0] }]
+        const pairs: Array<{ id: StableId; probe: FaceProbe }> = []
+        const used = new Set<FaceProbe>()
+        for (const id of memberIds) {
+          const snapshot = memberSnapshots.get(id)
+          if (snapshot === undefined || !remainingOriginals.some((entry) => entry.id === id)) continue
+          const radiusMatches = (probe: FaceProbe): boolean =>
+            probe.snapshot.radius !== undefined && Math.abs(probe.snapshot.radius - newSize) <= Math.max(1e-5, newSize * 1e-5)
+          // A single imported fillet (a vendor b-spline band too) comes back as
+          // a cylinder of the new radius; a chain member keeps its own kind.
+          const candidates = probes.filter((probe) => !used.has(probe) && (singleFillet
+            ? probe.snapshot.type === 'cylinder' && radiusMatches(probe)
+            : probe.snapshot.type === snapshot.type && blendKinds.includes(probe.snapshot.type) &&
+              (kind !== 'fillet' || probe.snapshot.type !== 'cylinder' || radiusMatches(probe))))
+          if (candidates.length === 0) continue
+          candidates.sort((a, b) => len(sub(a.snapshot.centroid, snapshot.centroid)) - len(sub(b.snapshot.centroid, snapshot.centroid)))
+          used.add(candidates[0])
+          pairs.push({ id, probe: candidates[0] })
+        }
+        return pairs
       })
-      if (!assign.ok) return refuse(this.#editRefusal(`filletRadius: ${assign.reason}`, req.importedFeatureKey, 'error'))
+      if (!assign.ok) return refuse(this.#editRefusal(`${label}: ${assign.reason}`, req.importedFeatureKey, 'error'))
       const handle = this.#mint({
         shape: result as number,
         faceMap: assign.faceMap,
@@ -6062,6 +7359,7 @@ export class GeomEngine {
         try { k.release(shape) } catch { /* */ }
       }
       if (result !== undefined) { try { k.release(result) } catch { /* */ } }
+      releaseFaceRecs(k, healedFaces)
       releaseFaceRecs(k, recs)
     }
   }
@@ -6087,6 +7385,80 @@ export class GeomEngine {
     }
   }
 
+  /** WO-2804: relocate the complete existing void. Recognition and healing
+   * are shared with Defeature/Resize; no resize profile or entry-cone policy
+   * participates. Every preview, Apply and history replay uses this boundary. */
+  #moveRecognizedHole(
+    rec: BodyRecord,
+    req: Omit<FaceEditRequest, 'body'>,
+    feature: RecognizedFeature,
+    axis: Vec3T,
+    recs: FaceRec[],
+  ): OpResult {
+    const k = this.#k()
+    const d = req.translation
+    if (!Array.isArray(d) || d.length !== 3 || d.some(v => !Number.isFinite(v)) || Math.hypot(...d) < 1e-9) {
+      return this.#editRefusal('Move Hole needs a finite, nonzero XYZ delta.', req.featureKey)
+    }
+    if (axis.some(v => !Number.isFinite(v)) || Math.abs(dot(d, axis)) > 1e-6) {
+      return this.#editRefusal('Move Hole stays on the same face: the delta must be perpendicular to the hole axis.', req.featureKey)
+    }
+    const scratch: ShapeHandle[] = []
+    let healed: ShapeHandle | undefined
+    let result: ShapeHandle | undefined
+    try {
+      // GEO-11: keep finite-data/host-loop healing checks at this consumer;
+      // bypass only reconstruction assumptions, never accept a poisoned heal.
+      const heal = this.#healRemovalForEdit(k, rec.shape as ShapeHandle, [feature], scratch, recs, 'Move Hole')
+      if (!heal.ok || !heal.shape) {
+        return this.#editRefusal('Move Hole cannot close the old hole without cutting into another feature. Nothing was changed.', req.featureKey, 'error')
+      }
+      healed = heal.shape
+      const beforeVol = k.getVolume(rec.shape as ShapeHandle)
+      const holeVol = k.getVolume(healed) - beforeVol
+      if (!Number.isFinite(holeVol) || !(holeVol > 1e-9)) {
+        return this.#editRefusal('Move Hole could not recover a finite positive-volume hole.', req.featureKey, 'error')
+      }
+      // Every cone, shoulder and blind floor stays at its original station,
+      // even if recognition picks the opposite opening after an upstream edit.
+      const voidShape = k.cut(healed, rec.shape as ShapeHandle)
+      scratch.push(voidShape)
+      const tool = k.translate(voidShape, d[0], d[1], d[2])
+      scratch.push(tool)
+      result = k.cut(healed, tool)
+      const resultVol = k.getVolume(result)
+      if (!k.isValid(result) || !Number.isFinite(resultVol) || !(resultVol > 1e-9)) {
+        return this.#editRefusal('Move Hole did not yield a valid finite positive-volume result.', req.featureKey, 'error')
+      }
+      // At a wall or another hole the translated cutter removes less material.
+      // Reject that partial move, preserving the source body and history.
+      if (Math.abs(resultVol - beforeVol) > Math.max(1e-5, holeVol * 1e-5)) {
+        return this.#editRefusal('Move Hole target breaks through a wall or overlaps another hole.', req.featureKey)
+      }
+      // healRemoval returns a single closed solid. Normalize compound wrappers
+      // and keep that topology; a split or empty result cannot carry this move.
+      const solidified = this.#asSingleSolid(result, scratch)
+      if (!solidified.ok || !solidified.shape) {
+        return this.#editRefusal(`Move Hole did not preserve the healed solid: ${solidified.reason}`, req.featureKey, 'error')
+      }
+      result = solidified.shape
+      const assign = this.#assignEditedIds(rec, this.#faceProbes(result), req.featureId,
+        (remOrig, probes) => this.#pairByRole(remOrig, probes, axis))
+      if (!assign.ok) return this.#editRefusal(`Move Hole: ${assign.reason}`, req.featureKey, 'error')
+      const handle = this.#mint({ shape: result as number, faceMap: assign.faceMap, snapshots: assign.snapshots, aliases: rec.aliases })
+      result = undefined
+      return {
+        ok: true, body: handle,
+        elementMap: { featureId: req.featureId, modified: assign.modified, generated: assign.generated, deleted: assign.deleted, geometry: assign.geometry },
+        diagnostics: okDiag(),
+      }
+    } finally {
+      if (healed !== undefined) { try { k.release(healed) } catch { /* */ } }
+      for (const shape of scratch) { if (shape !== healed) { try { k.release(shape) } catch { /* */ } } }
+      if (result !== undefined) { try { k.release(result) } catch { /* */ } }
+    }
+  }
+
   /**
    * holeDiameter: heal the recognized hole away (existing healRemoval stack),
    * then re-cut the pilot at the new radius on the same axis + depth. Symmetric
@@ -6097,8 +7469,23 @@ export class GeomEngine {
    * and counterbore, with the pilot's bottom moved to the new depth (measured
    * from the entry opening, like the recognizer's `depth`). A depth reaching the
    * far side of the part, or `through`, cuts through.
+   *
+   * WO-2762: `step: 'counterbore'` edits the counterbore step alone - its
+   * diameter (holeDiameter) or its depth from the entry opening (holeDepth) -
+   * and re-cuts the pilot exactly as it was. A countersink keeps its top
+   * diameter and angle whichever step changes: the cone's foot follows the
+   * bore it sits on, so a wider pilot shortens it and a narrower one lengthens
+   * it, and the countersink rim on the face stays where it was (RH-4). A small
+   * edge chamfer keeps its size and is carried to the new edge (WO-2076).
+   * Nothing the kernel can cut is refused (LIENCAM.md rule 11): a counterbore
+   * run down to its pilot's bottom or through, or resized to its pilot's
+   * diameter, makes the hole one bore; one narrower than its pilot is cut as
+   * asked; a bore as wide as a countersink's top takes the countersink in.
+   * Each of those is named in the result's info diagnostic params
+   * (`oneBoreDiameter`/`oneBoreDepth`, `narrowerThanPilot`,
+   * `countersinkTakenIn`) for the console line.
    */
-  #recutHole(rec: BodyRecord, req: FaceEditRequest | HoleDepthEditRequest): OpResult {
+  #recutHole(rec: BodyRecord, req: Omit<FaceEditRequest, 'body'> | Omit<HoleStepDiameterEditRequest, 'body'> | Omit<HoleDepthEditRequest, 'body'>, curved?: { coneOffset: number }): OpResult {
     const k = this.#k()
     const recs = gatherFaces(k, rec.shape as ShapeHandle)
     const scratch: ShapeHandle[] = []
@@ -6107,47 +7494,145 @@ export class GeomEngine {
     try {
       const feats = recognizeFeaturesCore(k, rec.shape as ShapeHandle, recs)
       const f = feats.find((ff) => ff.key === req.featureKey)
-      if (!f) return this.#editRefusal(`holeDiameter: feature ${req.featureKey} not found on this body`, req.featureKey, 'error')
+      const editName = req.kind === 'holeMove' ? 'Move Hole' : 'holeDiameter'
+      if (!f) return this.#editRefusal(`${editName}: feature ${req.featureKey} not found on this body`, req.featureKey, 'error')
       if (f.type !== 'throughHole' && f.type !== 'blindHole' && f.type !== 'counterboreStack') {
-        return this.#editRefusal(`holeDiameter: feature ${req.featureKey} is a ${f.type}, not a hole — refused (wrong kind)`, req.featureKey, 'warning', { featureClass: f.type })
+        return this.#editRefusal(`${editName}: feature ${req.featureKey} is a ${f.type}, not a hole — refused (wrong kind)`, req.featureKey, 'warning', { featureClass: f.type })
       }
       const byHash = new Map(recs.map((r) => [r.hash, r]))
       const dropped = f.dropHashes.map((h) => byHash.get(h)).filter((r): r is FaceRec => r !== undefined)
       // Measured geometry: axis (outward), entry rim centre, pilot radius, depth.
       const axis = normalize([Number(f.params.axisX), Number(f.params.axisY), Number(f.params.axisZ)])
-      if (Math.hypot(axis[0], axis[1], axis[2]) < 0.5) return this.#editRefusal(`holeDiameter: hole ${req.featureKey} has no resolvable axis`, req.featureKey, 'error')
+      if (Math.hypot(axis[0], axis[1], axis[2]) < 0.5) return this.#editRefusal(`${editName}: hole ${req.featureKey} has no resolvable axis`, req.featureKey, 'error')
       const entry: Vec3T = [f.fingerprint.cx, f.fingerprint.cy, f.fingerprint.cz]
+      // WO-2804 round 3: translation consumes the exact healed-out void, not
+      // a reconstructed profile. Branch before ALL resize-only radius, step,
+      // cone measurement/count and depth rules (including WO-2762 semantics).
+      if (req.kind === 'holeMove') return this.#moveRecognizedHole(rec, req, f, axis, recs)
       const oldR = Number(f.params.diameter) / 2
-      const newR = req.kind === 'holeDiameter' ? oldR + req.delta / 2 : oldR
+      const step = req.kind !== 'faceOffset' && 'step' in req && req.step === 'counterbore' ? 'counterbore' : undefined
+      const newR = req.kind === 'holeDiameter' && step === undefined ? oldR + req.delta / 2 : oldR
       if (!(newR > 1e-4)) return this.#editRefusal(`holeDiameter: resized radius ${r3(newR)} is not positive (delta ${req.delta} too negative for pilot Ø${r3(2 * oldR)})`, req.featureKey, 'warning')
       const cyls = dropped.filter((r) => r.type === 'cylinder' && r.radius !== undefined)
       const cbR = cyls.length ? Math.max(...cyls.map((r) => r.radius as number)) : oldR
       const isCounterbore = cbR > oldR + 1e-4
-      if (isCounterbore && newR >= cbR - 1e-4) {
-        return this.#editRefusal(`holeDiameter: resized pilot Ø${r3(2 * newR)} meets/exceeds the counterbore Ø${r3(2 * cbR)} — refused (would consume the spotface)`, req.featureKey, 'warning')
+      if (step === 'counterbore' && !isCounterbore) {
+        return this.#editRefusal(`holeDiameter: hole ${req.featureKey} has no counterbore step to edit`, req.featureKey, 'warning')
+      }
+      // WO-2762: the counterbore step's new radius and depth (only the step edit changes them).
+      let newCbR = step === 'counterbore' && req.kind === 'holeDiameter' ? cbR + req.delta / 2 : cbR
+      if (!(newCbR > 1e-4)) return this.#editRefusal(`holeDiameter: counterbore radius ${r3(newCbR)} is not positive`, req.featureKey, 'warning')
+      let cbLen = this.#axialExtent(cyls, cbR, axis)
+      if (isCounterbore && step === undefined && newR >= newCbR - 1e-4) {
+        return this.#editRefusal(`holeDiameter: resized pilot Ø${r3(2 * newR)} meets/exceeds the counterbore Ø${r3(2 * newCbR)} — refused (would consume the spotface)`, req.featureKey, 'warning')
       }
       const cones = dropped.filter((r) => r.type === 'cone')
       if (cones.length > 1) {
         return this.#editRefusal(`holeDiameter: feature ${req.featureKey} has ${cones.length} cones in its stack; only one entry cone can be reconstructed`, req.featureKey, 'warning', { featureClass: 'countersink' })
       }
-      const cone = cones.length === 1 ? this.#measureEntryCone(cones[0], axis) : undefined
-      if (cones.length === 1 && cone === undefined) {
+      const measuredCone = cones.length === 1 ? this.#measureEntryCone(cones[0], axis) : undefined
+      if (cones.length === 1 && measuredCone === undefined) {
         return this.#editRefusal(`holeDiameter: feature ${req.featureKey} entry cone angle/depth could not be measured safely`, req.featureKey, 'warning', { featureClass: 'countersink' })
       }
       let fullDepth = Number(f.params.depth)
       let isThrough = f.type === 'throughHole'
-      if (req.kind === 'holeDepth') {
-        // Material along the drill direction from the entry opening (AABB bound):
-        // a depth that reaches it breaks out of the far side -> a through hole.
+      // WO-2813: a parallel face edit must remove/add the complete analytic
+      // sleeve. A cut that clips a side wall or another hole may still be a
+      // valid solid; compare its volume before minting to reject that breakout.
+      const cavityVolume = (r: number, stepR: number, stepDepth: number, hasStep: boolean, entryCone: typeof measuredCone): number => {
+        const foot = hasStep ? stepR : r
+        let volume = Math.PI * r * r * fullDepth
+        if (hasStep) volume += Math.PI * (stepR * stepR - r * r) * stepDepth
+        if (entryCone !== undefined) {
+          const h = entryCone.axialDepth
+          const top = foot + h * Math.tan(entryCone.halfAngle)
+          volume += Math.PI * h / 3 * (top * top + top * foot - 2 * foot * foot)
+        }
+        return volume
+      }
+      const oldCavity = curved !== undefined ? cavityVolume(oldR, cbR, cbLen, isCounterbore, measuredCone) : 0
+      // Material along the drill direction from the entry opening (AABB bound):
+      // a depth that reaches it breaks out of the far side -> a through hole.
+      const reachOfBody = (): number => {
         const drillDir = scale(axis, -1)
         const bb = this.#bodyBBox(rec.shape as ShapeHandle)
         let reach = 0
         for (const x of [bb.min[0], bb.max[0]]) for (const y of [bb.min[1], bb.max[1]]) for (const z of [bb.min[2], bb.max[2]]) {
           reach = Math.max(reach, dot([x - entry[0], y - entry[1], z - entry[2]], drillDir))
         }
+        return reach
+      }
+      // WO-2762: what the edit did beyond the step it names, for the console.
+      const notes: Record<string, string | number> = {}
+      let pilotR = newR
+      let stepped = isCounterbore
+      if (req.kind === 'holeDepth' && step === 'counterbore') {
+        // WO-2762: the counterbore's depth from the entry opening; the pilot
+        // keeps its own. A counterbore run down to the pilot's bottom, or
+        // through, leaves no pilot: the hole becomes ONE bore at the
+        // counterbore's diameter, that deep (or through) - LIENCAM.md rule 11.
+        const newCbLen = req.through === true ? Infinity : cbLen + req.delta
+        if (!(newCbLen > 1e-4)) return this.#editRefusal(`holeDiameter: counterbore depth ${r3(newCbLen)} is not positive`, req.featureKey, 'warning')
+        if (newCbLen >= fullDepth - 1e-4) {
+          const reach = reachOfBody()
+          isThrough = req.through === true || isThrough || newCbLen >= reach - 1e-6
+          fullDepth = isThrough ? reach : newCbLen
+          pilotR = newCbR
+          stepped = false
+          notes.oneBoreDiameter = r3(2 * newCbR)
+          notes.oneBoreDepth = isThrough ? 'through' : r3(fullDepth)
+        } else {
+          cbLen = newCbLen
+        }
+      } else if (req.kind === 'holeDepth') {
+        const reach = reachOfBody()
         const newDepth = req.through === true ? reach : fullDepth + req.delta
         isThrough = req.through === true || newDepth >= reach - 1e-6
         fullDepth = newDepth
+      } else if (step === 'counterbore' && Math.abs(newCbR - oldR) <= 1e-4) {
+        // WO-2762: a counterbore resized to its pilot's diameter is that bore.
+        newCbR = oldR
+        stepped = false
+        notes.oneBoreDiameter = r3(2 * oldR)
+        notes.oneBoreDepth = isThrough || Number(f.params.openings) >= 2 ? 'through' : r3(fullDepth)
+      } else if (step === 'counterbore' && newCbR < oldR) {
+        // WO-2762: narrower than its pilot - cut as asked; the top step is the
+        // narrow one now (#buildHoleTool starts the pilot under it).
+        notes.narrowerThanPilot = r3(2 * oldR)
+      }
+      // WO-2762 (RH-4): a COUNTERSINK keeps its top diameter and angle - it is
+      // the seat for a screw head, sized to the head, not to the bore. Its
+      // foot sits on the bore it opens into, so it is re-measured from the NEW
+      // foot radius. An edge-break CHAMFER keeps its size instead and is
+      // carried to the new bore edge (WO-2076). Which one a cone IS is decided
+      // ONCE, on the geometry it first had (#entryConeKind), so the same final
+      // value gives the same shape by any route of edits. A bore as wide as the
+      // countersink's top takes the countersink in.
+      let cone = measuredCone
+      if (measuredCone !== undefined) {
+        const tan = Math.tan(measuredCone.halfAngle)
+        const footR = isCounterbore ? cbR : oldR
+        const topR = footR + measuredCone.axialDepth * tan
+        const coneId = rec.faceMap.get(cones[0].hash)
+        const kind = this.#entryConeKind(coneId, { topR, footR, axialDepth: measuredCone.axialDepth, halfAngle: measuredCone.halfAngle })
+        if (kind.countersink || curved !== undefined) {
+          const newFootR = stepped ? newCbR : pilotR
+          // A face offset moves the analytic cone parallel to itself. Resize
+          // Hole's existing countersink-mouth policy is unchanged on its route.
+          const wantedTopR = curved !== undefined
+            ? topR + curved.coneOffset / Math.cos(measuredCone.halfAngle)
+            : kind.topR
+          const axialDepth = (wantedTopR - newFootR) / tan
+          if (curved !== undefined && (!(axialDepth > 1e-6) || axialDepth >= fullDepth)) {
+            return this.#editRefusal('Push/Pull would close the cone or break through the hole bottom. Nothing was changed.', req.featureKey, 'warning')
+          }
+          if (Number.isFinite(axialDepth) && axialDepth > 1e-6) {
+            cone = { axialDepth, halfAngle: measuredCone.halfAngle }
+          } else {
+            cone = undefined
+            notes.countersinkTakenIn = r3(2 * kind.topR)
+          }
+        }
       }
 
       // 1) REMOVE: heal the hole away -> s1 (solid, openings closed). Non-destructive.
@@ -6165,7 +7650,7 @@ export class GeomEngine {
       // 2) RE-CUT: build a cylinder (+ counterbore spotface) tool at the new radius.
       const drill = scale(axis, -1)
       const diag = this.#diagOf(s1)
-      const tool = this.#buildHoleTool({ entry, drill, newR, fullDepth, isThrough, isCounterbore, cbR, cbLen: this.#axialExtent(cyls, cbR, axis), cone, diag, scratch })
+      const tool = this.#buildHoleTool({ entry, drill, newR: pilotR, fullDepth, isThrough, isCounterbore: stepped, cbR: newCbR, cbLen, cone, diag, scratch })
       if (!tool) return this.#editRefusal(`holeDiameter: re-cut tool for ${req.featureKey} could not be built`, req.featureKey, 'error')
       const s1Hashes = k.getSubShapes(s1, 'face').map((fc) => { const h = k.hashCode(fc, HM); try { k.release(fc) } catch { /* */ } return h })
       result = k.cutWithHistory(s1, tool, s1Hashes, HM).result
@@ -6175,6 +7660,13 @@ export class GeomEngine {
       // valid solid with a finite positive volume.
       const resultVol = k.getVolume(result)
       const resultValid = k.isValid(result)
+      if (curved !== undefined) {
+        const expected = oldCavity - cavityVolume(pilotR, newCbR, cbLen, stepped, cone)
+        const actual = resultVol - k.getVolume(rec.shape as ShapeHandle)
+        if (!Number.isFinite(expected) || Math.abs(actual - expected) > Math.max(1e-3, Math.abs(expected) * 1e-5)) {
+          return this.#editRefusal('Push/Pull would break through a wall or another opening. Nothing was changed.', req.featureKey, 'warning', { expected: r3(expected), measured: r3(actual) })
+        }
+      }
       if (!resultValid || !Number.isFinite(resultVol) || !(resultVol > 1e-9)) {
         return this.#editRefusal(`holeDiameter: re-cut of ${req.featureKey} at Ø${r3(2 * newR)} did not yield a valid positive-volume result (valid=${resultValid}, volume=${r3(resultVol)}) — out-of-class`, req.featureKey, 'error')
       }
@@ -6205,7 +7697,7 @@ export class GeomEngine {
         ok: true,
         body: handle,
         elementMap: { featureId: req.featureId, modified: assign.modified, generated: assign.generated, deleted: assign.deleted, geometry: assign.geometry },
-        diagnostics: okDiag(),
+        diagnostics: Object.keys(notes).length > 0 ? [{ code: 'OK', severity: 'info', params: notes }] : okDiag(),
       }
     } finally {
       if (s1 !== undefined) { try { k.release(s1) } catch { /* */ } }
@@ -6215,8 +7707,10 @@ export class GeomEngine {
     }
   }
 
-  /** Build the re-cut pilot tool, plus a wider counterbore spotface and/or entry
-   *  cone when present. Through holes overshoot both faces; blind holes stop at depth. */
+  /** Build the re-cut pilot tool, plus a counterbore spotface and/or entry
+   *  cone when present. Through holes overshoot both faces; blind holes stop at depth.
+   *  WO-2762: a counterbore narrower than the pilot is cut as the top step,
+   *  with the pilot below it. */
   #buildHoleTool(o: {
     entry: Vec3T; drill: Vec3T; newR: number; fullDepth: number; isThrough: boolean
     isCounterbore: boolean; cbR: number; cbLen: number
@@ -6228,7 +7722,11 @@ export class GeomEngine {
     const margin = o.isThrough ? bodyDepth * 0.5 : 0
     const top = add(o.entry, scale(o.drill, -margin))
     const pilotLen = (o.isThrough ? bodyDepth : o.fullDepth) + margin
-    let tool = this.#cylinderTool(top, o.drill, o.newR, pilotLen + margin, o.scratch)
+    // WO-2762: a counterbore narrower than its pilot - the pilot starts under it.
+    const narrowTop = o.isCounterbore && o.cbLen > 1e-4 && o.cbR < o.newR
+    let tool = narrowTop
+      ? this.#cylinderTool(add(o.entry, scale(o.drill, o.cbLen)), o.drill, o.newR, o.isThrough ? bodyDepth + margin : o.fullDepth - o.cbLen, o.scratch)
+      : this.#cylinderTool(top, o.drill, o.newR, pilotLen + margin, o.scratch)
     if (o.isCounterbore && o.cbLen > 1e-4) {
       const cb = this.#cylinderTool(top, o.drill, o.cbR, margin + o.cbLen, o.scratch)
       const fused = k.fuse(tool, cb)
@@ -6244,6 +7742,26 @@ export class GeomEngine {
       tool = fused
     }
     return tool
+  }
+
+  /** WO-2762: is this entry cone a countersink, and the top radius it keeps.
+   *  Decided once, from the cone as the engine first saw it: a countersink's
+   *  top is at least COUNTERSINK_TOP_RATIO x its foot (ISO countersunk-head
+   *  seats are ~1.8-2x the clearance hole, 13 on 6.6; an edge chamfer is a
+   *  fraction of a mm, 0.5 on 5). Deciding again from a resized hole would make
+   *  the shape depend on the route: d6.6 -> d9 keeps a d13 top, and 13/9 would
+   *  then read as a chamfer. The record holds while the cone still has the
+   *  dimension its kind keeps (a countersink's top, a chamfer's depth) - a cone
+   *  changed any other way is decided afresh. */
+  #entryConeKind(coneId: StableId | undefined, now: { topR: number; footR: number; axialDepth: number; halfAngle: number }): { countersink: boolean; topR: number } {
+    const was = coneId !== undefined ? this.#entryCones.get(coneId) : undefined
+    if (was !== undefined && Math.abs(was.halfAngle - now.halfAngle) < 1e-3 &&
+      (was.countersink ? Math.abs(was.topR - now.topR) < 1e-3 : Math.abs(was.axialDepth - now.axialDepth) < 1e-3)) {
+      return { countersink: was.countersink, topR: was.countersink ? was.topR : now.topR }
+    }
+    const countersink = now.topR >= COUNTERSINK_TOP_RATIO * now.footR
+    if (coneId !== undefined) this.#entryCones.set(coneId, { countersink, topR: now.topR, axialDepth: now.axialDepth, halfAngle: now.halfAngle })
+    return { countersink, topR: now.topR }
   }
 
   /** Measure a conical entry directly from its kernel face. The recognized hole
@@ -6391,12 +7909,31 @@ export class GeomEngine {
    *     GEO-10-R1 finding-3 fix: without it the old cylindrical wall/floor id of
    *     an offset planar face is dropped to deleted/generated instead of 'exact'.
    */
-  #pairByOffset(remOrig: Array<{ id: StableId; snap: GeometrySnapshot }>, probes: FaceProbe[]): Array<{ id: StableId; probe: FaceProbe }> {
+  #pairByOffset(
+    remOrig: Array<{ id: StableId; snap: GeometrySnapshot }>, probes: FaceProbe[],
+    moved?: { id: StableId; normal: Vec3T; level: number },
+  ): Array<{ id: StableId; probe: FaceProbe }> {
     const pairs: Array<{ id: StableId; probe: FaceProbe }> = []
     const usedP = new Set<number>()
+    // (0) WO-2760: the face the operator moved is the plane at its new level.
+    // Its area changes when a neighbour overhangs it (the owner's dome: the raised
+    // top meets the sphere on a wider circle), so it can't wait for (1).
+    const movedOrig = moved === undefined ? undefined : remOrig.find((o) => o.id === moved.id && o.snap.type === 'plane')
+    if (moved !== undefined && movedOrig !== undefined) {
+      let best: FaceProbe | undefined
+      let bestD = Infinity
+      for (const p of probes) {
+        if (p.snapshot.type !== 'plane') continue
+        if (dot(normalize(p.snapshot.normal as Vec3T), moved.normal) < 0.999) continue
+        if (Math.abs(dot(p.snapshot.centroid as Vec3T, moved.normal) - moved.level) > 1e-3) continue
+        const dA = Math.abs(p.snapshot.area - movedOrig.snap.area)
+        if (dA < bestD) { bestD = dA; best = p }
+      }
+      if (best) { pairs.push({ id: movedOrig.id, probe: best }); usedP.add(best.hash) }
+    }
     // (1) planar moved faces: same type + normal, closest area.
     for (const o of remOrig) {
-      if (o.snap.type !== 'plane') continue
+      if (o.snap.type !== 'plane' || pairs.some((q) => q.id === o.id)) continue
       let best: FaceProbe | undefined
       let bestD = Infinity
       for (const p of probes) {

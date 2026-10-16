@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { NotSentLegend } from './DefinitionFields'
 import { SectionHead } from './DefinitionFields'
 import { SectionNoneSet } from './DefinitionFields'
@@ -21,10 +24,11 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 type TravelHomingSectionProps = Pick<MachineDefinitionPanelState, 'notAcceptedCount' | 'unsent'>
 
 export function TravelHomingSection({ notAcceptedCount, unsent }: TravelHomingSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div data-testid="machine-def-group-travel">
                 <SectionHead
-                  title="Travel & Homing"
+                  title={controlText('TravelHomingSection.text001')}
                   summary={unsent.catalogued ? 'Homing policy' : 'Nothing on this tab for this controller'}
                   testId="machine-def-panel-head-homing"
                 />
@@ -39,7 +43,7 @@ export function TravelHomingSection({ notAcceptedCount, unsent }: TravelHomingSe
                 {unsent.catalogued && (
                   <div data-testid="machine-def-panel-general-homing">
                     <SectionHead
-                      title="Homing policy"
+                      title={controlText('TravelHomingSection.text002')}
                       summary="Machine-wide requirements and soft-limit policy"
                       testId="machine-def-panel-general-head-homing"
                     />

@@ -33,6 +33,7 @@ export {
 } from './registry';
 export { createMeshEditRecord, type NewMeshEdit } from './record';
 export { replayMeshEdits } from './replay';
+export { ancestryFromFacetOwners, composeMeshEditAncestry, mergeMeshEditAncestry } from './ancestry';
 export {
   resolveEditedStlBytes,
   resolveEditedStlMesh,
@@ -101,3 +102,11 @@ export {
   type BooleanBodyParameters,
   type BooleanBodyShape,
 } from './operations/booleanBody';
+export {
+  changeChamferSize,
+  chamferSizeChangeRefusal,
+  changeChamferSizeOperation,
+  CHANGE_CHAMFER_SIZE_KIND,
+} from './operations/chamferSize';
+
+export { MOVE_HOLE_KIND, moveHole, moveHoleOperation } from './operations/moveHole';

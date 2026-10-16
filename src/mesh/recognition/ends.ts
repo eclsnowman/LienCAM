@@ -132,12 +132,20 @@ export function corridorObstructions(
   excluded: ReadonlySet<number>,
 ): number[] {
   const out: number[] = [];
+  // WO-2804: a translated float32 rim and a refitted axis can disagree at
+  // their common end plane by one input ULP. That plane still only TOUCHES
+  // the end; treating roundoff as interior makes the surrounding face a
+  // fictitious obstruction. Keep the whole-triangle radial test and use only
+  // the source-coordinate precision here, never the feature-fit tolerance.
+  let coordinateScale = Math.max(1, Math.abs(lowStationMm), Math.abs(highStationMm), ...origin.map(Math.abs));
+  for (const coordinate of w.positions) coordinateScale = Math.max(coordinateScale, Math.abs(coordinate));
+  const endpointEpsilon = coordinateScale * 2 ** -23;
   for (let f = 0; f < w.facetCount; f++) {
     if (excluded.has(f) || w.areas[f] === 0) continue;
     const points = facetPoints(w, f);
     const stations = points.map((p) => dot(sub(p, origin), axis));
-    if (stations.every((s) => s < lowStationMm) || stations.every((s) => s > highStationMm)) continue;
-    const interior = stations.some((s) => s > lowStationMm) && stations.some((s) => s < highStationMm);
+    if (stations.every((s) => s < lowStationMm - endpointEpsilon) || stations.every((s) => s > highStationMm + endpointEpsilon)) continue;
+    const interior = stations.some((s) => s > lowStationMm + endpointEpsilon) && stations.some((s) => s < highStationMm - endpointEpsilon);
     const limit = interior ? envelopeRadiusMm : coreRadiusMm;
     if (facetRadialBounds(points, origin, axis).min < limit) out.push(f);
   }

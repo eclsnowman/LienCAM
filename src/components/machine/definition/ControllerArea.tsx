@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useEffect, useRef } from 'react'
 import { PinField } from './DefinitionFields'
 import { SectionHead } from './DefinitionFields'
@@ -67,6 +70,7 @@ type ControllerAreaProps = Pick<MachineDefinitionPanelState,
  * Mounted on the Controller tab by `MachineDefinitionPanel.tsx`.
  */
 export function ControllerArea(props: ControllerAreaProps) {
+  useText('control-screens-not-probing')
   const {
     def, draft, editDraft, importIssues, patchIoPin, pinProblem, polarityBoxFor, setSection, unsent,
   } = props
@@ -127,9 +131,9 @@ export function ControllerArea(props: ControllerAreaProps) {
   })()
   const statedBoardName = uccncBoardName(statedBoardType)
   const boardTooltip = statedBoardType === null
-    ? 'Not stated - nobody has declared which CNCdrive board this machine has'
+    ? controlText('ControllerArea.text001')
     : statedBoardName !== null
-      ? `${statedBoardName} (device type ${statedBoardType})`
+      ? controlText('ControllerArea.text002', { value1: String(statedBoardName), value2: String(statedBoardType) })
       : uccncBoardUnknownName(statedBoardType)
 
   return (
@@ -142,27 +146,23 @@ export function ControllerArea(props: ControllerAreaProps) {
             type="button"
             className="control-chip-btn"
             data-testid="machine-def-controller-import"
-            data-tooltip="Open the Machine Library to import a UCCNC .pro file for this machine"
+            data-tooltip={controlText('ControllerArea.text003')}
             onClick={() => { openModal('machine-config') }}
-          >
-            Import a .pro...
-          </button>
+          >{controlText('ControllerArea.text004')}</button>
           <button
             type="button"
             className="control-chip-btn"
             data-testid="machine-def-controller-export"
-            data-tooltip="Export this machine's stated settings as a UCCNC .pro file"
+            data-tooltip={controlText('ControllerArea.text005')}
             onClick={handleExportPro}
-          >
-            Export .pro
-          </button>
+          >{controlText('ControllerArea.text006')}</button>
         </div>
       )}
 
       {draft.controller === 'uccnc' && (
         <div data-testid="machine-def-controller-board" style={{ marginTop: 12 }}>
           <SectionHead
-            title="Controller board"
+            title={controlText('ControllerArea.text007')}
             summary="Which CNCdrive board this machine's definition declares"
             testId="machine-def-controller-head-board"
           />
@@ -174,11 +174,11 @@ export function ControllerArea(props: ControllerAreaProps) {
               fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)',
             }}
           >
-            <span className="mform-label">Board</span>
+            <span className="mform-label">{controlText('ControllerArea.text008')}</span>
             <select
               className="mform-select"
               data-testid="machine-def-controller-board-select"
-              aria-label="Controller board"
+              aria-label={controlText('ControllerArea.text009')}
               style={{ width: 220 }}
               value={statedBoardType === null ? '' : String(statedBoardType)}
               onChange={(e) => {
@@ -192,7 +192,7 @@ export function ControllerArea(props: ControllerAreaProps) {
                 editDraft((m) => withUccncBoardDeviceType(m, text === '' ? null : Number(text)))
               }}
             >
-              <option value="">Not stated</option>
+              <option value="">{controlText('ControllerArea.text010')}</option>
               {statedBoardType !== null && statedBoardName === null && (
                 <option value={String(statedBoardType)}>
                   {uccncBoardUnknownName(statedBoardType)}
@@ -213,23 +213,21 @@ export function ControllerArea(props: ControllerAreaProps) {
           type="button"
           className="control-chip-btn"
           data-testid="machine-def-controller-grbl-table-link"
-          data-tooltip="The GRBL $-table now lives under All settings"
+          data-tooltip={controlText('ControllerArea.text011')}
           style={{ marginTop: 12 }}
           onClick={() => { setSection('allSettings') }}
-        >
-          Controller settings ($-table) - All settings
-        </button>
+        >{controlText('ControllerArea.text012')}</button>
       )}
 
       {def && (
         <div data-testid="machine-def-controller-estop" style={{ marginTop: 12 }}>
           <SectionHead
-            title="E-stop"
+            title={controlText('ControllerArea.text013')}
             summary="Which input this machine names as its e-stop"
             testId="machine-def-controller-head-estop"
           />
           <PinField
-            label="E-stop"
+            label={controlText('ControllerArea.text014')}
             name="E-stop"
             testId="machine-def-controller-estop-pin"
             value={def.io.estop}
@@ -243,7 +241,7 @@ export function ControllerArea(props: ControllerAreaProps) {
       {unsent.catalogued && (
         <div data-testid="machine-def-controller-faults" style={{ marginTop: 12 }}>
           <SectionHead
-            title="Faults"
+            title={controlText('ControllerArea.text015')}
             summary={`${faultsEnabled} of ${FAULT_SIGNAL_ROWS.length} fault inputs enabled`}
             testId="machine-def-controller-head-faults"
           />
@@ -252,16 +250,14 @@ export function ControllerArea(props: ControllerAreaProps) {
             className="control-chip-btn"
             data-testid="machine-def-controller-faults-link"
             onClick={() => { setSection('allSettings') }}
-          >
-            All settings - Faults
-          </button>
+          >{controlText('ControllerArea.text016')}</button>
         </div>
       )}
 
       {unsent.catalogued && (
         <div data-testid="machine-def-controller-trajectory" style={{ marginTop: 12 }}>
           <SectionHead
-            title="Trajectory basics"
+            title={controlText('ControllerArea.text017')}
             summary="Path blending and lookahead"
             testId="machine-def-controller-head-trajectory"
           />
@@ -282,7 +278,7 @@ export function ControllerArea(props: ControllerAreaProps) {
         className="control-chip-btn"
         data-testid="machine-def-controller-walkthrough"
         style={{ marginTop: 12 }}
-        data-tooltip="Re-runs the seven-step setup walkthrough (WO-1696)"
+        data-tooltip={controlText('ControllerArea.text018')}
         onClick={() => {
           // WO-1696 has not landed - decide-and-log (WO-1694): the entry
           // point is present now so nothing has to be added to this area
@@ -290,12 +286,10 @@ export function ControllerArea(props: ControllerAreaProps) {
           // rather than doing nothing silently.
           addConsoleEvent({
             severity: 'info', source: 'machine',
-            message: 'Setup walkthrough: not available in this build yet.',
+            message: controlText('ControllerArea.text019'),
           })
         }}
-      >
-        Run the setup walkthrough again
-      </button>
+      >{controlText('ControllerArea.text020')}</button>
     </div>
   )
 }

@@ -37,6 +37,7 @@
 
 import type { AdaptivePass, EnginePt as Pt } from './engineEntry';
 import { MIN_DESCENT_HELIX_RADIUS } from '../../lib/cam/adaptiveClearing2d/engine/processFeature';
+import { formatStraightPlungeRefusal, type PlungeRefusalWhere } from './entryRefusal';
 import type { CutterSpec } from '../kernel/types';
 import type { IrMove, IrMoveRole } from '../ir/types';
 import { area, type Ring } from '../geom2d';
@@ -379,18 +380,20 @@ export function emitLevelPasses(
     const verdict = straightDescentVerdict(center, targetZ);
     return verdict === undefined || verdict.allowed;
   };
-  const assertStraightDescentIsClear = (center: Pt, targetZ: number, where: string): void => {
+  const assertStraightDescentIsClear = (center: Pt, targetZ: number, where: PlungeRefusalWhere): void => {
     const verdict = straightDescentVerdict(center, targetZ);
     if (verdict !== undefined && !verdict.allowed) {
-      throw new Error(
-        `emitLevelPasses: refusing a straight plunge through remaining stock at ` +
-          `(${center.x.toFixed(3)}, ${center.y.toFixed(3)}) from ` +
-          `${verdict.contact.toFixed(3)} to ${targetZ.toFixed(3)}: ` +
-          `${(verdict.fraction * 100).toFixed(1)}% of the cutter face ` +
-          `(${verdict.uncutColumns} of ${verdict.columns} cells) still stands above the floor, ` +
-          `allowance ${(plungeAllowance * 100).toFixed(0)}% (${where}); adaptive cleanup must ` +
-          `provide a cleared shaft, side entry, or fitting helix.`,
-      );
+      throw new Error(formatStraightPlungeRefusal({
+        x: center.x,
+        y: center.y,
+        fromZ: verdict.contact,
+        toZ: targetZ,
+        fraction: verdict.fraction,
+        uncutColumns: verdict.uncutColumns,
+        columns: verdict.columns,
+        allowance: plungeAllowance,
+        where,
+      }));
     }
   };
 
@@ -671,8 +674,7 @@ export function emitLevelPasses(
           assertStraightDescentIsClear(
             pass.point,
             z,
-            `region entry, mode ${pass.mode}, helix radius ${pass.radius.toFixed(3)} below the ` +
-              `${minHelixR.toFixed(3)} minimum`,
+            { kind: 'region', mode: pass.mode, helixRadius: pass.radius, minHelixRadius: minHelixR },
           );
           const rampStartZ = stockAwareRampStart(pass.point, 0, z, firstEntry);
           if (firstEntry || !canUseStockAwareEntry) {
@@ -768,7 +770,7 @@ export function emitLevelPasses(
             assertStraightDescentIsClear(
               b,
               z,
-              pass.fallbackHelix ? 'lift landing, fallback helix too small' : 'lift landing, no helix fits',
+              { kind: 'landing', fallbackHelixTooSmall: Boolean(pass.fallbackHelix) },
             );
             const rampStartZ = stockAwareRampStart(b, 0, z, false);
             if (canUseStockAwareEntry) {

@@ -37,6 +37,7 @@
 // Finish (4) is unchanged in behavior and reuses its existing
 // .model-item-finish-btn look; it just no longer floats.
 
+import { useText } from '../../i18n'
 import { useState } from 'react'
 import { Box, Check, ChevronDown, Plus } from 'lucide-react'
 import { TreeRenameLabel } from '../panels/TreeRenameLabel'
@@ -64,13 +65,14 @@ export interface ModelWorkspaceHeaderProps {
 export function ModelWorkspaceHeader({
   activeItem, items, onRename, onSwitch, onNewModel, onFinish,
 }: ModelWorkspaceHeaderProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [renaming, setRenaming] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
   if (activeItem === null) {
     return (
       <div className="panel-header">
-        <span className="panel-title">Design Tree</span>
+        <span className="panel-title">{workbenchText('ModelWorkspaceHeader.designTree')}</span>
       </div>
     )
   }
@@ -85,7 +87,7 @@ export function ModelWorkspaceHeader({
           className="panel-name"
           inputClassName="panel-project-rename"
           testId="model-workspace-header-name"
-          tooltip="Double-click to rename this model"
+          tooltip={workbenchText('ModelWorkspaceHeader.doubleClickToRenameThisModel')}
           onStart={() => setRenaming(true)}
           onCommit={(n) => { onRename(activeItem.id, n); setRenaming(false) }}
           onCancel={() => setRenaming(false)}
@@ -94,8 +96,8 @@ export function ModelWorkspaceHeader({
           type="button"
           className="icon-btn icon-btn-sm model-workspace-switcher-trigger"
           data-testid="model-workspace-switcher-trigger"
-          data-tooltip="Switch model"
-          aria-label="Switch model"
+          data-tooltip={workbenchText('ModelWorkspaceHeader.switchModel')}
+          aria-label={workbenchText('ModelWorkspaceHeader.switchModel')}
           aria-expanded={switcherOpen}
           onClick={() => setSwitcherOpen((v) => !v)}
         >
@@ -141,8 +143,8 @@ export function ModelWorkspaceHeader({
           type="button"
           className="tree-section-add-btn"
           data-testid="model-workspace-new-model-btn"
-          data-tooltip="New model"
-          aria-label="New model"
+          data-tooltip={workbenchText('ModelWorkspaceHeader.newModel')}
+          aria-label={workbenchText('ModelWorkspaceHeader.newModel')}
           onClick={onNewModel}
         >
           <Plus size={12} />
@@ -153,8 +155,7 @@ export function ModelWorkspaceHeader({
           data-testid="model-item-finish-btn"
           onClick={onFinish}
         >
-          Finish
-        </button>
+          {workbenchText('ModelWorkspaceHeader.finish')}</button>
       </div>
     </div>
   )

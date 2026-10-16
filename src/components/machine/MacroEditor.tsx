@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // MacroEditor - WO-1706: make, edit, remove and reorder macros in the app.
 //
 // One editor, opened from the Macros panel's "Edit macros" control, listing
@@ -18,6 +22,8 @@ import { ArrowDown, ArrowUp, CircleHelp, Pencil, Plus, Trash2, X } from 'lucide-
 import { controlMachine, useCamStore } from '../../store'
 import { parkCarrierMachine, saveParkMachineRecord } from '../../store/machineActionsStore'
 import { checkMacroBody, MACRO_API, machineMacros } from '../../lib/machine/macros/macroRuntime'
+import { machineOutputList } from '../../lib/machine/machineOutputs'
+import { macroOutputLabel, macroOutputSelection, selectedMacroOutput } from '../../lib/machine/macros/macroOutputSelection'
 import { ACTION_COLORS, type ActionColor } from '../../lib/machine/machineActions'
 import { publishMacroDraft } from '../../lib/exportCenter'
 import { newMachineMacroId, type MachineMacro } from '../../types'
@@ -36,6 +42,7 @@ interface Draft {
   /** WO-1707: kept off the Macros panel (a hidden custom button moved across).
    *  WO-2657: and so it does not run, from any route. */
   hidden: boolean
+  drivesOutput: string
 }
 
 function draftFromMacro(m: MachineMacro): Draft {
@@ -47,17 +54,19 @@ function draftFromMacro(m: MachineMacro): Draft {
     color: m.color ?? 'neutral',
     confirm: m.confirm ?? false,
     hidden: m.hidden ?? false,
+    drivesOutput: m.drivesOutput ?? '',
   }
 }
 
-const EMPTY_DRAFT: Draft = { id: null, name: '', mCodeText: '', body: '', color: 'neutral', confirm: false, hidden: false }
+const EMPTY_DRAFT: Draft = { id: null, name: '', mCodeText: '', body: '', color: 'neutral', confirm: false, hidden: false, drivesOutput: '' }
 
 function macroFromDraft(next: Draft, id: string, carried: MachineMacro | undefined): MachineMacro {
   const macro: MachineMacro = {
     id,
-    name: next.name.trim() || 'Unnamed macro',
+    name: next.name.trim() || controlText('MacroEditor.text001'),
     ...(draftMCode(next.mCodeText) === undefined ? {} : { mCode: draftMCode(next.mCodeText) }),
     body: next.body,
+    ...(next.drivesOutput ? { drivesOutput: next.drivesOutput } : {}),
     ...(next.color === 'neutral' ? {} : { color: next.color }),
     ...(next.confirm ? { confirm: true as const } : {}),
     ...(next.hidden ? { hidden: true as const } : {}),
@@ -76,6 +85,7 @@ function draftMCode(text: string): number | undefined {
 }
 
 export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useText('control-screens-not-probing')
   const machine = useCamStore(controlMachine)
   const parkMachine = useCamStore(parkCarrierMachine)
   const macros = machineMacros(parkMachine)
@@ -206,18 +216,17 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <span className="modal-title">Edit macros - {machine?.name ?? 'machine'}</span>
+          <span className="modal-title">{catalogChildren(controlText('MacroEditor.text002', { value1: '\u0000value1\u0000' }), { value1: machine?.name ?? controlText('MacroEditor.machine') })}</span>
           <button
             className="modal-btn modal-btn-ghost"
             onClick={() => setHelpOpen(!helpOpen)}
             data-testid="macro-editor-help"
-            data-tooltip="Macro help and examples"
-            aria-label="Macro help"
+            data-tooltip={controlText('MacroEditor.text003')}
+            aria-label={controlText('MacroEditor.text004')}
             aria-pressed={helpOpen}
           >
-            <CircleHelp size={14} /> Help
-          </button>
-          <button className="modal-close-btn" onClick={onClose} data-tooltip="Close" aria-label="Close">
+            <CircleHelp size={14} />{controlText('MacroEditor.text005')}</button>
+          <button className="modal-close-btn" onClick={onClose} data-tooltip={controlText('MacroEditor.text006')} aria-label={controlText('MacroEditor.text007')}>
             <X size={15} />
           </button>
         </div>
@@ -250,15 +259,13 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
               {conflicts.length > 0 && (
                 <div className="macro-editor-conflicts" data-testid="macro-editor-conflicts">
                   {conflicts.map(([code, list]) => (
-                    <div key={code} data-testid={`macro-editor-conflict-M${code}`}>
-                      M{code} is bound to {list.map((m) => `"${m.name}"`).join(' and ')} - typing M{code} runs "{list[0].name}" (the first one in the list).
-                    </div>
+                    <div key={code} data-testid={`macro-editor-conflict-M${code}`}>{catalogChildren(controlText('MacroEditor.text008', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000' }), { value1: code, value2: list.map((m) => `"${m.name}"`).join(' and '), value3: code, value4: list[0].name })}</div>
                   ))}
                 </div>
               )}
 
               {macros.length === 0 && !draft && (
-                <div className="panel-empty macro-editor-empty" data-testid="macro-editor-empty">No macros yet.</div>
+                <div className="panel-empty macro-editor-empty" data-testid="macro-editor-empty">{controlText('MacroEditor.text009')}</div>
               )}
 
               <div className="macro-editor-list" data-testid="macro-editor-list">
@@ -269,7 +276,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                       <div className="macro-editor-row">
                         <span className="macro-editor-name" data-testid={`macro-editor-item-${m.id}-name`}>{m.name}</span>
                         <span className="control-actions-default" data-testid={`macro-editor-item-${m.id}-mcode`}>
-                          {m.mCode === undefined ? 'no M-code' : `M${m.mCode}`}
+                          {m.mCode === undefined ? controlText('MacroEditor.text010') : `M${m.mCode}`}
                         </span>
                         <span className="control-actions-rowbtns">
                           <button
@@ -277,8 +284,8 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                             disabled={index === 0}
                             onClick={() => move(m.id, -1)}
                             data-testid={`macro-editor-item-${m.id}-up`}
-                            data-tooltip="Move up"
-                            aria-label={`Move ${m.name} up`}
+                            data-tooltip={controlText('MacroEditor.text011')}
+                            aria-label={controlText('MacroEditor.text012', { value1: String(m.name) })}
                           >
                             <ArrowUp size={13} />
                           </button>
@@ -287,8 +294,8 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                             disabled={index === macros.length - 1}
                             onClick={() => move(m.id, 1)}
                             data-testid={`macro-editor-item-${m.id}-down`}
-                            data-tooltip="Move down"
-                            aria-label={`Move ${m.name} down`}
+                            data-tooltip={controlText('MacroEditor.text013')}
+                            aria-label={controlText('MacroEditor.text014', { value1: String(m.name) })}
                           >
                             <ArrowDown size={13} />
                           </button>
@@ -296,8 +303,8 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                             className="panel-action-btn"
                             onClick={() => (isSelected ? closeEditor() : startEdit(m))}
                             data-testid={`macro-editor-item-${m.id}-edit`}
-                            data-tooltip="Edit"
-                            aria-label={`Edit ${m.name}`}
+                            data-tooltip={controlText('MacroEditor.text015')}
+                            aria-label={controlText('MacroEditor.text016', { value1: String(m.name) })}
                           >
                             <Pencil size={13} />
                           </button>
@@ -305,8 +312,8 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                             className="panel-action-btn"
                             onClick={() => remove(m.id)}
                             data-testid={`macro-editor-item-${m.id}-delete`}
-                            data-tooltip="Delete this macro"
-                            aria-label={`Delete ${m.name}`}
+                            data-tooltip={controlText('MacroEditor.text017')}
+                            aria-label={controlText('MacroEditor.text018', { value1: String(m.name) })}
                           >
                             <Trash2 size={13} />
                           </button>
@@ -340,8 +347,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                 </div>
               ) : (
                 <button className="modal-btn modal-btn-ghost" data-testid="macro-editor-add" onClick={startAdd}>
-                  <Plus size={13} /> Add macro
-                </button>
+                  <Plus size={13} />{controlText('MacroEditor.text019')}</button>
               )}
             </>
           )}
@@ -366,21 +372,23 @@ function MacroDraftForm({
   onSave: () => void
   onCancel: () => void
 }) {
+  const machine = useCamStore(parkCarrierMachine)
+  const outputs = machineOutputList(machine)
+  const selectedOutput = selectedMacroOutput(outputs, draft.drivesOutput)
+  useText('control-screens-not-probing')
   return (
     <div className="control-actions-editor macro-editor-form" data-testid="macro-editor-form">
       <div className="control-actions-editor-row">
         <input
           className="mform-input macro-editor-name-input"
-          placeholder="Macro name"
+          placeholder={controlText('MacroEditor.text020')}
           value={draft.name}
           data-testid="macro-editor-name"
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
         />
-        <label className="macro-editor-mcode-label">
-          M-code
-          <input
+        <label className="macro-editor-mcode-label">{controlText('MacroEditor.text021')}<input
             className="mform-input mform-input-mono macro-editor-mcode-input"
-            placeholder="none"
+            placeholder={controlText('MacroEditor.text022')}
             inputMode="numeric"
             value={draft.mCodeText}
             data-testid="macro-editor-mcode"
@@ -389,9 +397,7 @@ function MacroDraftForm({
         </label>
       </div>
       {conflictWith && (
-        <div className="control-error-text" data-testid="macro-editor-mcode-conflict">
-          M{draftMCode(draft.mCodeText)} is already bound to "{conflictWith.name}" - both will run from that M-code, first in the list.
-        </div>
+        <div className="control-error-text" data-testid="macro-editor-mcode-conflict">{catalogChildren(controlText('MacroEditor.text023', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: draftMCode(draft.mCodeText), value2: conflictWith.name })}</div>
       )}
       <div className="control-actions-editor-row">
         <span className="control-color-picks">
@@ -402,7 +408,7 @@ function MacroDraftForm({
               className={`control-color-pick macro-${c.id} ${draft.color === c.id ? 'control-color-active' : ''}`}
               data-testid={`macro-editor-color-${c.id}`}
               data-tooltip={c.label}
-              aria-label={`Color: ${c.label}`}
+              aria-label={controlText('MacroEditor.text024', { value1: String(c.label) })}
               aria-pressed={draft.color === c.id}
               onClick={() => setDraft({ ...draft, color: c.id })}
             />
@@ -414,9 +420,7 @@ function MacroDraftForm({
             checked={draft.confirm}
             data-testid="macro-editor-confirm"
             onChange={(e) => setDraft({ ...draft, confirm: e.target.checked })}
-          />
-          ask twice
-        </label>
+          />{controlText('MacroEditor.text025')}</label>
         <label className="control-actions-confirm">
           <input
             type="checkbox"
@@ -424,11 +428,28 @@ function MacroDraftForm({
             data-testid="macro-editor-shown"
             onChange={(e) => setDraft({ ...draft, hidden: !e.target.checked })}
           />
-          on the panel
+          {controlText('MacroEditor.text026')}
           {/* WO-2657: a macro off the panel is off - no button, no M-code. */}
-          <span className="control-actions-default" data-testid="macro-editor-shown-note">(off: does not run)</span>
+          <span className="control-actions-default" data-testid="macro-editor-shown-note">{controlText('MacroEditor.hiddenNote')}</span>
         </label>
       </div>
+      <label className="macro-editor-mcode-label">
+        {controlText('MacroEditor.drivesOutput')}
+        <select
+          className="mform-input"
+          data-testid="macro-editor-output"
+          value={selectedOutput ? macroOutputSelection(selectedOutput) : draft.drivesOutput}
+          onChange={(e) => setDraft({ ...draft, drivesOutput: e.target.value })}
+        >
+          <option value="">{controlText('MacroEditor.outputNone')}</option>
+          {draft.drivesOutput && !selectedOutput && (
+            <option value={draft.drivesOutput}>{draft.drivesOutput}</option>
+          )}
+          {outputs.map((output, index) => (
+            <option key={index} value={macroOutputSelection(output)}>{macroOutputLabel(output, outputs)}</option>
+          ))}
+        </select>
+      </label>
       <textarea
         className="mform-input mform-input-mono macro-editor-code"
         placeholder="line('M7')"
@@ -438,12 +459,10 @@ function MacroDraftForm({
         onChange={(e) => setDraft({ ...draft, body: e.target.value })}
       />
       {bodyCheck && !bodyCheck.ok && (
-        <div className="control-error-text" data-testid="macro-editor-body-error">
-          Line {bodyCheck.line}, column {bodyCheck.column}: {bodyCheck.message}.
-        </div>
+        <div className="control-error-text" data-testid="macro-editor-body-error">{catalogChildren(controlText('MacroEditor.text027', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: bodyCheck.line, value2: bodyCheck.column, value3: bodyCheck.message })}</div>
       )}
       <div className="macro-editor-api" data-testid="macro-editor-api-list">
-        <span className="control-actions-label">Macro API</span>
+        <span className="control-actions-label">{controlText('MacroEditor.text028')}</span>
         <ul>
           {MACRO_API.map((name) => (
             <li key={name} data-testid={`macro-editor-api-${name}`}>{API_HELP[name]}</li>
@@ -452,8 +471,8 @@ function MacroDraftForm({
       </div>
       <div className="control-actions-editor-row">
         <span className="control-actions-rowbtns">
-          <button className="modal-btn modal-btn-primary" data-testid="macro-editor-save" onClick={onSave}>Save</button>
-          <button className="modal-btn modal-btn-ghost" data-testid="macro-editor-cancel" onClick={onCancel}>Cancel</button>
+          <button className="modal-btn modal-btn-primary" data-testid="macro-editor-save" onClick={onSave}>{controlText('MacroEditor.text029')}</button>
+          <button className="modal-btn modal-btn-ghost" data-testid="macro-editor-cancel" onClick={onCancel}>{controlText('MacroEditor.text030')}</button>
         </span>
       </div>
     </div>

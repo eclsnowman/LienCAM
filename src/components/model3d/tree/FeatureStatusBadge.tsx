@@ -11,6 +11,8 @@
 // not deleted" framing and the 2D tree's own outdated/stale semantics, distinct
 // from a hard error).
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { CheckCircle2, AlertCircle, Ban, Clock, Loader2, Rewind } from 'lucide-react'
 import type { FeatureStatus } from '../../../doc'
 
@@ -22,16 +24,16 @@ export interface FeatureStatusBadgeProps {
 
 const STATUS_LABEL: Record<FeatureStatus, string> = {
   ok: 'OK',
-  dirty: 'Pending regeneration',
-  running: 'Regenerating...',
-  failed: 'Failed',
-  degraded: 'Degraded',
+  get dirty() { return workbenchText('FeatureStatusBadge.pendingRegeneration') },
+  get running() { return workbenchText('FeatureStatusBadge.regenerating') },
+  get failed() { return workbenchText('FeatureStatusBadge.failed') },
+  get degraded() { return workbenchText('FeatureStatusBadge.degraded') },
   // WO UI-6 (BK-39, mission #2): deliberately NOT grouped with 'degraded' --
   // absent-by-design, not stale/erroring.
-  suppressed: 'Suppressed',
+  get suppressed() { return workbenchText('FeatureStatusBadge.suppressed') },
   // WO UI-7 (BK-40, mission #1): its own label, distinct from 'Suppressed' --
   // a marker-position absence, not a per-feature user choice.
-  rolledBack: 'Rolled back',
+  get rolledBack() { return workbenchText('FeatureStatusBadge.rolledBack') },
 }
 
 const STATUS_COLOR_VAR: Record<FeatureStatus, string> = {
@@ -45,6 +47,7 @@ const STATUS_COLOR_VAR: Record<FeatureStatus, string> = {
 }
 
 export function FeatureStatusBadge({ status, tooltip }: FeatureStatusBadgeProps) {
+  useText('sketch-and-model-workbench')
   const color = STATUS_COLOR_VAR[status]
   const label = STATUS_LABEL[status]
   return (

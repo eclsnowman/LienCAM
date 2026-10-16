@@ -22,6 +22,8 @@
 //    This module copies every body's positions/indices into freshly allocated
 //    merged arrays, so the input buffers are never mutated.
 
+import { textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { exportBinaryStl } from '../../mesh/stl'
 import { meshFromTessBuffers, type TessellatedBrepBuffers } from '../../mesh/crossDomainBoolean'
 import type { MeshBuffers } from '../../mesh/types'
@@ -38,21 +40,21 @@ export interface StlBodyInput {
 /** Named refusal for one body's malformed tessellation. */
 function validateBodyTess(featureId: string, tess: TessellatedBrepBuffers): void {
   if (tess.position.length % 3 !== 0) {
-    throw new Error(`STL export: body '${featureId}' position count is not a multiple of 3`)
+    throw new Error(workbenchText('modelStlExport.stlExportBodyPositionCountIsNotAMultiple', { featureId: String(featureId) }))
   }
   if (tess.index.length % 3 !== 0) {
-    throw new Error(`STL export: body '${featureId}' has an incomplete triangle (index count not divisible by 3)`)
+    throw new Error(workbenchText('modelStlExport.stlExportBodyHasAnIncompleteTriangleIndexCount', { featureId: String(featureId) }))
   }
   const vertexCount = tess.position.length / 3
   for (let i = 0; i < tess.position.length; i++) {
     if (!Number.isFinite(tess.position[i])) {
-      throw new Error(`STL export: body '${featureId}' has a non-finite position coordinate`)
+      throw new Error(workbenchText('modelStlExport.stlExportBodyHasANonFinitePositionCoordinate', { featureId: String(featureId) }))
     }
   }
   for (let i = 0; i < tess.index.length; i++) {
     const idx = tess.index[i]
     if (idx < 0 || idx >= vertexCount) {
-      throw new Error(`STL export: body '${featureId}' has an index ${idx} out of vertex range [0, ${vertexCount})`)
+      throw new Error(workbenchText('modelStlExport.stlExportBodyHasAnIndexOutOfVertex', { featureId: String(featureId), idx: String(idx), vertexCount: String(vertexCount) }))
     }
   }
 }
@@ -62,7 +64,7 @@ function validateBodyTess(featureId: string, tess: TessellatedBrepBuffers): void
  *  body's buffers and refuses empty input / zero total triangles by name.
  *  Inputs are never mutated; the merged positions/indices are fresh arrays. */
 export function mergeTessellatedBodies(inputs: StlBodyInput[]): MeshBuffers {
-  if (inputs.length === 0) throw new Error('STL export: no body to export')
+  if (inputs.length === 0) throw new Error(workbenchText('modelStlExport.stlExportNoBodyToExport'))
   const meshes: MeshBuffers[] = []
   let totalVertices = 0
   let totalTriangles = 0
@@ -73,7 +75,7 @@ export function mergeTessellatedBodies(inputs: StlBodyInput[]): MeshBuffers {
     totalVertices += mesh.positions.length / 3
     totalTriangles += mesh.indices.length / 3
   }
-  if (totalTriangles === 0) throw new Error('STL export: zero triangles')
+  if (totalTriangles === 0) throw new Error(workbenchText('modelStlExport.stlExportZeroTriangles'))
 
   const positions = new Float32Array(totalVertices * 3)
   const indices = new Uint32Array(totalTriangles * 3)

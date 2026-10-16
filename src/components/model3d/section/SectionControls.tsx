@@ -4,6 +4,7 @@
 // (Lab3DView.tsx lines ~807-851), matching FeatureTree.tsx/DialogShell.tsx's
 // visual language instead of that older demo surface's hardcoded hex.
 
+import { useText } from '../../../i18n'
 import { SECTION_AXES, type SectionController } from './useSectionState'
 
 export interface SectionControlsProps {
@@ -12,6 +13,7 @@ export interface SectionControlsProps {
 }
 
 export function SectionControls({ controller, canDrag = true }: SectionControlsProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const { state, setAxis, setPos, setFlip, setEnabled, setDragEnabled, reset } = controller
   return (
     <div
@@ -37,8 +39,7 @@ export function SectionControls({ controller, canDrag = true }: SectionControlsP
           checked={state.enabled}
           onChange={(ev) => setEnabled(ev.target.checked)}
         />
-        Section
-      </label>
+        {workbenchText('SectionControls.section')}</label>
       {SECTION_AXES.map((axis) => (
         <button
           key={axis}
@@ -68,8 +69,7 @@ export function SectionControls({ controller, canDrag = true }: SectionControlsP
           disabled={!state.enabled}
           onChange={(ev) => setFlip(ev.target.checked)}
         />
-        Flip
-      </label>
+        {workbenchText('SectionControls.flip')}</label>
       <input
         type="range"
         data-testid="section-slider"
@@ -96,8 +96,7 @@ export function SectionControls({ controller, canDrag = true }: SectionControlsP
           cursor: canDrag ? 'ns-resize' : 'default',
         }}
       >
-        Drag plane
-      </button>
+        {workbenchText('SectionControls.dragPlane')}</button>
       <button
         type="button"
         data-testid="section-clear"
@@ -111,8 +110,7 @@ export function SectionControls({ controller, canDrag = true }: SectionControlsP
           cursor: 'pointer',
         }}
       >
-        Clear
-      </button>
+        {workbenchText('SectionControls.clear')}</button>
     </div>
   )
 }

@@ -30,7 +30,7 @@
 import { describe, it, expect } from 'vitest'
 import ts from 'typescript'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 
 const SRC = join(process.cwd(), 'src')
 
@@ -74,28 +74,28 @@ function calleeObject(call: ts.CallExpression): string | null {
  * its own candidate (expanded in `consider`), so two distinct messages are
  * never joined into a false long one.
  */
-function foldStaticText(node: ts.Expression | undefined): string | null {
+function foldStaticText(node: ts.Expression | undefined, catalogCall?: (call: ts.CallExpression) => string | null): string | null {
   if (!node) return null
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text
   if (ts.isTemplateExpression(node)) {
     let s = node.head.text
     for (const span of node.templateSpans) {
-      const inner = foldStaticText(span.expression)
+      const inner = foldStaticText(span.expression, catalogCall)
       if (inner) s += inner
       s += span.literal.text
     }
     return s
   }
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    const l = foldStaticText(node.left)
-    const r = foldStaticText(node.right)
+    const l = foldStaticText(node.left, catalogCall)
+    const r = foldStaticText(node.right, catalogCall)
     if (l === null || r === null) return null
     return l + r
   }
-  if (ts.isParenthesizedExpression(node)) return foldStaticText(node.expression)
+  if (ts.isParenthesizedExpression(node)) return foldStaticText(node.expression, catalogCall)
   if (ts.isConditionalExpression(node)) {
-    const t = foldStaticText(node.whenTrue)
-    const f = foldStaticText(node.whenFalse)
+    const t = foldStaticText(node.whenTrue, catalogCall)
+    const f = foldStaticText(node.whenFalse, catalogCall)
     if (t !== null && t === f) return t
     const tEmpty = t === null || t === ''
     const fEmpty = f === null || f === ''
@@ -103,7 +103,106 @@ function foldStaticText(node: ts.Expression | undefined): string | null {
     if (fEmpty && !tEmpty) return t
     return null
   }
+  if (ts.isCallExpression(node) && catalogCall) return catalogCall(node)
   return null
+}
+
+type CatalogReader = (area: string) => string | null
+
+/** Read source data, never import the app/i18next or evaluate a catalog module. */
+const readEnglishCatalog: CatalogReader = (area) => {
+  if (!/^[a-z0-9-]+$/.test(area)) return null
+  try { return readFileSync(join(SRC, 'i18n/locales/en', `${area}.ts`), 'utf8') } catch { return null }
+}
+
+function unwrapped(node: ts.Expression): ts.Expression {
+  while (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isParenthesizedExpression(node)) node = node.expression
+  return node
+}
+
+/** Catalogs.ts registers each English filename's default-exported string tree. */
+function catalogStrings(source: string): Map<string, string> {
+  const sf = ts.createSourceFile('catalog.ts', source, ts.ScriptTarget.Latest, true)
+  const declarations = new Map<string, ts.Expression>()
+  for (const statement of sf.statements) {
+    if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) declarations.set(declaration.name.text, declaration.initializer)
+    }
+  }
+  const words = new Map<string, string>()
+  let staticTree = true
+  const walk = (node: ts.Expression, prefix: string): void => {
+    node = unwrapped(node)
+    if (ts.isStringLiteralLike(node)) { words.set(prefix, node.text); return }
+    if (!ts.isObjectLiteralExpression(node)) { staticTree = false; return }
+    for (const property of node.properties) {
+      if (!ts.isPropertyAssignment(property)) { staticTree = false; continue }
+      const key = propName(property.name)
+      if (key !== null) walk(property.initializer, prefix ? `${prefix}.${key}` : key)
+      else staticTree = false
+    }
+  }
+  for (const statement of sf.statements) {
+    if (!ts.isExportAssignment(statement) || statement.isExportEquals) continue
+    const expression = unwrapped(statement.expression)
+    const value = ts.isIdentifier(expression) ? declarations.get(expression.text) : expression
+    if (value) walk(value, '')
+  }
+  return staticTree ? words : new Map()
+}
+
+/** Bind identifiers in this file only. No dependency source or default library is loaded.
+ * Symbols distinguish the genuine imported factory/const lookup from shadowed names.
+ * Only the existing static textFor(namespace)(key, parameters) form is supported. */
+function catalogResolver(sf: ts.SourceFile, readCatalog: CatalogReader): (call: ts.CallExpression) => string | null {
+  if (!sf.text.includes('textFor')) return () => null
+  const options: ts.CompilerOptions = { noResolve: true, noLib: true, target: ts.ScriptTarget.Latest }
+  const host = ts.createCompilerHost(options)
+  host.getSourceFile = (file) => file === sf.fileName ? sf : undefined
+  host.fileExists = (file) => file === sf.fileName
+  host.readFile = (file) => file === sf.fileName ? sf.text : undefined
+  const checker = ts.createProgram([sf.fileName], options, host).getTypeChecker()
+  const catalogs = new Map<string, Map<string, string>>()
+  return (call) => {
+    if (!ts.isIdentifier(call.expression) || call.arguments.length < 1 || call.arguments.length > 2) return null
+    const declaration = checker.getSymbolAtLocation(call.expression)?.valueDeclaration
+    if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer ||
+        !ts.isVariableDeclarationList(declaration.parent) || !(declaration.parent.flags & ts.NodeFlags.Const)) return null
+    const factory = declaration.initializer
+    if (!ts.isCallExpression(factory) || !ts.isIdentifier(factory.expression) || factory.arguments.length !== 1) return null
+    const imported = checker.getSymbolAtLocation(factory.expression)?.declarations?.[0]
+    if (!imported || !ts.isImportSpecifier(imported) || imported.isTypeOnly ||
+        (imported.propertyName ?? imported.name).text !== 'textFor') return null
+    const importDeclaration = imported.parent.parent.parent
+    if (!ts.isImportDeclaration(importDeclaration) || !ts.isStringLiteral(importDeclaration.moduleSpecifier) ||
+        importDeclaration.importClause?.isTypeOnly) return null
+    const specifier = importDeclaration.moduleSpecifier.text
+    if (!specifier.startsWith('.')) return null
+    const importedPath = resolve(dirname(join(SRC, sf.fileName)), specifier)
+    if (![join(SRC, 'i18n'), join(SRC, 'i18n/index'), join(SRC, 'i18n/index.ts')].includes(importedPath)) return null
+    const area = factory.arguments[0]
+    const key = call.arguments[0]
+    if (!ts.isStringLiteralLike(area) || !ts.isStringLiteralLike(key)) return null
+    if (!catalogs.has(area.text)) catalogs.set(area.text, catalogStrings(readCatalog(area.text) ?? ''))
+    const value = catalogs.get(area.text)!.get(key.text)
+    if (value === undefined) return null
+    const values = new Map<string, string>()
+    const parameters = call.arguments[1]
+    if (parameters) {
+      if (!ts.isObjectLiteralExpression(parameters)) return null
+      for (const property of parameters.properties) {
+        if (!ts.isPropertyAssignment(property)) return null
+        const name = propName(property.name)
+        // Namespace/default/key/interpolation overrides are not ordinary parameters.
+        if (name === null || ['ns', 'defaultValue', 'keySeparator', 'nsSeparator', 'interpolation', 'count', 'context', 'lng'].includes(name)) return null
+        values.set(name, foldStaticText(property.initializer) ?? '')
+      }
+    }
+    // Match the existing template rule: keep static text, omit runtime-only values.
+    const staticValue = value.replace(/\{\{\s*([\w]+)\s*\}\}/g, (_, name: string) => values.get(name) ?? '')
+    return staticValue.includes('{{') ? null : staticValue
+  }
 }
 
 /** A sentence boundary is [.!?] followed by whitespace or end-of-string. */
@@ -122,15 +221,16 @@ function branches(node: ts.Expression): ts.Expression[] {
 }
 
 /** Scan ONE source file's text and return every three-sentence message literal at a sink. */
-export function scanSource(file: string, text: string): Hit[] {
+export function scanSource(file: string, text: string, readCatalog: CatalogReader = readEnglishCatalog): Hit[] {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, /*setParentNodes*/ true, ts.ScriptKind.TSX)
+  const resolveCatalogCall = catalogResolver(sf, readCatalog)
   const at = (n: ts.Node): number => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
   const hits: Hit[] = []
   const seen = new Set<number>()
 
   const consider = (sink: string, node: ts.Expression): void => {
     for (const n of branches(node)) {
-      const message = foldStaticText(n)
+      const message = foldStaticText(n, resolveCatalogCall)
       if (message === null) continue
       const sentences = sentenceCount(message)
       if (sentences < 3) continue
@@ -207,6 +307,11 @@ const PINNED: Record<string, number> = {
   'components/machine/JogPanel.tsx': 1,
   'lib/machine/probeRoutines.ts': 3,
   'mesh/edit/operations/boundaryCap.ts': 1,
+  // WO-2324 maintenance: recovered baseline visibility, not new messages.
+  // index502/503 and their real errorMessage sinks are Git-identical on frozen
+  // M3940, accepted main802, current main6bd and this candidate. Keep the old
+  // three pins intact; provenance and the preserved first red are in evidence.
+  'store/index.ts': 2,
 }
 
 describe('WO-1917 console-line census - no operator message runs to three sentences', () => {
@@ -250,5 +355,79 @@ describe('WO-1917 console-line census - no operator message runs to three senten
       `}`,
     ].join('\n')
     expect(scanSource('scratch/positive.ts', scratch)).toEqual([])
+  })
+})
+
+describe('WO-2324 static English catalog census maintenance', () => {
+  const file = 'components/machine/census-control.ts'
+  const three = 'The bridge did not answer. The port is closed. Try reconnecting.'
+  const two = 'The bridge did not answer. Try reconnecting.'
+  const source = (expression: string, binding = "import { textFor as factory } from '../../i18n'; const words = factory('census-control');") =>
+    `${binding}\nfunction report() { pushConsole('tx', ${expression}, 'error') }`
+  const reader = (words: Record<string, string>): CatalogReader => (area) => area === 'census-control'
+    ? `const words = ${JSON.stringify({ messages: words })} as const; export default words;`
+    : null
+
+  it('resolves the real imported factory alias and attributes catalog text exactly like a literal', () => {
+    const literal = scanSource(file, source(JSON.stringify(three)))
+    const translated = scanSource(file, source("words('messages.long')"), reader({ long: three }))
+    expect(translated).toEqual(literal)
+    expect(translated).toEqual([{ file, line: 2, sink: 'pushConsole', sentences: 3, text: three }])
+  })
+
+  it('POSITIVE/NEGATIVE/RESTORED: adding the third catalog sentence raises the actual scan and restoring removes it', () => {
+    const scratch = source("words('messages.message')")
+    const before = scanSource(file, scratch, reader({ message: two }))
+    const negative = scanSource(file, scratch, reader({ message: three }))
+    const restored = scanSource(file, scratch, reader({ message: two }))
+    expect(before).toEqual([])
+    expect(negative).toEqual([{ file, line: 2, sink: 'pushConsole', sentences: 3, text: three }])
+    expect(byFile(negative)).toEqual({ [file]: 1 })
+    expect(listFor(negative)).toContain(`${file}:2`)
+    expect(restored).toEqual(before)
+  })
+
+  it('folds concatenated catalog fragments into one message at the existing sink', () => {
+    const hits = scanSource(file, source("words('messages.first') + words('messages.second')"), reader({
+      first: 'The bridge did not answer. ', second: 'The port is closed. Try reconnecting.',
+    }))
+    expect(hits).toEqual([{ file, line: 2, sink: 'pushConsole', sentences: 3, text: three }])
+  })
+
+  it('preserves the literal-template rule for static and runtime-only interpolation', () => {
+    const literal = scanSource(file, source('`First sentence. ${runtimeValue}Second sentence. ${"Final sentence."}`'))
+    const translated = scanSource(file, source("words('messages.templated', { runtime: runtimeValue, fixed: 'Final sentence.' })"), reader({
+      templated: 'First sentence. {{runtime}}Second sentence. {{fixed}}',
+    }))
+    expect(translated).toEqual(literal)
+    expect(translated[0].sentences).toBe(3)
+  })
+
+  it('does not pretend missing/dynamic namespaces or keys resolve', () => {
+    for (const expression of ["words('messages.missing')", 'words(dynamicKey)', "words('messages.' + key)"]) {
+      expect(scanSource(file, source(expression), reader({ long: three }))).toEqual([])
+    }
+    for (const area of ['dynamicArea', "'missing-area'"]) {
+      const binding = `import { textFor as factory } from '../../i18n'; const words = factory(${area});`
+      expect(scanSource(file, source("words('messages.long')", binding), reader({ long: three }))).toEqual([])
+    }
+  })
+
+  it('rejects similarly named functions, spoofed imports, type-only imports and shadowed bindings', () => {
+    const bindings = [
+      "function textFor(area) { return () => '' }; const words = textFor('census-control');",
+      "import { textFor as factory } from '../../fake-i18n'; const words = factory('census-control');",
+      "import type { textFor as factory } from '../../i18n'; const words = factory('census-control');",
+      "import { textFor as factory } from '../../i18n'; function build(factory) { const words = factory('census-control'); pushConsole(words('messages.long')); }",
+    ]
+    for (const binding of bindings) expect(scanSource(file, source("words('messages.long')", binding), reader({ long: three }))).toEqual([])
+    const shadowed = "import { textFor } from '../../i18n'; const words = textFor('census-control'); function report(words) { pushConsole(words('messages.long')) }"
+    expect(scanSource(file, shadowed, reader({ long: three }))).toEqual([])
+  })
+
+  it('does not invent text for overridden lookup options or a dynamic/spread catalog tree', () => {
+    expect(scanSource(file, source("words('messages.long', { ns: 'other' })"), reader({ long: three }))).toEqual([])
+    expect(scanSource(file, source("words('messages.long')"), () => `export default { messages: { long: ${JSON.stringify(three)} }, ...unknown };`)).toEqual([])
+    expect(scanSource(file, source("words('messages.long')"), () => 'export default { messages: { long: runtimeValue } };')).toEqual([])
   })
 })

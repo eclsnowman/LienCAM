@@ -330,7 +330,8 @@ describe('WO UI-70-R5 / 2. the current tree passes -- every route it uses is san
     const grants = SANCTIONED_AUTHORING.filter((s) => s.route !== 'UNRESOLVED')
     expect(grants.map((s) => s.key).sort()).toEqual([
       'components/model3d/referenceImage/ReferenceImageCalibration.tsx:ReferenceImageCalibration > createPortal(<> {points.length < 2 && <WorkbenchConfirmBar testId="reference-image-cali...',
-      'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label="Reference image corner handles"> {IMAGE_CORNERS.map((corn...',
+      // WO-2784 RE-PIN: WO-2322 (686f74ad2f, landed a43dc7cf90) moved the corner-handles aria-label into the workbench text catalog; same portal site, key re-texted only.
+      "components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label={workbenchText('ReferenceImagePlacement.referenceImageCorn...",
       'components/panels/sketch/SketchImportExportWindows.tsx:SketchImportExportWindows > createPortal( <div className="modal-backdrop" data-ui78-sanctioned="" onMouseDown={onCl...',
       'lib/sketch/printDrawing.ts:printSketchDocument > document.body.appendChild(frame)',
       "lib/sketch/printDrawing.ts:printSketchDocument > document.createElement('iframe')",
@@ -449,7 +450,8 @@ describe('WO UI-70-R5 / 3. the sanctioned list cannot go stale, understate, or l
     // Each added surface has its exact sanction and census recipe above.
     expect(outOfFlow).toEqual([
       'components/model3d/referenceImage/ReferenceImageCalibration.tsx:ReferenceImageCalibration > createPortal(<> {points.length < 2 && <WorkbenchConfirmBar testId="reference-image-cali...',
-      'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label="Reference image corner handles"> {IMAGE_CORNERS.map((corn...',
+      // WO-2784 RE-PIN: WO-2322 (686f74ad2f, landed a43dc7cf90) moved the corner-handles aria-label into the workbench text catalog; same portal site, key re-texted only.
+      "components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label={workbenchText('ReferenceImagePlacement.referenceImageCorn...",
       'components/panels/sketch/SketchImportExportWindows.tsx:SketchImportExportWindows > createPortal( <div className="modal-backdrop" data-ui78-sanctioned="" onMouseDown={onCl...',
       'lib/sketch/printDrawing.ts:printSketchDocument > document.body.appendChild(frame)',
       "lib/sketch/printDrawing.ts:printSketchDocument > document.createElement('iframe')",

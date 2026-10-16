@@ -62,6 +62,7 @@ import { analyzeAndMeasure } from '../../analysis';
 import type { MeshBuffers, Vec3 } from '../../types';
 import { recognizeEdgeBlends } from '../../recognition/edgeBlends';
 import { recognizeMeshFeatures } from '../../recognition/recognize';
+import { faceRegions } from '../../recognition/tangentRim';
 import { facetNormal, facetPoints, normalsWithin, vertexAt, weldMesh, type WeldedMesh } from '../../recognition/topology';
 import { cross, dot, length, normalize, sub } from '../../recognition/types';
 import { facetCount, vertexCount } from '../idView';
@@ -74,6 +75,7 @@ import type {
   MeshEditRecord,
 } from '../types';
 import { facetSoup } from './boundaryCap';
+import { moveBesideSphericalBoss } from './sphericalRimOffset';
 
 export const MOVE_FLAT_FACE_KIND = 'move-flat-face';
 export const MOVE_FLAT_FACE_VERSION = 1;
@@ -405,6 +407,44 @@ function carriedChamferFacets(
   return carried;
 }
 
+/**
+ * WO-2798: blends belong to the edge they round, exactly as a chamfer does
+ * (WO-2767 gave the STEP route the same rule). Every fillet the picked face
+ * runs TANGENT into - the foot fillet round a boss, the r2 chain round a top,
+ * the floor fillets of a pocket - rides with the face at its own radius, and
+ * the wall beyond it stretches.
+ *
+ * The band is grown from the face's smooth rim across smoothly-joined facets.
+ * It stops at a wall that runs along the move (that wall stretches: a bore, a
+ * flank, a round corner standing along the move) and at any other real flat
+ * face (one `tangentRim.ts` would offer). A tangent wall that is neither - a
+ * drafted wall a fillet runs into - is left where it is, so the band's rigid
+ * edge drags it off its plane and `proveFacet` says so in one sentence
+ * instead of building a wrong shape.
+ */
+function carriedBlendFacets(w: WeldedMesh, selected: ReadonlySet<number>, face: FacePlane): Set<number> {
+  const carried = new Set<number>();
+  const faces = faceRegions(w);
+  const seeds: number[] = [];
+  for (const f of selected) for (const next of faces.smooth[f]) if (!selected.has(next)) seeds.push(next);
+  if (seeds.length === 0) return carried;
+  const eligible = (facet: number): boolean =>
+    !selected.has(facet) && !carried.has(facet) && w.areas[facet] > 0 &&
+    !runsAlongMove(facetNormal(w, facet), face.normal) && !faces.isFace(faces.regionOf[facet]);
+
+  const queue = seeds.filter(eligible);
+  for (const f of queue) carried.add(f);
+  while (queue.length > 0) {
+    const f = queue.pop() as number;
+    for (const next of faces.smooth[f]) {
+      if (!eligible(next)) continue;
+      carried.add(next);
+      queue.push(next);
+    }
+  }
+  return carried;
+}
+
 // ------------------------------------------------------------------ preparing
 
 function prepare(
@@ -451,8 +491,10 @@ function prepare(
   }
 
   // Which vertices move, and which faces beside them hold them. A proved
-  // chamfer directly on the rim rides with the face as one rigid band.
+  // chamfer directly on the rim rides with the face as one rigid band, and so
+  // does a fillet the face runs tangent into (WO-2798).
   const carried = carriedChamferFacets(mesh, welded, selected, plane);
+  for (const f of carriedBlendFacets(welded, selected, plane)) carried.add(f);
   const moving = new Set<number>();
   for (const f of selected) for (let c = 0; c < 3; c++) moving.add(welded.facets[f * 3 + c]);
   for (const f of carried) for (let c = 0; c < 3; c++) moving.add(welded.facets[f * 3 + c]);
@@ -645,6 +687,11 @@ function moveDetailed(
   if (typeof distanceMm !== 'number' || !Number.isFinite(distanceMm) || Math.abs(distanceMm) > 1e6) {
     throw new Error(`"${String(distanceMm)}" is not a distance LienCAM can move a face by. Nothing was changed.`);
   }
+  // WO-2802: a spherical rim has a changing intersection with this plane.
+  // It must be clipped and re-closed, never solved as several fixed chord planes.
+  const curved = options.resolveNeighbours === false ? null
+    : moveBesideSphericalBoss(mesh, facets, distanceMm, (m, fs, d) => moveDetailed(m, fs, d));
+  if (curved) return { ...curved, requestedMm: distanceMm, refusal: null };
   const prepared = prepare(mesh, facets, options);
   const sign = distanceMm >= 0 ? 1 : -1;
   const folds = foldLimits(prepared);

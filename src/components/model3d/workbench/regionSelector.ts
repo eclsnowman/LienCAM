@@ -1,3 +1,5 @@
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { ProfileRegion } from '../../../geom/geom-service'
 
 export interface RegionSignature {
@@ -112,7 +114,7 @@ export function resolveProfileSelector(
       ? {
           ok: false,
           code: 'regions-unavailable',
-          message: 'This sketch no longer has a closed profile.',
+          message: workbenchText('regionSelector.thisSketchNoLongerHasAClosedProfile'),
         }
       : { ok: true, profiles: [...regions] as [ProfileRegion, ...ProfileRegion[]] }
   }
@@ -122,7 +124,7 @@ export function resolveProfileSelector(
       return {
         ok: false,
         code: 'invalid-selector',
-        message: 'This feature has an invalid sketch-region selection.',
+        message: workbenchText('regionSelector.thisFeatureHasAnInvalidSketchRegionSelection'),
       }
     }
     const profiles: ProfileRegion[] = []
@@ -133,7 +135,7 @@ export function resolveProfileSelector(
         return {
           ok: false,
           code: resolved.code === 'invalid-selector' ? 'invalid-selector' : 'regions-unavailable',
-          message: `Selected sketch region ${index + 1} is unavailable: ${resolved.message}`,
+          message: workbenchText('regionSelector.selectedSketchRegionIsUnavailable', { value1: String(index + 1), message: String(resolved.message) }),
         }
       }
       profiles.push(resolved.profiles[0])
@@ -145,7 +147,7 @@ export function resolveProfileSelector(
     return {
       ok: false,
       code: 'invalid-selector',
-      message: 'This feature has an invalid sketch-region selection.',
+      message: workbenchText('regionSelector.thisFeatureHasAnInvalidSketchRegionSelection'),
     }
   }
 
@@ -154,14 +156,14 @@ export function resolveProfileSelector(
     return {
       ok: false,
       code: 'invalid-selector',
-      message: 'This feature has an invalid sketch-region selection.',
+      message: workbenchText('regionSelector.thisFeatureHasAnInvalidSketchRegionSelection'),
     }
   }
   if (regions === undefined || regions.length === 0) {
     return {
       ok: false,
       code: 'regions-unavailable',
-      message: 'This sketch does not contain replayable closed regions.',
+      message: workbenchText('regionSelector.thisSketchDoesNotContainReplayableClosedRegions'),
     }
   }
 
@@ -172,7 +174,7 @@ export function resolveProfileSelector(
     return {
       ok: false,
       code: 'region-not-found',
-      message: 'The selected sketch region changed or no longer exists. Select the region again.',
+      message: workbenchText('regionSelector.theSelectedSketchRegionChangedOrNoLongerExists'),
     }
   }
   if (matches.length === 1) return { ok: true, profiles: [matches[0]] }
@@ -185,7 +187,7 @@ export function resolveProfileSelector(
     return {
       ok: false,
       code: 'region-ambiguous',
-      message: 'Several sketch regions now share this boundary. Select the region again.',
+      message: workbenchText('regionSelector.severalSketchRegionsNowShareThisBoundarySelectThe'),
     }
   }
   return { ok: true, profiles: [matches[ordinal]] }

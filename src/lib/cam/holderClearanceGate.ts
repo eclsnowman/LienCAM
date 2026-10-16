@@ -16,6 +16,8 @@ import type { Tool, ToolHolder, ToolpathMove } from '../../types'
 import { formatPosition, positionNumber } from '../machine/positionFrames'
 import {
   buildSolidColumns,
+  createClearSpaceStockEnvelope,
+  buildClearSpaceSolidColumns,
   checkHolderAndShankClearance,
   toolNeckBand,
   trimToolpathToAssemblyReach,
@@ -24,9 +26,57 @@ import {
   type HolderClearanceReport,
   type ReachStop,
   type SolidColumns,
+  type ClearSpaceCandidateSweep,
 } from './holderClearance'
 import { createStockState, type StockState } from './stockState'
-import type { ToolpathStockBlock } from './types'
+import type { ChamferWorkerPayload, ToolpathStockBlock } from './types'
+
+/** WO-2754: obstacle preparation for the opt-in policy only. Existing trim and
+ * fallback consumers keep their semantics. Replay and loaded stock are both
+ * conservative retained-material envelopes tied to this dispatch. */
+export function prepareChamferClearSpace(payload: ChamferWorkerPayload): {
+  input?: Omit<ClearSpaceCandidateSweep, 'from' | 'to'>; reason?: string; notices: string[]
+} {
+  const notices: string[] = []
+  const fail = (reason: string) => ({ reason, notices })
+  const evidence = payload.entryEvidence
+  if (!evidence || evidence.frame !== 'world' || evidence.dispatch.opId !== payload.opId ||
+      evidence.dispatch.setupId !== payload.setupId) return fail('World-frame evidence does not belong to this dispatch.')
+  if (!evidence.workholding.complete || evidence.workholding.omissions.length > 0) return fail('In-scope workholding could not be resolved.')
+  if (!isUsableBlock(payload.stockBlock) || evidence.stockSource === 'unavailable') return fail('Resolved stock bounds are unavailable.')
+  const block = payload.stockBlock
+  // Legacy sampled replay remains available to the old reach trim. Here it
+  // supplies frame consistency only, never permission to remove a whole cell.
+  if (evidence.stockSource === 'prior-result-envelope') {
+    if (!isUsableStockState(payload.remainingStock)) return fail('The dispatched prior-stock envelope is unavailable.')
+    const prior = payload.remainingStock.bounds
+    if (prior.minX !== block.min.x || prior.minY !== block.min.y || prior.minZ !== block.min.z ||
+        prior.maxX !== block.max.x || prior.maxY !== block.max.y || prior.maxZ !== block.max.z) {
+      return fail('Prior-stock bounds do not match the resolved world stock.')
+    }
+  }
+  const stock = createClearSpaceStockEnvelope({ minX: block.min.x, minY: block.min.y, minZ: block.min.z,
+    maxX: block.max.x, maxY: block.max.y, maxZ: block.max.z }, 0.25, MAX_STOCK_COLUMNS,
+    payload.clearSpacePredecessors ?? [])
+  const readableColumns = (mesh: ClearanceMesh): SolidColumns | null => {
+    const columns = buildClearSpaceSolidColumns(mesh)
+    return columns && columns.spanZ.length > 0 ? columns : null
+  }
+  const part = payload.clearancePart ? readableColumns(payload.clearancePart) : null
+  if (payload.clearancePart && !part) return fail('The part mesh could not be conservatively enclosed as a closed boundary.')
+  const workholding: SolidColumns[] = []
+  for (const mesh of payload.workholding ?? []) {
+    const columns = readableColumns(mesh)
+    if (!columns) return fail('A resolved workholding mesh could not be conservatively enclosed as a closed boundary.')
+    workholding.push(columns)
+  }
+  if (part || workholding.length > 0) notices.push('Chamfer clear-space: mesh obstacles use triangle-overlapped column enclosures; sloping faces and gaps between stacked spans may be conservatively filled.')
+  notices.push(`Chamfer clear-space: checked against the ${evidence.stockSource === 'prior-result-envelope'
+    ? 'prior-result' : 'loaded-stock'} retained-material envelope; unrepresented removals remain material.`)
+  if (!payload.clearancePart) notices.push('Chamfer clear-space: no separate part mesh was supplied; material proof is limited to the dispatched stock envelope and available workholding.')
+  return { input: { tool: payload.tool, holder: payload.holder, stock, part: part ?? undefined, workholding,
+    evidence: { stock: 'retained-envelope', frame: 'world', workholding: 'complete' } }, notices }
+}
 
 export type HolderClearanceGateStatus = 'clear' | 'collision' | 'not-checked'
 

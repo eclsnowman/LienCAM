@@ -1,4 +1,4 @@
-(LienCAM 0.36.0-alpha.1 - 06 Knob and handwheel - uccnc)
+(LienCAM 0.36.0-alpha.2 - 06 Knob and handwheel - uccnc)
 G90 G94 G17 G21 G64
 ( Setup 1 )
 G54

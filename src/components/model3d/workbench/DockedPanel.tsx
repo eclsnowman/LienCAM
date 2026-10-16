@@ -3,6 +3,7 @@
 // the view its whole width back to review the preview; the strip's chevron (or its name) brings it back. The fold is
 // remembered per viewer. Header, a scrolling body, and a footer that stays put (Cancel / Finish).
 
+import { useText } from '../../../i18n'
 import { useState, type ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { readPref, writePref } from '../../common/useToolPaletteLayout'
@@ -25,6 +26,7 @@ export interface DockedPanelProps {
 }
 
 export function DockedPanel({ id, testId, title, icon, width, onClose, closeLabel, closeTestId, footer, children, className }: DockedPanelProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const key = `liencam.${id}.dock-folded`
   const [folded, setFolded] = useState<boolean>(() => readPref(key) === true)
   const fold = (next: boolean) => { writePref(key, next); setFolded(next) }
@@ -37,8 +39,8 @@ export function DockedPanel({ id, testId, title, icon, width, onClose, closeLabe
           className="docked-panel-unfold"
           data-testid={`${testId}-unfold`}
           aria-expanded={false}
-          aria-label={`Show the ${title} panel`}
-          data-tooltip={`Show the ${title} panel`}
+          aria-label={workbenchText('DockedPanel.showThePanel', { title: String(title) })}
+          data-tooltip={workbenchText('DockedPanel.showThePanel', { title: String(title) })}
           onClick={() => fold(false)}
         >
           <ChevronLeft size={14} />
@@ -58,8 +60,8 @@ export function DockedPanel({ id, testId, title, icon, width, onClose, closeLabe
           className="modal-close-btn docked-panel-fold"
           data-testid={`${testId}-fold`}
           aria-expanded={true}
-          aria-label={`Fold the ${title} panel to widen the view`}
-          data-tooltip="Fold to the side: the view gets its whole width back"
+          aria-label={workbenchText('DockedPanel.foldThePanelToWidenTheView', { title: String(title) })}
+          data-tooltip={workbenchText('DockedPanel.foldToTheSideTheViewGetsItsWhole')}
           onClick={() => fold(true)}
         >
           <ChevronRight size={14} />

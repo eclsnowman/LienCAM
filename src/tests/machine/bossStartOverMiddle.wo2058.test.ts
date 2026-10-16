@@ -13,7 +13,9 @@
 // The native route (UccncController over the fake bridge board, with a round
 // boss and a rect boss) is pinned in probingRunThrough.wo2034.test.ts. This
 // file pins the planner's contract, and that the beside-the-face plan (the
-// pendant, and a text route with no G38.3) keeps WO-2035's cross-over.
+// pendant) keeps WO-2035's cross-over. WO-2800 (Operator 10-14): the runner never
+// runs it in place of the approved plan - a text route with no G38.3 says so
+// and moves nothing (approvedProbingEveryRoute.wo2800.test.ts).
 
 import { describe, expect, it } from 'vitest'
 import { planFeatureProbeCycle, type ProbeCycleTouchStep } from '../../lib/machine/probeFeatureCycle'
@@ -121,7 +123,7 @@ describe('WO-2058 planner: Boss and Rect boss start over the middle and work fro
   })
 })
 
-describe('WO-2058: the beside-the-face boss plan keeps WO-2035\'s cross-over (the pendant; a text route with no G38.3)', () => {
+describe('WO-2058: the beside-the-face boss plan keeps WO-2035\'s cross-over (the pendant)', () => {
   // The pendant's screen still says start outside the X max face at probing
   // depth, so it plans with approachFromTop: false.
   const TOP = 20

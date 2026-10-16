@@ -112,6 +112,8 @@
 // while the user is asking for the ENCLOSED REGIONS, which may be bounded by several profiles' edges
 // at once. Everything else in this adapter (finite/degenerate/unsupported refusals, block expansion,
 // ellipse tessellation, srcId rewriting) is unchanged and still runs BEFORE the engine.
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { arrangementFaceLoops, computeArrangementRegions } from './sketchRegionArrangement'
 import type { PlaneFrame, Sketch3dEntity } from '../../../sketch3d'
 import type { ProfileRegion } from '../../../geom/geom-service'
@@ -236,7 +238,7 @@ function tessellatedLineEntities(
   for (let i = 0; i < lastIndex; i++) {
     const start = ring[i]
     const end = closed ? ring[(i + 1) % ring.length] : ring[i + 1]
-    const id = `${e.id}~ell${i}`
+    const id = workbenchText('sketchProfile.ell', { id: String(e.id), i: String(i) })
     srcIdMap.set(id, e.id)
     out.push({ id, construction: e.construction, kind: 'line', start, end })
   }
@@ -304,7 +306,7 @@ function rewriteSrcIds(profile: ProfileRegion, srcIdMap: Map<string, string>): P
  * loop chaining (chainEntitiesIntoLoops threads NaN through its vertex keys without complaint).
  */
 export function validateSketchForProfile(sketch: Sketch | null): SketchProfileRefusal | null {
-  if (sketch === null) return refuse('no-geometry', 'No sketch is open.')
+  if (sketch === null) return refuse('no-geometry', workbenchText('sketchProfile.noSketchIsOpen'))
 
   // Flatten any rigid block into its world member geometry FIRST (SKC-BLOCKS
   // Stage 3): the block is a container, its members are the real profile lines/
@@ -317,23 +319,23 @@ export function validateSketchForProfile(sketch: Sketch | null): SketchProfileRe
     const kinds = [...new Set(unsupported.map((e) => e.kind))].join(', ')
     return refuse(
       'unsupported-entity',
-      `This sketch contains ${kinds} geometry, which cannot be extruded or revolved yet. ` +
-        `Delete it, or mark it as construction geometry, to produce a profile.`,
+      workbenchText('sketchProfile.thisSketchContainsGeometryWhichCannotBeExtrudedOr', { kinds: String(kinds) }) +
+        workbenchText('sketchProfile.deleteItOrMarkItAsConstructionGeometryTo'),
       unsupported.map((e) => e.id),
     )
   }
 
   const profileEntities = live.filter((e) => PROFILE_KINDS.has(e.kind))
   if (profileEntities.length === 0) {
-    return refuse('no-geometry', 'This sketch has no closed profile yet -- draw one to extrude or revolve it.')
+    return refuse('no-geometry', workbenchText('sketchProfile.thisSketchHasNoClosedProfileYetDrawOne'))
   }
 
   const nonFinite = profileEntities.filter((e) => !entityFinite(e))
   if (nonFinite.length > 0) {
     return refuse(
       'non-finite-coordinate',
-      'This sketch has geometry with non-finite coordinates (the constraint solve did not converge). ' +
-        'No profile is produced.',
+      workbenchText('sketchProfile.thisSketchHasGeometryWithNonFiniteCoordinatesThe') +
+        workbenchText('sketchProfile.noProfileIsProduced'),
       nonFinite.map((e) => e.id),
     )
   }
@@ -342,7 +344,7 @@ export function validateSketchForProfile(sketch: Sketch | null): SketchProfileRe
   if (degenerate.length > 0) {
     return refuse(
       'degenerate-entity',
-      'This sketch has zero-length or zero-radius geometry. No profile is produced.',
+      workbenchText('sketchProfile.thisSketchHasZeroLengthOrZeroRadiusGeometry'),
       degenerate.map((e) => e.id),
     )
   }
@@ -359,7 +361,7 @@ export function validateSketchForProfile(sketch: Sketch | null): SketchProfileRe
   if (arrangementFaceLoops(adaptEntities(profileEntities).adapted).length === 0) {
     return refuse(
       'open-loop',
-      'This sketch profile is not closed. Close the loop (or remove the stray geometry) to extrude or revolve it.',
+      workbenchText('sketchProfile.thisSketchProfileIsNotClosedCloseTheLoop'),
       [],
     )
   }
@@ -413,12 +415,12 @@ export async function extractSketchProfile(
     // nesting classifier itself refused. Named rather than swallowed.
     return {
       ok: false,
-      refusal: refuse('open-loop', `This sketch profile could not be built.${err instanceof Error ? ` (${err.message})` : ''}`),
+      refusal: refuse('open-loop', workbenchText('sketchProfile.thisSketchProfileCouldNotBeBuilt', { value1: String(err instanceof Error ? ` (${err.message})` : '') })),
     }
   }
 
   if (regions[0] === undefined) {
-    return { ok: false, refusal: refuse('no-geometry', 'This sketch has no closed profile yet.') }
+    return { ok: false, refusal: refuse('no-geometry', workbenchText('sketchProfile.thisSketchHasNoClosedProfileYet')) }
   }
   // SKC-47-R1 MAJOR 1: the kernel-facing srcId must be the ORIGINAL sketch-entity id, never the
   // synthetic tessellation id minted above for loop-chaining. Rewrite before the finiteness check
@@ -427,7 +429,7 @@ export async function extractSketchProfile(
   if (rewrittenRegions.some((region) => !profileIsFinite(region))) {
     return {
       ok: false,
-      refusal: refuse('non-finite-coordinate', 'The extracted profile contains non-finite coordinates. No profile is produced.'),
+      refusal: refuse('non-finite-coordinate', workbenchText('sketchProfile.theExtractedProfileContainsNonFiniteCoordinatesNoProfile')),
     }
   }
   // Transitional compatibility view: old direct `.profile` reads still get

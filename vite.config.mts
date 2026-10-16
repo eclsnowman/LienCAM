@@ -325,6 +325,31 @@ function releaseLegalFiles(): Plugin {
   }
 }
 
+// 10-14: when node_modules is a junction to another drive (main checkout ->
+// H:\LienCAM\node_modules), Vite 8's /@fs/ static route drops the drive letter
+// and answers a raw .wasm request with index.html, so Manifold and Clipper
+// fail to start. Serve those files through /node_modules/ instead. Only .wasm
+// is rewritten, so JS module identity is unchanged; same-drive setups are untouched.
+function crossDriveWasm(): Plugin {
+  const drive = (path: string) => path.slice(0, 2).toLowerCase()
+  const prefix = `/@fs/${installedDependencyRoot.replaceAll('\\', '/')}/`.toLowerCase()
+  return {
+    name: 'liencam-cross-drive-wasm',
+    apply: 'serve',
+    configureServer(server) {
+      if (drive(installedDependencyRoot) === drive(projectRoot)) return
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url ?? ''
+        const path = url.split('?', 1)[0]
+        if (path.toLowerCase().startsWith(prefix) && path.toLowerCase().endsWith('.wasm')) {
+          req.url = `/node_modules/${url.slice(prefix.length)}`
+        }
+        next()
+      })
+    },
+  }
+}
+
 // WO-2485: workers have independent module graphs. Build the LGPL engine once
 // and route every deep import to a namespace in that replaceable ES module.
 // Merely assigning manual chunks would duplicate it in each worker bundle.
@@ -435,7 +460,7 @@ export default defineConfig({
   // The desktop shell serves the packaged build from a secure custom origin.
   // Relative URLs keep every emitted HTML entry portable inside app.asar.
   base: './',
-  plugins: [react(), pendantBrokerLifecycle(), releaseLegalFiles(), lgplModules()],
+  plugins: [react(), crossDriveWasm(), pendantBrokerLifecycle(), releaseLegalFiles(), lgplModules()],
   worker: { format: 'es', plugins: () => [lgplModules(true)] },
   server: {
     fs: {
@@ -457,6 +482,14 @@ export default defineConfig({
         '**/.opencode/**',
         '**/queue/**',
         '**/.git/**',
+        // 10-14: archive/active-work holds junctions to every lane worktree on
+        // H: (full checkouts) and .git.hdd is the retired git store; watching
+        // them took the dev server past 421,000 handles and stalled every request.
+        '**/archive/**',
+        '**/.git.hdd/**',
+        '**/node_modules.hdd/**',
+        // 30k+ captured test outputs; the app never imports them.
+        '**/src/tests/evidence/**',
       ],
     },
   },

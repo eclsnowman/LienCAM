@@ -4,6 +4,8 @@
 // re-expressed with this app's 3D-viewport token set (FeatureTree.tsx/
 // DialogShell.tsx) rather than the 2D tree's own inline styles.
 
+import { useText } from '../../../i18n'
+import { catalogChildren } from '../catalogChildren'
 import type { RGB } from './appearanceStore'
 import type { AppearanceSessionState } from './useAppearanceSession'
 
@@ -26,6 +28,7 @@ function fromHex(hex: string): RGB {
 }
 
 export function AppearancePanel({ state, onFilterModeChange, onColorChange, onClear }: AppearancePanelProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <div
       data-testid="appearance-panel"
@@ -55,8 +58,7 @@ export function AppearancePanel({ state, onFilterModeChange, onColorChange, onCl
             cursor: 'pointer',
           }}
         >
-          Face
-        </button>
+          {workbenchText('AppearancePanel.face')}</button>
         <button
           type="button"
           data-testid="appearance-filter-body"
@@ -71,13 +73,11 @@ export function AppearancePanel({ state, onFilterModeChange, onColorChange, onCl
             cursor: 'pointer',
           }}
         >
-          Body
-        </button>
+          {workbenchText('AppearancePanel.body')}</button>
       </div>
       {state.target === null ? (
         <div style={{ color: 'var(--text-muted)' }} data-testid="appearance-empty">
-          (pick a {state.filterMode} to color)
-        </div>
+          {catalogChildren(workbenchText('AppearancePanel.pickAToColor', { filterMode: '\u0000value1\u0000' }), { value1: state.filterMode })}</div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <label
@@ -102,7 +102,7 @@ export function AppearancePanel({ state, onFilterModeChange, onColorChange, onCl
             />
           </label>
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} data-testid="appearance-target-label">
-            {state.target.kind === 'face' ? state.target.id : `body: ${state.target.bodyId}`}
+            {state.target.kind === 'face' ? state.target.id : workbenchText('AppearancePanel.body2', { value1: String(state.target.bodyId) })}
           </span>
           <button
             type="button"
@@ -118,8 +118,7 @@ export function AppearancePanel({ state, onFilterModeChange, onColorChange, onCl
               cursor: 'pointer',
             }}
           >
-            Clear
-          </button>
+            {workbenchText('AppearancePanel.clear')}</button>
         </div>
       )}
     </div>

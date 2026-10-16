@@ -1,3 +1,5 @@
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { ReferenceImage2dControls, ReferenceImage2dInsert } from './ReferenceImage2d'
 import { Fragment, useRef, useState } from 'react'
 import { useCamStore } from '../../../store'
@@ -89,84 +91,84 @@ const CONSTRAINT_KIND_BY_BUTTON: Record<string, SketchConstraintKind> = {
 export const SECTIONS: SectionDef[] = [
   {
     id: 'create',
-    title: 'Create',
+    get title() { return workbenchText('SketchToolbox.create') },
     tools: [
-      { id: 'line',          label: 'Line',          icon: Slash,               stage: 3 },
-      { id: 'rect-corner',   label: 'Rectangle',     icon: Square,              stage: 3 },
-      { id: 'rect-center',   label: 'Center Rect',   icon: SquareDot,           stage: 3 },
-      { id: 'circle-center', label: 'Circle',        icon: cadIcon('circle-center'), stage: 3 },
-      { id: 'circle-3pt',    label: '3-Pt Circle',   icon: cadIcon('circle-3pt'), stage: 3 },
-      { id: 'ellipse',       label: 'Ellipse',       icon: cadIcon('ellipse'),  stage: 3 },
-      { id: 'ellipse-arc',   label: 'Elliptical Arc', icon: cadIcon('ellipse-arc'), stage: 3 },
-      { id: 'spline',        label: 'Spline',        icon: cadIcon('spline'),   stage: 3 },
-      { id: 'spline-control', label: 'Control Spline', icon: cadIcon('spline-control'), stage: 3 },
-      { id: 'bezier',        label: 'Bezier',        icon: cadIcon('bezier'),   stage: 3 },
-      { id: 'conic',         label: 'Conic Arc',     icon: cadIcon('conic'),    stage: 3 },
-      { id: 'text',          label: 'Text',          icon: Type,                stage: 3 },
-      { id: 'arc-3pt',       label: '3-Pt Arc',      icon: cadIcon('arc-3pt'),  stage: 3 },
-      { id: 'arc-tangent',   label: 'Tangent Arc',   icon: Tangent,             stage: 3 },
-      { id: 'arc-center',    label: 'Center Arc',    icon: Radius,              stage: 3 },
-      { id: 'gear',          label: 'Gear',          icon: Settings2,           stage: 6 },
-      { id: 'polygon',       label: 'Polygon',       icon: Pentagon,            stage: 6 },
-      { id: 'slot',          label: 'Slot',          icon: cadIcon('slot'),     stage: 6 },
-      { id: 'slot-arc',      label: 'Arc Slot',      icon: cadIcon('slot-arc'), stage: 6 },
-      { id: 'point',         label: 'Point',         icon: cadIcon('point'),    stage: 3 },
-      { id: 'construction',  label: 'Construction',  icon: cadIcon('construction'), stage: 3 },
+      { id: 'line',          get label() { return workbenchText('SketchToolbox.line') },          icon: Slash,               stage: 3 },
+      { id: 'rect-corner',   get label() { return workbenchText('SketchToolbox.rectangle') },     icon: Square,              stage: 3 },
+      { id: 'rect-center',   get label() { return workbenchText('SketchToolbox.centerRect') },   icon: SquareDot,           stage: 3 },
+      { id: 'circle-center', get label() { return workbenchText('SketchToolbox.circle') },        icon: cadIcon('circle-center'), stage: 3 },
+      { id: 'circle-3pt',    get label() { return workbenchText('SketchToolbox.3PtCircle') },   icon: cadIcon('circle-3pt'), stage: 3 },
+      { id: 'ellipse',       get label() { return workbenchText('SketchToolbox.ellipse') },       icon: cadIcon('ellipse'),  stage: 3 },
+      { id: 'ellipse-arc',   get label() { return workbenchText('SketchToolbox.ellipticalArc') }, icon: cadIcon('ellipse-arc'), stage: 3 },
+      { id: 'spline',        get label() { return workbenchText('SketchToolbox.spline') },        icon: cadIcon('spline'),   stage: 3 },
+      { id: 'spline-control', get label() { return workbenchText('SketchToolbox.controlSpline') }, icon: cadIcon('spline-control'), stage: 3 },
+      { id: 'bezier',        get label() { return workbenchText('SketchToolbox.bezier') },        icon: cadIcon('bezier'),   stage: 3 },
+      { id: 'conic',         get label() { return workbenchText('SketchToolbox.conicArc') },     icon: cadIcon('conic'),    stage: 3 },
+      { id: 'text',          get label() { return workbenchText('SketchToolbox.text') },          icon: Type,                stage: 3 },
+      { id: 'arc-3pt',       get label() { return workbenchText('SketchToolbox.3PtArc') },      icon: cadIcon('arc-3pt'),  stage: 3 },
+      { id: 'arc-tangent',   get label() { return workbenchText('SketchToolbox.tangentArc') },   icon: Tangent,             stage: 3 },
+      { id: 'arc-center',    get label() { return workbenchText('SketchToolbox.centerArc') },    icon: Radius,              stage: 3 },
+      { id: 'gear',          get label() { return workbenchText('SketchToolbox.gear') },          icon: Settings2,           stage: 6 },
+      { id: 'polygon',       get label() { return workbenchText('SketchToolbox.polygon') },       icon: Pentagon,            stage: 6 },
+      { id: 'slot',          get label() { return workbenchText('SketchToolbox.slot') },          icon: cadIcon('slot'),     stage: 6 },
+      { id: 'slot-arc',      get label() { return workbenchText('SketchToolbox.arcSlot') },      icon: cadIcon('slot-arc'), stage: 6 },
+      { id: 'point',         get label() { return workbenchText('SketchToolbox.point') },         icon: cadIcon('point'),    stage: 3 },
+      { id: 'construction',  get label() { return workbenchText('SketchToolbox.construction') },  icon: cadIcon('construction'), stage: 3 },
     ],
   },
   {
     id: 'modify',
-    title: 'Modify',
+    get title() { return workbenchText('SketchToolbox.modify') },
     tools: [
       // Smart Dim. + Reference promoted here from the former bottom-relegated
       // DIMENSIONS section (sketch-panel-density pass): dimensioning is a
       // frequent action and should not require scrolling to the panel bottom.
       // Handlers/behavior unchanged - placement only.
-      { id: 'smart-dimension',  label: 'Smart Dim.',   icon: Ruler,             stage: 4 },
-      { id: 'toggle-reference', label: 'Reference',    icon: Eye,               stage: 4 },
-      { id: 'trim',             label: 'Trim',         icon: Scissors,          stage: 6 },
-      { id: 'split',            label: 'Split',        icon: Split,             stage: 6 },
-      { id: 'extend',           label: 'Extend',       icon: ArrowRightFromLine, stage: 6 },
-      { id: 'fillet',           label: 'Fillet',       icon: cadIcon('fillet'), stage: 6 },
-      { id: 'chamfer',          label: 'Chamfer',      icon: cadIcon('chamfer'), stage: 6 },
-      { id: 'offset',           label: 'Offset',       icon: cadIcon('offset'), stage: 6 },
-      { id: 'mirror',           label: 'Mirror',       icon: FlipHorizontal2,   stage: 6 },
-      { id: 'pattern-linear',   label: 'Linear Pat.',  icon: Grid3x3,           stage: 6 },
-      { id: 'pattern-circular', label: 'Circular Pat.', icon: cadIcon('pattern-circular'), stage: 6 },
-      { id: 'pattern-path',     label: 'Path Pat.',    icon: Waypoints,         stage: 6 },
-      { id: 'move',             label: 'Move',         icon: Move,              stage: 6 },
-      { id: 'rotate',           label: 'Rotate',       icon: RotateCw,          stage: 6 },
-      { id: 'scale',            label: 'Scale',        icon: Scaling,           stage: 6 },
-      { id: 'delete',           label: 'Delete',       icon: Trash2,            stage: 3 },
+      { id: 'smart-dimension',  get label() { return workbenchText('SketchToolbox.smartDim') },   icon: Ruler,             stage: 4 },
+      { id: 'toggle-reference', get label() { return workbenchText('SketchToolbox.reference') },    icon: Eye,               stage: 4 },
+      { id: 'trim',             get label() { return workbenchText('SketchToolbox.trim') },         icon: Scissors,          stage: 6 },
+      { id: 'split',            get label() { return workbenchText('SketchToolbox.split') },        icon: Split,             stage: 6 },
+      { id: 'extend',           get label() { return workbenchText('SketchToolbox.extend') },       icon: ArrowRightFromLine, stage: 6 },
+      { id: 'fillet',           get label() { return workbenchText('SketchToolbox.fillet') },       icon: cadIcon('fillet'), stage: 6 },
+      { id: 'chamfer',          get label() { return workbenchText('SketchToolbox.chamfer') },      icon: cadIcon('chamfer'), stage: 6 },
+      { id: 'offset',           get label() { return workbenchText('SketchToolbox.offset') },       icon: cadIcon('offset'), stage: 6 },
+      { id: 'mirror',           get label() { return workbenchText('SketchToolbox.mirror') },       icon: FlipHorizontal2,   stage: 6 },
+      { id: 'pattern-linear',   get label() { return workbenchText('SketchToolbox.linearPat') },  icon: Grid3x3,           stage: 6 },
+      { id: 'pattern-circular', get label() { return workbenchText('SketchToolbox.circularPat') }, icon: cadIcon('pattern-circular'), stage: 6 },
+      { id: 'pattern-path',     get label() { return workbenchText('SketchToolbox.pathPat') },    icon: Waypoints,         stage: 6 },
+      { id: 'move',             get label() { return workbenchText('SketchToolbox.move') },         icon: Move,              stage: 6 },
+      { id: 'rotate',           get label() { return workbenchText('SketchToolbox.rotate') },       icon: RotateCw,          stage: 6 },
+      { id: 'scale',            get label() { return workbenchText('SketchToolbox.scale') },        icon: Scaling,           stage: 6 },
+      { id: 'delete',           get label() { return workbenchText('SketchToolbox.delete') },       icon: Trash2,            stage: 3 },
     ],
   },
   {
     id: 'constraints',
-    title: 'Constraints',
+    get title() { return workbenchText('SketchToolbox.constraints') },
     tools: [
-      { id: 'coincident',    label: 'Coincident',    icon: Crosshair,             stage: 4 },
-      { id: 'concentric',    label: 'Concentric',    icon: Target,                stage: 4 },
-      { id: 'parallel',      label: 'Parallel',      icon: cadIcon('parallel'),   stage: 4 },
-      { id: 'perpendicular', label: 'Perpendicular', icon: cadIcon('perpendicular'), stage: 4 },
-      { id: 'collinear',     label: 'Collinear',     icon: cadIcon('collinear'),  stage: 4 },
-      { id: 'horizontal',    label: 'Horizontal',    icon: MoveHorizontal,        stage: 4 },
-      { id: 'vertical',      label: 'Vertical',      icon: MoveVertical,          stage: 4 },
-      { id: 'tangent',       label: 'Tangent',       icon: Tangent,               stage: 4 },
-      { id: 'equal',         label: 'Equal',         icon: Equal,                 stage: 4 },
-      { id: 'midpoint',      label: 'Midpoint',      icon: cadIcon('midpoint'),   stage: 4 },
-      { id: 'symmetric',     label: 'Symmetric',     icon: cadIcon('symmetric'),  stage: 4 },
-      { id: 'fix',           label: 'Fix',           icon: Lock,                  stage: 4 },
-      { id: 'point-on-obj',  label: 'On Object',     icon: LocateFixed,           stage: 4 },
-      { id: 'continuity-g1', label: 'Tangent G1',    icon: Spline,                stage: 4 },
-      { id: 'continuity-g2', label: 'Curvature G2',  icon: Waves,                 stage: 4 },
+      { id: 'coincident',    get label() { return workbenchText('SketchToolbox.coincident') },    icon: Crosshair,             stage: 4 },
+      { id: 'concentric',    get label() { return workbenchText('SketchToolbox.concentric') },    icon: Target,                stage: 4 },
+      { id: 'parallel',      get label() { return workbenchText('SketchToolbox.parallel') },      icon: cadIcon('parallel'),   stage: 4 },
+      { id: 'perpendicular', get label() { return workbenchText('SketchToolbox.perpendicular') }, icon: cadIcon('perpendicular'), stage: 4 },
+      { id: 'collinear',     get label() { return workbenchText('SketchToolbox.collinear') },     icon: cadIcon('collinear'),  stage: 4 },
+      { id: 'horizontal',    get label() { return workbenchText('SketchToolbox.horizontal') },    icon: MoveHorizontal,        stage: 4 },
+      { id: 'vertical',      get label() { return workbenchText('SketchToolbox.vertical') },      icon: MoveVertical,          stage: 4 },
+      { id: 'tangent',       get label() { return workbenchText('SketchToolbox.tangent') },       icon: Tangent,               stage: 4 },
+      { id: 'equal',         get label() { return workbenchText('SketchToolbox.equal') },         icon: Equal,                 stage: 4 },
+      { id: 'midpoint',      get label() { return workbenchText('SketchToolbox.midpoint') },      icon: cadIcon('midpoint'),   stage: 4 },
+      { id: 'symmetric',     get label() { return workbenchText('SketchToolbox.symmetric') },     icon: cadIcon('symmetric'),  stage: 4 },
+      { id: 'fix',           get label() { return workbenchText('SketchToolbox.fix') },           icon: Lock,                  stage: 4 },
+      { id: 'point-on-obj',  get label() { return workbenchText('SketchToolbox.onObject') },     icon: LocateFixed,           stage: 4 },
+      { id: 'continuity-g1', get label() { return workbenchText('SketchToolbox.tangentG1') },    icon: Spline,                stage: 4 },
+      { id: 'continuity-g2', get label() { return workbenchText('SketchToolbox.curvatureG2') },  icon: Waves,                 stage: 4 },
     ],
   },
   {
     id: 'utility',
-    title: 'Utility',
+    get title() { return workbenchText('SketchToolbox.utility') },
     tools: [
-      { id: 'measure',  label: 'Measure',       icon: cadIcon('measure'), stage: 6 },
-      { id: 'project',  label: 'Project / Use', icon: Import,  stage: 6 },
+      { id: 'measure',  get label() { return workbenchText('SketchToolbox.measure') },       icon: cadIcon('measure'), stage: 6 },
+      { id: 'project',  get label() { return workbenchText('SketchToolbox.projectUse') }, icon: Import,  stage: 6 },
     ],
   },
 ]
@@ -182,6 +184,7 @@ export const SECTIONS: SectionDef[] = [
 const TOOL_BTN_STYLE = { paddingLeft: 0, paddingRight: 0 } as const
 
 function FinishSketchButton() {
+  useText('sketch-and-model-workbench')
   const finishSketch = useCamStore((s) => s.finishSketch)
   const cancelActiveSketch = useCamStore((s) => s.cancelActiveSketch)
   const hasEntities = useCamStore(
@@ -214,14 +217,15 @@ const BANNER_NAME_MAX = 3
 // they carry named sets + a Resolve/Review action; the header chip then defers
 // to the banner. DoF computation is untouched - this only relocates the readout.
 function SketchDefinitionChip() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeSketch = useCamStore((s) => s.activeSketch)
   const liveStatus = useCamStore((s) => s.sketchSolveStatus)
 
   if (!activeSketch) {
     return (
-      <span className="sketch-def-chip sketch-def-chip-idle" data-tooltip="No active sketch">
+      <span className="sketch-def-chip sketch-def-chip-idle" data-tooltip={workbenchText('SketchToolbox.noActiveSketch')}>
         <Info size={11} />
-        <span>No sketch</span>
+        <span>{workbenchText('SketchToolbox.noSketch')}</span>
       </span>
     )
   }
@@ -239,10 +243,10 @@ function SketchDefinitionChip() {
       <span
         className="sketch-def-chip sketch-def-chip-idle"
         data-testid="cam-sketch-dof-chip"
-        data-tooltip="The solver has not produced a definition verdict"
+        data-tooltip={workbenchText('SketchToolbox.theSolverHasNotProducedADefinitionVerdict')}
       >
         <CircleDashed size={11} />
-        <span>Not solved</span>
+        <span>{workbenchText('SketchToolbox.notSolved')}</span>
       </span>
     )
   }
@@ -258,10 +262,10 @@ function SketchDefinitionChip() {
       <span
         className="sketch-def-chip sketch-def-chip-failed"
         data-testid="cam-sketch-dof-chip"
-        data-tooltip={`Solve failed: ${status.failureMessage ?? 'see console for details'}`}
+        data-tooltip={workbenchText('SketchToolbox.solveFailed', { value1: String(status.failureMessage ?? workbenchText('SketchToolbox.seeConsoleForDetails')) })}
       >
         <AlertTriangle size={11} />
-        <span>Solve failed</span>
+        <span>{workbenchText('SketchToolbox.solveFailed2')}</span>
       </span>
     )
   }
@@ -273,10 +277,10 @@ function SketchDefinitionChip() {
       <span
         className="sketch-def-chip sketch-def-chip-defined"
         data-testid="cam-sketch-dof-chip"
-        data-tooltip="Fully defined"
+        data-tooltip={workbenchText('SketchToolbox.fullyDefined')}
       >
         <CheckCircle2 size={11} />
-        <span>Fully defined</span>
+        <span>{workbenchText('SketchToolbox.fullyDefined')}</span>
       </span>
     )
   }
@@ -285,10 +289,10 @@ function SketchDefinitionChip() {
     <span
       className="sketch-def-chip sketch-def-chip-under"
       data-testid="cam-sketch-dof-chip"
-      data-tooltip={`Under-defined: ${status.dof} degrees of freedom remain`}
+      data-tooltip={workbenchText('SketchToolbox.underDefinedDegreesOfFreedomRemain', { dof: String(status.dof) })}
     >
       <CircleDashed size={11} />
-      <span>{status.dof} DoF</span>
+      <span>{workbenchText('SketchToolbox.dof', { dof: String((status.dof) ?? '') })}</span>
     </span>
   )
 }
@@ -299,6 +303,7 @@ function SketchDefinitionChip() {
 // conflict or a redundant advisory to surface - otherwise it renders nothing
 // and reclaims the row entirely.
 function SolveBanner() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeSketch = useCamStore((s) => s.activeSketch)
   const liveStatus = useCamStore((s) => s.sketchSolveStatus)
   const [resolveOpen, setResolveOpen] = useState(false)
@@ -320,9 +325,9 @@ function SolveBanner() {
     return (
       <span className="sketch-conflict-ids">
         {rows.slice(0, BANNER_NAME_MAX).map((r) => (
-          <code key={r.id} data-tooltip={`${r.label}: ${r.operands}`}>{r.label}</code>
+          <code key={r.id} data-tooltip={workbenchText('SketchToolbox.value', { label: String(r.label), operands: String(r.operands) })}>{r.label}</code>
         ))}
-        {extra > 0 && <code>+{extra} more</code>}
+        {extra > 0 && <code>{workbenchText('SketchToolbox.more', { extra: String((extra) ?? '') })}</code>}
       </span>
     )
   }
@@ -338,17 +343,15 @@ function SolveBanner() {
           <AlertTriangle size={12} />
           <div className="sketch-solve-banner-text">
             <span>
-              Over-defined: {status.conflicting.length} conflicting
-            </span>
+              {workbenchText('SketchToolbox.overDefinedConflicting', { length: String((status.conflicting.length) ?? '') })}</span>
             {nameChips(status.conflicting)}
           </div>
           <button
             className="sketch-resolve-btn"
             onClick={() => setResolveOpen((o) => !o)}
-            data-tooltip="List the conflicting set - remove one to resolve"
+            data-tooltip={workbenchText('SketchToolbox.listTheConflictingSetRemoveOneToResolve')}
           >
-            Resolve...
-          </button>
+            {workbenchText('SketchToolbox.resolve')}</button>
         </div>
         {resolvePanel}
       </>
@@ -362,16 +365,15 @@ function SolveBanner() {
     <div className="sketch-solve-banner sketch-solve-banner-redundant">
       <Info size={12} />
       <div className="sketch-solve-banner-text">
-        <span>{status.redundant.length} redundant (advisory)</span>
+        <span>{workbenchText('SketchToolbox.redundantAdvisory', { length: String((status.redundant.length) ?? '') })}</span>
         {nameChips(status.redundant)}
       </div>
       <button
         className="sketch-resolve-btn"
         onClick={() => setResolveOpen((o) => !o)}
-        data-tooltip="List the redundant constraints - removal optional"
+        data-tooltip={workbenchText('SketchToolbox.listTheRedundantConstraintsRemovalOptional')}
       >
-        Review...
-      </button>
+        {workbenchText('SketchToolbox.review')}</button>
     </div>
   )
 
@@ -395,6 +397,7 @@ function SolveBanner() {
 // badge building on glyphsVisible alone). Default ON; state in the sketch slice.
 // stopPropagation keeps clicks from also collapsing the section header.
 function ConstraintGlyphToggle() {
+  useText('sketch-and-model-workbench')
   const glyphsVisible = useCamStore((s) => s.sketchGlyphsVisible)
   const toggleSketchGlyphs = useCamStore((s) => s.toggleSketchGlyphs)
   return (
@@ -412,6 +415,7 @@ function ConstraintGlyphToggle() {
 // the ViewportToolbar input edits), so grid snap and the visible grid can
 // never disagree.
 function SnapSettings() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const entity = useSketcherTool((s) => s.snapEntity)
   const grid = useSketcherTool((s) => s.snapGrid)
   const inference = useSketcherTool((s) => s.snapInference)
@@ -428,16 +432,16 @@ function SnapSettings() {
     title: string
   }> = [
     {
-      flag: 'entity', on: entity, icon: Magnet, label: 'Entity snaps',
-      title: 'Snap to endpoints, midpoints, centers, and intersections',
+      flag: 'entity', on: entity, icon: Magnet, label: workbenchText('SketchToolbox.entitySnaps'),
+      title: workbenchText('SketchToolbox.snapToEndpointsMidpointsCentersAndIntersections'),
     },
     {
-      flag: 'grid', on: grid, icon: Grid3x3, label: 'Grid snap',
-      title: 'Snap to grid points (spacing below)',
+      flag: 'grid', on: grid, icon: Grid3x3, label: workbenchText('SketchToolbox.gridSnap'),
+      title: workbenchText('SketchToolbox.snapToGridPointsSpacingBelow'),
     },
     {
-      flag: 'inference', on: inference, icon: Wand2, label: 'Inference',
-      title: 'H/V alignment guides and automatic constraints on commit',
+      flag: 'inference', on: inference, icon: Wand2, label: workbenchText('SketchToolbox.inference'),
+      title: workbenchText('SketchToolbox.hVAlignmentGuidesAndAutomaticConstraintsOnCommit'),
     },
   ]
 
@@ -454,8 +458,8 @@ function SnapSettings() {
           <span>{label}</span>
         </button>
       ))}
-      <label className="sketch-snap-spacing" data-tooltip={`Grid spacing (${unitLabel(displayUnits)}) - shared by the drawn grid and grid snap`}>
-        <span>Grid spacing ({unitLabel(displayUnits)})</span>
+      <label className="sketch-snap-spacing" data-tooltip={workbenchText('SketchToolbox.gridSpacingSharedByTheDrawnGridAndGrid', { value1: String(unitLabel(displayUnits)) })}>
+        <span>{workbenchText('SketchToolbox.gridSpacing', { value1: String((unitLabel(displayUnits)) ?? '') })}</span>
         <NumericInput min={1} step={1} value={gridSpacing} onChange={setGridSpacing} units={displayUnits} />
       </label>
     </div>
@@ -466,6 +470,7 @@ function SnapSettings() {
 // armed). Same row styling as the grid-spacing input; the value drives
 // filletClick via the store and persists for the session.
 function FilletRadiusRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const radius = useSketcherTool((s) => s.filletRadius)
   const setRadius = sketcherTools.setFilletRadius
   const displayUnits = useCamStore((s) => s.appSettings.displayUnits)
@@ -473,9 +478,9 @@ function FilletRadiusRow() {
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip={`Fillet radius (${unitLabel(displayUnits)}) - applied by the next fillet click`}
+        data-tooltip={workbenchText('SketchToolbox.filletRadiusAppliedByTheNextFilletClick', { value1: String(unitLabel(displayUnits)) })}
       >
-        <span>Fillet radius ({unitLabel(displayUnits)})</span>
+        <span>{workbenchText('SketchToolbox.filletRadius', { value1: String((unitLabel(displayUnits)) ?? '') })}</span>
         <NumericInput min={0.1} step={0.5} value={radius} onChange={setRadius} units={displayUnits} />
       </label>
     </div>
@@ -487,6 +492,7 @@ function FilletRadiusRow() {
 // chamferClick via the store and persists for the session (equal-distance
 // chamfer v1: one setback applied to both legs).
 function ChamferSetbackRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const setback = useSketcherTool((s) => s.chamferSetback)
   const setSetback = sketcherTools.setChamferSetback
   const displayUnits = useCamStore((s) => s.appSettings.displayUnits)
@@ -494,9 +500,9 @@ function ChamferSetbackRow() {
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip={`Chamfer setback (${unitLabel(displayUnits)}) - applied equally to both legs by the next chamfer`}
+        data-tooltip={workbenchText('SketchToolbox.chamferSetbackAppliedEquallyToBothLegsByThe', { value1: String(unitLabel(displayUnits)) })}
       >
-        <span>Chamfer setback ({unitLabel(displayUnits)})</span>
+        <span>{workbenchText('SketchToolbox.chamferSetback', { value1: String((unitLabel(displayUnits)) ?? '') })}</span>
         <NumericInput min={0.1} step={0.5} value={setback} onChange={setSetback} units={displayUnits} />
       </label>
     </div>
@@ -507,6 +513,7 @@ function ChamferSetbackRow() {
 // armed). Live: editing it while a chain is selected updates the preview
 // (the viewport reads the store value per cursor move).
 function OffsetDistanceRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const distance = useSketcherTool((s) => s.offsetDistance)
   const setDistance = sketcherTools.setOffsetDistance
   const displayUnits = useCamStore((s) => s.appSettings.displayUnits)
@@ -514,9 +521,9 @@ function OffsetDistanceRow() {
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip={`Offset distance (${unitLabel(displayUnits)}) - the cursor side picks the offset side`}
+        data-tooltip={workbenchText('SketchToolbox.offsetDistanceTheCursorSidePicksTheOffsetSide', { value1: String(unitLabel(displayUnits)) })}
       >
-        <span>Offset distance ({unitLabel(displayUnits)})</span>
+        <span>{workbenchText('SketchToolbox.offsetDistance', { value1: String((unitLabel(displayUnits)) ?? '') })}</span>
         <NumericInput min={0.1} step={0.5} value={distance} onChange={setDistance} units={displayUnits} />
       </label>
     </div>
@@ -532,34 +539,36 @@ function OffsetDistanceRow() {
 // the same useSketcherTool/sketcherTools engine, so one row definition
 // serves both hosts with no host-specific props.
 export function GearRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const p = useSketcherTool((s) => s.gearParams)
   return (
     <div className="sketch-snap-settings" data-testid="gear-row">
       <label className="sketch-snap-spacing">
-        <span>Teeth</span>
-        <NumericInput ariaLabel="Gear teeth" min={6} max={200} step={1} value={p.teeth} onChange={(teeth) => sketcherTools.setGearParams({ teeth })} />
+        <span>{workbenchText('SketchToolbox.teeth')}</span>
+        <NumericInput ariaLabel={workbenchText('SketchToolbox.gearTeeth')} min={6} max={200} step={1} value={p.teeth} onChange={(teeth) => sketcherTools.setGearParams({ teeth })} />
       </label>
       <label className="sketch-snap-spacing">
-        <span>Module (mm)</span>
-        <NumericInput ariaLabel="Gear module" min={0.01} max={100} step={0.1} value={p.module} onChange={(module) => sketcherTools.setGearParams({ module })} />
+        <span>{workbenchText('SketchToolbox.moduleMm')}</span>
+        <NumericInput ariaLabel={workbenchText('SketchToolbox.gearModule')} min={0.01} max={100} step={0.1} value={p.module} onChange={(module) => sketcherTools.setGearParams({ module })} />
       </label>
       <label className="sketch-snap-spacing">
-        <span>Pressure angle</span>
-        <select aria-label="Gear pressure angle" value={p.pressureAngle} onChange={(e) => sketcherTools.setGearParams({ pressureAngle: Number(e.target.value) as 14.5 | 20 | 25 })}>
-          <option value={14.5}>14.5 deg</option>
-          <option value={20}>20 deg</option>
-          <option value={25}>25 deg</option>
+        <span>{workbenchText('SketchToolbox.pressureAngle')}</span>
+        <select aria-label={workbenchText('SketchToolbox.gearPressureAngle')} value={p.pressureAngle} onChange={(e) => sketcherTools.setGearParams({ pressureAngle: Number(e.target.value) as 14.5 | 20 | 25 })}>
+          <option value={14.5}>{workbenchText('SketchToolbox.145Deg')}</option>
+          <option value={20}>{workbenchText('SketchToolbox.20Deg')}</option>
+          <option value={25}>{workbenchText('SketchToolbox.25Deg')}</option>
         </select>
       </label>
       <label className="sketch-snap-spacing">
-        <span>Root fillet (mm)</span>
-        <NumericInput ariaLabel="Gear root fillet" min={0} max={maxGearRootFillet(p)} step={0.1} value={p.rootFillet} onChange={(rootFillet) => sketcherTools.setGearParams({ rootFillet })} />
+        <span>{workbenchText('SketchToolbox.rootFilletMm')}</span>
+        <NumericInput ariaLabel={workbenchText('SketchToolbox.gearRootFillet')} min={0} max={maxGearRootFillet(p)} step={0.1} value={p.rootFillet} onChange={(rootFillet) => sketcherTools.setGearParams({ rootFillet })} />
       </label>
     </div>
   )
 }
 
 export function PolygonSidesRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const sides = useSketcherTool((s) => s.polygonSides)
   const mode = useSketcherTool((s) => s.polygonMode)
   const setSides = sketcherTools.setPolygonSides
@@ -567,16 +576,16 @@ export function PolygonSidesRow() {
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Polygon sides (>= 3) - click center, then a vertex"
+        data-tooltip={workbenchText('SketchToolbox.polygonSides3ClickCenterThenAVertex')}
       >
-        <span>Sides</span>
+        <span>{workbenchText('SketchToolbox.sides')}</span>
         <NumericInput min={3} step={1} value={sides} onChange={(v) => setSides(Math.round(v))} />
       </label>
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Inscribed: click a vertex. Circumscribed: click a side midpoint."
+        data-tooltip={workbenchText('SketchToolbox.inscribedClickAVertexCircumscribedClickASideMidpoint')}
       >
-        <span>Mode</span>
+        <span>{workbenchText('SketchToolbox.mode')}</span>
         <select
           data-testid="polygon-mode"
           value={mode}
@@ -584,8 +593,8 @@ export function PolygonSidesRow() {
             event.target.value as 'inscribed' | 'circumscribed',
           )}
         >
-          <option value="inscribed">Inscribed</option>
-          <option value="circumscribed">Circumscribed</option>
+          <option value="inscribed">{workbenchText('SketchToolbox.inscribed')}</option>
+          <option value="circumscribed">{workbenchText('SketchToolbox.circumscribed')}</option>
         </select>
       </label>
     </div>
@@ -602,6 +611,7 @@ export function PolygonSidesRow() {
 // inputs never fires a single-key shortcut (the focus guard treats INPUT as
 // a typing target).
 function TextInputRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const value = useCamStore((s) => s.sketchTextValue)
   const setValue = useCamStore((s) => s.setSketchTextValue)
   const height = useCamStore((s) => s.sketchTextHeight)
@@ -662,20 +672,20 @@ function TextInputRow() {
               ? value.trim().length > 0
                 // A fresh placement with typed work survives Escape (it commits
                 // instead of cancelling), so say so.
-                ? 'Placing new text — Enter to finish, Esc to keep the typed text'
+                ? workbenchText('SketchToolbox.placingNewTextEnterToFinishEscToKeep')
                 // A fresh, still-empty placement is removed by Escape.
-                : 'Placing new text — Enter to finish, Esc to discard it'
+                : workbenchText('SketchToolbox.placingNewTextEnterToFinishEscToDiscard')
               // Editing existing text: Escape restores its pre-edit value.
-              : 'Editing placed text — Enter to finish, Esc to revert to the original text'}
+              : workbenchText('SketchToolbox.editingPlacedTextEnterToFinishEscToRevert')}
           </span>
         </div>
       )}
       {editing && (
         <label
           className="sketch-snap-spacing"
-          data-tooltip="Text to engrave - placed left-to-right from the click point"
+          data-tooltip={workbenchText('SketchToolbox.textToEngravePlacedLeftToRightFromThe')}
         >
-          <span>Text</span>
+          <span>{workbenchText('SketchToolbox.text')}</span>
           <input
             type="text"
             value={value}
@@ -687,16 +697,16 @@ function TextInputRow() {
       )}
       <label
         className="sketch-snap-spacing"
-        data-tooltip={`Cap height (${unitLabel(displayUnits)}) of the engraved text`}
+        data-tooltip={workbenchText('SketchToolbox.capHeightOfTheEngravedText', { value1: String(unitLabel(displayUnits)) })}
       >
-        <span>Height ({unitLabel(displayUnits)})</span>
+        <span>{workbenchText('SketchToolbox.height', { value1: String((unitLabel(displayUnits)) ?? '') })}</span>
         <NumericInput min={0.1} step={0.5} value={height} onChange={setHeight} units={displayUnits} />
       </label>
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Baseline angle in degrees (CCW). 0 = horizontal; the ghost and placed text rotate live."
+        data-tooltip={workbenchText('SketchToolbox.baselineAngleInDegreesCCW0HorizontalTheGhost')}
       >
-        <span>Angle (deg)</span>
+        <span>{workbenchText('SketchToolbox.angleDeg')}</span>
         <NumericInput step={15} value={rotationDeg} onChange={setRotation} />
       </label>
       {/* LETTER SPACING (tracking): absolute mm added between glyphs. Negative
@@ -706,9 +716,9 @@ function TextInputRow() {
           open edit, like height/angle. */}
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Letter spacing (tracking) in mm added between glyphs. Negative tightens, positive widens; 0 = the font's natural spacing."
+        data-tooltip={workbenchText('SketchToolbox.letterSpacingTrackingInMmAddedBetweenGlyphsNegative')}
       >
-        <span>Letter spacing (mm)</span>
+        <span>{workbenchText('SketchToolbox.letterSpacingMm')}</span>
         <NumericInput step={0.1} value={letterSpacing} onChange={setLetterSpacing} />
       </label>
       {/* MIRROR (flip-TEXT, spec T5b): mirror-image the glyphs in place --
@@ -718,16 +728,16 @@ function TextInputRow() {
           the next placement + live patch of an open edit, like height. */}
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Mirror the glyphs (reads reversed, same position). Independent of the on-path Flip side toggle."
+        data-tooltip={workbenchText('SketchToolbox.mirrorTheGlyphsReadsReversedSamePositionIndependentOf')}
       >
-        <span>Mirror</span>
+        <span>{workbenchText('SketchToolbox.mirror')}</span>
         <button
           type="button"
           className={`sketch-header-toggle${mirrored ? ' sketch-header-toggle-on' : ''}`}
           aria-pressed={mirrored}
           onClick={() => setMirrored(!mirrored)}
         >
-          {mirrored ? 'Mirrored' : 'Normal'}
+          {mirrored ? workbenchText('SketchToolbox.mirrored') : workbenchText('SketchToolbox.normal')}
         </button>
       </label>
       {/* UNIFIED FONT PICKER (always visible while the text tool is armed or a
@@ -740,12 +750,12 @@ function TextInputRow() {
       <label
         className="sketch-snap-spacing"
         data-tooltip={
-          'Pick a font. "Hershey (single-line / engrave)" cuts open centerline '
-          + 'strokes with the tool tip; every other face is an outline (closed '
-          + 'filled-glyph contours + holes) you can pocket or contour.'
+          workbenchText('SketchToolbox.pickAFontHersheySingleLineEngraveCutsOpen')
+          + workbenchText('SketchToolbox.strokesWithTheToolTipEveryOtherFaceIs')
+          + workbenchText('SketchToolbox.filledGlyphContoursHolesYouCanPocketOrContour')
         }
       >
-        <span>Font</span>
+        <span>{workbenchText('SketchToolbox.font')}</span>
         <select
           value={fontValue}
           onChange={(e) => setFont(e.target.value)}
@@ -758,16 +768,15 @@ function TextInputRow() {
       </label>
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Import a .ttf / .otf / typeface .json font. Converted in-browser (no upload) and saved with your project settings. Imported faces are outline."
+        data-tooltip={workbenchText('SketchToolbox.importATtfOtfTypefaceJsonFontConvertedIn')}
       >
-        <span>Add font</span>
+        <span>{workbenchText('SketchToolbox.addFont')}</span>
         <button
           type="button"
           className="sketch-header-toggle"
           onClick={() => fileInputRef.current?.click()}
         >
-          Import font...
-        </button>
+          {workbenchText('SketchToolbox.importFont')}</button>
         <input
           ref={fileInputRef}
           type="file"
@@ -792,16 +801,16 @@ function TextInputRow() {
         // <div>, so each button keeps its own accessible name.
         <div
           className="sketch-snap-spacing"
-          data-tooltip="Attach this text to a curve (line, arc, circle, ellipse, spline) so it follows the path."
+          data-tooltip={workbenchText('SketchToolbox.attachThisTextToACurveLineArcCircle')}
         >
-          <span>On path</span>
+          <span>{workbenchText('SketchToolbox.onPath')}</span>
           {pathId == null ? (
             <button
               type="button"
               className={`sketch-header-toggle${picking ? ' sketch-header-toggle-on' : ''}`}
               onClick={() => (picking ? cancelPickPath() : editId && beginPickPath(editId))}
             >
-              {picking ? 'Click a curve… (Esc)' : 'Attach to path'}
+              {picking ? workbenchText('SketchToolbox.clickACurveEsc') : workbenchText('SketchToolbox.attachToPath')}
             </button>
           ) : (
             <span style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
@@ -810,17 +819,15 @@ function TextInputRow() {
                 className="sketch-header-toggle"
                 onClick={() => editId && unbindPath(editId)}
               >
-                Detach
-              </button>
+                {workbenchText('SketchToolbox.detach')}</button>
               <button
                 type="button"
                 className={`sketch-header-toggle${pathFlip ? ' sketch-header-toggle-on' : ''}`}
                 aria-pressed={pathFlip}
-                data-tooltip="Flip the text to the other side of the curve"
+                data-tooltip={workbenchText('SketchToolbox.flipTheTextToTheOtherSideOfThe')}
                 onClick={() => setPathFlip(!pathFlip)}
               >
-                Flip side
-              </button>
+                {workbenchText('SketchToolbox.flipSide')}</button>
             </span>
           )}
         </div>
@@ -835,9 +842,9 @@ function TextInputRow() {
       {editing && pathId != null && (
         <label
           className="sketch-snap-spacing"
-          data-tooltip={`Exact position along the path (${unitLabel(displayUnits)} of arc-length from the path start). Typing a value switches the anchor to Free.`}
+          data-tooltip={workbenchText('SketchToolbox.exactPositionAlongThePathOfArcLengthFrom', { value1: String(unitLabel(displayUnits)) })}
         >
-          <span>Position along path ({unitLabel(displayUnits)})</span>
+          <span>{workbenchText('SketchToolbox.positionAlongPath', { value1: String((unitLabel(displayUnits)) ?? '') })}</span>
           <NumericInput step={0.5} value={pathOffset} onChange={setPathOffset} units={displayUnits} />
         </label>
       )}
@@ -854,7 +861,8 @@ function TextInputRow() {
 // EXPORTED (WO-1860, same convention as PolygonSidesRow / WO-1472):
 // WorkbenchToolRail.tsx renders this SAME row -- both rails arm the shared
 // sketcherTools engine, so one row definition serves both hosts.
-export function ImportIntoSketchRow({ sketchName = 'Sketch', referenceImageImport = false }: { sketchName?: string; referenceImageImport?: boolean }) {
+export function ImportIntoSketchRow({ sketchName = textFor('sketch-and-model-workbench')('SketchToolbox.sketch'), referenceImageImport = false }: { sketchName?: string; referenceImageImport?: boolean }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Keep options in the host row: closing either window must not reset them.
   const [window, setWindow] = useState<'import' | 'export' | null>(null)
@@ -868,19 +876,17 @@ export function ImportIntoSketchRow({ sketchName = 'Sketch', referenceImageImpor
       <div className="sketch-import-export-row">
         <button type="button" className="sketch-header-toggle"
           data-testid="cam-sketch-import-into-sketch" onClick={() => setWindow('import')}>
-          Import...
-        </button>
+          {workbenchText('SketchToolbox.import')}</button>
         <button type="button" className="sketch-header-toggle"
           data-testid="sketch-export-print-open" onClick={() => setWindow('export')}>
-          Export / Print...
-        </button>
+          {workbenchText('SketchToolbox.exportPrint')}</button>
       </div>
       <SketchImportExportWindows window={window} onClose={() => setWindow(null)}
         importControls={<>
           {referenceImageImport && <ReferenceImage2dInsert onInserted={() => setWindow(null)} />}
           <button type="button" className="modal-btn modal-btn-primary"
-            data-tooltip="Import a DXF or SVG file, or trace a PNG/JPG picture, as editable geometry in this sketch, chained and constrained like drawn geometry."
-            onClick={() => fileInputRef.current?.click()}>Choose DXF / SVG / PNG / JPG...</button>
+            data-tooltip={workbenchText('SketchToolbox.importADXFOrSVGFileOrTraceA')}
+            onClick={() => fileInputRef.current?.click()}>{workbenchText('SketchToolbox.chooseDXFSVGPNGJPG')}</button>
           <input
             ref={fileInputRef}
             type="file"
@@ -896,12 +902,12 @@ export function ImportIntoSketchRow({ sketchName = 'Sketch', referenceImageImpor
               e.target.value = '' // allow re-picking the same file
             }}
       />
-          <p className="sketch-import-picture-note">Picture choices apply to PNG / JPG pictures.</p>
+          <p className="sketch-import-picture-note">{workbenchText('SketchToolbox.pictureChoicesApplyToPNGJPGPictures')}</p>
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Picture import: how wide the traced picture is, in mm. The height follows the picture."
+        data-tooltip={workbenchText('SketchToolbox.pictureImportHowWideTheTracedPictureIsIn')}
       >
-        <span>Picture width (mm)</span>
+        <span>{workbenchText('SketchToolbox.pictureWidthMm')}</span>
         <input
           type="number"
           min={1}
@@ -916,9 +922,9 @@ export function ImportIntoSketchRow({ sketchName = 'Sketch', referenceImageImpor
       </label>
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Picture import: pixels darker than this (0 black to 255 white) become shapes."
+        data-tooltip={workbenchText('SketchToolbox.pictureImportPixelsDarkerThanThis0BlackTo')}
       >
-        <span>Picture threshold</span>
+        <span>{workbenchText('SketchToolbox.pictureThreshold')}</span>
         <input
           type="number"
           min={1}
@@ -935,39 +941,37 @@ export function ImportIntoSketchRow({ sketchName = 'Sketch', referenceImageImpor
         </>}
         exportControls={<>
       <label className="sketch-snap-spacing">
-        <span>Paper</span>
-        <select aria-label="Print paper" value={printOptions.paper} style={{ flex: 1, minWidth: 0 }}
+        <span>{workbenchText('SketchToolbox.paper')}</span>
+        <select aria-label={workbenchText('SketchToolbox.printPaper')} value={printOptions.paper} style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => setPrintOptions({ ...printOptions, paper: e.target.value as SketchPrintOptions['paper'] })}>
           {Object.keys(PRINT_PAPERS).map((paper) => <option key={paper} value={paper}>{paper}</option>)}
         </select>
       </label>
       <label className="sketch-snap-spacing">
-        <span>Orientation</span>
-        <select aria-label="Print orientation" value={printOptions.orientation} style={{ flex: 1, minWidth: 0 }}
+        <span>{workbenchText('SketchToolbox.orientation')}</span>
+        <select aria-label={workbenchText('SketchToolbox.printOrientation')} value={printOptions.orientation} style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => setPrintOptions({ ...printOptions, orientation: e.target.value as SketchPrintOptions['orientation'] })}>
-          <option value="portrait">Portrait</option><option value="landscape">Landscape</option>
+          <option value="portrait">{workbenchText('SketchToolbox.portrait')}</option><option value="landscape">{workbenchText('SketchToolbox.landscape')}</option>
         </select>
       </label>
       <label className="sketch-snap-spacing">
-        <span>Scale</span>
-        <select aria-label="Print scale" value={printOptions.scale} style={{ flex: 1, minWidth: 0 }}
+        <span>{workbenchText('SketchToolbox.scale')}</span>
+        <select aria-label={workbenchText('SketchToolbox.printScale')} value={printOptions.scale} style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => setPrintOptions({ ...printOptions, scale: e.target.value as SketchPrintOptions['scale'] })}>
-          <option value="actual">Actual size (1:1)</option><option value="fit">Fit to page</option>
+          <option value="actual">{workbenchText('SketchToolbox.actualSize11')}</option><option value="fit">{workbenchText('SketchToolbox.fitToPage')}</option>
         </select>
       </label>
       <div className="sketch-snap-spacing">
         <button type="button" className="modal-btn modal-btn-primary"
           data-testid="sketch-export-svg"
-          data-tooltip="Save this sketch as an SVG in millimetres. Print at 100% scale for a 1:1 template."
+          data-tooltip={workbenchText('SketchToolbox.saveThisSketchAsAnSVGInMillimetresPrint')}
           onClick={() => { void sketcherTools.exportSketchSvg(sketchName) }}>
-          Export SVG...
-        </button>
+          {workbenchText('SketchToolbox.exportSVG')}</button>
         <button type="button" className="modal-btn modal-btn-primary"
           data-testid="sketch-print"
-          data-tooltip="Print this sketch using the chosen paper and scale. Choose 100% / Actual size in the print dialog for a 1:1 template."
+          data-tooltip={workbenchText('SketchToolbox.printThisSketchUsingTheChosenPaperAndScale')}
           onClick={() => sketcherTools.printSketch(sketchName, printOptions)}>
-          Print...
-        </button>
+          {workbenchText('SketchToolbox.print')}</button>
       </div>
         </>}
       />
@@ -983,54 +987,56 @@ export function BezierJointRow({ sketch, selectedIds }: {
   sketch: Sketch | null
   selectedIds: readonly string[]
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const found = sketch ? bezierJointSummary(sketch.entities, selectedIds) : null
   if (!found) return null
-  const what = `${found.joints} bezier joint${found.joints === 1 ? '' : 's'}`
+  const what = workbenchText('SketchToolbox.bezierJoint', { joints: String(found.joints), value2: String(found.joints === 1 ? '' : 's') })
   return (
     <div className="sketch-snap-settings" data-testid="sketch-bezier-joint-row">
-      <span className="sketch-snap-spacing">Bezier joints</span>
+      <span className="sketch-snap-spacing">{workbenchText('SketchToolbox.bezierJoints')}</span>
       <button
         type="button"
         className={`sketch-tool-btn${found.allSmooth ? ' sketch-tool-btn-active' : ''}`}
         style={TOOL_BTN_STYLE}
         data-testid="sketch-bezier-joint-smooth"
         aria-pressed={found.allSmooth}
-        data-tooltip={`Make ${what} smooth - the handles stay in line, the curve stays tangent`}
+        data-tooltip={workbenchText('SketchToolbox.makeSmoothTheHandlesStayInLineTheCurve', { what: String(what) })}
         onClick={() => sketcherTools.setBezierJointsSmooth(true)}
       >
-        <span>Smooth</span>
+        <span>{workbenchText('SketchToolbox.smooth')}</span>
       </button>
       <button
         type="button"
         className="sketch-tool-btn"
         style={TOOL_BTN_STYLE}
         data-testid="sketch-bezier-joint-corner"
-        data-tooltip={`Make ${what} corners - each handle moves on its own`}
+        data-tooltip={workbenchText('SketchToolbox.makeCornersEachHandleMovesOnItsOwn', { what: String(what) })}
         onClick={() => sketcherTools.setBezierJointsSmooth(false)}
       >
-        <span>Corner</span>
+        <span>{workbenchText('SketchToolbox.corner')}</span>
       </button>
     </div>
   )
 }
 
-const CONIC_RHO_TIP = 'Conic rho (0 to 1): 0.5 is a parabola, below it an ellipse arc, above it a hyperbola arc'
+const CONIC_RHO_TIP = workbenchText('SketchToolbox.conicRho0To105IsA')
 
 /** WO-1863: the conic tool's rho (CREATE, shown while the conic tool is armed). The next conic
  *  arc is drawn at it; a conic being placed reshapes at once. Out-of-range values are drawn at the
  *  nearest drawable rho (console line, no notice). Both hosts render this one row. */
 export function ConicDrawRhoRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const chain = useSketcherTool((s) => s.chain)
   const [, setVersion] = useState(0)
   const rho = chain?.kind === 'conic' ? chain.rho : sketcherTools.conicDrawRhoValue()
   return (
     <div className="sketch-snap-settings" data-testid="sketch-conic-draw-rho-row">
       <label className="sketch-snap-spacing" data-tooltip={CONIC_RHO_TIP}>
-        <span>Rho</span>
+        <span>{workbenchText('SketchToolbox.rho')}</span>
         <NumericInput
           step={0.05}
           value={rho}
-          ariaLabel="Conic rho"
+          ariaLabel={workbenchText('SketchToolbox.conicRho')}
           onChange={(v) => { sketcherTools.setConicDrawRho(v); setVersion((k) => k + 1) }}
         />
       </label>
@@ -1045,17 +1051,18 @@ export function ConicRhoRow({ sketch, selectedIds }: {
   sketch: Sketch | null
   selectedIds: readonly string[]
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const found = sketch ? conicSelectionSummary(sketch.entities, selectedIds) : null
   if (!found) return null
-  const what = `${found.entityIds.length} conic arc${found.entityIds.length === 1 ? '' : 's'}`
+  const what = workbenchText('SketchToolbox.conicArc2', { length: String(found.entityIds.length), value2: String(found.entityIds.length === 1 ? '' : 's') })
   return (
     <div className="sketch-snap-settings" data-testid="sketch-conic-rho-row">
-      <label className="sketch-snap-spacing" data-tooltip={`${CONIC_RHO_TIP} - sets ${what}`}>
-        <span>{found.mixed ? 'Rho (mixed)' : 'Rho'}</span>
+      <label className="sketch-snap-spacing" data-tooltip={workbenchText('SketchToolbox.sets', { CONIC_RHO_TIP: String(CONIC_RHO_TIP), what: String(what) })}>
+        <span>{found.mixed ? workbenchText('SketchToolbox.rhoMixed') : workbenchText('SketchToolbox.rho')}</span>
         <NumericInput
           step={0.05}
           value={found.rho}
-          ariaLabel="Selected conic rho"
+          ariaLabel={workbenchText('SketchToolbox.selectedConicRho')}
           onChange={(v) => sketcherTools.setSelectedConicsRho(v)}
         />
       </label>
@@ -1068,22 +1075,23 @@ export function ConicRhoRow({ sketch, selectedIds }: {
 // wraps back to its first through-point. Drives both the live preview and the
 // committed entity's `closed` flag.
 function SplineClosedRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const closed = useSketcherTool((s) => s.splineClosed)
   const setClosed = sketcherTools.setSplineClosed
   return (
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Close loop - wrap the spline back to its first point (default: open). Tip: with 3+ points you can also click the START point to close it."
+        data-tooltip={workbenchText('SketchToolbox.closeLoopWrapTheSplineBackToItsFirst')}
       >
-        <span>Close loop</span>
+        <span>{workbenchText('SketchToolbox.closeLoop')}</span>
         <button
           type="button"
           className={`sketch-header-toggle${closed ? ' sketch-header-toggle-on' : ''}`}
           aria-pressed={closed}
           onClick={() => setClosed(!closed)}
         >
-          {closed ? 'Closed' : 'Open'}
+          {closed ? workbenchText('SketchToolbox.closed') : workbenchText('SketchToolbox.open')}
         </button>
       </label>
     </div>
@@ -1095,6 +1103,7 @@ function SplineClosedRow() {
 // as a discoverable button + hint. Reads the live rotated flag off the rect
 // chain so it stays in sync whether the user clicked here or pressed Tab.
 function RectRotatedRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const rotated = useSketcherTool((s) =>
     s.chain?.kind === 'rect' ? s.chain.rotated === true : false,
   )
@@ -1103,16 +1112,16 @@ function RectRotatedRow() {
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Rotated rectangle - draw at any angle (3 clicks: corner, edge, width). Shortcut: Tab"
+        data-tooltip={workbenchText('SketchToolbox.rotatedRectangleDrawAtAnyAngle3ClicksCorner')}
       >
-        <span>Rotated (Tab)</span>
+        <span>{workbenchText('SketchToolbox.rotatedTab')}</span>
         <button
           type="button"
           className={`sketch-header-toggle${rotated ? ' sketch-header-toggle-on' : ''}`}
           aria-pressed={rotated}
           onClick={() => toggle()}
         >
-          {rotated ? 'Angled' : 'Axis'}
+          {rotated ? workbenchText('SketchToolbox.angled') : workbenchText('SketchToolbox.axis')}
         </button>
       </label>
     </div>
@@ -1122,15 +1131,16 @@ function RectRotatedRow() {
 // Linear pattern count (MODIFY section, shown while the tool is armed).
 // The step vector comes from two clicks in the viewport.
 function LinearPatternRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const count = useSketcherTool((s) => s.linearPatternCount)
   const setCount = sketcherTools.setLinearPatternCount
   return (
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Instance count (>= 2) - two clicks define the step vector"
+        data-tooltip={workbenchText('SketchToolbox.instanceCount2TwoClicksDefineTheStepVector')}
       >
-        <span>Instances</span>
+        <span>{workbenchText('SketchToolbox.instances')}</span>
         <NumericInput min={2} step={1} value={count} onChange={(v) => setCount(Math.round(v))} />
       </label>
     </div>
@@ -1140,6 +1150,7 @@ function LinearPatternRow() {
 // Circular pattern count + per-step angle. Changing the count resets the
 // angle to 360/count (full circle); the angle input then overrides it.
 function CircularPatternRow() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const count = useSketcherTool((s) => s.circularPatternCount)
   const angle = useSketcherTool((s) => s.circularPatternAngleDeg)
   const setCount = sketcherTools.setCircularPatternCount
@@ -1148,16 +1159,16 @@ function CircularPatternRow() {
     <div className="sketch-snap-settings">
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Instance count (>= 2) - a click places the rotation center"
+        data-tooltip={workbenchText('SketchToolbox.instanceCount2AClickPlacesTheRotationCenter')}
       >
-        <span>Instances</span>
+        <span>{workbenchText('SketchToolbox.instances')}</span>
         <NumericInput min={2} step={1} value={count} onChange={(v) => setCount(Math.round(v))} />
       </label>
       <label
         className="sketch-snap-spacing"
-        data-tooltip="Per-step angle (deg) - count changes reset this to 360/count"
+        data-tooltip={workbenchText('SketchToolbox.perStepAngleDegCountChangesResetThisTo')}
       >
-        <span>Step angle</span>
+        <span>{workbenchText('SketchToolbox.stepAngle')}</span>
         <NumericInput step={5} value={angle} onChange={(v) => { if (v !== 0) setAngle(v) }} />
       </label>
     </div>
@@ -1165,6 +1176,7 @@ function CircularPatternRow() {
 }
 
 export function SketchToolbox() {
+  const workbenchText = useText('sketch-and-model-workbench')
   // folds and compact mode, remembered per viewer (useToolPaletteLayout)
   const layout = useToolPaletteLayout('cam-sketch')
   const sketchTool = useSketcherTool((s) => s.tool)
@@ -1182,7 +1194,7 @@ export function SketchToolbox() {
   const selectedIds = useCamStore((s) => s.sketchSelectedIds)
   const sketchName = useCamStore((s) => s.project.geometry
     .filter((g) => !activeSketch?.ownerGeometryId || g.id === activeSketch.ownerGeometryId)
-    .flatMap((g) => g.layers2d ?? []).find((l) => l.id === activeSketch?.layerId)?.name ?? 'Sketch')
+    .flatMap((g) => g.layers2d ?? []).find((l) => l.id === activeSketch?.layerId)?.name ?? workbenchText('SketchToolbox.sketch'))
   const displayUnits = useCamStore((s) => s.appSettings.displayUnits)
   const applySketchConstraint = useCamStore((s) => s.applySketchConstraint)
   // A live placed-text edit (double-click) shows the text inputs even though
@@ -1211,16 +1223,15 @@ export function SketchToolbox() {
       <div className="panel-header">
         <span className="panel-title">
           <PenTool size={13} />
-          Sketch
-        </span>
+          {workbenchText('SketchToolbox.sketch')}</span>
         <SketchDefinitionChip />
         <button
           type="button"
           className="rail-compact-btn"
           data-testid="cam-sketch-compact"
           aria-pressed={layout.compact}
-          aria-label={layout.compact ? 'Show tool names' : 'Compact tools (icons only)'}
-          data-tooltip={layout.compact ? 'Show the tool names under their icons' : 'Compact: icons only, packed tight (hover a tool for its name)'}
+          aria-label={layout.compact ? workbenchText('SketchToolbox.showToolNames') : workbenchText('SketchToolbox.compactToolsIconsOnly')}
+          data-tooltip={layout.compact ? workbenchText('SketchToolbox.showTheToolNamesUnderTheirIcons') : workbenchText('SketchToolbox.compactIconsOnlyPackedTightHoverAToolFor')}
           onClick={layout.toggleCompact}
         >
           {layout.compact ? <Rows3 size={14} /> : <LayoutGrid size={14} />}
@@ -1278,7 +1289,7 @@ export function SketchToolbox() {
                           className={`sketch-tool-btn${constructionMode ? ' sketch-tool-btn-active' : ''}`}
                           style={TOOL_BTN_STYLE}
                           onClick={toggleSketchConstruction}
-                          data-tooltip={'Construction (q): toggle selected entities, or draw new entities as construction'}
+                          data-tooltip={workbenchText('SketchToolbox.constructionQToggleSelectedEntitiesOrDrawNewEntities')}
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
@@ -1298,8 +1309,8 @@ export function SketchToolbox() {
                           disabled={!hasSelection}
                           onClick={deleteSketchSelection}
                           data-tooltip={hasSelection
-                            ? 'Delete selected (Del / Backspace)'
-                            : 'Delete - select entities first'}
+                            ? workbenchText('SketchToolbox.deleteSelectedDelBackspace')
+                            : workbenchText('SketchToolbox.deleteSelectEntitiesFirst')}
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
@@ -1327,8 +1338,8 @@ export function SketchToolbox() {
                             dimIds.forEach((dimId) => toggle(dimId))
                           }}
                           data-tooltip={dimIds.length > 0
-                            ? hint(label, 'Toggle driving <-> reference on the selected dimension(s)')
-                            : 'Reference - select a dimension label first'}
+                            ? hint(label, workbenchText('SketchToolbox.toggleDrivingReferenceOnTheSelectedDimensionS'))
+                            : workbenchText('SketchToolbox.referenceSelectADimensionLabelFirst')}
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
@@ -1351,8 +1362,8 @@ export function SketchToolbox() {
                           onClick={() => toggleMeasure()}
                           data-tooltip={
                             measureOpen
-                              ? `Measure readout open - click or press ${measureKey ?? 'it'} to close`
-                              : hint(label, `Inspect selected geometry without creating a dimension${keySuffix}`)
+                              ? workbenchText('SketchToolbox.measureReadoutOpenClickOrPressToClose', { value1: String(measureKey ?? 'it') })
+                              : hint(label, workbenchText('SketchToolbox.inspectSelectedGeometryWithoutCreatingADimension', { keySuffix: String(keySuffix) }))
                           }
                         >
                           <ToolIcon size={15} />
@@ -1369,7 +1380,7 @@ export function SketchToolbox() {
                     if (constraintKind) {
                       const plan = activeSketch
                         ? planConstraintForSelection(activeSketch, selectedIds, constraintKind)
-                        : { ok: false as const, reason: 'no active sketch' }
+                        : { ok: false as const, reason: workbenchText('SketchToolbox.noActiveSketch2') }
                       return (
                         <button
                           key={id}
@@ -1378,8 +1389,8 @@ export function SketchToolbox() {
                           disabled={!plan.ok}
                           onClick={() => applySketchConstraint(constraintKind)}
                           data-tooltip={plan.ok
-                            ? `${label}: apply to selection`
-                            : `${label} - ${plan.reason}`}
+                            ? workbenchText('SketchToolbox.applyToSelection', { label: String(label) })
+                            : workbenchText('SketchToolbox.value2', { label: String(label), reason: String(plan.reason) })}
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
@@ -1401,7 +1412,7 @@ export function SketchToolbox() {
                           className={`sketch-tool-btn${armed ? ' sketch-tool-btn-active' : ''}`}
                           style={TOOL_BTN_STYLE}
                           onClick={() => setSketchTool(armed ? 'select' : (id as SketchToolId))}
-                          data-tooltip={armed ? `${label} (armed - Esc to disarm)` : idle}
+                          data-tooltip={armed ? workbenchText('SketchToolbox.armedEscToDisarm', { label: String(label) }) : idle}
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
@@ -1414,7 +1425,7 @@ export function SketchToolbox() {
                         className="sketch-tool-btn"
                         style={TOOL_BTN_STYLE}
                         disabled
-                        data-tooltip={`${label} - coming in Stage ${stage}`}
+                        data-tooltip={workbenchText('SketchToolbox.comingInStage', { label: String(label), stage: String(stage) })}
                       >
                         <ToolIcon size={15} />
                         <span>{label}</span>

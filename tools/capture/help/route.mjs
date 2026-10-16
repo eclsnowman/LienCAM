@@ -6,12 +6,13 @@ import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { demoProject } from './demo-project.mjs'
+import { HELP_EVIDENCE } from './evidence-root.mjs'
 
 const [lane, script, ...args] = process.argv.slice(2)
 if (!/^WO-(2129|2130|2131|2132|2133|2134|2135|2252)$/.test(lane)) throw new Error('Unknown route lane')
 const root = process.cwd()
 const original = path.join(root, 'src/tests/evidence', lane)
-const output = path.join(root, 'src/tests/evidence/WO-2491/routes', lane)
+const output = path.join(root, HELP_EVIDENCE, 'routes', lane)
 const generated = path.join(output, 'generated')
 fs.mkdirSync(generated, { recursive: true })
 for (const asset of ['fixtures', 'Shop endmills.json', 'Engraving.json']) {
@@ -63,7 +64,7 @@ for (const name of names) {
   let code = raw
     .replace(/dirname\(fileURLToPath\(import\.meta\.url\)\)/g, JSON.stringify(output))
     .replace(/(?:path\.)?resolve\(HERE, '\.\.\/\.\.\/\.\.\/\.\.'\)/g, 'process.cwd()')
-    .replaceAll('src/tests/evidence/' + lane + '/', 'src/tests/evidence/WO-2491/routes/' + lane + '/')
+    .replaceAll('src/tests/evidence/' + lane + '/', HELP_EVIDENCE + '/routes/' + lane + '/')
     .replace(/width: (?:1440|1600), height: (?:900|950|1000)/g, 'width: 1920, height: 1080')
     .replace(/viewport: tall \? \{ width: 1400, height: 1900 \} : \{ width: 1920, height: 1080 \}/g, 'viewport: { width: 1920, height: 1080 }')
     .replace("chromium.launch()", "chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })")

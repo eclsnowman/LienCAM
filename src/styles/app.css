@@ -9023,6 +9023,17 @@ input[type="checkbox"]:disabled,
   color: var(--text-disabled); border-right: 1px solid var(--border);
 }
 .gcode-linetext { padding-left: 14px; color: var(--text-primary); white-space: pre; }
+/* WO-2672: annotations differ in both states; move colours are explicit opt-in.
+   Reuse the toolpath palette. Background/current/staged/menu treatments stay. */
+.control-gcode-list [data-listing-kind="header"] .gcode-linetext {
+  color: var(--text-secondary); font-weight: 600; font-style: italic;
+}
+.control-gcode-list .gcode-comment { color: var(--text-secondary); font-style: italic; }
+.control-gcode-list[data-move-colours="true"] [data-listing-kind="rapid"] .gcode-linetext { color: color-mix(in srgb, var(--hue-rapid) 50%, var(--text-primary)); }
+.control-gcode-list[data-move-colours="true"] [data-listing-kind="feed"] .gcode-linetext { color: color-mix(in srgb, var(--hue-cut) 50%, var(--text-primary)); }
+.control-gcode-list[data-move-colours="true"] [data-listing-kind="arc"] .gcode-linetext { color: color-mix(in srgb, var(--hue-lead-in) 50%, var(--text-primary)); }
+.control-gcode-list[data-move-colours="true"] [data-listing-kind="tool-change"] .gcode-linetext { color: color-mix(in srgb, var(--hue-helix) 50%, var(--text-primary)); }
+.control-gcode-list[data-move-colours="true"] [data-listing-kind="m-code"] .gcode-linetext { color: color-mix(in srgb, var(--hue-stepover) 50%, var(--text-primary)); }
 
 /* diagnostics strip */
 .diag { display: flex; flex-direction: column; gap: 6px; }
@@ -9468,6 +9479,21 @@ input[type="checkbox"]:disabled,
 .control-col-scroll > .control-panel > .panel-header {
   height: 26px;
   min-height: 26px;
+}
+
+/* WO-2836: the Spindle header is one line - title, live rpm, gear,
+   chevron. Neither text wraps; the title gives way (ellipsis) only if the
+   rail is ever narrower than both, and the rpm never shrinks. */
+.control-col-scroll > .control-panel > .panel-header > .control-spindle-title {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.control-col-scroll > .control-panel > .panel-header > .control-spindle-title + .control-version {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* 8/12 -> 8/8 vertical. The SIDE inset stays at 12px: that is the

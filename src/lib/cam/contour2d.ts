@@ -29,7 +29,7 @@ import {
 import { offsetLoop } from './face2d/clipperOffset'
 import { resolveHeights } from './heights'
 import { resolveFeedrates } from './feedrates'
-import { assertToolFluteReach } from './toolFluteReach'
+import { assertToolFluteReach, operatorLoopRef, operatorLoopTarget, type OperatorLoop } from './toolFluteReach'
 import { directionForTool } from '../tool/cutHand'
 import { loopWindingFor, materialSideFor } from './millingDirection'
 import {
@@ -279,7 +279,7 @@ function buildOpenContourToolpath(
         const loop = loops.find(candidate => candidate.id === id)
         if (!loop) {
           throw new Error(
-            `Open contour: selected chain "${id}" no longer exists. Re-select it and recompute.`,
+            'Open contour: a selected chain no longer exists. Re-select it and recompute.',
           )
         }
         if (loop.closed) {
@@ -328,7 +328,7 @@ function buildOpenContourToolpath(
       topZ,
       bottomZ: loopDeepestCut,
       fluteLength: tool.fluteLength,
-      target: `for chain "${loop.id}"`,
+      target: operatorLoopTarget(loop, 'chain'),
     })
     resolvedLoopBottoms.set(loop.id, loopRawBottom)
   }
@@ -341,7 +341,8 @@ function buildOpenContourToolpath(
 
   let completed = 0
   for (const loop of targetLoops) {
-    const source = cleanOpenChain(loop.points, `chain "${loop.id}"`)
+    const chain = operatorLoopRef(loop, 'a selected chain', 'chain')
+    const source = cleanOpenChain(loop.points, chain)
     const bottomZ = resolvedLoopBottoms.get(loop.id) ?? rawBottomZ
     const roughBottomZ = bottomZ + axialStock
     const depths = buildDepths(topZ, bottomZ, passes.stepdown)
@@ -360,7 +361,7 @@ function buildOpenContourToolpath(
           reverseTravel,
           stockBounds,
           toolRadius,
-          `chain "${loop.id}" rough path`,
+          `${chain} rough path`,
         )
       : null
     const finishPlan = doFinish
@@ -370,7 +371,7 @@ function buildOpenContourToolpath(
           reverseTravel,
           stockBounds,
           toolRadius,
-          `chain "${loop.id}" finish path`,
+          `${chain} finish path`,
         )
       : null
 
@@ -519,7 +520,7 @@ export function buildContourToolpath(
       topZ,
       bottomZ: loopDeepestCut,
       fluteLength: tool.fluteLength,
-      target: `for loop "${loop.id}"`,
+      target: operatorLoopTarget(loop),
     })
     resolvedLoopBottoms.set(loop.id, loopRawBottom)
   }
@@ -540,8 +541,8 @@ export function buildContourToolpath(
   // WO-2289: Roughing style Trochoidal replaces only how the rough pass is traced
   // at a level. A loop it cannot fit is roughed with Offset and the console says so.
   const trochoidalRequested = params.roughingStyle === 'trochoidal' && opHasRoughing
-  const sayOffsetFallback = (loopId: string) => {
-    const line = `Contour: loop "${loopId}" was roughed with Offset - the trochoidal channel does not fit it. ` +
+  const sayOffsetFallback = (loop: OperatorLoop) => {
+    const line = `Contour: ${operatorLoopRef(loop)} was roughed with Offset - the trochoidal channel does not fit it. ` +
       'Narrow the Channel width to rough it in orbits.'
     if (notify) notify(line)
     else console.info(line)
@@ -578,7 +579,7 @@ export function buildContourToolpath(
     })
     if (tabSettings && bottomZ > tabSettings.stockBottomZ + 1e-6) {
       throw new Error(
-        `Contour tabs: loop "${loop.id}" is not a cut-through contour. ` +
+        `Contour tabs: ${operatorLoopRef(loop)} is not a cut-through contour. ` +
         `Bottom of cut ${bottomZ.toFixed(3)} mm does not reach stock bottom ` +
         `${tabSettings.stockBottomZ.toFixed(3)} mm.`,
       )
@@ -631,13 +632,13 @@ export function buildContourToolpath(
     // the original byte-identical path below.
     if (tabSettings && finishLoops.length !== 1) {
       throw new Error(
-        `Contour tabs: loop "${loop.id}" must resolve to one closed finish contour; ` +
+        `Contour tabs: ${operatorLoopRef(loop)} must resolve to one closed finish contour; ` +
         `the offset produced ${finishLoops.length} regions.`,
       )
     }
     if (finishLoops.length === 0 && roughLoops.length === 0) continue   // degenerate
     if (roughLoops.length > 1 || finishLoops.length > 1) {
-      if (trochoidalRequested) sayOffsetFallback(loop.id)
+      if (trochoidalRequested) sayOffsetFallback(loop)
       emitMultiRegion({
         moves,
         roughLoops, finishLoops, applyDir,
@@ -672,7 +673,7 @@ export function buildContourToolpath(
       ? planTrochoidalRough(rawPts, isOuter, applyDir, tool.diameter, stockToLeave, params,
           plannerDirection, roughPath, tabPlan)
       : null
-    if (trochoidalRequested && roughPath && !trochoid) sayOffsetFallback(loop.id)
+    if (trochoidalRequested && roughPath && !trochoid) sayOffsetFallback(loop)
 
     // ── Roughing passes ────────────────────────────────────────────────────
     // After the last depth we leave the tool AT depth so we can bridge

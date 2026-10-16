@@ -66,6 +66,8 @@ export interface RecognizedFeature {
   /** stable within one query result: `${kind}-${smallest source facet id}` */
   id: string;
   kind: FeatureKind;
+  /** Spherical bosses share removal semantics, but are named as domes. */
+  profile?: 'spherical-cap';
   axis: FeatureAxis;
   /** the functional bore/boss diameter: the SMALLEST cylinder for a hole or a
    *  counterbore (the part a cutter has to fit), the boss diameter for a boss. */

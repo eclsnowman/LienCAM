@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // WO INT-4A: boolean-combine dialog -- target + tool body features + a
 // union/subtract/intersect op, inserted as a new 'feature' DAG node
 // (InsertNodeCommand) that consumes both inputs. The page's regen executor
@@ -17,7 +18,16 @@
 // result, and Apply hands the edit to the page (`meshTarget.onApply`) - which
 // writes the STL's own edit journal, not the DAG. Intersect stays for kernel
 // bodies: an STL's journal records an added or a cut shape, nothing else.
+//
+// WO-2823: every body the operator can see is a target or a tool, either way
+// round. The STL target's tool list holds the modelled bodies after Box and
+// Cylinder, and a modelled target's tool list holds the STL. A pair with the
+// STL in it is the page's (`meshTarget.onApplyBody`): the STL goes in as the
+// solid its mesh bounds and the Boolean - union, subtract or intersect - runs
+// on the kernel like any other, its result a body every later edit picks.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useRef, useState } from 'react'
 import type { CommandHistory, FeatureDag } from '../../../doc'
 import type { BooleanBodyParameters } from '../../../mesh/edit'
@@ -65,6 +75,9 @@ export interface BooleanMeshTarget {
   onToolShapeChange(shape: BooleanBodyParameters | null): void
   /** record it: the refusal/error sentence, or undefined when it landed */
   onApply(): Promise<string | undefined>
+  /** WO-2823: a Boolean between the STL and a modelled body (either may be
+   *  the target); the refusal/error sentence, or undefined when it landed */
+  onApplyBody(pair: { targetFeatureId: string; toolFeatureId: string; boolOp: BooleanOp }): Promise<string | undefined>
 }
 
 type ShapeAxis = 'x' | 'y' | 'z'
@@ -91,9 +104,9 @@ export type BooleanDialogProps = BooleanDialogCommonProps & (
 )
 
 const OP_LABELS: Record<BooleanOp, string> = {
-  fuse: 'Union',
-  cut: 'Subtract',
-  intersect: 'Intersect',
+  get fuse() { return workbenchText('BooleanDialog.union') },
+  get cut() { return workbenchText('BooleanDialog.subtract') },
+  get intersect() { return workbenchText('BooleanDialog.intersect') },
 }
 
 const SELECTABLE_OPS: ReadonlySet<BooleanOp> = new Set(['fuse', 'cut', 'intersect'])
@@ -112,6 +125,7 @@ export function BooleanDialog({
   onApplied,
   onClose,
 }: BooleanDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const editing = mode === 'edit'
   const existing = editing ? dag.getNode(featureId) : undefined
   // WO-1961: an STL target is offered when creating only (an STL edit is its
@@ -132,7 +146,10 @@ export function BooleanDialog({
   const viewportPickStartedRef = useRef(false)
   // WO-1961: the tool shape for an STL target, seeded where Setup's control
   // seeded it - centred on the part's top face, a cylinder through the part.
-  const [toolShape, setToolShape] = useState<'box' | 'cylinder'>('box')
+  // WO-2823: 'box', 'cylinder', or the id of the modelled body that is the tool
+  const [meshTool, setMeshTool] = useState<string>('box')
+  const toolShape: 'box' | 'cylinder' = meshTool === 'cylinder' ? 'cylinder' : 'box'
+  const meshToolBodyId = meshTool !== 'box' && meshTool !== 'cylinder' ? meshTool : null
   const [toolCenter, setToolCenter] = useState<[number, number, number]>(() => mesh?.seedCenter ?? [0, 0, 0])
   const [toolSize, setToolSize] = useState<[number, number, number]>([10, 10, 10])
   const [toolDiameter, setToolDiameter] = useState<number>(10)
@@ -142,11 +159,21 @@ export function BooleanDialog({
 
   const targetIsMesh = mesh !== undefined && targetFeatureId === mesh.id
   const targetOptions = mesh !== undefined ? [{ id: mesh.id, label: mesh.label }, ...bodyOptions] : bodyOptions
-  const selectableOps = targetIsMesh ? MESH_TARGET_OPS : SELECTABLE_OPS
+  // WO-2823: the STL is a tool of a modelled target too.
+  const toolOptions = mesh !== undefined ? [...bodyOptions, { id: mesh.id, label: mesh.label }] : bodyOptions
+  /** the STL target's tool is a typed shape (not a body) */
+  const shapeTool = targetIsMesh && meshToolBodyId === null
+  /** the STL and a modelled body, either way round */
+  const meshPair = mesh !== undefined && (targetIsMesh ? meshToolBodyId !== null : toolFeatureId === mesh.id)
+  /** the tool body the dialog shows and Apply uses: an STL target's tool is
+   *  its body pick (the hidden tool list keeps whatever the other direction
+   *  last held); a shape tool is no body */
+  const effectiveToolId = targetIsMesh ? meshToolBodyId ?? '' : toolFeatureId
+  const selectableOps = shapeTool ? MESH_TARGET_OPS : SELECTABLE_OPS
   const toolShapeValid = toolShape === 'box'
     ? toolSize.every((n) => Number.isFinite(n) && n > 0)
     : toolDiameter > 0 && toolLength > 0
-  const toolShapeParameters: BooleanBodyParameters | null = targetIsMesh && toolShapeValid && MESH_TARGET_OPS.has(boolOp)
+  const toolShapeParameters: BooleanBodyParameters | null = shapeTool && toolShapeValid && MESH_TARGET_OPS.has(boolOp)
     ? toolShape === 'box'
       ? { operation: boolOp === 'fuse' ? 'add' : 'subtract', shape: 'box', center: [...toolCenter], size: [...toolSize] }
       : {
@@ -163,50 +190,53 @@ export function BooleanDialog({
   const editReferenceError = (() => {
     if (!editing) return undefined
     if (existing === undefined || existing.kind !== 'feature' || existing.payload.opType !== 'boolean') {
-      return `Boolean edit refused: '${featureId}' is not a Boolean feature`
+      return workbenchText('BooleanDialog.booleanEditRefusedIsNotABooleanFeature', { featureId: String(featureId) })
     }
     const target = existing.payload.targetFeatureId
     const tool = existing.payload.toolFeatureId
     if (typeof target !== 'string' || target.length === 0 || dag.getNode(target) === undefined) {
-      return `Boolean edit refused: target body '${String(target)}' is not available`
+      return workbenchText('BooleanDialog.booleanEditRefusedTargetBodyIsNotAvailable', { value1: String(String(target)) })
     }
     if (typeof tool !== 'string' || tool.length === 0 || dag.getNode(tool) === undefined) {
-      return `Boolean edit refused: tool body '${String(tool)}' is not available`
+      return workbenchText('BooleanDialog.booleanEditRefusedToolBodyIsNotAvailable', { value1: String(String(tool)) })
     }
     if (!existing.consumes.includes(target) || !existing.consumes.includes(tool)) {
-      return 'Boolean edit refused: target or tool is missing from the feature dependencies'
+      return workbenchText('BooleanDialog.booleanEditRefusedTargetOrToolIsMissingFrom')
     }
     const order = dag.featureOrder()
     const featureIndex = order.indexOf(featureId)
     if (order.indexOf(target) < 0 || order.indexOf(target) >= featureIndex || order.indexOf(tool) < 0 || order.indexOf(tool) >= featureIndex) {
-      return 'Boolean edit refused: target and tool must be upstream body features'
+      return workbenchText('BooleanDialog.booleanEditRefusedTargetAndToolMustBeUpstream')
     }
     if (!bodyOptions.some((option) => option.id === target) || !bodyOptions.some((option) => option.id === tool)) {
-      return 'Boolean edit refused: target or tool body is unavailable'
+      return workbenchText('BooleanDialog.booleanEditRefusedTargetOrToolBodyIsUnavailable')
     }
     if (!SELECTABLE_OPS.has(existing.payload.boolOp as BooleanOp)) {
-      return `Boolean edit refused: operation '${String(existing.payload.boolOp)}' is unavailable`
+      return workbenchText('BooleanDialog.booleanEditRefusedOperationIsUnavailable', { value1: String(String(existing.payload.boolOp)) })
     }
     return undefined
   })()
   const selectionError =
     targetFeatureId !== '' && !targetOptions.some((option) => option.id === targetFeatureId)
-      ? `Target body '${targetFeatureId}' is unavailable.`
-      : !targetIsMesh && toolFeatureId !== '' && !bodyOptions.some((option) => option.id === toolFeatureId)
-        ? `Tool body '${toolFeatureId}' is unavailable.`
-        : undefined
-  const invalid = targetIsMesh
+      ? workbenchText('BooleanDialog.targetBodyIsUnavailable', { targetFeatureId: String(targetFeatureId) })
+      : !targetIsMesh && toolFeatureId !== '' && !toolOptions.some((option) => option.id === toolFeatureId)
+        ? workbenchText('BooleanDialog.toolBodyIsUnavailable', { toolFeatureId: String(toolFeatureId) })
+        : meshToolBodyId !== null && targetIsMesh && !bodyOptions.some((option) => option.id === meshToolBodyId)
+          ? workbenchText('BooleanDialog.toolBodyIsUnavailable', { toolFeatureId: String(meshToolBodyId) })
+          : undefined
+  const invalid = shapeTool
     ? selectionError !== undefined || toolShapeParameters === null || meshApplying
-    : editReferenceError !== undefined ||
+    : (meshPair && meshApplying) ||
+      editReferenceError !== undefined ||
       selectionError !== undefined ||
       targetFeatureId === '' ||
-      toolFeatureId === '' ||
-      targetFeatureId === toolFeatureId ||
+      effectiveToolId === '' ||
+      targetFeatureId === effectiveToolId ||
       !SELECTABLE_OPS.has(boolOp)
 
   useEffect(() => {
-    onSelectionChange?.({ targetFeatureId, toolFeatureId: targetIsMesh ? '' : toolFeatureId })
-  }, [targetFeatureId, toolFeatureId, targetIsMesh, onSelectionChange])
+    onSelectionChange?.({ targetFeatureId, toolFeatureId: effectiveToolId })
+  }, [targetFeatureId, effectiveToolId, onSelectionChange])
 
   // WO-1961: the page previews the tool shape on the part as the fields change.
   const onToolShapeChangeRef = useRef(mesh?.onToolShapeChange)
@@ -243,7 +273,13 @@ export function BooleanDialog({
     setMeshApplying(true)
     let refusal: string | undefined
     try {
-      refusal = await mesh.onApply()
+      refusal = meshPair
+        ? await mesh.onApplyBody({
+            targetFeatureId,
+            toolFeatureId: effectiveToolId,
+            boolOp,
+          })
+        : await mesh.onApply()
     } catch (err) {
       refusal = err instanceof Error ? err.message : String(err)
     }
@@ -258,14 +294,14 @@ export function BooleanDialog({
   const handleApply = (): void => {
     if (invalid) return
     setApplyError(undefined)
-    if (targetIsMesh) {
+    if (targetIsMesh || meshPair) {
       void handleMeshApply()
       return
     }
     if (editing) {
       const live = dag.getNode(featureId)
       if (live === undefined || live.kind !== 'feature' || live.payload.opType !== 'boolean') {
-        setApplyError(`Boolean edit refused: '${featureId}' is no longer available`)
+        setApplyError(workbenchText('BooleanDialog.booleanEditRefusedIsNoLongerAvailable', { featureId: String(featureId) }))
         return
       }
       try {
@@ -284,7 +320,7 @@ export function BooleanDialog({
     }
 
     const id = nextId(dag, 'F')
-    const payload = { opType: 'boolean', targetFeatureId, toolFeatureId, boolOp, name: `Boolean ${id}` }
+    const payload = { opType: 'boolean', targetFeatureId, toolFeatureId, boolOp, name: workbenchText('BooleanDialog.boolean', { id: String(id) }) }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [targetFeatureId, toolFeatureId], payload }))
     } catch (err) {
@@ -312,23 +348,23 @@ export function BooleanDialog({
             onChange={(n) => { const next: [number, number, number] = [...value]; next[i] = n; set(next) }}
             min={min}
             step={1}
-            ariaLabel={`Tool ${label.toLowerCase()} ${name}`}
+            ariaLabel={workbenchText('BooleanDialog.tool', { value1: String(label.toLowerCase()), name: String(name) })}
             tooltip={tooltip}
             style={{ width: '100%' }}
           />
         </span>
       ))}
-      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('BooleanDialog.mm')}</span>
     </div>
   )
 
-  const toolLabel = targetIsMesh
-    ? `new ${toolShape}`
-    : bodyOptions.find((opt) => opt.id === toolFeatureId)?.label ?? '(none)'
+  const toolLabel = shapeTool
+    ? workbenchText('BooleanDialog.new', { value1: String(toolShape) })
+    : toolOptions.find((opt) => opt.id === effectiveToolId)?.label ?? workbenchText('BooleanDialog.none')
 
   return (
     <DialogShell
-      title={editing ? 'Edit Boolean combine' : 'Boolean combine'}
+      title={editing ? workbenchText('BooleanDialog.editBooleanCombine') : workbenchText('BooleanDialog.booleanCombine')}
       onApply={handleApply}
       onCancel={onClose}
       applyDisabled={invalid}
@@ -346,12 +382,12 @@ export function BooleanDialog({
               style={{ color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', fontWeight: 600 }}
             >
               {activeBodyPickRole === 'target'
-                ? 'TARGET: click the body to keep'
+                ? workbenchText('BooleanDialog.targetClickTheBodyToKeep')
                 : activeBodyPickRole === 'tool'
-                  ? 'TOOL: click the body to combine'
+                  ? workbenchText('BooleanDialog.toolClickTheBodyToCombine')
                   : targetIsMesh
-                    ? 'TOOL: set the shape below'
-                    : 'Viewport pick ready'}
+                    ? workbenchText('BooleanDialog.toolSetTheShapeBelow')
+                    : workbenchText('BooleanDialog.viewportPickReady')}
             </div>
             <button
               type="button"
@@ -360,26 +396,24 @@ export function BooleanDialog({
               onClick={requestViewportSequence}
             >
               {activeBodyPickRole === 'target'
-                ? 'Restart target pick'
+                ? workbenchText('BooleanDialog.restartTargetPick')
                 : activeBodyPickRole === 'tool'
-                  ? 'Restart target/tool pick'
-                  : 'Restart viewport pick'}
+                  ? workbenchText('BooleanDialog.restartTargetToolPick')
+                  : workbenchText('BooleanDialog.restartViewportPick')}
             </button>
             <div
               data-testid="boolean-pick-status"
               style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
             >
-              Target: {targetOptions.find((opt) => opt.id === targetFeatureId)?.label ?? '(none)'}
-              {' | '}
-              Tool: {toolLabel}
+              {workbenchText('BooleanDialog.targetTool', { value1: String(targetOptions.find((opt) => opt.id === targetFeatureId)?.label ?? workbenchText('BooleanDialog.none')), toolLabel: String(toolLabel) })}
             </div>
           </>
         )}
         <details open={onRequestBodyPick === undefined}>
-          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>Choose from lists</summary>
+          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>{workbenchText('BooleanDialog.chooseFromLists')}</summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 70, color: 'var(--text-muted)' }}>Target</span>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('BooleanDialog.target')}</span>
               <select
                 data-testid="boolean-target-select"
                 value={targetFeatureId}
@@ -395,14 +429,14 @@ export function BooleanDialog({
             </label>
             {!targetIsMesh && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 70, color: 'var(--text-muted)' }}>Tool</span>
+                <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('BooleanDialog.tool2')}</span>
                 <select
                   data-testid="boolean-tool-select"
                   value={toolFeatureId}
                   onChange={(e) => setToolFeatureId(e.target.value)}
                   style={{ flex: 1 }}
                 >
-                  {bodyOptions.map((opt) => (
+                  {toolOptions.map((opt) => (
                     <option key={opt.id} value={opt.id}>
                       {opt.label}
                     </option>
@@ -415,60 +449,65 @@ export function BooleanDialog({
         {targetIsMesh && (
           <div data-testid="boolean-tool-shape" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 70, color: 'var(--text-muted)' }}>Tool</span>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('BooleanDialog.tool2')}</span>
               <select
                 data-testid="boolean-tool-shape-select"
-                value={toolShape}
-                onChange={(e) => setToolShape(e.target.value as 'box' | 'cylinder')}
+                value={meshTool}
+                onChange={(e) => setMeshTool(e.target.value)}
                 style={{ flex: 1 }}
               >
-                <option value="box">Box</option>
-                <option value="cylinder">Cylinder</option>
+                <option value="box">{workbenchText('BooleanDialog.box')}</option>
+                <option value="cylinder">{workbenchText('BooleanDialog.cylinder')}</option>
+                {bodyOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
             </label>
-            {triple('Centre', 'boolean-tool-center', toolCenter, setToolCenter,
-              "Where the middle of the shape sits, in the part's own coordinates (the STL file's numbers), mm.")}
-            {toolShape === 'box'
-              ? triple('Size', 'boolean-tool-size', toolSize, setToolSize, "The box's length along X, Y and Z, mm.", 0.001)
+            {shapeTool && triple(workbenchText('BooleanDialog.centre'), 'boolean-tool-center', toolCenter, setToolCenter,
+              workbenchText('BooleanDialog.whereTheMiddleOfTheShapeSitsInThe'))}
+            {!shapeTool ? null : toolShape === 'box'
+              ? triple(workbenchText('BooleanDialog.size'), 'boolean-tool-size', toolSize, setToolSize, workbenchText('BooleanDialog.theBoxSLengthAlongXYAndZ'), 0.001)
               : (
                 <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 70, color: 'var(--text-muted)' }}>Diameter</span>
+                    <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('BooleanDialog.diameter')}</span>
                     <span data-testid="boolean-tool-diameter" style={{ flex: 1 }}>
                       <NumericInput
                         value={toolDiameter}
                         onChange={setToolDiameter}
                         min={0.001}
                         step={0.5}
-                        ariaLabel="Tool cylinder diameter"
-                        tooltip="The cylinder's diameter, mm."
+                        ariaLabel={workbenchText('BooleanDialog.toolCylinderDiameter')}
+                        tooltip={workbenchText('BooleanDialog.theCylinderSDiameterMm')}
                         style={{ width: '100%' }}
                       />
                     </span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('BooleanDialog.mm')}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 70, color: 'var(--text-muted)' }}>Length</span>
+                    <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('BooleanDialog.length')}</span>
                     <span data-testid="boolean-tool-length" style={{ flex: 1 }}>
                       <NumericInput
                         value={toolLength}
                         onChange={setToolLength}
                         min={0.001}
                         step={1}
-                        ariaLabel="Tool cylinder length"
-                        tooltip="The cylinder's length along its axis, centred on Centre, mm."
+                        ariaLabel={workbenchText('BooleanDialog.toolCylinderLength')}
+                        tooltip={workbenchText('BooleanDialog.theCylinderSLengthAlongItsAxisCentredOn')}
                         style={{ width: '100%' }}
                       />
                     </span>
                     <select
                       data-testid="boolean-tool-axis"
-                      aria-label="Tool cylinder axis"
+                      aria-label={workbenchText('BooleanDialog.toolCylinderAxis')}
                       value={toolAxis}
                       onChange={(e) => setToolAxis(e.target.value as ShapeAxis)}
                     >
-                      <option value="x">along X</option>
-                      <option value="y">along Y</option>
-                      <option value="z">along Z</option>
+                      <option value="x">{workbenchText('BooleanDialog.alongX')}</option>
+                      <option value="y">{workbenchText('BooleanDialog.alongY')}</option>
+                      <option value="z">{workbenchText('BooleanDialog.alongZ')}</option>
                     </select>
                   </div>
                 </>
@@ -476,7 +515,7 @@ export function BooleanDialog({
           </div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Op</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('BooleanDialog.op')}</span>
           <select
             data-testid="boolean-op-select"
             value={boolOp}
@@ -490,35 +529,34 @@ export function BooleanDialog({
             ))}
           </select>
         </label>
-        {targetIsMesh && mesh !== undefined && (
+        {shapeTool && mesh !== undefined && (
           <div
             data-testid="boolean-preview-status"
             data-state={mesh.preview.kind}
             style={{ color: mesh.preview.kind === 'failed' ? 'var(--text-danger)' : 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
           >
             {boolOp === 'intersect'
-              ? `Union adds the shape to "${mesh.label}"; Subtract cuts it out.`
+              ? workbenchText('BooleanDialog.unionAddsTheShapeToSubtractCutsItOut', { label: String(mesh.label) })
               : mesh.preview.message}
           </div>
         )}
-        {!targetIsMesh && invalid && targetFeatureId === toolFeatureId && targetFeatureId !== '' && (
-          <div style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            Target and tool must be different bodies.
-          </div>
+        {!shapeTool && targetFeatureId === effectiveToolId && targetFeatureId !== '' && (
+          <div data-testid="boolean-same-body-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
+            {workbenchText('BooleanDialog.targetAndToolMustBeDifferentBodies')}</div>
         )}
         {editReferenceError !== undefined && (
           <div data-testid="boolean-reference-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {editReferenceError}
+            {readableInternalIds(editReferenceError)}
           </div>
         )}
         {selectionError !== undefined && (
           <div data-testid="boolean-selection-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {selectionError}
+            {readableInternalIds(selectionError)}
           </div>
         )}
         {applyError !== undefined && (
           <div data-testid="boolean-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {applyError}
+            {readableInternalIds(applyError)}
           </div>
         )}
       </div>

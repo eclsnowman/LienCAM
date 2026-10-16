@@ -41,6 +41,9 @@ Object.defineProperty(globalThis, 'localStorage', { value: memStorage, configura
 
 const { SolidsWorkbenchPage } = await import('../../components/model3d')
 const { createFeatureCommand } = await import('../../components/model3d/dialogs/createFeatureCommand')
+const { EditFeaturePayloadCommand } = await import('../../components/model3d/dialogs/EditFeaturePayloadCommand')
+const { makeBoxTessBuffers } = await import('../../viewport3d/fixtures')
+const { COARSE_TESS_QUALITY } = await import('../../viewport3d/tessQuality')
 const { useCamStore } = await import('../../store')
 
 afterEach(cleanup)
@@ -72,6 +75,13 @@ describe('INT-17A SolidsWorkbenchPage -> CAM model-body sync (G2 interleave)', (
   it('surfaces one CAM entry per body, and a single-body edit re-derives ONLY that body', async () => {
     useCamStore.getState().newProject()
     const client = createFakeGeomClient()
+    // WO-2866: the fake's tessellation follows this height, so the F1 edit below is a real shape
+    // change (an identical replay keeps its version by design). Only re-derived bodies re-tessellate.
+    let height = 10
+    client.tessellate = async (_h, q) => makeBoxTessBuffers({
+      featureId: q.deflection === COARSE_TESS_QUALITY.deflection ? 'FAKECOARSE' : 'FAKEDISPLAY',
+      size: { x: 40, y: 20, z: height },
+    })
     render(<SolidsWorkbenchPage createClient={() => client} createSceneRuntime={fakeCreateSceneRuntime} />)
     await waitFor(() => expect(screen.getByTestId('solids-workbench-status').textContent).toMatch(/ready/i))
 
@@ -103,7 +113,10 @@ describe('INT-17A SolidsWorkbenchPage -> CAM model-body sync (G2 interleave)', (
     const vC0 = byBody('F3')!.modelBody!.ref.version
     const idA0 = byBody('F1')!.id, idB0 = byBody('F2')!.id, idC0 = byBody('F3')!.id
 
-    // Edit ONLY body A (regenerate F1). fullResync([F1]) marks just F1 dirty.
+    // Edit ONLY body A: a REAL shape edit (height 10 -> 20), then regenerate F1. WO-2866: an
+    // identical replay keeps its version by design, so the version rises only for a real change.
+    height = 20
+    hooks().history.execute(new EditFeaturePayloadCommand('F1', { opType: 'extrude', sketchId: 'SK1', distance: 20, direction: 'up', boolMode: 'newBody', name: 'Body A' }))
     await hooks().fullResync(['F1'])
 
     await waitFor(() => expect(byBody('F1')!.modelBody!.ref.version).toBeGreaterThan(vA0))

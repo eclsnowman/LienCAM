@@ -1,3 +1,8 @@
+import { catalogChildren } from './probing/catalogText'
+import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 import { fmtMachineLength, unitLabel } from '../../lib/ui/unitFormat'
 // WO-411 slice 3 - Run a checked routine, watch it, confirm what it proposes.
 //
@@ -38,7 +43,7 @@ import { useMachineToolTable } from '../../store/machineToolTableStore'
 import { EstopControl } from './ControlTransportBar'
 
 const WCS_SLOTS: readonly WcsId[] = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59']
-const LIVE_POSITION_REFUSAL = 'the controller has not reported both machine and work position'
+const LIVE_POSITION_REFUSAL = probeText('probeRoutineRunPanel1')
 
 export interface ProbeRoutineRunPanelProps {
   expanded: ExpandedRoutine
@@ -61,6 +66,7 @@ function wcsOf(proposalWcs: string, activeWcs: string | null): WcsId | null {
 }
 
 export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeWcs, units }: ProbeRoutineRunPanelProps) {
+  useText('probing-screens')
   const activeTool = useMachineControl((s) => s.activeTool)
   const machine = useCamStore(controlMachine)
   const machineId = machine?.id ?? 'default'
@@ -117,7 +123,7 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
     announcedExecutionRefusal.current = capabilityRefusal
     useMachineControl.getState().pushConsole(
       'tx',
-      `Probe routine: refused - ${capabilityRefusal}`,
+      probeText('probeRoutineRunPanel2', { value1: String(capabilityRefusal) }),
       'error',
     )
   }, [capabilityRefusal])
@@ -126,7 +132,7 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
     if (!ticked || busy || capabilityRefusal) return
     setBusy(true)
     setWritten(null)
-    setLive(`Running ${expanded.routineName} - keep the E-STOP in reach.`)
+    setLive(probeText('probeRoutineRunPanel3', { value1: String(expanded.routineName) }))
     try {
       const r = await runProbeRoutine(expanded, probe, ticked, expanded.hash, {
         envelope,
@@ -134,10 +140,10 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
           if (event.kind === 'touch') {
             const axis = event.touch.axis.toLowerCase() as 'x' | 'y' | 'z'
             const at = formatPosition({ ...event.frame, machine: { [axis]: event.touch.positionMm }, format: (v) => fmt(v, units) })
-            setLive(`Step ${event.step.number} (${event.step.label}): contact at ${at}.`)
+            setLive(probeText('probeRoutineRunPanel4', { value1: String(event.step.number), value2: String(event.step.label), value3: String(at) }))
           } else if (event.kind === 'moving') {
             const at = formatPosition({ ...event.frame, machine: event.target, format: (v) => fmt(v, units) })
-            setLive(`Step ${event.step.number} (${event.step.label}): moving to ${at}.`)
+            setLive(probeText('probeRoutineRunPanel5', { value1: String(event.step.number), value2: String(event.step.label), value3: String(at) }))
           }
         },
       })
@@ -160,19 +166,19 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
       if (setWorkOffsetValue(wcs, axis, value)) applied++
     }
     setWritten(applied > 0
-      ? `${wcs} updated: ${(['X', 'Y', 'Z'] as const).filter((a) => proposal.axes[a] !== undefined).map((a) => `${a} = ${fmt(proposal.axes[a]!, units)}`).join(', ')}.`
-      : `Nothing was written to ${wcs} - the controller refused the offset.`)
+      ? probeText('probeRoutineRunPanel6', { value1: String(wcs), value2: String((['X', 'Y', 'Z'] as const).filter((a) => proposal.axes[a] !== undefined).map((a) => `${a} = ${fmt(proposal.axes[a]!, units)}`).join(', ')) })
+      : probeText('probeRoutineRunPanel7', { value1: String(wcs) }))
   }
 
   const onConfirmToolLength = (proposal: Extract<ProbeRoutineEvaluatedProposal, { kind: 'toolLength' }>) => {
     const outcome = confirmProbeRoutineToolLength(proposal)
     if (!outcome.ok) {
-      setWritten(`Nothing was recorded - ${outcome.reason}`)
-      useMachineControl.getState().pushConsole('tx', `Probe routine: refused - ${outcome.reason}`, 'error')
+      setWritten(probeText('probeRoutineRunPanel8', { value1: String(outcome.reason) }))
+      useMachineControl.getState().pushConsole('tx', probeText('probeRoutineRunPanel9', { value1: String(outcome.reason) }), 'error')
       return
     }
     setWritten(outcome.message)
-    useMachineControl.getState().pushConsole('tx', `Probe routine: ${outcome.message}`, 'info')
+    useMachineControl.getState().pushConsole('tx', probeText('probeRoutineRunPanel10', { value1: String(outcome.message) }), 'info')
   }
 
   return (
@@ -185,10 +191,7 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
           disabled={busy || stale}
           onChange={(e) => setTickedHash(e.target.checked ? expanded.hash : null)}
         />
-        <span>
-          The probe is at the start position shown, and the {motionSteps.length} numbered moves and
-          searches above are clear of clamps, the vise and the part.
-        </span>
+        <span>{catalogChildren(probeText('probeRoutineRunPanel13', { value1: '\u0000value1\u0000' }), { value1: motionSteps.length })}</span>
       </label>
       <div className="probe-routine-run-row">
         <button
@@ -196,10 +199,10 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
           className="modal-btn modal-btn-primary"
           data-testid="probe-routine-run"
           disabled={!ticked || busy || Boolean(capabilityRefusal)}
-          title={capabilityRefusal ?? (stale ? 'Check the routine again first - the preview is out of date.' : !ticked ? 'Tick the path-clear statement first.' : `Run ${expanded.routineName}`)}
+          title={capabilityRefusal ?? (stale ? probeText('probeRoutineRunPanel14') : !ticked ? probeText('probeRoutineRunPanel15') : probeText('probeRoutineRunPanel16', { value1: String(expanded.routineName) }))}
           onClick={() => { void onRun() }}
         >
-          {busy ? 'Running...' : 'Run'}
+          {busy ? probeText('probeRoutineRunPanel17') : probeText('probeRoutineRunPanel18')}
         </button>
         {showEstop && (
           // Operator ruling 2026-08-21: the Routines tab carries no transport row; while
@@ -258,7 +261,7 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
                 <div key={i} className="probe-routine-proposal" data-testid="probe-routine-run-proposal" data-kind="workOffset">
                   <strong>{p.label}</strong>
                   <span>
-                    {wcs ? `${wcs}: ` : 'Work offset: '}
+                    {wcs ? `${wcs}: ` : probeText('probeRoutineRunPanel19')}
                     {axes.map((a) => `${a} = ${fmt(p.axes[a]!, units)}`).join(', ')}
                     {p.compensationNote ? ` ${p.compensationNote}` : ''}
                   </span>
@@ -267,10 +270,9 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
                     className="modal-btn modal-btn-primary"
                     data-testid="probe-routine-confirm-offset"
                     disabled={!wcs || axes.length === 0}
-                    title={wcs ? `Write ${axes.join(' and ')} to ${wcs}` : 'Activate a work offset (G54..G59) first.'}
+                    title={wcs ? probeText('probeRoutineRunPanel20', { value1: String(axes.join(' and ')), value2: String(wcs) }) : probeText('probeRoutineRunPanel21')}
                     onClick={() => onConfirm(p)}
-                  >
-                    Confirm: write to {wcs ?? 'the work offset'}
+                  >{probeText('probeRoutineRunPanel24', { value1: jsxTextValue(wcs ?? probeText('probeRoutineRunPanel23')) })}
                   </button>
                 </div>
               )
@@ -279,32 +281,29 @@ export function ProbeRoutineRunPanel({ expanded, stale, probe, envelope, activeW
               const resolvedTool = p.tool === 'active' ? activeTool : p.tool
               const knownTool = resolvedTool !== null && Boolean(findTool(toolTable, resolvedTool))
               const refusal = resolvedTool === null
-                ? 'No tool is active on the controller - make the measured tool active first.'
+                ? probeText('probeRoutineRunPanel25')
                 : !knownTool
-                  ? `T${resolvedTool} is not in the tool table yet - add it on the Tools tab first.`
+                  ? probeText('probeRoutineRunPanel26', { value1: String(resolvedTool) })
                   : null
               return (
                 <div key={i} className="probe-routine-proposal" data-testid="probe-routine-run-proposal" data-kind="toolLength">
                   <strong>{p.label}</strong>
-                  <span>
-                    Tool {p.tool === 'active' ? '(active)' : `T${p.tool}`} length datum at {formatPosition({ machine: { z: p.machineZ }, format: (v) => fmt(v, units) })}.
-                  </span>
+                  <span>{probeText('probeRoutineRunPanel29', { value1: jsxTextValue(p.tool === 'active' ? '(active)' : `T${p.tool}`), value2: jsxTextValue(formatPosition({ machine: { z: p.machineZ }, format: (v) => fmt(v, units) })) })}</span>
                   <button
                     type="button"
                     className="modal-btn modal-btn-primary"
                     data-testid="probe-routine-confirm-tool-length"
                     disabled={refusal !== null}
-                    title={refusal ?? `Record this Z against T${resolvedTool}`}
+                    title={refusal ?? probeText('probeRoutineRunPanel30', { value1: String(resolvedTool) })}
                     onClick={() => onConfirmToolLength(p)}
-                  >
-                    Confirm: record for {resolvedTool !== null ? `T${resolvedTool}` : 'active tool'}
+                  >{probeText('probeRoutineRunPanel33', { value1: jsxTextValue(resolvedTool !== null ? `T${resolvedTool}` : probeText('probeRoutineRunPanel32')) })}
                   </button>
                 </div>
               )
             }
             return (
               <div key={i} className="probe-routine-proposal" data-testid="probe-routine-run-proposal" data-kind="report">
-                <strong>Measured</strong>
+                <strong>{probeText('probeRoutineRunPanel35')}</strong>
                 <ul>
                   {p.items.map((item) => (
                     <li key={item.label}>{item.label}: {item.unit === 'mm' ? fmt(item.value, units) : `${item.value} ${item.unit}`}</li>

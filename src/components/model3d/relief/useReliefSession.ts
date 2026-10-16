@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { fileDataUrl } from '../../../referenceImage/imageData'
 // Relief - relief mode inside the Model screen (WO-2171, image relief stage 1b;
 // docs/design/IMAGE-RELIEF-PLAN.md section 4, the Form pattern).
@@ -106,6 +107,7 @@ declare global {
 const SETTLE_DELAY_MS = 60
 
 export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
+  const workbenchText = useText('sketch-and-model-workbench')
   const active = useReliefStore((s) => s.active)
   // the rail reads only what its buttons show - a slider drag re-renders the palette, never the Model page (S9)
   const ready = useReliefStore((s) => s.settings !== null)
@@ -183,7 +185,7 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
       try {
         adjusted = await adjustedFor(picture, auto, s)
       } catch (e) {
-        if (!stale()) useReliefStore.getState().setNotice(`The picture could not be adjusted: ${e instanceof Error ? e.message : String(e)}`)
+        if (!stale()) useReliefStore.getState().setNotice(workbenchText('useReliefSession.thePictureCouldNotBeAdjusted', { value1: String(e instanceof Error ? e.message : String(e)) }))
         return
       }
       if (stale()) return
@@ -253,9 +255,9 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
     const st = useReliefStore.getState()
     const found = await depsRef.current.faceTarget(ownerId, faceId)
     if (!useReliefStore.getState().active) return
-    if (found === null) { st.setNotice('Click a flat face on the part to lay the picture on.'); return }
+    if (found === null) { st.setNotice(workbenchText('useReliefSession.clickAFlatFaceOnThePartToLay')); return }
     if (!found.flat) {
-      st.setNotice(`That face is ${found.surfaceType === 'cylinder' ? 'round' : 'curved'}. Curved faces come in a later stage - click a flat face.`)
+      st.setNotice(workbenchText('useReliefSession.thatFaceIsCurvedFacesComeInALater', { value1: String(found.surfaceType === 'cylinder' ? 'round' : 'curved') }))
       return
     }
     const target: ReliefFaceTarget = { ownerId, faceId, face: found.face, bodyName: found.bodyName }
@@ -285,15 +287,15 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
       void pictureOf(p.image).then((picture) => {
         const now = useReliefStore.getState()
         if (now.active && now.featureId === featureId) useReliefStore.setState(p.settings.adjust === undefined ? { picture, autoAdjust: autoAdjust(picture, p.autoParams) } : { picture })
-      }).catch((e) => useReliefStore.getState().setNotice(`The stored picture could not be read: ${e instanceof Error ? e.message : String(e)}`))
+      }).catch((e) => useReliefStore.getState().setNotice(workbenchText('useReliefSession.theStoredPictureCouldNotBeRead', { value1: String(e instanceof Error ? e.message : String(e)) })))
       return
     }
     editRef.current = null
     const id = nextId(dag, 'REL')
-    st.openSession({ featureId: null, name: `Relief ${id.slice(3)}` })
+    st.openSession({ featureId: null, name: workbenchText('useReliefSession.relief', { value1: String(id.slice(3)) }) })
     const picked = depsRef.current.selectedFace()
     if (picked !== null) void lookUpFace(picked.ownerId, picked.faceId)
-    else st.setNotice('Click a flat face on the part, then open a picture.')
+    else st.setNotice(workbenchText('useReliefSession.clickAFlatFaceOnThePartThenOpen'))
   }, [lookUpFace])
 
   const leave = useCallback(() => {
@@ -320,10 +322,10 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
       const s = useReliefStore.getState().settings
       const line = describeAuto(auto, s === null ? 0.1 : picturePitchMm(picture, s))
       useReliefStore.getState().setStatus(useReliefStore.getState().status, line)
-      depsRef.current.log('info', `${useReliefStore.getState().name}: ${file.name} (${decoded.cols} x ${decoded.rows}, ${decoded.bitDepth}-bit) - ${line}`)
-      if (useReliefStore.getState().target === null) useReliefStore.getState().setNotice('Now click a flat face on the part to lay the picture on.')
+      depsRef.current.log('info', workbenchText('useReliefSession.xBit', { value1: String(useReliefStore.getState().name), name: String(file.name), cols: String(decoded.cols), rows: String(decoded.rows), bitDepth: String(decoded.bitDepth), line: String(line) }))
+      if (useReliefStore.getState().target === null) useReliefStore.getState().setNotice(workbenchText('useReliefSession.nowClickAFlatFaceOnThePartTo'))
     } catch (e) {
-      st.setNotice(`${file.name} could not be opened as a picture: ${e instanceof Error ? e.message : String(e)}`)
+      st.setNotice(workbenchText('useReliefSession.couldNotBeOpenedAsAPicture', { name: String(file.name), value2: String(e instanceof Error ? e.message : String(e)) }))
     }
   }, [compute])
 
@@ -350,8 +352,8 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
         const now = useReliefStore.getState()
         if (!now.active) return
         if (why !== null) {
-          now.setNotice(`Apply did not build: ${why}`)
-          depsRef.current.log('error', `${now.name} refused: ${why}`)
+          now.setNotice(workbenchText('useReliefSession.applyDidNotBuild', { why: String(why) }))
+          depsRef.current.log('error', workbenchText('useReliefSession.refused', { value1: String(now.name), value2: String(why) }))
           return
         }
         const { dag, history, onApplied } = depsRef.current
@@ -385,42 +387,42 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
   const railSections: RailSection[] = [
     {
       id: 'relief-image',
-      title: 'Relief - image',
+      title: workbenchText('useReliefSession.reliefImage'),
       tools: [
-        { testId: 'relief-open-image', label: 'Open image', icon: ImagePlus, title: 'Open a PNG or JPG (8- or 16-bit) - light is high', onClick: () => fileInputRef.current?.click() },
+        { testId: 'relief-open-image', label: workbenchText('useReliefSession.openImage'), icon: ImagePlus, title: workbenchText('useReliefSession.openAPNGOrJPG8Or16Bit'), onClick: () => fileInputRef.current?.click() },
       ],
     },
     {
       id: 'relief-place',
-      title: 'Place',
+      title: workbenchText('useReliefSession.place'),
       tools: [
-        { testId: 'relief-pick-face', label: 'Pick face', icon: MousePointerClick, title: 'Click a flat face on the part to lay the picture on', onClick: () => store().setNotice('Click a flat face on the part to lay the picture on.') },
-        { testId: 'relief-fit', label: 'Fit to face', icon: Scan, disabled: !ready, title: 'Fit the picture inside the face again: centred, proportions kept, 5 % margin', onClick: () => store().fitToFace() },
+        { testId: 'relief-pick-face', label: workbenchText('useReliefSession.pickFace'), icon: MousePointerClick, title: workbenchText('useReliefSession.clickAFlatFaceOnThePartToLay2'), onClick: () => store().setNotice(workbenchText('useReliefSession.clickAFlatFaceOnThePartToLay')) },
+        { testId: 'relief-fit', label: workbenchText('useReliefSession.fitToFace'), icon: Scan, disabled: !ready, title: workbenchText('useReliefSession.fitThePictureInsideTheFaceAgainCentredProportions'), onClick: () => store().fitToFace() },
       ],
     },
     {
       id: 'relief-height',
-      title: 'Height',
+      title: workbenchText('useReliefSession.height'),
       tools: [
-        { testId: 'relief-raise', label: 'Raise', icon: ArrowUpFromLine, disabled: !ready, active: style === 'raise', title: 'The subject stands proud of the face', onClick: () => store().setSettings(reliefStyleSettings('raise')) },
-        { testId: 'relief-emboss', label: 'Emboss', icon: Layers, disabled: !ready, active: style === 'emboss', title: 'The subject stays at the face, everything around it cuts down to the depth', onClick: () => store().setSettings(reliefStyleSettings('emboss')) },
-        { testId: 'relief-engrave', label: 'Engrave', icon: ArrowDownToLine, disabled: !ready, active: style === 'engrave', title: 'The subject cuts into the face to the depth, everything around it stays at the face', onClick: () => store().setSettings(reliefStyleSettings('engrave')) },
-        { testId: 'relief-invert', label: 'Invert', icon: Contrast, disabled: !ready, active: inverted, title: 'Dark is high instead of light', onClick: () => store().setSettings({ invert: !(store().settings?.invert ?? false) }) },
+        { testId: 'relief-raise', label: workbenchText('useReliefSession.raise'), icon: ArrowUpFromLine, disabled: !ready, active: style === 'raise', title: workbenchText('useReliefSession.theSubjectStandsProudOfTheFace'), onClick: () => store().setSettings(reliefStyleSettings('raise')) },
+        { testId: 'relief-emboss', label: workbenchText('useReliefSession.emboss'), icon: Layers, disabled: !ready, active: style === 'emboss', title: workbenchText('useReliefSession.theSubjectStaysAtTheFaceEverythingAroundIt'), onClick: () => store().setSettings(reliefStyleSettings('emboss')) },
+        { testId: 'relief-engrave', label: workbenchText('useReliefSession.engrave'), icon: ArrowDownToLine, disabled: !ready, active: style === 'engrave', title: workbenchText('useReliefSession.theSubjectCutsIntoTheFaceToTheDepth'), onClick: () => store().setSettings(reliefStyleSettings('engrave')) },
+        { testId: 'relief-invert', label: workbenchText('useReliefSession.invert'), icon: Contrast, disabled: !ready, active: inverted, title: workbenchText('useReliefSession.darkIsHighInsteadOfLight'), onClick: () => store().setSettings({ invert: !(store().settings?.invert ?? false) }) },
       ],
     },
     {
       id: 'relief-adjust',
-      title: 'Adjust',
+      title: workbenchText('useReliefSession.adjust'),
       tools: [
-        { testId: 'relief-auto', label: 'Auto', icon: WandSparkles, disabled: !hasPicture || !ready, active: autoOn, title: 'Auto adjusts the picture for a clean relief (runs on open); click to switch it off or back on', onClick: () => store().setAuto(!(store().settings?.auto ?? true)) },
+        { testId: 'relief-auto', label: workbenchText('useReliefSession.auto'), icon: WandSparkles, disabled: !hasPicture || !ready, active: autoOn, title: workbenchText('useReliefSession.autoAdjustsThePictureForACleanReliefRuns'), onClick: () => store().setAuto(!(store().settings?.auto ?? true)) },
       ],
     },
     {
       id: 'relief-preview',
-      title: 'Preview',
+      title: workbenchText('useReliefSession.preview'),
       tools: [
-        { testId: 'relief-map-height', label: 'Height map', icon: MapIcon, active: mapShown === 'height', title: 'The 2D map shows the heights (light = high)', onClick: () => store().setMapView('height') },
-        { testId: 'relief-map-shaded', label: 'Shaded', icon: MapIcon, active: mapShown === 'shaded', title: 'The 2D map shows the relief lit from the upper left', onClick: () => store().setMapView('shaded') },
+        { testId: 'relief-map-height', label: workbenchText('useReliefSession.heightMap'), icon: MapIcon, active: mapShown === 'height', title: workbenchText('useReliefSession.the2DMapShowsTheHeightsLightHigh'), onClick: () => store().setMapView('height') },
+        { testId: 'relief-map-shaded', label: workbenchText('useReliefSession.shaded'), icon: MapIcon, active: mapShown === 'shaded', title: workbenchText('useReliefSession.the2DMapShowsTheReliefLitFromThe'), onClick: () => store().setMapView('shaded') },
       ],
     },
   ]

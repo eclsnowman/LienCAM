@@ -1,4 +1,4 @@
-(LienCAM 0.36.0-alpha.1 - 07 Relief medallion - uccnc)
+(LienCAM 0.36.0-alpha.2 - 07 Relief medallion - uccnc)
 G90 G94 G17 G21 G64
 ( Setup 1 )
 G54

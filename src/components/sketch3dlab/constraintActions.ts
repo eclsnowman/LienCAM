@@ -4,6 +4,8 @@
 // button was pressed - selection SHAPE alone is deliberately ambiguous between some kinds (e.g.
 // horizontal-by-2-points and coincident both take 2 points, 0 entities), exactly like a real CAD
 // sketcher where the tool you pick disambiguates the same picks.
+import { textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import {
   addAngleConstraint,
   addCoincidentConstraint,
@@ -66,13 +68,13 @@ export function applyConstraintFromSelection(
 ): Sketch3dLabConstraintOutcome {
   const { points, entities } = selection
   if (constraintNeedsValue(kind) && (value === null || !Number.isFinite(value))) {
-    return { error: `'${kind}' needs a numeric value` }
+    return { error: workbenchText('constraintActions.needsANumericValue', { kind: String(kind) }) }
   }
 
   try {
     switch (kind) {
       case 'coincident': {
-        if (points.length !== 2 || entities.length !== 0) return { error: 'Coincident needs exactly 2 points selected' }
+        if (points.length !== 2 || entities.length !== 0) return { error: workbenchText('constraintActions.coincidentNeedsExactly2PointsSelected') }
         return { document: addCoincidentConstraint(document, id, points[0], points[1]) }
       }
       case 'horizontal':
@@ -82,13 +84,13 @@ export function applyConstraintFromSelection(
         if (points.length === 2 && entities.length === 0) {
           return { document: add(document, id, { points: [points[0], points[1]] }) }
         }
-        return { error: `'${kind}' needs exactly 1 line, or 2 points selected` }
+        return { error: workbenchText('constraintActions.needsExactly1LineOr2PointsSelected', { kind: String(kind) }) }
       }
       case 'parallel':
       case 'perpendicular':
       case 'tangent':
       case 'equal': {
-        if (entities.length !== 2 || points.length !== 0) return { error: `'${kind}' needs exactly 2 entities selected` }
+        if (entities.length !== 2 || points.length !== 0) return { error: workbenchText('constraintActions.needsExactly2EntitiesSelected', { kind: String(kind) }) }
         const add =
           kind === 'parallel'
             ? addParallelConstraint
@@ -100,7 +102,7 @@ export function applyConstraintFromSelection(
         return { document: add(document, id, entities[0], entities[1]) }
       }
       case 'midpoint': {
-        if (points.length !== 1 || entities.length !== 1) return { error: "'midpoint' needs exactly 1 point + 1 line selected" }
+        if (points.length !== 1 || entities.length !== 1) return { error: workbenchText('constraintActions.midpointNeedsExactly1Point1LineSelected') }
         return { document: addMidpointConstraint(document, id, points[0], entities[0]) }
       }
       case 'distance': {
@@ -110,25 +112,25 @@ export function applyConstraintFromSelection(
         if (points.length === 1 && entities.length === 1) {
           return { document: addDistanceConstraint(document, id, points[0], { line: entities[0] }, value as number) }
         }
-        return { error: "'distance' needs 2 points, or 1 point + 1 line selected" }
+        return { error: workbenchText('constraintActions.distanceNeeds2PointsOr1Point1Line') }
       }
       case 'angle': {
-        if (entities.length !== 2 || points.length !== 0) return { error: "'angle' needs exactly 2 lines selected" }
+        if (entities.length !== 2 || points.length !== 0) return { error: workbenchText('constraintActions.angleNeedsExactly2LinesSelected') }
         return { document: addAngleConstraint(document, id, entities[0], entities[1], value as number) }
       }
       case 'radius':
       case 'diameter': {
-        if (entities.length !== 1 || points.length !== 0) return { error: `'${kind}' needs exactly 1 entity selected` }
+        if (entities.length !== 1 || points.length !== 0) return { error: workbenchText('constraintActions.needsExactly1EntitySelected', { kind: String(kind) }) }
         const add = kind === 'radius' ? addRadiusConstraint : addDiameterConstraint
         return { document: add(document, id, entities[0], value as number) }
       }
       case 'fixed': {
         if (points.length === 1 && entities.length === 0) return { document: addFixedConstraint(document, id, { point: points[0] }) }
         if (entities.length === 1 && points.length === 0) return { document: addFixedConstraint(document, id, { entityId: entities[0] }) }
-        return { error: "'fixed' needs exactly 1 point or 1 entity selected" }
+        return { error: workbenchText('constraintActions.fixedNeedsExactly1PointOr1EntitySelected') }
       }
       default:
-        return { error: `unsupported constraint kind '${kind satisfies never}'` }
+        return { error: workbenchText('constraintActions.unsupportedConstraintKind', { value1: String(kind satisfies never) }) }
     }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) }

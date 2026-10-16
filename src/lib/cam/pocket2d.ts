@@ -23,8 +23,8 @@ import { offsetLoop } from './face2d/clipperOffset'
 import { resolveHeights } from './heights'
 import { resolveFeedrates } from './feedrates'
 import { assertPocketEntryAllowed } from './pocketEntryPolicy'
-import { helixDescent, helixFits, rampDescent } from './moves'
-import { assertToolFluteReach } from './toolFluteReach'
+import { helixDescent, helixFits, MIN_HELIX_RADIUS_MM, rampDescent } from './moves'
+import { assertToolFluteReach, operatorLoopRef } from './toolFluteReach'
 import { directionForTool } from '../tool/cutHand'
 import { clearanceAllowanceMmOf, type ToolReachInputs } from './holderClearanceGate'
 import { applyRestAir2d } from './restAir2d'
@@ -1018,14 +1018,14 @@ function assignIslandsToOuterBounds(
       closedPathIsStrictlyInside(islandPath, ensureCCW(bound.points as Pt2[]) as Pt2[]))
     if (containing.length === 0) {
       throw new Error(
-        `Pocket: selected island loop "${island.id}" is not fully contained inside any selected ` +
+        `Pocket: selected island ${operatorLoopRef(island, 'loop')} is not fully contained inside any selected ` +
         'outer pocket boundary. It crosses, touches, or lies outside the boundary. Refusing to ' +
         'silently omit or partially machine the island.'
       )
     }
     if (containing.length > 1) {
       throw new Error(
-        `Pocket: selected island loop "${island.id}" is fully contained by multiple selected ` +
+        `Pocket: selected island ${operatorLoopRef(island, 'loop')} is fully contained by multiple selected ` +
         'outer pocket boundaries, so its ownership is ambiguous. Select one outer boundary.'
       )
     }
@@ -1947,6 +1947,20 @@ function machineRegionAtDepth(
 // vertices (the deepest interior points) plus the naive centre for the
 // island-clear point with the best clearance to both islands and the pocket
 // wall, and fits the helix radius to that clearance.
+//
+// WO-2876: the rings are offsets of the outer boundary alone, so around a
+// central island the innermost generations shrink onto the island and every
+// one of their vertices lies inside its keep-out (a 40 mm square round a 12 mm
+// circle refused with ~11 mm of room on every side). When the innermost
+// generation offers nothing, the scan walks outward to the first generation
+// that does - the ring inside-out actually cuts first, since stepToRing skips
+// rings wholly inside a keep-out - sampling along its rings, not only at their
+// corners. A Helix entry walks on past a clear ring too tight for its helix to
+// the first one the requested helix fits (a 1 mm stepover's first clear ring
+// left 0.28 mm, the next ring out 1.69 mm); when no ring fits it the roomiest
+// one takes a reduced helix if helixFits accepts it, and otherwise the
+// operation refuses - it never plunges for a Helix (rule 11). A pocket whose
+// innermost generation already had a point is placed exactly as before.
 
 /** Min distance from pt to every expanded-island boundary (positive outside). */
 function minDistToIslands(pt: Pt2, islands: Pt2[][]): number {
@@ -1955,10 +1969,48 @@ function minDistToIslands(pt: Pt2, islands: Pt2[][]): number {
   return d
 }
 
+/** Points every `step` mm along each closed loop, its vertices included. */
+function ringSamples(loops: Pt2[][], step: number): Pt2[] {
+  const out: Pt2[] = []
+  for (const loop of loops) {
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length]
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step))
+      for (let k = 0; k < n; k++) out.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n })
+    }
+  }
+  return out
+}
+
+/** The island-clear candidate with the best clearance to the islands and the pocket wall. */
+function bestIslandClearPoint(
+  candidates: Pt2[], outerRings: Pt2[][], expandedIslands: Pt2[][],
+): { pt: Pt2; clear: number } | null {
+  let bestPt: Pt2 | null = null
+  let bestClear = -Infinity
+  for (const c of candidates) {
+    if (expandedIslands.some(isl => pointInPolygon(c, isl))) continue
+    const wallRing = outerRings.find(r => pointInPolygon(c, r))
+    if (!wallRing) continue
+    const wallClear = -distToPolyBoundary(c, wallRing)   // negative inside → clearance
+    const islClear  = minDistToIslands(c, expandedIslands)
+    const clear     = Math.min(wallClear, islClear)
+    if (clear > bestClear) { bestClear = clear; bestPt = c }
+  }
+  return bestPt && bestClear > 0 ? { pt: bestPt, clear: bestClear } : null
+}
+
+/** Spacing of the WO-2876 outward ring scan; stepToRing scans rings at the same 0.25 mm. */
+const ENTRY_RING_SCAN_STEP = 0.25
+
 function placeEntry(
   naiveCtr: Pt2, clampRing: Pt2[], candidateGen: Pt2[][],
   outerRings: Pt2[][], expandedIslands: Pt2[][],
   requestedHelixR: number, toolRadius: number,
+  /** WO-2876: the generations outside candidateGen, innermost first. */
+  outwardGens: Pt2[][][] = [],
+  /** WO-2876: the entry is a Helix, so the outward scan looks for room for it. */
+  wantsHelix = false,
 ): { entryCtr: Pt2; safeHelixR: number } {
   const margin = toolRadius * 0.1
 
@@ -1982,27 +2034,43 @@ function placeEntry(
   const candidates: Pt2[] = [naiveCtr]
   for (const loop of candidateGen) candidates.push(...loop)
 
-  let bestPt: Pt2 | null = null
-  let bestClear = -Infinity
-  for (const c of candidates) {
-    if (expandedIslands.some(isl => pointInPolygon(c, isl))) continue
-    const wallRing = outerRings.find(r => pointInPolygon(c, r))
-    if (!wallRing) continue
-    const wallClear = -distToPolyBoundary(c, wallRing)   // negative inside → clearance
-    const islClear  = minDistToIslands(c, expandedIslands)
-    const clear     = Math.min(wallClear, islClear)
-    if (clear > bestClear) { bestClear = clear; bestPt = c }
+  let best = bestIslandClearPoint(candidates, outerRings, expandedIslands)
+  let outward = false
+  if (!best) {
+    let roomiest: { pt: Pt2; clear: number } | null = null
+    for (const gen of outwardGens) {
+      const found = bestIslandClearPoint(ringSamples(gen, ENTRY_RING_SCAN_STEP), outerRings, expandedIslands)
+      if (!found) continue
+      if (!wantsHelix || found.clear - margin >= requestedHelixR) { best = found; break }
+      if (!roomiest || found.clear > roomiest.clear) roomiest = found
+    }
+    best ??= roomiest
+    outward = best !== null
   }
 
-  if (!bestPt || bestClear <= 0) {
+  if (!best) {
     // ADR 0003: never emit a gouging entry — surface the error through the worker.
     throw new Error(
       'pocket2d entry: no island-clear entry point — every candidate lies ' +
       'inside an island keep-out or outside the pocket. Refusing to emit a ' +
       'gouging entry (ADR 0003).')
   }
+  const { pt: bestPt, clear: bestClear } = best
 
   const fitR = Math.min(requestedHelixR, bestClear - margin)
+  // WO-2876 (rule 11): a Helix placed by the outward scan either runs as a
+  // helix or moves nothing. Every consumer of safeHelixR (performEntry,
+  // machineRegion, machineRegionAtDepth, staysDown) turns a radius helixFits
+  // rejects into a plunge, so a fit below it here would be a Plunge the
+  // operator did not choose. Only the outward route refuses: it used to throw,
+  // and the legacy candidates keep their logged degradation unchanged.
+  if (outward && wantsHelix && !(fitR > margin && helixFits(fitR))) {
+    throw new Error(
+      `Pocket 2D: no room for the Helix entry around the island in this pocket - the most ` +
+      `room any ring offers is ${bestClear.toFixed(2)} mm and a helix needs ` +
+      `${(Math.max(margin, MIN_HELIX_RADIUS_MM) + margin).toFixed(2)} mm. Nothing was cut; ` +
+      `a Plunge entry fits.`)
+  }
   if (fitR <= margin) {
     // Structured, non-silent degradation (ADR 0003): the plunge point itself is
     // verified island-clear above.
@@ -2244,7 +2312,8 @@ export function buildPocketToolpath(
       if (insideOut) {
         const innerRing = largestLoop(innerGen)
         const placed = placeEntry(centroid(innerRing), innerRing, innerGen,
-          generations[0], expandedIslands, requestedHelixR, toolRadius)
+          generations[0], expandedIslands, requestedHelixR, toolRadius,
+          generations.slice(0, -1).reverse(), entryType === 'ramp_helical')
         entryCtr   = placed.entryCtr
         safeHelixR = placed.safeHelixR
       } else if (entryType === 'ramp_linear' || entryType === 'plunge') {

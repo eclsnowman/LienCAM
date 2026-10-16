@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // ProgramPreview - LIVE 3D view of the loaded program (MACHINE-CONTROL Tier 1).
 //
 // This REPLACED the Canvas-2D XY plan view. The plan view could not show plunge
@@ -321,12 +325,12 @@ export function stagedListingProgramPath(view: StagedProgramView, armed: Program
 
 type CameraView = 'top' | 'front' | 'right' | 'iso'
 
-const VIEW_BUTTONS: ReadonlyArray<{ view: CameraView; label: string; short: string }> = [
-  { view: 'top', label: 'Top view', short: 'TOP' },
-  { view: 'front', label: 'Front view', short: 'FRT' },
-  { view: 'right', label: 'Right view', short: 'RGT' },
-  { view: 'iso', label: 'Isometric view', short: 'ISO' },
-]
+const VIEW_BUTTONS: ReadonlyArray<{ view: CameraView; label: string; short: string }> = liveCatalog(() => ([
+  { view: 'top', label: controlText('ProgramPreview.text001'), short: controlText('ProgramPreview.text002') },
+  { view: 'front', label: controlText('ProgramPreview.text003'), short: controlText('ProgramPreview.text004') },
+  { view: 'right', label: controlText('ProgramPreview.text005'), short: controlText('ProgramPreview.text006') },
+  { view: 'iso', label: controlText('ProgramPreview.text007'), short: controlText('ProgramPreview.text008') },
+]))
 
 function machineFitBounds(envelope: MachineEnvelope) {
   if (!envelope.x || !envelope.y) return null
@@ -388,6 +392,7 @@ export function intendedStockWorkBox(
 }
 
 export function ProgramPreview() {
+  useText('control-screens-not-probing')
   const programText = useMachineControl((s) => s.programText)
   const storeProgramContext = useMachineControl((s) => s.programContext)
   const stagedProgram = useMachineControl((s) => s.stagedProgram)
@@ -687,7 +692,7 @@ export function ProgramPreview() {
       return perSetup.find((v) => v.setup.id === activeSetup.setup.id)?.verdict
         ?? compareProgramContext(programContext, intentProject, contextText, postConfigForProject, loadedMotionDigest ?? undefined)
     } catch (err) {
-      console.error('[program-context] comparison failed:', err)
+      console.error(controlText('ProgramPreview.text009'), err)
       return 'comparison-failed'
     }
   }, [programContext, activeSetup, intentProject, contextText, loadedMotionDigest, postConfigForProject])
@@ -1001,7 +1006,7 @@ export function ProgramPreview() {
         }}
         resolution={gridResolution}
       />
-      <div className="control-preview-view-rail" aria-label="Viewport views">
+      <div className="control-preview-view-rail" aria-label={controlText('ProgramPreview.text010')}>
         {VIEW_BUTTONS.map(({ view, label, short }) => (
           <button
             key={view}
@@ -1021,37 +1026,37 @@ export function ProgramPreview() {
         <button
           type="button"
           className="control-preview-view-button"
-          aria-label="Follow tool"
+          aria-label={controlText('ProgramPreview.text011')}
           aria-pressed={toolFollowEnabled}
           data-testid="program-preview-tool-follow"
           data-follow-mode={toolFollowEnabled ? 'follow' : 'fixed'}
           title={toolFollowEnabled
-            ? 'Follow tool view on - the cutter stays centered'
-            : 'Fixed table view on - select to follow the cutter'}
+            ? controlText('ProgramPreview.text012')
+            : controlText('ProgramPreview.text013')}
           onClick={toggleToolFollowEnabled}
         >
-          {toolFollowEnabled ? 'FOL' : 'FIX'}
+          {toolFollowEnabled ? controlText('ProgramPreview.text014') : controlText('ProgramPreview.text015')}
         </button>
         <button
           type="button"
           className="control-preview-view-button"
-          aria-label="Show remaining moves only"
+          aria-label={controlText('ProgramPreview.text016')}
           aria-pressed={remainingPathOnly}
           data-testid="program-preview-remaining-path"
           data-path-view={remainingPathOnly ? 'remaining' : 'all'}
           title={remainingPathOnly
-            ? 'Remaining moves only while running - select to show the full path'
-            : 'Full path shown - select to hide moves behind the running cursor'}
+            ? controlText('ProgramPreview.text017')
+            : controlText('ProgramPreview.text018')}
           onClick={toggleRemainingPathOnly}
         >
-          {remainingPathOnly ? 'REM' : 'ALL'}
+          {remainingPathOnly ? controlText('ProgramPreview.text019') : controlText('ProgramPreview.text020')}
         </button>
         <span className="control-preview-view-divider" aria-hidden="true" />
         <button
           type="button"
           className="control-preview-view-button control-preview-fit-button"
-          aria-label="Fit machine extents"
-          title="Fit machine extents"
+          aria-label={controlText('ProgramPreview.text021')}
+          title={controlText('ProgramPreview.text022')}
           disabled={!machineBounds}
           onClick={() => {
             const vp = vpRef.current
@@ -1067,14 +1072,12 @@ export function ProgramPreview() {
               }
             }
           }}
-        >
-          MCH
-        </button>
+        >{controlText('ProgramPreview.text023')}</button>
         <button
           type="button"
           className="control-preview-view-button control-preview-fit-button"
-          aria-label="Fit program extents"
-          title="Fit program extents"
+          aria-label={controlText('ProgramPreview.text024')}
+          title={controlText('ProgramPreview.text025')}
           disabled={path.moves.length === 0}
           onClick={() => {
             const vp = vpRef.current
@@ -1090,9 +1093,7 @@ export function ProgramPreview() {
               }
             }
           }}
-        >
-          PGM
-        </button>
+        >{controlText('ProgramPreview.text026')}</button>
       </div>
       {/* WO-414 batch 2: the Table card is gone (Operator: "remove it"). A travel
           mismatch (Machine Library vs controller) is the one thing it showed
@@ -1111,9 +1112,7 @@ export function ProgramPreview() {
         />
       )}
       {path.moves.length === 0 && (
-        <div className="panel-empty control-preview-empty">
-          Path preview appears when a program is loaded.
-        </div>
+        <div className="panel-empty control-preview-empty">{controlText('ProgramPreview.text027')}</div>
       )}
     </div>
   )
@@ -1144,13 +1143,13 @@ function TravelMismatchLine({ mismatches }: { mismatches: TravelMismatch[] }) {
   )
 }
 
-const INTENDED_STOCK_STATE_TEXT: Record<IntendedStockState, { badge: string; note: string | null }> = {
-  'no-context': { badge: 'NONE', note: 'No intended stock information - this program was loaded from a file, not from a setup.' },
-  current: { badge: 'CURRENT', note: null },
-  'project-changed': { badge: 'STALE', note: 'Setup changed since this program was posted. The block shows the stock AS POSTED, not the live setup - reload from the setup to refresh it.' },
-  'program-changed': { badge: 'STALE', note: 'Program text changed since it was posted. The block shows the stock AS POSTED - reload from the setup to refresh it.' },
-  'comparison-failed': { badge: 'UNVERIFIED', note: 'The app could not compare this program with the project (logged to the console). The block shows the stock AS POSTED; do not trust it as current.' },
-}
+const INTENDED_STOCK_STATE_TEXT: Record<IntendedStockState, { badge: string; note: string | null }> = liveCatalog(() => ({
+  'no-context': { badge: controlText('ProgramPreview.text028'), note: controlText('ProgramPreview.text029') },
+  current: { badge: controlText('ProgramPreview.text030'), note: null },
+  'project-changed': { badge: controlText('ProgramPreview.text031'), note: controlText('ProgramPreview.text032') },
+  'program-changed': { badge: controlText('ProgramPreview.text033'), note: controlText('ProgramPreview.text034') },
+  'comparison-failed': { badge: controlText('ProgramPreview.text035'), note: controlText('ProgramPreview.text036') },
+}))
 
 /** WO-380: the intended-stock readout - which setup/stock the loaded program
  *  was posted against, its overall size, material and G54-G59 slot.
@@ -1186,10 +1185,11 @@ function IntendedStockReadout({
   visible: boolean
   onToggleVisible: () => void
 }) {
+  useText('control-screens-not-probing')
   // WO-2278: distinguish another project's post only in this readout's words.
   // Keep the shared verdict, scene tint and program-text drift precedence.
   const text = state === 'project-changed' && postedFromAnotherProject
-    ? { badge: 'other project', note: 'This program was posted from another project. The block shows the stock AS POSTED in that project.' }
+    ? { badge: controlText('ProgramPreview.text037'), note: controlText('ProgramPreview.text038') }
     : INTENDED_STOCK_STATE_TEXT[state]
   const dim = (mm: number) => fmtMachineLength(mm, units)
   const [open, setOpen] = useState(false)
@@ -1208,7 +1208,7 @@ function IntendedStockReadout({
     }
   }, [open])
   const wcsShort = context ? `G${context.wcs.fixtureOffset}` : null
-  const eyeTip = visible ? 'Hide the intended stock box in the preview' : 'Show the intended stock box in the preview'
+  const eyeTip = visible ? controlText('ProgramPreview.text039') : controlText('ProgramPreview.text040')
   return (
     <div
       ref={rootRef}
@@ -1223,28 +1223,25 @@ function IntendedStockReadout({
           className="control-intended-stock-popover"
           data-testid="program-preview-intended-stock-body"
           role="dialog"
-          aria-label="Intended stock details"
+          aria-label={controlText('ProgramPreview.text041')}
         >
           {context && (
             <dl className="control-intended-stock-facts" data-testid="program-preview-intended-stock-facts">
-              <dt>Setup</dt>
+              <dt>{controlText('ProgramPreview.text042')}</dt>
               <dd data-testid="program-preview-intended-stock-setup">{context.setup.name}</dd>
-              <dt>Stock</dt>
+              <dt>{controlText('ProgramPreview.text043')}</dt>
               <dd data-testid="program-preview-intended-stock-name">
                 {context.stock.name}
                 {/* WO-380: stock material is not shown - there is no place to set one yet (Operator 2026-08-21) */''}
               </dd>
-              <dt>Size</dt>
+              <dt>{controlText('ProgramPreview.text044')}</dt>
               <dd data-testid="program-preview-intended-stock-size">
                 {box
                   ? `X ${dim(box.max.x - box.min.x)}  Y ${dim(box.max.y - box.min.y)}  Z ${dim(box.max.z - box.min.z)} ${unitLabel(units)}`
-                  : 'no volume (not drawn)'}
+                  : controlText('ProgramPreview.text045')}
               </dd>
-              <dt>WCS</dt>
-              <dd data-testid="program-preview-intended-stock-wcs">
-                G{context.wcs.fixtureOffset}
-                {context.wcs.label && context.wcs.label !== `G${context.wcs.fixtureOffset}` ? ` (${context.wcs.label})` : ''}
-              </dd>
+              <dt>{controlText('ProgramPreview.text046')}</dt>
+              <dd data-testid="program-preview-intended-stock-wcs">{catalogChildren(controlText('ProgramPreview.text047', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: context.wcs.fixtureOffset, value2: context.wcs.label && context.wcs.label !== `G${context.wcs.fixtureOffset}` ? ` (${context.wcs.label})` : '' })}</dd>
             </dl>
           )}
           {text.note && (
@@ -1262,11 +1259,9 @@ function IntendedStockReadout({
           aria-expanded={open}
           aria-haspopup="dialog"
           style={state === 'project-changed' && postedFromAnotherProject ? { whiteSpace: 'normal' } : undefined}
-          data-tooltip={open ? 'Hide the intended-stock details' : 'Show which setup and stock this program was posted against'}
+          data-tooltip={open ? controlText('ProgramPreview.text048') : controlText('ProgramPreview.text049')}
           onClick={() => setOpen((v) => !v)}
-        >
-          Intended stock
-          {' - '}
+        >{controlText('ProgramPreview.text050')}{' - '}
           <span
             className="control-intended-stock-badge"
             data-testid="program-preview-intended-stock-badge"

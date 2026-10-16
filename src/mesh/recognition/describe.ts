@@ -39,5 +39,5 @@ export function describeFeature(feature: RecognizedFeature): string {
   // A boss stands proud of the face, so it is TALL; everything else here is cut
   // into the face and is DEEP. Same measured number, the word the operator uses.
   const extent = feature.kind === 'boss' ? 'tall' : 'deep';
-  return `${KIND_WORDS[feature.kind]} ${featureDiameterText(feature)}${cone}, ${mm(feature.depthMm)} mm ${extent}`;
+  return `${feature.profile === 'spherical-cap' ? 'dome' : KIND_WORDS[feature.kind]} ${featureDiameterText(feature)}${cone}, ${mm(feature.depthMm)} mm ${extent}`;
 }

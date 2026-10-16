@@ -416,6 +416,26 @@ const RECIPES: Recipe[] = [
     },
   },
   {
+    id: 'hole-move',
+    what: 'heal -> makeHole -> editFeature kind:holeMove',
+    covers: 'editFeature:kind=holeMove',
+    run: async (r) => {
+      const h = await healedStep(r.engine)
+      await r.withFixture(fixtureOf(h, 'holeMove edit on the healed body'), async () => {
+        const holed = mustOk(await r.engine.makeHole({
+          featureId: 'RCMHH', body: h.body, face: h.merge.winner, points: [{ x: 30, y: 15, z: STEP.az }],
+          style: { kind: 'simple', diameter: 6 }, depth: { kind: 'blind', distance: 3 },
+        }), 'holeMove fixture hole')
+        const verdicts = await r.engine.recognizeFeatures(holed.body!)
+        const hole = verdicts.find((v) => /hole/i.test(v.featureClass))
+        if (hole === undefined) {
+          throw new Error(`RECIPE hole-diameter: no hole verdict, so #recutHole never ran -- vacuous. Got: ${JSON.stringify(verdicts.map((v) => v.featureClass))}`)
+        }
+        mustOk(await r.engine.editFeature({ featureId: 'RCMHD', body: holed.body!, featureKey: hole.featureKey, delta: 0, kind: 'holeMove', translation: [5, 0, 0] }), 'editFeature holeMove')
+      })
+    },
+  },
+  {
     id: 'hole-depth',
     what: 'heal -> makeHole -> editFeature kind:holeDepth (WO-2091: same #recutHole core, new depth)',
     covers: 'editFeature:kind=holeDepth',
@@ -892,7 +912,7 @@ describe('WO UI-57-R5 tier 1 DISPATCH CHOKE POINT: every derived route is EXECUT
         .toEqual([`${method}:op=add`, `${method}:op=cut`, `${method}:op=intersect`, `${method}:op=newBody`])
     }
     expect(routes.filter((r) => r.method === 'editFeature').map((r) => r.id).sort())
-      .toEqual(['editFeature:kind=faceOffset', 'editFeature:kind=holeDepth', 'editFeature:kind=holeDiameter', 'editFeature:kind=pocketDepth', 'editFeature:kind=relief'])
+      .toEqual(['editFeature:kind=faceOffset', 'editFeature:kind=holeDepth', 'editFeature:kind=holeDiameter', 'editFeature:kind=holeMove', 'editFeature:kind=pocketDepth', 'editFeature:kind=relief'])
   })
 
   it('#runtime-every-route-driven: EVERY derived PRODUCER dispatch route was ACTUALLY EXECUTED, and the driven set is read off the REQUESTS THE ENGINE RECEIVED (an undriven route is RED BY ROUTE NAME)', () => {

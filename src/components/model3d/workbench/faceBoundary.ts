@@ -93,14 +93,14 @@ export function edgePolyline(
   projectToLocal: ProjectToLocal,
 ): EdgePolylineResult {
   const collisions = edgeIdCollisions(body.edgeIds, [edgeId])
-  if (collisions.length > 0) return { ok: false, reason: 'edge-id-collision', collisions }
+  if (collisions.length > 0) return { ok: false, reason: "edge-id-collision", collisions }
   const points = edgeWorldPoints(body, edgeId)
-  if (points.length === 0) return { ok: false, reason: 'edge-not-found' }
-  if (!points.every(finiteVec3)) return { ok: false, reason: 'non-finite-point' }
-  if (points.length < 2 || distinctPointCount3D(points) < 2) return { ok: false, reason: 'degenerate-edge' }
+  if (points.length === 0) return { ok: false, reason: "edge-not-found" }
+  if (!points.every(finiteVec3)) return { ok: false, reason: "non-finite-point" }
+  if (points.length < 2 || distinctPointCount3D(points) < 2) return { ok: false, reason: "degenerate-edge" }
   const projected = points.map(projectToLocal)
-  if (!projected.every(finiteVec2)) return { ok: false, reason: 'non-finite-point' }
-  if (distinctPointCount2D(projected) < 2) return { ok: false, reason: 'collapsed-projection' }
+  if (!projected.every(finiteVec2)) return { ok: false, reason: "non-finite-point" }
+  if (distinctPointCount2D(projected) < 2) return { ok: false, reason: "collapsed-projection" }
   return { ok: true, points }
 }
 
@@ -226,31 +226,31 @@ export function faceBoundaryLoops(
   projectToLocal: ProjectToLocal,
 ): FaceBoundaryLoopsResult {
   const boundaryIds = edgesOfFace(body, faceId)
-  if (boundaryIds.length === 0) return { ok: false, reason: 'no-boundary-edges' }
+  if (boundaryIds.length === 0) return { ok: false, reason: "no-boundary-edges" }
   const collisions = edgeIdCollisions(body.edgeIds, boundaryIds)
-  if (collisions.length > 0) return { ok: false, reason: 'edge-id-collision', collisions }
+  if (collisions.length > 0) return { ok: false, reason: "edge-id-collision", collisions }
 
   const segs: EdgeSeg[] = []
   for (const edgeId of boundaryIds) {
     const points = edgeWorldPoints(body, edgeId)
-    if (!points.every(finiteVec3)) return { ok: false, reason: 'non-finite-point' }
-    if (points.length < 2 || distinctPointCount3D(points) < 2) return { ok: false, reason: 'degenerate-edge' }
+    if (!points.every(finiteVec3)) return { ok: false, reason: "non-finite-point" }
+    if (points.length < 2 || distinctPointCount3D(points) < 2) return { ok: false, reason: "degenerate-edge" }
     segs.push({ edgeId, points })
   }
 
   const loops = chainIntoLoops(segs)
-  if (loops.length === 0) return { ok: false, reason: 'unchainable-face' }
+  if (loops.length === 0) return { ok: false, reason: "unchainable-face" }
 
   const withArea: Array<{ loop: Vec3[]; area: number; order: number }> = []
   for (let order = 0; order < loops.length; order++) {
     const loop = loops[order]
-    if (distinctPointCount3D(loop) < 3) return { ok: false, reason: 'degenerate-face-loop' }
+    if (distinctPointCount3D(loop) < 3) return { ok: false, reason: "degenerate-face-loop" }
     const projected = loop.map(projectToLocal)
-    if (!projected.every(finiteVec2)) return { ok: false, reason: 'non-finite-point' }
-    if (distinctPointCount2D(projected) < 3) return { ok: false, reason: 'collapsed-projection' }
+    if (!projected.every(finiteVec2)) return { ok: false, reason: "non-finite-point" }
+    if (distinctPointCount2D(projected) < 3) return { ok: false, reason: "collapsed-projection" }
     const area = Math.abs(shoelaceArea2D(projected))
-    if (!Number.isFinite(area)) return { ok: false, reason: 'non-finite-point' }
-    if (area <= DEGENERATE_EPS) return { ok: false, reason: 'collapsed-projection' }
+    if (!Number.isFinite(area)) return { ok: false, reason: "non-finite-point" }
+    if (area <= DEGENERATE_EPS) return { ok: false, reason: "collapsed-projection" }
     withArea.push({ loop, area, order })
   }
 
@@ -269,5 +269,5 @@ export function faceOuterBoundaryLoop(body: CachedBody, faceId: StableId, projec
   if (result.reason === 'edge-id-collision') return result
   // Preserve the legacy reattach contract: every benign extraction failure remains
   // the single silent `no-clean-loop` result at this compatibility seam.
-  return { ok: false, reason: 'no-clean-loop' }
+  return { ok: false, reason: "no-clean-loop" }
 }

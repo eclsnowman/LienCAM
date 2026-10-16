@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { ProbingArea } from '../../ProbingArea'
 import type { MachineDefinitionPanelState } from '../../useMachineDefinitionPanel'
 
@@ -9,11 +12,10 @@ type Step6Props = Pick<MachineDefinitionPanelState, 'draft' | 'editDraft' | 'pat
   & { def: NonNullable<MachineDefinitionPanelState['def']> }
 
 export function Step6ProbeAndToolSetter(props: Step6Props) {
+  useText('control-screens-not-probing')
   return (
     <div data-testid="setup-step-probing">
-      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>
-        Where is the probe (and the tool setter, if this machine has one)?
-      </p>
+      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>{controlText('Step6ProbeAndToolSetter.text001')}</p>
       <ProbingArea {...props} />
     </div>
   )

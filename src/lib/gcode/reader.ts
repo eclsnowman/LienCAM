@@ -197,6 +197,13 @@ export interface GcodeRefusedWord {
   reason: string
 }
 
+/** One accepted listed-output word and only the output identities it targets. */
+export interface GcodeListedOutputCommand {
+  code: number
+  on: number[]
+  off: number[]
+}
+
 export type GcodeReadItem =
   | { kind: 'move'; line: number; moveIndex: number; wcs: GcodeWcs }
   | { kind: 'dwell'; line: number; seconds: number }
@@ -208,7 +215,7 @@ export type GcodeReadItem =
    *  its outputs. `outputs` is the set of listed outputs the file has ON after
    *  this word, each named by its on word's number; it is present only when
    *  the machine lists output words beyond the dialect's coolant words. */
-  | { kind: 'coolant'; line: number; flood: boolean; mist: boolean; outputs?: number[] }
+  | { kind: 'coolant'; line: number; flood: boolean; mist: boolean; outputs?: number[]; standardCode?: 7 | 8 | 9; listedCommand?: GcodeListedOutputCommand }
   | { kind: 'program-end'; line: number; code: 'M2' | 'M30' }
   | { kind: 'work-offset'; line: number; wcs: GcodeWcs }
   | { kind: 'tool-length-offset'; line: number; enabled: boolean; tool?: number }
@@ -355,7 +362,7 @@ function refusal(line: number, reason: string): GcodeReadResult {
   return { ok: false, refusal: { line, reason, message: `Line ${line}: ${reason}` } }
 }
 
-function codeOutsideComments(raw: string): { ok: true; code: string } | { ok: false; reason: string } {
+export function codeOutsideComments(raw: string): { ok: true; code: string } | { ok: false; reason: string } {
   let depth = 0
   let code = ''
   for (const ch of raw.replace(/\r$/, '')) {
@@ -1005,24 +1012,30 @@ export function readGcodeProgram(text: string, options: GcodeReaderOptions): Gco
         items.push({ kind: 'tool-change', line: block.line, tool: inSpindleTool })
       } else if (m === 7) {
         coolant = { ...coolant, mist: true }
-        items.push({ kind: 'coolant', line: block.line, ...coolantState() })
+        items.push({ kind: 'coolant', line: block.line, ...coolantState(), standardCode: 7 })
       } else if (m === 8) {
         coolant = { ...coolant, flood: true }
-        items.push({ kind: 'coolant', line: block.line, ...coolantState() })
+        items.push({ kind: 'coolant', line: block.line, ...coolantState(), standardCode: 8 })
       } else if (m === 9) {
         // M9 stops coolant AND every listed output (the shared off word).
         coolant = { flood: false, mist: false }
         outputsOn = []
-        items.push({ kind: 'coolant', line: block.line, ...coolantState() })
+        items.push({ kind: 'coolant', line: block.line, ...coolantState(), standardCode: 9 })
       } else if (outputWords.has(m)) {
         // WO-1650: A WORD THE DEFINITION POINTS AT ONE OF ITS OUTPUTS.
         const on = new Set(outputsOn)
+        const targets = new Map<number, boolean>()
         for (const word of outputWords.get(m)!) {
           if (word.on) on.add(word.onCode)
           else on.delete(word.onCode)
+          targets.set(word.onCode, word.on)
         }
         outputsOn = [...on].sort((a, b) => a - b)
-        items.push({ kind: 'coolant', line: block.line, ...coolantState() })
+        items.push({ kind: 'coolant', line: block.line, ...coolantState(), listedCommand: {
+          code: m,
+          on: [...targets].filter(([, enabled]) => enabled).map(([code]) => code),
+          off: [...targets].filter(([, enabled]) => !enabled).map(([code]) => code),
+        } })
       } else if (gcodeWordEntry(table, 'M', m) === null) {
         // Only reachable under `macroMCodes: 'report'` - the loop above refuses
         // every other unaccepted M-code before any modal state moves.

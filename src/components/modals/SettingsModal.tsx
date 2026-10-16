@@ -104,6 +104,8 @@ function backOffIsStated(machine: MachineConfig, axis: AxisName): boolean {
 }
 
 export function SettingsModal() {
+  const projectOpenDirectly = useUiPrefs((s) => s.projectOpenDirectly)
+  const setProjectOpenDirectly = useUiPrefs((s) => s.setProjectOpenDirectly)
   useShellText('app-shell-settings-menus')
   const activeModal = useCamStore((s) => s.activeModal)
   const closeModal  = useCamStore((s) => s.closeModal)
@@ -138,6 +140,8 @@ export function SettingsModal() {
   const setUiScale = useUiPrefs((s) => s.setUiScale)
   const uiColorMode = useUiPrefs((s) => s.uiColorMode)
   const setUiColorMode = useUiPrefs((s) => s.setUiColorMode)
+  const programListingColours = useUiPrefs((s) => s.programListingColours)
+  const setProgramListingColours = useUiPrefs((s) => s.setProgramListingColours)
   const language = useUiPrefs((s) => s.language)
   const setLanguage = useUiPrefs((s) => s.setLanguage)
   const languageText = useText('language')
@@ -264,6 +268,11 @@ export function SettingsModal() {
 
         {/* Body — a growable list of preference sections */}
         <div className="modal-body">
+          <div className="mform-section-header">Opening projects</div>
+          <label className="mform-row" style={{ gap: 10 }}>
+            <input type="checkbox" checked={projectOpenDirectly} onChange={(event) => setProjectOpenDirectly(event.target.checked)} />
+            Always go straight to the file browser
+          </label>
           <div className="mform-section-header">{shellText('SettingsModal.sTLProjection')}</div>
 
           <div className="mform-row">
@@ -457,6 +466,18 @@ export function SettingsModal() {
                 onChange={(e) => setUiColorMode(e.target.checked ? 'light' : 'dark')}
               />
               <span>{shellText('SettingsModal.lightMode')}</span>
+            </label>
+          </div>
+
+          <div className="mform-row">
+            <label className="op-check-label">
+              <input
+                data-testid="settings-program-listing-colours"
+                type="checkbox"
+                checked={programListingColours === true}
+                onChange={(e) => setProgramListingColours(e.target.checked)}
+              />
+              <span>{shellText('SettingsModal.programListingColours')}</span>
             </label>
           </div>
 

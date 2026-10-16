@@ -21,5 +21,11 @@ contextBridge.exposeInMainWorld('liencamHost', Object.freeze({
   chooseMachinePath: (kind) => ipcRenderer.invoke('liencam:choose-machine-path', kind),
   setJobWakeLock: (active) => ipcRenderer.send('liencam:set-job-wake-lock', active === true),
   saveFile: (filename, data) => ipcRenderer.invoke('liencam:save-file', filename, data),
+  recentProjects: () => ipcRenderer.invoke('liencam:recent-projects'),
+  openProjectFile: (path) => ipcRenderer.invoke('liencam:open-project-file', path),
+  rememberProject: (project) => ipcRenderer.invoke('liencam:remember-project', project),
+  removeRecentProject: (path) => ipcRenderer.invoke('liencam:remove-recent-project', path),
+  openProjectLink: (url) => ipcRenderer.invoke('liencam:open-project-link', url),
+  openIssueForm: (url) => ipcRenderer.invoke('liencam:open-issue-form', url),
 }))
 

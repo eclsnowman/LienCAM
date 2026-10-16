@@ -72,7 +72,8 @@ describe('SolidsWorkbenchPage STEP-import cache lifecycle (WO INT-6A-R1)', () =>
     expect(typeof cacheKeyA).toBe('string')
     expect(cacheKeyA).not.toBe('IMP1')
     const importCallsAAfterFirstImport = clientA.importStepCalls.length
-    expect(importCallsAAfterFirstImport).toBe(1)
+    // WO-2796 probes the solid count, disposes the probe, then replays the node.
+    expect(importCallsAAfterFirstImport).toBe(2)
 
     // A second, INDEPENDENT document -- a fresh dag, so nextId mints "IMP1" again.
     const pageB = render(<SolidsWorkbenchPage createClient={() => clientB} createSceneRuntime={fakeCreateSceneRuntime} />)

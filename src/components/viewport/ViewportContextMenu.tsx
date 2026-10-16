@@ -1,6 +1,7 @@
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
 import { useEffect, useRef } from 'react'
+import { dismissContextMenuOnRightDrag } from '../../lib/viewport/navPresetController'
 
 export type ViewportContextTarget =
   | { kind: 'part'; id: string; label: string }
@@ -96,6 +97,10 @@ export function ViewportContextMenu({ at, target, visibility, onAction, onClose 
   const menuRef = useRef<HTMLDivElement>(null)
   const firstActionRef = useRef<HTMLButtonElement>(null)
   const items = buildViewportContextMenu(target, visibility)
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose }, [onClose])
+  // Keep the opening gesture's lifetime across ordinary parent rerenders.
+  useEffect(() => dismissContextMenuOnRightDrag(at, () => closeRef.current()), [at])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

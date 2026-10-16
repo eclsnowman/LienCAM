@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import type { Units } from '../../../lib/ui/unitFormat'
 import { fmtDim, unitLabel } from '../../../lib/ui/unitFormat'
 import { measureSketchSelection } from '../../../lib/sketch/measureSelection'
@@ -21,6 +22,7 @@ export function SketchMeasureReadout({
   displayUnits,
   testId = 'sketch-measure-readout',
 }: SketchMeasureReadoutProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const measurement = sketch
     ? measureSketchSelection(sketch.entities, selectedIds)
     : null
@@ -32,8 +34,8 @@ export function SketchMeasureReadout({
           <div className="sketch-measure-title">{measurement.title}</div>
           {measurement.references && measurement.references.length > 0 ? (
             <div className="sketch-measure-row sketch-measure-reference" data-testid="sketch-measure-reference">
-              <span>Reference</span>
-              <strong>{measurement.references.map((ref) => ref.label).join(' to ')}</strong>
+              <span>{workbenchText('SketchMeasureReadout.reference')}</span>
+              <strong>{measurement.references.map((ref) => ref.label).join(workbenchText('SketchMeasureReadout.to'))}</strong>
             </div>
           ) : null}
           {measurement.values.map((item) => (
@@ -43,7 +45,7 @@ export function SketchMeasureReadout({
                 {item.kind === 'length'
                   ? `${fmtDim(item.value, displayUnits)} ${unitLabel(displayUnits)}`
                   : item.kind === 'angle'
-                    ? `${item.value.toFixed(2)} deg`
+                    ? workbenchText('SketchMeasureReadout.deg', { value1: String(item.value.toFixed(2)) })
                     : item.value}
               </strong>
             </div>
@@ -51,8 +53,7 @@ export function SketchMeasureReadout({
         </>
       ) : (
         <span className="sketch-measure-empty">
-          Select one entity for its size, or two for spacing.
-        </span>
+          {workbenchText('SketchMeasureReadout.selectOneEntityForItsSizeOrTwoFor')}</span>
       )}
     </div>
   )

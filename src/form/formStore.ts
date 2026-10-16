@@ -4,6 +4,7 @@
 // into the project (stage 4), exactly as a sketch in progress is.
 
 import { create } from 'zustand'
+import { Matrix4, Vector3 } from 'three'
 import type { Cage } from './cage'
 import { cageBounds, cloneCage, edgeKey, parseEdgeKey } from './cage'
 import { validateCage } from './halfEdge'
@@ -25,6 +26,9 @@ import { saveFile } from '../lib/saveFile'
 
 export type FormDisplayMode = 'cage' | 'both' | 'smooth'
 export type FormTransformMode = 'translate' | 'rotate' | 'scale'
+export type RotationPick = 'edge' | 'x' | 'y' | 'z'
+/** A session-only fixed line: subsequent turns use the same hinge, not a moving centroid. */
+export interface RotationAxis { origin: Vec3; direction: Vec3; label: string }
 
 /** What a tool just changed (the points that moved or are new, the edges and faces it made or creased), drawn in its own colour for a moment (WO-2497). Display only: never in the cage or the saved form. */
 export interface ResultFlash { points: number[]; edges: string[]; faces: number[] }
@@ -116,6 +120,15 @@ export interface FormState {
   notice: string | null
   selection: CageSelection
   transformMode: FormTransformMode
+  rotationAxis: RotationAxis | null
+  rotationPick: RotationPick | null
+  rotationCentreAxis: 'x' | 'y' | 'z'
+  rotationAngle: number
+  chooseRotationAxis: (pick: RotationPick | null) => void
+  pickRotationAxis: (pick: CagePick | null) => void
+  setRotationCentreAxis: (axis: 'x' | 'y' | 'z') => void
+  setRotationAngle: (degrees: number) => void
+  rotateSelection: () => void
   /** a mirror across the plane n . p = symmetryAt (n: the X, Y or Z axis, or symmetryNormal for 'p'); `c<N>` circular round the Z axis; or off */
   symmetry: SymmetryMode | null
   /** where the mirror plane sits along its normal (a Z mirror starts at the cage's mid-height, X and Y at 0) */
@@ -474,6 +487,17 @@ function initialSegments(): Record<StarterKind, { x: number; y: number; z: numbe
   }
 }
 
+function rotationPickNotice(pick: RotationPick): string {
+  return pick === 'edge' ? 'Click a cage edge for the rotation axis; Esc cancels' : `Click a cage point for the ${pick.toUpperCase()} axis; Esc cancels`
+}
+
+// The status line is shared by every tool. Cancel only the instruction owned by
+// the current axis choice, keeping newer tool results and completed-turn feedback.
+function hasRotationInstruction(s: FormState): boolean {
+  return s.rotationPick !== null ? s.notice === rotationPickNotice(s.rotationPick)
+    : s.rotationAxis !== null && s.notice === `Rotate about ${s.rotationAxis.label}`
+}
+
 export const useFormStore = create<FormState>()((set, get) => ({
   cage: starterCage(initialKind),
   topologyVersion: 1,
@@ -493,6 +517,51 @@ export const useFormStore = create<FormState>()((set, get) => ({
   notice: null,
   selection: EMPTY_SELECTION,
   transformMode: 'translate',
+  rotationAxis: null,
+  rotationPick: null,
+  rotationCentreAxis: 'z',
+  rotationAngle: 90,
+  chooseRotationAxis: (pick) => {
+    if (get().dragging) return
+    get().clearResultFlash()
+    const s = get()
+    const notice = pick !== null ? rotationPickNotice(pick)
+      : hasRotationInstruction(s) || s.notice === null ? 'Rotate about the selection centre' : s.notice
+    set({ rotationPick: pick, rotationAxis: null, notice })
+  },
+  pickRotationAxis: (pick) => {
+    const s = get(), mode = s.rotationPick
+    if (mode === null) return
+    let axis: RotationAxis | null = null
+    if (mode === 'edge' && pick?.kind === 'edge') {
+      const [a, b] = parseEdgeKey(pick.key), p = s.cage.positions[a], q = s.cage.positions[b]
+      if (p && q) {
+        const d = new Vector3(...q).sub(new Vector3(...p))
+        if (d.lengthSq() > 1e-18) axis = { origin: [...p], direction: d.normalize().toArray() as Vec3, label: `edge ${pick.key}` }
+      }
+    } else if (mode !== 'edge' && pick?.kind === 'point' && s.cage.positions[pick.index]) {
+      const direction: Vec3 = [0, 0, 0]
+      direction[{ x: 0, y: 1, z: 2 }[mode]] = 1
+      axis = { origin: [...s.cage.positions[pick.index]], direction, label: `${mode.toUpperCase()} through point ${pick.index}` }
+    }
+    if (axis) set({ rotationAxis: axis, rotationPick: null, notice: `Rotate about ${axis.label}` })
+  },
+  setRotationCentreAxis: (rotationCentreAxis) => set({ rotationCentreAxis }),
+  setRotationAngle: (rotationAngle) => { if (Number.isFinite(rotationAngle)) set({ rotationAngle }) },
+  rotateSelection: () => {
+    const s = get(), points = selectionPoints(s.cage, s.selection)
+    if (s.transformMode !== 'rotate' || s.rotationPick !== null || s.dragging || points.length === 0 || s.rotationAngle === 0) return
+    const direction: Vec3 = [0, 0, 0]
+    direction[{ x: 0, y: 1, z: 2 }[s.rotationCentreAxis]] = 1
+    const origin = s.rotationAxis?.origin ?? points.reduce<Vec3>((c, p) => c.map((v, k) => v + s.cage.positions[p][k] / points.length) as Vec3, [0, 0, 0])
+    const matrix = new Matrix4().makeTranslation(...origin)
+      .multiply(new Matrix4().makeRotationAxis(new Vector3(...(s.rotationAxis?.direction ?? direction)), s.rotationAngle * Math.PI / 180))
+      .multiply(new Matrix4().makeTranslation(-origin[0], -origin[1], -origin[2]))
+    get().beginMove({ extrude: false })
+    get().moveBy(matrix.elements)
+    get().endDrag()
+    set({ notice: `Rotated ${s.rotationAngle} deg about ${s.rotationAxis?.label ?? `${s.rotationCentreAxis.toUpperCase()} through the selection centre`}` })
+  },
   symmetry: null,
   symmetryAt: 0,
   symmetryNormal: null,
@@ -578,6 +647,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
       selection: EMPTY_SELECTION,
       // A transform choice belongs to this session, including when editing a saved feature.
       transformMode: 'translate',
+      rotationAxis: null, rotationPick: null, rotationAngle: 90, rotationCentreAxis: 'z',
       symmetry: symmetry ?? null,
       symmetryAt: symmetryAt ?? 0,
       symmetryNormal: symmetry === 'p' ? (symmetryNormal ?? null) : null,
@@ -1068,6 +1138,17 @@ export const useFormStore = create<FormState>()((set, get) => ({
     set(symmetryOn(s.cage, plane.mode, plane.at, plane.mode === 'p' ? plane.normal : null, plane.deviation > 1e-6 ? ` (a best fit: the farthest point is ${plane.deviation.toFixed(2)} mm off it)` : ''))
   },
 }))
+
+// All selection writers (click, box, grow/shrink, loops), cage replacements (tools,
+// starters, Undo/Redo), Face, and session/mode exits invalidate a picked line.
+// Live moveBy updates keep it fixed, including the typed turn's beginMove/endDrag.
+useFormStore.subscribe((s, prev) => {
+  if (s.rotationAxis === null && s.rotationPick === null) return
+  if (!s.active || s.transformMode !== 'rotate' || s.faceTool !== null || s.selection !== prev.selection
+    || s.topologyVersion !== prev.topologyVersion || (s.cage !== prev.cage && !s.dragging)) {
+    useFormStore.setState({ rotationAxis: null, rotationPick: null, notice: hasRotationInstruction(s) ? null : s.notice })
+  }
+})
 
 // The flash shows the form as the tool left it: any other change to the session ends it at once - the form, the
 // selection, a drag, the status line (a tool that found nothing to do), choosing Move / Rotate / Scale, the

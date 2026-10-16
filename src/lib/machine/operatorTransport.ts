@@ -16,11 +16,13 @@ import {
   isProbeCyclePaused,
   loadedFileArmableFromLine1,
   loadedFileFitRefusal,
+  loadedFileRefusedAtLoad,
   operatorChosenStartLost,
   pausedProgramReadout,
   nonProgramActionStatus,
   standaloneMdiJob,
   programHoldCycleStartDecision,
+  programM0HoldLine,
   programPartsTransportState,
   textM6WasAnswered,
   textProgramHoldLine,
@@ -151,7 +153,7 @@ export const PROGRAM_FIT_REMEDY =
 
 /** WO-2686: the next step when the loaded file, read again now, does not fit. */
 export const LOADED_FILE_FIT_REMEDY =
-  'Correct what it names (work offset, saved point, tool length) or load another program; CYCLE START then runs it from line 1.'
+  'Correct what it names (work offset, saved point, tool length, machine travel) or load another program; CYCLE START then runs it from line 1.'
 
 /**
  * Whether re-arming from the top is offered, and if not, why (WO-082). Mirrors
@@ -183,7 +185,7 @@ export function deriveReArm(input: OperatorTransportInput): OperatorReArmState {
  * this verdict owns the sole CYCLE START gesture. */
 export function deriveOperatorTransport(input: OperatorTransportInput): OperatorTransportState {
   const reArm = deriveReArm(input)
-  const state = inAKeptStop(input, deriveCycleVerdict(input, reArm))
+  const state = atProgramStop(input, inAKeptStop(input, deriveCycleVerdict(input, reArm)))
   // WO-1186 orders the fresh connection's offer by the facts a coordinate
   // action needs: datum first, then an active work offset. Keep this narrowly
   // scoped to the empty state so a loaded or held program retains its more
@@ -197,8 +199,7 @@ export function deriveOperatorTransport(input: OperatorTransportInput): Operator
     return {
       ...state,
       nextAction:
-        'No machine datum. Before using Home All, check each axis is off its home switch; '
-        + 'then home the machine before choosing a work-coordinate action.',
+        'No machine datum. Press Home All before choosing a work-coordinate action.',
       reArm,
     }
   }
@@ -243,6 +244,58 @@ function inAKeptStop(
       ? `The program is returning to line ${paused.line}.`
       : paused.sentence
   return { ...verdict, nextAction: paused.sentence, cycleStartDetail }
+}
+
+/**
+ * WO-2776: HELD AT THE PROGRAM'S OWN M0, CYCLE START'S TIP NAMES THAT STOP.
+ *
+ * Board session 2026-10-07 (OWED-CHECKS O13): at the M0 on line 11 the line
+ * under the bar named the hold, and the tip over CYCLE START said only "Resume
+ * the held program." WO-2566 renamed the tip in a kept stop, whose verdict is
+ * `start`; a program held on its M0 is the resume branch's (or Single Block's),
+ * so it was never asked. Words only: the action and its gate are the verdict's.
+ * A Feed Hold, a tool change (an M6 not yet answered, or a post's commented M0 -
+ * WO-2691), a hold a flow or card owns, and a kept stop keep their own tips.
+ */
+function atProgramStop(
+  input: OperatorTransportInput,
+  verdict: Omit<OperatorTransportState, 'reArm'>,
+): Omit<OperatorTransportState, 'reArm'> {
+  if (!verdict.cycleStartEnabled || (verdict.action !== 'resume' && verdict.action !== 'single-block')) return verdict
+  if (input.connectionPhase !== 'connected' || input.toolChange) return verdict
+  if (sessionOwnedHold(input) !== null || heldAtToolChange(input) !== null) return verdict
+  const paused = input.pausedProgram !== undefined ? input.pausedProgram : pausedProgramReadout()
+  if (paused !== null) return verdict
+  const stop = programStopHeldAt(input)
+  if (stop === null) return verdict
+  return {
+    ...verdict,
+    cycleStartDetail: verdict.action === 'resume'
+      ? `Carry on from the ${stop.word} on line ${stop.line}.`
+      : `Execute exactly one block after the ${stop.word} on line ${stop.line}.`,
+  }
+}
+
+/** The program's own stop (an M0, or an M1 the session stops at) the job is
+ * held on, as the session reads it: the file door's held boundary
+ * (`programM0HoldLine`), the text door's held pause line. Null for any other
+ * hold. */
+function programStopHeldAt(input: OperatorTransportInput): { word: 'M0' | 'M1'; line: number } | null {
+  const live = useMachineControl.getState()
+  if (input.programParts?.held) {
+    // The session's held boundary is the live job's.
+    const line = input.job === live.job ? programM0HoldLine() : null
+    return line === null ? null : { word: 'M0', line }
+  }
+  const text = input.programText
+  if (text === null) return null
+  const line = textProgramHoldLine(text, input.job, input.job === live.job ? live.holdsSeen : 0)
+  if (line === null) return null
+  const words = tokenizeLine(text.split(/\r?\n/)[line - 1] ?? '', line).words
+  const has = (value: number) => words.some((w) => w.letter === 'M' && w.value === value)
+  // A same-line M6 holds first as the tool change; answered, the M0 holds.
+  if (has(6) && !textM6WasAnswered(line)) return null
+  return has(0) ? { word: 'M0', line } : has(1) ? { word: 'M1', line } : null
 }
 
 /**
@@ -325,7 +378,9 @@ function publishedListing(input: OperatorTransportInput): boolean | undefined {
  * - The boundary's macro (an M6 prelude among them): CYCLE START continues it
  *   while it waits at hold(), with or without Single Block (the session
  *   refuses the step); while it moves there is no door.
- * - The clamp card: not this order's hold; today's words stand.
+ * - The clamp card (WO-2773, Operator 2026-10-13 "A - Continue on both"): the
+ *   same answer - its Continue is the only door, and CYCLE START is dark with
+ *   the same tip, naming its own card.
  * A plain M6 hold with no card (no measured reference tool) has no owner here
  * and is still released by CYCLE START.
  * - A probe routine held by Feed Hold (WO-2103): CYCLE START resumes it.
@@ -395,6 +450,20 @@ function sessionOwnedHold(input: OperatorTransportInput): Omit<OperatorTransport
       cycleStartDetail: "This hold's macro is still running.",
     }
   }
+  if (programHold.owner === 'clamp-card') {
+    const clamp = toolChange?.mode === 'clampPause' ? toolChange : null
+    const now = clamp?.step === 'stopping' || clamp?.step === 'parking'
+      ? clamp.message || 'parking for the clamp pause'
+      : clamp?.step === 'failed'
+        ? 'the park did not finish - see the Park + clamp card'
+        : 'screw down the material, then press Continue on the Park + clamp card'
+    return {
+      action: 'none',
+      cycleStartEnabled: false,
+      nextAction: `${part} - ${now}`,
+      cycleStartDetail: 'The Park + clamp card continues this program, not CYCLE START.',
+    }
+  }
   if (programHold.owner !== 'tool-change-card' && programHold.owner !== 'typed-tool-change') return null
   const card = toolChange?.mode === 'toolChange' ? toolChange : null
   const tool = card?.tool != null ? `T${card.tool}` : 'the next tool'
@@ -438,6 +507,17 @@ function sessionOwnedHold(input: OperatorTransportInput): Omit<OperatorTransport
  * its gate are the verdict's own.
  */
 function heldAtToolChange(input: OperatorTransportInput): string | null {
+  const held = heldToolChange(input)
+  return held === null ? null : toolChangeHoldSentence(held.tool)
+}
+
+function toolChangeHoldSentence(tool: number | null): string {
+  return `Held for a tool change - fit ${tool === null ? 'the next tool' : `T${tool}`}, then press CYCLE START.`
+}
+
+/** heldAtToolChange's reading: the hold is the file's own tool change at
+ *  source line `line`, and the tool its words name (null when they name none). */
+function heldToolChange(input: OperatorTransportInput): { line: number; tool: number | null } | null {
   const text = input.programText
   if (text === null) return null
   const live = useMachineControl.getState()
@@ -445,7 +525,7 @@ function heldAtToolChange(input: OperatorTransportInput): string | null {
   if (held === null || textM6WasAnswered(held)) return null
   const lines = text.split(/\r?\n/)
   let change = false
-  let tool: string | null = null
+  let tool: number | null = null
   for (let n = held; n >= 1 && n > held - 4; n--) {
     const raw = lines[n - 1] ?? ''
     // The product tokenizer, so compact words (`G1X10`, `M6T2`) read as the controller reads them.
@@ -458,10 +538,9 @@ function heldAtToolChange(input: OperatorTransportInput): string | null {
     const t = words.find((w) => w.letter === 'T' && Number.isInteger(w.value))?.value
     const word = t !== undefined ? String(t) : (said ? /\bT(\d+)\b/i.exec(said)?.[1] : undefined)
     if (said !== undefined || word !== undefined || has('M', [6])) change = true
-    if (tool === null && word !== undefined && Number(word) > 0) tool = `T${Number(word)}`
+    if (tool === null && word !== undefined && Number(word) > 0) tool = Number(word)
   }
-  if (!change) return null
-  return `Held for a tool change - fit ${tool ?? 'the next tool'}, then press CYCLE START.`
+  return change ? { line: held, tool } : null
 }
 
 function deriveCycleVerdict(
@@ -715,8 +794,11 @@ function armFromLine1Verdict(
   // destroyed is his "otherwise": line 1 does not take its place.
   if (live && operatorChosenStartLost()) return null
   const textDoor = input.programText !== null && reArm.enabled
-  // The file door's file, the one a reconnect left named (seat case 1) too.
-  const fileDoor = input.programText === null && live && publishedListing(input) === true
+  // The file door's file, the one a reconnect left named (seat case 1) too,
+  // and (WO-2772) one a Load refused for a reason outside it: never staged, so
+  // no listing - CYCLE START reads it below exactly as it reads the others.
+  const fileDoor = input.programText === null && live
+    && (publishedListing(input) === true || loadedFileRefusedAtLoad())
     && !standaloneMdiJob() && loadedFileArmableFromLine1()
   if (!textDoor && !fileDoor) return null
   // A failed run leaves GRBL in Hold with the rest of it buffered (WO-087):
@@ -785,15 +867,49 @@ async function armFromLine1ThenStart(): Promise<boolean> {
   return executeOperatorCycleStart()
 }
 
-export function currentOperatorTransport(): OperatorTransportState {
+function currentOperatorTransportInput(): OperatorTransportInput {
   const s = useMachineControl.getState()
-  return deriveOperatorTransport({
+  return {
     ...s,
     noHomeSwitches: activeMachineHasNoHomeSwitches(),
     programParts: programPartsTransportState(),
     guidedMeasure: guidedToolMeasureState(),
     programHold: programHoldCycleStartDecision(),
-  })
+  }
+}
+
+export function currentOperatorTransport(): OperatorTransportState {
+  return deriveOperatorTransport(currentOperatorTransportInput())
+}
+
+/**
+ * WO-2863 (sweep G6): the tool change a CYCLE START out of the file's own
+ * tool-change hold completes. The line told the operator "fit T3, then press
+ * CYCLE START"; pressing it is the operator saying T3 is fitted - the same
+ * moment UCCNC's M6 macro calls Setcurrenttool (machineControlStore
+ * setToolChange). Null unless the line on screen is that sentence and names a
+ * tool. Before this the TOOL panel kept reading T2 after the resume: a GRBL
+ * post writes the change as a comment and an M0, never a T word, so neither
+ * the controller nor the program's tool-change list ever heard of T3.
+ */
+function toolFittedByResume(state: OperatorTransportState): { line: number; tool: number } | null {
+  const held = heldToolChange(currentOperatorTransportInput())
+  if (held === null || held.tool === null) return null
+  return state.nextAction === toolChangeHoldSentence(held.tool) ? { line: held.line, tool: held.tool } : null
+}
+
+/** The readouts only: the tool in the spindle, and the program's own list of
+ *  its tool changes (ToolGlance reads the last one the run has passed). What
+ *  is sent and how the program resumes do not change. */
+function recordToolFitted(fitted: { line: number; tool: number }): void {
+  const s = useMachineControl.getState()
+  s.setActiveTool(fitted.tool)
+  const { toolChanges } = s.job
+  if (toolChanges.some((change) => change.sourceLine === fitted.line && change.tool === fitted.tool)) return
+  const change = { sourceLine: fitted.line, tool: fitted.tool, label: `T${fitted.tool}` }
+  const next = [...toolChanges.filter((c) => c.sourceLine !== fitted.line), change]
+    .sort((a, b) => a.sourceLine - b.sourceLine)
+  useMachineControl.setState({ job: { ...s.job, toolChanges: next } })
 }
 
 /** Execute only the action named by a fresh canonical verdict. */
@@ -810,12 +926,15 @@ export async function executeOperatorCycleStart(): Promise<boolean> {
       return startMaterialFitTrace()
     case 'single-block':
       return ctrl.stepJob()
-    case 'resume':
-      if (useMachineControl.getState().job.phase === 'paused' && ctrl.hasActiveJob()) {
+    case 'resume': {
+      const fitted = toolFittedByResume(state)
+      const resumed = useMachineControl.getState().job.phase === 'paused' && ctrl.hasActiveJob()
         // The controller refuses this while Single Block is on (WO-006).
-        return ctrl.resumeJob()
-      }
-      return ctrl.cycleResume()
+        ? ctrl.resumeJob()
+        : ctrl.cycleResume()
+      if (resumed && fitted !== null) recordToolFitted(fitted)
+      return resumed
+    }
     case 'start':
       return startMachineJob()
     case 'arm-start':

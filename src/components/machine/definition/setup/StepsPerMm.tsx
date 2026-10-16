@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useState } from 'react'
 import { NumericInput } from '../../../ui/NumericInput'
 
@@ -60,6 +63,7 @@ export function StepsPerMm({ onChange }: {
    *  pressed; never called while the popover's own fields are being typed. */
   onChange: (stepsPerUnit: number) => void
 }) {
+  useText('control-screens-not-probing')
   const [open, setOpen] = useState(false)
   const [inputs, setInputs] = useState<StepsPerMmInputs>(DEFAULT_INPUTS)
   const set = <K extends keyof StepsPerMmInputs>(key: K, value: StepsPerMmInputs[K]) => {
@@ -84,9 +88,7 @@ export function StepsPerMm({ onChange }: {
       <summary
         data-testid="steps-per-mm-trigger"
         style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}
-      >
-        Work it out
-      </summary>
+      >{controlText('StepsPerMm.text001')}</summary>
       <div
         style={{
           display: 'flex', flexDirection: 'column', gap: 6,
@@ -94,54 +96,54 @@ export function StepsPerMm({ onChange }: {
         }}
       >
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ flex: 'none', width: 130 }}>Motor steps/rev</span>
+          <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text002')}</span>
           <NumericInput
             value={inputs.motorStepsPerRev} min={1} step={1}
-            ariaLabel="Motor steps per revolution"
+            ariaLabel={controlText('StepsPerMm.text003')}
             className="mform-input mform-input-mono"
             style={{ flex: 'none', width: 70 }}
             onChange={(v) => set('motorStepsPerRev', v)}
           />
         </label>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ flex: 'none', width: 130 }}>Microsteps</span>
+          <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text004')}</span>
           <NumericInput
             value={inputs.microsteps} min={1} step={1}
-            ariaLabel="Microsteps"
+            ariaLabel={controlText('StepsPerMm.text005')}
             className="mform-input mform-input-mono"
             style={{ flex: 'none', width: 70 }}
             onChange={(v) => set('microsteps', v)}
           />
         </label>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ flex: 'none', width: 130 }}>Drive</span>
+          <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text006')}</span>
           <select
             className="mform-select"
-            aria-label="Drive type"
+            aria-label={controlText('StepsPerMm.text007')}
             value={inputs.drive}
             onChange={(e) => set('drive', e.target.value as StepsPerMmDrive)}
           >
-            <option value="belt">Belt and pulley</option>
-            <option value="screw">Leadscrew / ballscrew</option>
+            <option value="belt">{controlText('StepsPerMm.text008')}</option>
+            <option value="screw">{controlText('StepsPerMm.text009')}</option>
           </select>
         </label>
         {inputs.drive === 'belt' ? (
           <>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ flex: 'none', width: 130 }}>Belt pitch (mm)</span>
+              <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text010')}</span>
               <NumericInput
                 value={inputs.beltPitchMm} min={0} step={0.5}
-                ariaLabel="Belt pitch in millimeters"
+                ariaLabel={controlText('StepsPerMm.text011')}
                 className="mform-input mform-input-mono"
                 style={{ flex: 'none', width: 70 }}
                 onChange={(v) => set('beltPitchMm', v)}
               />
             </label>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ flex: 'none', width: 130 }}>Pulley teeth</span>
+              <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text012')}</span>
               <NumericInput
                 value={inputs.beltTeeth} min={0} step={1}
-                ariaLabel="Pulley tooth count"
+                ariaLabel={controlText('StepsPerMm.text013')}
                 className="mform-input mform-input-mono"
                 style={{ flex: 'none', width: 70 }}
                 onChange={(v) => set('beltTeeth', v)}
@@ -150,10 +152,10 @@ export function StepsPerMm({ onChange }: {
           </>
         ) : (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ flex: 'none', width: 130 }}>Screw lead (mm)</span>
+            <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text014')}</span>
             <NumericInput
               value={inputs.screwLeadMm} min={0} step={0.5}
-              ariaLabel="Screw lead in millimeters"
+              ariaLabel={controlText('StepsPerMm.text015')}
               className="mform-input mform-input-mono"
               style={{ flex: 'none', width: 70 }}
               onChange={(v) => set('screwLeadMm', v)}
@@ -161,7 +163,7 @@ export function StepsPerMm({ onChange }: {
           </label>
         )}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ flex: 'none', width: 130 }}>steps/mm</span>
+          <span style={{ flex: 'none', width: 130 }}>{controlText('StepsPerMm.text016')}</span>
           <span
             data-testid="steps-per-mm-result"
             className="mform-input-mono"
@@ -179,9 +181,7 @@ export function StepsPerMm({ onChange }: {
             setOpen(false)
           }}
           style={{ alignSelf: 'flex-start' }}
-        >
-          Use this value
-        </button>
+        >{controlText('StepsPerMm.text017')}</button>
       </div>
     </details>
   )

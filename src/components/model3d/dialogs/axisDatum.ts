@@ -8,6 +8,8 @@
 // round edge picked for an edge axis gives the circle's axis; a curved edge with no axial neighbour
 // gives the circle through its points, held where it was picked.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import * as THREE from 'three'
 import type { CachedBody } from '../../../viewport3d'
 import type { StableId, Vec3 } from '../../../geom/geom-service'
@@ -114,9 +116,9 @@ async function knownFaces(faceIds: readonly StableId[], lookup: AxisFaceLookup):
 /** A face picked for "through a cylinder or hole". */
 export async function axisFromFacePick(body: CachedBody, ownerId: string, faceId: StableId, lookup: AxisFaceLookup): Promise<AxisPickOutcome> {
   const geometry = await lookup(faceId)
-  if (geometry === undefined) return { ok: false, message: 'Axis: that face has no captured geometry yet - pick it again once the model has rebuilt.' }
+  if (geometry === undefined) return { ok: false, message: workbenchText('axisDatum.axisThatFaceHasNoCapturedGeometryYetPick') }
   const made = computeAxisLine('cylinder', [{ role: 'axisFace', geometry }])
-  if (!made.ok) return { ok: false, message: `Axis: that face has no axis (${made.reason}).` }
+  if (!made.ok) return { ok: false, message: workbenchText('axisDatum.axisThatFaceHasNoAxis', { reason: String(made.reason) }) }
   const round = geometry.axis !== undefined && geometry.surfaceType !== 'plane'
   return {
     ok: true,
@@ -125,7 +127,7 @@ export async function axisFromFacePick(body: CachedBody, ownerId: string, faceId
       faces: [{ role: 'axisFace', faceId }],
       ownerIds: [ownerId],
       seed: round ? spanOver(made.axis, tessellatedPoints(body, faceId)) : made.axis,
-      said: round ? `the ${geometry.surfaceType === 'cylinder' ? 'cylinder or hole' : `${geometry.surfaceType} face`}'s axis` : 'square to the flat face, through its centre',
+      said: round ? workbenchText('axisDatum.theSAxis', { value1: String(geometry.surfaceType === 'cylinder' ? workbenchText('axisDatum.cylinderOrHole') : workbenchText('axisDatum.face', { value1: String(geometry.surfaceType) })) }) : workbenchText('axisDatum.squareToTheFlatFaceThroughItsCentre'),
     },
   }
 }
@@ -158,7 +160,7 @@ export async function axisFromEdgePick(body: CachedBody, ownerId: string, edgeId
   if (points.length === 2) {
     const d = sub(points[1], points[0])
     const span = len(d)
-    if (!(span > 1e-9)) return { ok: false, message: 'Axis: that edge has no length.' }
+    if (!(span > 1e-9)) return { ok: false, message: workbenchText('axisDatum.axisThatEdgeHasNoLength') }
     const seed: AxisLine = { origin: points[0], dir: { x: d.x / span, y: d.y / span, z: d.z / span }, length: span }
     const made = computeAxisLine('edge', faces.map((face) => ({ role: 'edgeFace' as const, geometry: face.geometry })), seed)
     return {
@@ -168,7 +170,7 @@ export async function axisFromEdgePick(body: CachedBody, ownerId: string, edgeId
         faces: faces.map((face) => ({ role: 'edgeFace', faceId: face.id })),
         ownerIds: [ownerId],
         seed: made.ok ? made.axis : seed,
-        said: 'along the edge',
+        said: workbenchText('axisDatum.alongTheEdge'),
       },
     }
   }
@@ -176,11 +178,11 @@ export async function axisFromEdgePick(body: CachedBody, ownerId: string, edgeId
   const axial = faces.find((face) => face.geometry.axis !== undefined && face.geometry.surfaceType !== 'plane')
   if (axial !== undefined) {
     const fromFace = await axisFromFacePick(body, ownerId, axial.id, lookup)
-    if (fromFace.ok) return { ok: true, pick: { ...fromFace.pick, said: 'the round edge\'s axis' } }
+    if (fromFace.ok) return { ok: true, pick: { ...fromFace.pick, said: workbenchText('axisDatum.theRoundEdgeSAxis') } }
   }
   const circle = circleAxis(points)
-  if (circle === undefined) return { ok: false, message: 'Axis: that edge is neither straight nor round - pick a straight edge.' }
-  return { ok: true, pick: { kind: 'edge', faces: [], ownerIds: [ownerId], seed: circle, said: 'the curved edge\'s centre line (held where it is)' } }
+  if (circle === undefined) return { ok: false, message: workbenchText('axisDatum.axisThatEdgeIsNeitherStraightNorRoundPick') }
+  return { ok: true, pick: { kind: 'edge', faces: [], ownerIds: [ownerId], seed: circle, said: workbenchText('axisDatum.theCurvedEdgeSCentreLineHeldWhereIt') } }
 }
 
 /** A picked vertex: its position and the faces that meet there. */
@@ -193,7 +195,7 @@ export async function axisPointFromVertexPick(point: Vec3, ownerId: string, adja
 export function axisFromTwoPoints(a: AxisPickedPoint, b: AxisPickedPoint): AxisPickOutcome {
   const d = sub(b.point, a.point)
   const span = len(d)
-  if (!(span > 1e-9)) return { ok: false, message: 'Axis: the second point is the first point - pick a different vertex.' }
+  if (!(span > 1e-9)) return { ok: false, message: workbenchText('axisDatum.axisTheSecondPointIsTheFirstPointPick') }
   return {
     ok: true,
     pick: {
@@ -201,7 +203,7 @@ export function axisFromTwoPoints(a: AxisPickedPoint, b: AxisPickedPoint): AxisP
       faces: [...a.faceIds.map((faceId) => ({ role: 'pointA' as const, faceId })), ...b.faceIds.map((faceId) => ({ role: 'pointB' as const, faceId }))],
       ownerIds: [...new Set([a.ownerId, b.ownerId])],
       seed: { origin: a.point, dir: { x: d.x / span, y: d.y / span, z: d.z / span }, length: span },
-      said: 'through the two points',
+      said: workbenchText('axisDatum.throughTheTwoPoints'),
     },
   }
 }

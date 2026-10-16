@@ -73,8 +73,8 @@ describe('WO-1650: the shared reader accepts any word the list defines', () => {
     if (!read.ok) throw new Error(read.refusal.message)
     const coolant = read.program.items.filter((item) => item.kind === 'coolant')
     expect(coolant).toEqual([
-      { kind: 'coolant', line: 2, flood: true, mist: false },
-      { kind: 'coolant', line: 4, flood: false, mist: false },
+      { kind: 'coolant', line: 2, flood: true, mist: false, standardCode: 8 },
+      { kind: 'coolant', line: 4, flood: false, mist: false, standardCode: 9 },
     ])
     expect(coolant.every((item) => !('outputs' in item))).toBe(true)
   })

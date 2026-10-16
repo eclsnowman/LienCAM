@@ -3,8 +3,9 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { runCaptureHarness } from '../lib/harness.mjs'
 import { demoProject } from './demo-project.mjs'
-const out = 'src/tests/evidence/WO-2491/folder'
-await runCaptureHarness({ port: 62499, outDir: out, viewport: { width: 1920, height: 1080 }, projectFile: path.resolve(demoProject) }, async ({ page, capture }) => {
+import { HELP_EVIDENCE } from './evidence-root.mjs'
+const out = HELP_EVIDENCE + '/folder'
+await runCaptureHarness({ port: Number(process.env.CAPTURE_PORT || 62499), outDir: out, viewport: { width: 1920, height: 1080 }, projectFile: path.resolve(demoProject) }, async ({ page, capture }) => {
   await page.evaluate(() => { const s = window.__camStore.getState(); s.setViewerMode('setup'); s.setActiveSetup(s.project.setups[0].id) })
   const setup = page.locator('.tree-setup').filter({ has: page.locator('.tree-setup-name', { hasText: /^Setup 1$/ }) }).first()
   await setup.getByRole('button', { name: 'New operation folder' }).click({ force: true })

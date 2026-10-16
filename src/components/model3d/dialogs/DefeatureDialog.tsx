@@ -10,6 +10,8 @@
 // set. Apply adopts the page-owned preview when that seam is supplied; legacy
 // callers still rewrite the SAME node through EditFeaturePayloadCommand.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, X } from 'lucide-react'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -35,7 +37,9 @@ export const DEFEATURE_CLASS_DISPOSITIONS = {
   filletPlanar: { kind: 'accept' },
   chamferPlanar: { kind: 'accept' },
   filletCurvedCorner: { kind: 'accept' },
-  sliver: { kind: 'decline', reason: 'Defeature declines sliver: sliver removal is not supported by this command' },
+  filletChain: { kind: 'accept' },
+  chamferChain: { kind: 'accept' },
+  sliver: { kind: 'decline', get reason() { return workbenchText('DefeatureDialog.defeatureDeclinesSliverSliverRemovalIsNotSupportedBy') } },
 } as const satisfies Record<FeatureClass, DefeatureClassDisposition>
 
 export const DEFEATURE_CLASSES = Object.freeze(
@@ -103,16 +107,18 @@ export interface DefeaturePreviewFeedback {
 }
 
 const FEATURE_CLASS_LABELS = {
-  throughHole: 'Through hole',
-  blindHole: 'Blind hole',
-  counterboreStack: 'Counterbore stack',
-  pocket: 'Pocket',
-  engravedText: 'Engraved text',
-  boss: 'Boss',
-  filletPlanar: 'Planar fillet',
-  chamferPlanar: 'Planar chamfer',
-  filletCurvedCorner: 'Curved-corner fillet',
-  sliver: 'Sliver',
+  get throughHole() { return workbenchText('DefeatureDialog.throughHole') },
+  get blindHole() { return workbenchText('DefeatureDialog.blindHole') },
+  get counterboreStack() { return workbenchText('DefeatureDialog.counterboreStack') },
+  get pocket() { return workbenchText('DefeatureDialog.pocket') },
+  get engravedText() { return workbenchText('DefeatureDialog.engravedText') },
+  get boss() { return workbenchText('DefeatureDialog.boss') },
+  get filletPlanar() { return workbenchText('DefeatureDialog.planarFillet') },
+  get chamferPlanar() { return workbenchText('DefeatureDialog.planarChamfer') },
+  get filletCurvedCorner() { return workbenchText('DefeatureDialog.curvedCornerFillet') },
+  get filletChain() { return workbenchText('DefeatureDialog.filletChain') },
+  get chamferChain() { return workbenchText('DefeatureDialog.chamferChain') },
+  get sliver() { return workbenchText('DefeatureDialog.sliver') },
 } as const satisfies Record<FeatureClass, string>
 
 function classLabel(featureClass: FeatureClass): string {
@@ -129,7 +135,9 @@ const PREFERRED_MEASURED_KEYS: Partial<Record<FeatureClass, string[]>> = {
   counterboreStack: ['diameter'],
   filletPlanar: ['radius'],
   filletCurvedCorner: ['radius'],
+  filletChain: ['radius'],
   chamferPlanar: ['distance', 'radius', 'width'],
+  chamferChain: ['distance', 'distanceA'],
 }
 
 /** axisX/axisY/axisZ (direction) and centerX/centerY/centerZ (position) are never
@@ -141,13 +149,13 @@ function measuredParam(verdict: FeatureVerdict): string {
   const entries = Object.entries(verdict.params).filter(([, value]) =>
     typeof value === 'number' ? Number.isFinite(value) : value.trim().length > 0,
   )
-  if (entries.length === 0) return 'measured parameter unavailable'
+  if (entries.length === 0) return workbenchText('DefeatureDialog.measuredParameterUnavailable')
   const preferredKeys = PREFERRED_MEASURED_KEYS[verdict.featureClass] ?? []
   const entry = preferredKeys.map((key) => entries.find(([name]) => name === key)).find((candidate) => candidate !== undefined)
     ?? entries.find(([name]) => LENGTH_LIKE_KEY.test(name))
-  if (entry === undefined) return 'measured parameter unavailable'
+  if (entry === undefined) return workbenchText('DefeatureDialog.measuredParameterUnavailable')
   const [key, value] = entry
-  const rendered = typeof value === 'number' ? `${Number(value.toFixed(4))} mm` : value
+  const rendered = typeof value === 'number' ? workbenchText('DefeatureDialog.mm', { value1: String(Number(value.toFixed(4))) }) : value
   return `${key} ${rendered}`
 }
 
@@ -167,9 +175,9 @@ export function defeatureRemovedLine(verdicts: readonly FeatureVerdict[], ownerL
     const measure = measuredParam(verdict)
     return measure === 'measured parameter unavailable' ? kind : `${kind} (${measure})`
   })
-  if (named.length === 0) return `Removed the picked features from ${ownerLabel}.`
-  if (named.length === 1) return `Removed the ${named[0]} from ${ownerLabel}.`
-  return `Removed ${named.length} features from ${ownerLabel}: ${named.join(', ')}.`
+  if (named.length === 0) return workbenchText('DefeatureDialog.removedThePickedFeaturesFrom', { ownerLabel: String(ownerLabel) })
+  if (named.length === 1) return workbenchText('DefeatureDialog.removedTheFrom', { value1: String(named[0]), ownerLabel: String(ownerLabel) })
+  return workbenchText('DefeatureDialog.removedFeaturesFrom', { length: String(named.length), ownerLabel: String(ownerLabel), value3: String(named.join(', ')) })
 }
 
 /** DEFEATURE-CLICK-PICK (Q-68): one plain-words label for a recognized verdict,
@@ -178,7 +186,7 @@ export function defeatureRemovedLine(verdicts: readonly FeatureVerdict[], ownerL
  *  the way its list row does -- single source of truth for both surfaces. */
 export function defeatureVerdictLabel(verdict: FeatureVerdict): string {
   const faces = verdict.faceIds.length
-  return `${classLabel(verdict.featureClass)} ${measuredParam(verdict)} (${faces} face${faces === 1 ? '' : 's'})`
+  return workbenchText('DefeatureDialog.face', { value1: String(classLabel(verdict.featureClass)), value2: String(measuredParam(verdict)), faces: String(faces), value4: String(faces === 1 ? '' : 's') })
 }
 
 /** A viewport face selects the complete recognized feature group that owns it.
@@ -193,9 +201,9 @@ export function defeatureRemovalName(verdicts: FeatureVerdict[]): string {
   const families = new Set(verdicts.map((verdict) => featureFamily(verdict.featureClass)))
   if (families.size === 1) {
     const family = [...families][0]
-    return `Delete ${verdicts.length} ${family}${verdicts.length === 1 ? '' : 's'}`
+    return workbenchText('DefeatureDialog.delete', { length: String(verdicts.length), family: String(family), value3: String(verdicts.length === 1 ? '' : 's') })
   }
-  return `Delete ${verdicts.length} feature groups`
+  return workbenchText('DefeatureDialog.deleteFeatureGroups', { length: String(verdicts.length) })
 }
 
 function selectionSummary(verdicts: FeatureVerdict[]): string {
@@ -210,8 +218,13 @@ function selectionSummary(verdicts: FeatureVerdict[]): string {
 }
 
 export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'create', featureId, initialFeatureKeys, selectedKeys: controlledKeys, onToggleKey, hoverKey, onRowHover, previewFeedback, onApplyPreview, onApplied, onClose }: DefeatureDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const editing = mode === 'edit'
   const removable = useMemo(() => verdicts.filter((v) => v.removable), [verdicts])
+  // WO-2766: a single-face refusal ("cannot be rebuilt on its own") a removable
+  // blend chain covers is not shown - the chain row is what removes it.
+  const rows = useMemo(() => verdicts.filter((v) => v.removable || v.faceIds.length === 0 || !removable.some((chain) =>
+    (chain.featureClass === 'filletChain' || chain.featureClass === 'chamferChain') && v.faceIds.every((id) => chain.faceIds.includes(id)))), [removable, verdicts])
   // Controlled when the parent supplies both the mask and its toggle; otherwise
   // the dialog owns the mask internally exactly as it did before this WO.
   const controlled = controlledKeys !== undefined && onToggleKey !== undefined
@@ -331,7 +344,7 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
         return
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        setApplyError(`Defeature Apply failed: ${message}`)
+        setApplyError(workbenchText('DefeatureDialog.defeatureApplyFailed', { message: String(message) }))
         return
       } finally {
         applyingRef.current = false
@@ -376,13 +389,13 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
       <header className="defeature-command-header" onPointerDown={beginCardDrag}>
         <GripVertical size={14} aria-hidden="true" />
         <div className="defeature-command-heading">
-          <span className="defeature-command-kicker">Delete faces</span>
-          <strong id="defeature-command-title">{editing ? 'Edit healed removal' : 'Pick features in the model'}</strong>
+          <span className="defeature-command-kicker">{workbenchText('DefeatureDialog.deleteFaces')}</span>
+          <strong id="defeature-command-title">{editing ? workbenchText('DefeatureDialog.editHealedRemoval') : workbenchText('DefeatureDialog.pickFeaturesInTheModel')}</strong>
         </div>
         <button
           type="button"
           className="modal-close-btn"
-          aria-label="Cancel delete faces"
+          aria-label={workbenchText('DefeatureDialog.cancelDeleteFaces')}
           data-testid="dialog-shell-close"
           disabled={applying}
           onClick={requestClose}
@@ -394,22 +407,19 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
         <div data-testid="defeature-picker" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {controlled && (
           <div style={{ color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', lineHeight: 1.4 }}>
-            Click faces in the viewport. A recognized hole, pocket, boss, fillet, chamfer, or engraving is selected as one coherent group. Orange faces will be deleted and healed.
-          </div>
+            {workbenchText('DefeatureDialog.clickFacesInTheViewportARecognizedHolePocket')}</div>
         )}
         {removable.length === 0 && (
           <div data-testid="defeature-empty" style={{ color: 'var(--text-secondary)' }}>
-            No removable face groups were found on this body.
-          </div>
+            {workbenchText('DefeatureDialog.noRemovableFaceGroupsWereFoundOnThisBody')}</div>
         )}
         {removable.length > 0 && (
           <div
             data-testid="defeature-summary"
             style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', borderTop: '1px solid var(--border-subtle, rgba(255,255,255,0.12))', paddingTop: 6, marginTop: 2 }}
           >
-            {selectedVerdicts.length} of {removable.length} selected
-            {selectedVerdicts.length > 0 && (
-              <> - {selectionSummary(selectedVerdicts)}</>
+            {workbenchText('DefeatureDialog.ofSelected', { length: String((selectedVerdicts.length) ?? ''), length2: String((removable.length) ?? '') })}{selectedVerdicts.length > 0 && (
+              <>{workbenchText('DefeatureDialog.value')}{selectionSummary(selectedVerdicts)}</>
             )}
           </div>
         )}
@@ -433,13 +443,12 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
         )}
         <details data-testid="defeature-selection-details">
           <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-            Recognized face groups
-          </summary>
+            {workbenchText('DefeatureDialog.recognizedFaceGroups')}</summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto', paddingTop: 6 }}>
-            {verdicts.map((verdict) => {
+            {rows.map((verdict) => {
               const reason = verdict.removable
-                ? 'Select this recognized feature for removal'
-                : (verdict.refuseReason?.trim() || 'Recognition did not provide a refusal reason')
+                ? workbenchText('DefeatureDialog.selectThisRecognizedFeatureForRemoval')
+                : (verdict.refuseReason?.trim() || workbenchText('DefeatureDialog.recognitionDidNotProvideARefusalReason'))
               const hovered = hoverKey === verdict.featureKey && verdict.removable
               return (
                 <label
@@ -470,8 +479,8 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
                     onChange={() => toggle(verdict.featureKey)}
                   />
                   <span>
-                    {classLabel(verdict.featureClass)} - {measuredParam(verdict)}
-                    {!verdict.removable && <> - Declined: {reason}</>}
+                    {classLabel(verdict.featureClass)}{workbenchText('DefeatureDialog.value')}{measuredParam(verdict)}
+                    {!verdict.removable && <>{workbenchText('DefeatureDialog.declined')}{reason}</>}
                   </span>
                 </label>
               )
@@ -487,8 +496,7 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
       </div>
       <footer className="defeature-command-footer">
         <button type="button" className="modal-btn modal-btn-ghost" data-testid="dialog-shell-cancel" disabled={applying} onClick={requestClose}>
-          Cancel
-        </button>
+          {workbenchText('DefeatureDialog.cancel')}</button>
         <button
           type="button"
           className="modal-btn modal-btn-primary"
@@ -496,8 +504,7 @@ export function DefeatureDialog({ dag, history, ownerId, verdicts, mode = 'creat
           disabled={invalid || applying}
           onClick={handleApply}
         >
-          Apply removal
-        </button>
+          {workbenchText('DefeatureDialog.applyRemoval')}</button>
       </footer>
     </aside>
   )

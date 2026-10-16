@@ -30,7 +30,7 @@ const waitIdle = (h) => h.page.waitForFunction(() => /idle/i.test(document.query
  * controller definition, so its X/Y/Z ranges are unknown to routines),
  * optionally the fixed tool setter position (Probing section), then Save.
  */
-async function defineMachine(h, { setter = null, controller = null, save = true } = {}) {
+async function defineMachine(h, { setter = null, controller = null, safeZ = null, save = true } = {}) {
   const { tid, page } = h
   await tid('control-view-machine').click()
   await tid('control-machine-tab-definition').click()
@@ -51,6 +51,11 @@ async function defineMachine(h, { setter = null, controller = null, save = true 
       await input.press('Enter')
     }
     await page.waitForTimeout(500)
+  }
+  if (safeZ !== null) {
+    await tid('machine-def-tab-machine').click()
+    await page.getByLabel('Safe Z', { exact: true }).fill(String(safeZ))
+    await page.getByLabel('Safe Z', { exact: true }).press('Enter')
   }
   if (save) {
     await tid('machine-def-panel-save').click()
@@ -453,6 +458,24 @@ export const GAPS = {
       await h.shot(a)
       h.sidecar(a, { appState: 'Control > Probing, built-in simulator connected and homed, machine defined. Simulated part placed under the probe; G54 set by MDI (G10 L20 P1) at the part top, 14 mm in from its front-left corner. examples/gcode/02-toe-clamps-grbl.nc loaded through Load > Open file. Z surface picked, Points X and Y set to 3: margin, fade, points and the cutting-area bounds, the grid of points over the stock. Nothing run yet. Whole frame.', extra: { part } })
       await tid('control-probe-run-guided').click()
+      // WO-2716: the earlier round lost the loaded program during this
+      // simulator run. Capture the UI's reason promptly instead of a 5 min
+      // locator timeout; no product state is changed by this observation.
+      await page.waitForFunction(() =>
+        document.querySelector('[data-testid="control-work-probe-apply"]') ||
+        document.querySelector('[data-testid="control-surface-mesh-plan-error"]') ||
+        document.querySelector('[data-testid="probing-run-why"]'),
+      null, { timeout: 300_000 })
+      if (await tid('control-surface-mesh-plan-error').count()) {
+        const reason = await tid('control-surface-mesh-plan-error').innerText()
+        await h.debug('measured-mesh-blocker')
+        return { captureComplete: false, disposition: 'G05a CAPTURED; G05b NEEDS PRODUCT INVESTIGATION', reason, evidence: 'debug/G05-measured-mesh-blocker.png' }
+      }
+      if (await tid('probing-run-why').count()) {
+        const reason = await tid('probing-run-why').innerText()
+        await h.debug('measured-mesh-stopped')
+        return { captureComplete: false, disposition: 'G05a CAPTURED; G05b NOT CAPTURED', reason, evidence: 'debug/G05-measured-mesh-stopped.png' }
+      }
       await tid('control-work-probe-apply').waitFor({ state: 'visible', timeout: 300_000 })
       await waitIdle(h)
       await page.mouse.move(1, 1)
@@ -474,12 +497,56 @@ export const GAPS = {
       const before = await readSimulatedPart(h)
       const ox = -150 - before.bore.x + before.x, oy = -150 - before.bore.y + before.y
       const setter = { x: ox + before.sx - 15, y: oy + before.sy - 15, z: before.top }
-      await defineMachine(h, { controller: 'uccnc', setter })
+      await defineMachine(h, { controller: 'uccnc', setter, safeZ: -5 })
       const part = await partAndWorkZero(h)
       if (Math.abs(part.x - ox) > 0.01 || Math.abs(part.y - oy) > 0.01) throw new Error('C-6 part not where expected: ' + JSON.stringify({ part, ox, oy }))
+      // WO-2716: M6 uses the macro flag, not just the setter coordinates.
+      // Configure it through the same editor and TC control an operator uses.
+      await tid('control-view-machine').click()
+      await tid('control-machine-tab-macros').click()
+      await tid('control-macros-edit').last().click()
+      await tid('macro-editor-add').click()
+      await tid('macro-editor-name').fill('Tool change over setter')
+      await tid('macro-editor-body').fill(`goTo({ x: ${setter.x}, y: ${setter.y}, z: ${setter.z + 10} })`)
+      await tid('macro-editor-save').click()
+      await tid('macro-editor-modal').getByRole('button', { name: 'Close', exact: true }).click()
+      const flag = page.getByRole('button', { name: 'Mark "Tool change over setter" as used for tool change', exact: true })
+      await flag.last().click()
+      if (await flag.count()) throw new Error('C-6 tool-change macro flag did not persist')
+      // Guided change also requires a measured reference, not merely a Ref star.
+      await mdi(h, `G21 G90 G53 G0 Z-5`)
+      await mdi(h, `G21 G90 G53 G0 X${setter.x} Y${setter.y}`)
+      await mdi(h, `G21 G90 G53 G0 Z${setter.z + 10}`)
+      await tid('control-view-tools').click()
+      await tid('control-tool-add-input').fill('1')
+      await tid('control-tool-add').click()
+      await tid('control-tool-ref-1').click()
+      await tid('control-tool-row-1').locator('.control-tool-num').click()
+      await tid('control-probe-measure').click()
+      await tid('control-probe-status').waitFor({ timeout: 120_000 })
+      const reference = await tid('control-probe-status').innerText()
+      if (!/Recorded for T1/.test(reference) || await tid('control-probe-status').evaluate(el => el.classList.contains('control-probe-status-error'))) {
+        throw new Error('C-6 reference measurement did not finish successfully: ' + reference)
+      }
+      await waitIdle(h)
+      await h.debug('reference-measured')
       await loadProgram(h, 'examples/01-fixture-plate/uccnc.nc')
-      await h.debug('01-loaded')
-      await tid('control-cyclestart').click()
+      // The first M6 is line 64. Use the real run-from-line planner to reach
+      // the change without spending the capture window on Face 1's cuts.
+      await tid('control-runfrom-input').fill('64')
+      await tid('control-runfrom-input').press('Enter')
+      await tid('control-runfrom-plan').click()
+      // WO-2810: line 64 expects T2 while T1 is the last known tool, so Plan first
+      // asks the operator. Run the tool change for T2 first (the M6 pictured here).
+      const toolAsk = tid('control-runfrom-toolask')
+      await toolAsk.or(tid('control-runfrom-next-step')).first().waitFor()
+      // That choice moves to the setter and opens the guided change itself.
+      if (await toolAsk.isVisible()) await tid('control-runfrom-toolask-change').click()
+      else {
+        await tid('control-runfrom-next-step').waitFor()
+        await h.debug('01-loaded')
+        await tid('control-cyclestart').click()
+      }
       const card = page.locator('[data-testid="control-toolchange-card"], [data-testid="control-toolchange-banner"]').first()
       await card.waitFor({ timeout: 300_000 })
       await page.waitForTimeout(1500)
@@ -487,17 +554,56 @@ export const GAPS = {
       const a = 'C-6a-m6-tool-change.png'
       await h.shot(a)
       const cardA = await card.innerText()
-      h.sidecar(a, { appState: `Control > Main, built-in simulator, starter machine re-declared as UCCNC and defined with a fixed tool setter on the simulated part top (machine X${setter.x} Y${setter.y} Z${setter.z}). G54 at the part's front-left top corner. examples/01-fixture-plate/uccnc.nc loaded through Load > Open file and started with CYCLE START; the program reached its first M6: the tool-change card asking for the next tool. Whole frame.`, extra: { card: cardA, setter } })
+      h.sidecar(a, { appState: `Control > Main, built-in simulator, starter machine re-declared as UCCNC, Safe Z -5 mm, fixed setter on the simulated part top (machine X${setter.x} Y${setter.y} Z${setter.z}), position macro marked used for tool change, T1 reference measured. G54 at the part's front-left top corner. examples/01-fixture-plate/uccnc.nc loaded through Load > Open file; From line 64, Plan, "Run the tool change for T2 first" (WO-2810) opens the guided T2 change. Whole frame.`, extra: { card: cardA, setter, reference } })
       const cont = tid('control-tc-continue')
-      if (await cont.count()) {
+      // The banner may precede the automatic M6 park. Wait for the actual
+      // swap action; a banner alone must never count as a measured capture.
+      await cont.filter({ hasText: /Continue - probe/ }).waitFor({ timeout: 60_000 })
+      {
+        // Simulator only: invalid travel reaches the authentic WO-1996
+        // failed-measure recovery route without any failed probe motion.
+        // Never use on a physical board.
+        if (await tid('control-kind-select').inputValue() !== 'simulator') throw new Error('C-6 recovery capture requires the simulator')
+        await tid('control-view-tools').click()
+        const travel = await tid('control-probe-cfg-travel').inputValue()
+        await tid('control-probe-cfg-travel').fill('0.1')
+        await tid('control-probe-cfg-travel').press('Enter')
+        await tid('control-view-main').click()
         await cont.click()
-        await page.waitForTimeout(2000)
-        await tid('control-tc-continue').filter({ hasText: /Continue from the M6/ }).waitFor({ timeout: 120_000 }).catch(() => {})
+        const fromM6 = tid('control-tc-continue').filter({ hasText: /^Continue from the M6$/ })
+        // WO-1996: this particular button belongs to a successful Retry after
+        // a missed measure. Ordinary Continue measures and resumes directly.
+        await page.waitForFunction(() =>
+          !document.querySelector('[data-testid="control-toolchange-card"]') ||
+          document.querySelector('[data-testid="control-tc-retry"]') ||
+          document.querySelector('[data-testid="control-tc-message"]')?.textContent?.includes('Insert T4') ||
+          document.querySelector('[data-testid="control-tc-continue"]')?.textContent === 'Continue from the M6',
+        null, { timeout: 90_000 })
+        if (await tid('control-tc-retry').count()) {
+          const failedMeasure = await tid('control-toolchange-card').innerText()
+          if (!/Max travel must be larger than the retract distance/.test(failedMeasure)) throw new Error('C-6 unexpected failed-measure receipt: ' + failedMeasure)
+          await h.debug('short-search-missed')
+          await tid('control-view-tools').click()
+          await tid('control-probe-cfg-travel').fill(travel)
+          await tid('control-probe-cfg-travel').press('Enter')
+          await tid('control-view-main').click()
+          await tid('control-tc-retry').click()
+          await fromM6.waitFor({ timeout: 90_000 })
+        }
+        if (!await fromM6.count() && !await tid('control-tc-retry').count()) {
+          await tid('control-view-tools').click()
+          const readback = await tid('control-tool-row-3').innerText()
+          if (!/measured/.test(readback)) throw new Error('C-6 resumed without a measured T3 table readback: ' + readback)
+          await h.debug('ordinary-measure-resumed')
+          return { captureComplete: false, disposition: 'C-6a CAPTURED; C-6b NOT CAPTURED', reason: 'Normal successful M6 measurement resumes directly. Continue from the M6 is exposed only after a missed measurement and successful Retry (WO-1996). The ordinary route does not produce this state.', readback, evidence: 'debug/C-6-ordinary-measure-resumed.png' }
+        }
+        await fromM6.waitFor({ timeout: 90_000 })
         await h.debug('03-after-measure')
         const b = 'C-6b-m6-measured.png'
         await h.shot(b)
         const cardB = await tid('control-toolchange-card').innerText().catch(() => '')
-        h.sidecar(b, { appState: 'Same run as C-6a after the swap was confirmed with the card\'s Continue: the new tool measured on the setter, the card offering Continue from the M6 (not pressed). Whole frame.', extra: { card: cardB } })
+        if (!/measured and its length offset applied/.test(cardB)) throw new Error('C-6 retry lacks the measured/applied receipt: ' + cardB)
+        h.sidecar(b, { appState: 'Same built-in simulator run as C-6a: Tools > Max travel temporarily set to 0.1 mm makes Continue refuse the measure before motion (travel must exceed retract). The original travel is restored through the UI; Retry measures successfully and applies the length. The recovery card offers Continue from the M6 (not pressed). Whole frame. No physical controller was used.', extra: { card: cardB, restoredMaxTravel: travel, recovery: 'simulator-only preflight refusal, restored travel, successful Retry' } })
       }
     },
   },

@@ -6,6 +6,7 @@
 // most CAD viewport hide/isolate commands read "the current selection"
 // rather than owning a dedicated pick mode of their own.
 
+import { useText } from '../../../i18n'
 import type { CSSProperties } from 'react'
 import type { StableId } from '../../../geom/geom-service'
 
@@ -28,6 +29,7 @@ export function VisibilityPanel({
   onClearIsolate,
   onShowAll,
 }: VisibilityPanelProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const hasSelection = selectedFaceIds.length > 0 || selectedBodyIds.length > 0
   return (
     <div
@@ -53,8 +55,7 @@ export function VisibilityPanel({
         onClick={onHideSelectedFaces}
         style={buttonStyle()}
       >
-        Hide face{selectedFaceIds.length > 1 ? 's' : ''}
-      </button>
+        {workbenchText('VisibilityPanel.hideFace', { value1: String((selectedFaceIds.length > 1 ? 's' : '')) })}</button>
       <button
         type="button"
         data-testid="visibility-isolate"
@@ -63,16 +64,13 @@ export function VisibilityPanel({
         onClick={onIsolateSelection}
         style={buttonStyle(isolateActive)}
       >
-        Isolate selection
-      </button>
+        {workbenchText('VisibilityPanel.isolateSelection')}</button>
       {isolateActive && (
         <button type="button" data-testid="visibility-clear-isolate" onClick={onClearIsolate} style={buttonStyle()}>
-          Exit isolate
-        </button>
+          {workbenchText('VisibilityPanel.exitIsolate')}</button>
       )}
       <button type="button" data-testid="visibility-show-all" onClick={onShowAll} style={buttonStyle()}>
-        Show all
-      </button>
+        {workbenchText('VisibilityPanel.showAll')}</button>
     </div>
   )
 }
@@ -81,7 +79,7 @@ function buttonStyle(active = false): CSSProperties {
   return {
     background: active ? 'var(--select-ui-bg)' : 'transparent',
     color: 'var(--text-primary)',
-    border: '1px solid var(--border-subtle)',
+    border: "1px solid var(--border-subtle)",
     borderRadius: 'var(--radius-md)',
     padding: '2px 8px',
     cursor: 'pointer',

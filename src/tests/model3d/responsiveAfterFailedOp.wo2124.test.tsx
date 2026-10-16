@@ -107,7 +107,10 @@ describe('WO-2124: the Model screen stays responsive after a failed operation', 
     expect(hooks().getBodyHandle('S5')).toBe(leafHandle)
     expect(hooks().getBodyPresentationVisible('S5')).toBe(true)
     for (const ancestor of ['F1', 'S2', 'S3', 'S4']) expect(hooks().getBodyPresentationVisible(ancestor)).toBe(false)
-    expect(screen.getByTestId('feature-row-S6').querySelector('[data-testid="feature-status-badge"]')?.getAttribute('data-tooltip')).toMatch(/SHELL_FAILED/)
+    // WO-2868: the row names the failure in plain words, never the diagnostic code
+    const shellTooltip = screen.getByTestId('feature-row-S6').querySelector('[data-testid="feature-status-badge"]')?.getAttribute('data-tooltip')
+    expect(shellTooltip).toMatch(/^Shell/)
+    expect(shellTooltip).not.toMatch(/SHELL_FAILED/)
 
     // before WO-2124 this landing painted the whole model once or twice per body: 27 paints here (6 with it)
     expect(landingPaints).toBeLessThanOrEqual(8)

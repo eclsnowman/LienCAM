@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReferenceImagePayload } from '../../../referenceImage/referenceImage'
@@ -13,6 +14,7 @@ export function ReferenceImagePlacement({ payload, frame, runtime, canvas, onPre
   onPreview(center: ImagePoint | null): void; onCommit(center: ImagePoint): void
   onScalePreview?(placement: ImagePlacement | null): void; onScaleCommit?(placement: ImagePlacement): void
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const callbacks = useRef({ onPreview, onCommit, onScalePreview, onScaleCommit })
   callbacks.current = { onPreview, onCommit, onScalePreview, onScaleCommit }
   const handles = useRef<(HTMLButtonElement | null)[]>([])
@@ -136,9 +138,9 @@ export function ReferenceImagePlacement({ payload, frame, runtime, canvas, onPre
       window.removeEventListener('blur', cancel)
     }
   }, [sourceKey, runtime, canvas])
-  return payload.scaleLocked || !onScaleCommit ? null : createPortal(<div aria-label="Reference image corner handles">
+  return payload.scaleLocked || !onScaleCommit ? null : createPortal(<div aria-label={workbenchText('ReferenceImagePlacement.referenceImageCornerHandles')}>
     {IMAGE_CORNERS.map((corner, i) => <button key={i} type="button" ref={(node) => { handles.current[i] = node }}
-      aria-label={`Resize reference image corner ${i + 1}`} data-testid={`reference-image-corner-${i}`}
+      aria-label={workbenchText('ReferenceImagePlacement.resizeReferenceImageCorner', { value1: String(i + 1) })} data-testid={`reference-image-corner-${i}`}
       onPointerDown={(event) => begin.current(event.nativeEvent, corner)} onClick={(event) => { event.stopPropagation(); event.preventDefault() }}
       style={{ position: 'fixed', display: 'none', width: 12, height: 12, padding: 0, transform: 'translate(-50%, -50%)',
         background: 'white', border: '2px solid #167bc1', borderRadius: 2, zIndex: 35, cursor: 'nwse-resize', touchAction: 'none' }} />)}

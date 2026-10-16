@@ -38,6 +38,7 @@ import { operatorNotice } from './operatorNotices'
 import {
   normalize, sumv, magnitude, sub, rotate, centroid, closestPointOnPaths, closestOnSegment, segmentPathsIntersection, cleanPath, closePath, polyBBoxOf,
 } from './geom'
+import { estimatePassesMs, estimateRepositionMs, estimateWallGapMs, repositionLevelCount, ridePasses, type RepositionTimeModel } from './repositionTime'
 
 // PROTO wall-clean instrumentation (render-only): counts how many inter-pass transitions
 // fired the wall-clean ride vs the total transitions seen, so a dump can report the
@@ -59,8 +60,10 @@ export function getWallCleanStats(): { fired: number; transitions: number } { re
 // the wall-follow length factor; and (b)(4) a MULTI-SEGMENT at-depth route through proven-
 // cleared stock (backtrack along the cutter's own track, a perpendicular detour, or a ride
 // through the swept-track graph) that recovered a connection no single arc or chord kept down.
-const b8GateStats = { rejections: 0, routedAround: 0, routedAroundChord: 0, routedDetour: 0, stoppedShort: 0 }
-export function getB8GateStats(): { rejections: number; routedAround: number; routedAroundChord: number; routedDetour: number; stoppedShort: number } { return { ...b8GateStats } }
+// `routedWallChain` (WO-2787) counts rung (b)(6): a connection between two DIFFERENT walls kept
+// down by riding both walls in the milling direction.
+const b8GateStats = { rejections: 0, routedAround: 0, routedAroundChord: 0, routedDetour: 0, stoppedShort: 0, routedWallChain: 0 }
+export function getB8GateStats(): { rejections: number; routedAround: number; routedAroundChord: number; routedDetour: number; stoppedShort: number; routedWallChain: number } { return { ...b8GateStats } }
 
 // WO-447 WALL-COVERAGE bookkeeping (measurement + evidence; the RIDES it reports are real,
 // the counters are not read by any gate). Under params.wallFinish the engine parameterizes
@@ -219,6 +222,68 @@ export function setFragmentationCensus(on: boolean): void { fragCensus.enabled =
 /** The census from the most recent processFeature run (empty when disabled). */
 export function getFragmentationCensus(): FragmentationCensus {
   return { enabled: fragCensus.enabled, passEnds: [...fragCensus.passEnds], reseeds: [...fragCensus.reseeds], entries: [...fragCensus.entries] }
+}
+
+/** WO-2787: what the keep-down ladder saw when a connection lifted -- the engine's own
+ *  pre-move stock belief and the machinable region -- so a diagnostic can draw the lift.
+ *  OFF (null) by default; diagnostic tests only. Read-only: nothing it returns is used. */
+export interface KeepDownLiftTrace {
+  passIndex: number
+  connStart: Pt
+  connEnd: Pt
+  liftReason: string
+  clearedBeforePass: Loops
+  cutRegion: Loops
+}
+let keepDownLiftTrace: ((t: KeepDownLiftTrace) => void) | null = null
+export function setKeepDownLiftTrace(fn: ((t: KeepDownLiftTrace) => void) | null): void { keepDownLiftTrace = fn }
+
+/** WO-2787 fix round 4: every candidate the time-chosen keep-down ladder weighed for one
+ *  connection, its estimated machine time over all depth levels, and what became of it.
+ *  OFF (null) by default; diagnostic tests only. Read-only: nothing it returns is used. */
+export interface RepositionChoiceTrace {
+  passIndex: number
+  connStart: Pt
+  connEnd: Pt
+  liftMs: number
+  /** A refused rung with nothing to time (no route found, stop-short refused) has no points
+   *  and ms 0; `reason` says why. */
+  candidates: { rung: string; kind: 'wallfollow' | 'loopback'; points: Pt[]; feedFrom?: number; ms: number; outcome: 'feasible' | 'refused' | 'slower'; reason?: string; coverMs?: number }[]
+  chosen: string
+  /** WO-2787 round 7: the gap-fill time inside `liftMs` (the wall a kept-down ride would have
+   *  covered and the lift leaves to the gap-fill); a candidate's `coverMs` is the gap-fill time
+   *  its ride spares, already taken off its `ms`. */
+  liftCoverMs?: number
+  /** WO-2787 round 7: the rung was forced (the whole-program check kept a program planned
+   *  with it, or a diagnostic hook asked for it), not ranked by the model. */
+  forced?: true
+  clearedBeforePass: Loops
+  cutRegion: Loops
+}
+let repositionChoiceTrace: ((t: RepositionChoiceTrace) => void) | null = null
+export function setRepositionChoiceTrace(fn: ((t: RepositionChoiceTrace) => void) | null): void { repositionChoiceTrace = fn }
+/** WO-2787 fix round 7: the whole-program check (engine/index.ts) hands the trace the
+ *  decisions of the program it kept, once, instead of every plan it timed. */
+export function reportRepositionChoices(decisions: RepositionChoiceTrace[]): void { for (const t of decisions) repositionChoiceTrace?.(t) }
+/** WO-2787 fix round 7: OFF (null) by default; diagnostic tests only. Asked once per connection
+ *  the timed ladder decides; a rung name ('lift' for the lift) makes that connection take that
+ *  rung if it proves, so a test can emit the whole program with each admitted alternative and
+ *  time it. null decides as usual. */
+let repositionChoiceForce: ((connStart: Pt, connEnd: Pt) => string | null) | null = null
+export function setRepositionChoiceForce(fn: ((connStart: Pt, connEnd: Pt) => string | null) | null): void { repositionChoiceForce = fn }
+/** WO-2787 fix round 7: the per-run counters (B8 gate, wall cleanup, wall coverage, dropped
+ *  slivers) as one value, so the whole-program check (engine/index.ts) can leave them
+ *  describing the run it keeps rather than the last trial it timed. */
+export type FeatureStatsSnapshot = { b8: typeof b8GateStats; clean: typeof wallCleanStats; cover: typeof wallCoverStats; sliver: DroppedSliverStats }
+export function snapshotFeatureStats(): FeatureStatsSnapshot {
+  return { b8: { ...b8GateStats }, clean: { ...wallCleanStats }, cover: { ...wallCoverStats }, sliver: getDroppedSliverStats() }
+}
+export function restoreFeatureStats(snapshot: FeatureStatsSnapshot): void {
+  Object.assign(b8GateStats, snapshot.b8)
+  Object.assign(wallCleanStats, snapshot.clean)
+  Object.assign(wallCoverStats, snapshot.cover)
+  droppedSliverStats.largestEntryRadius = snapshot.sliver.largestEntryRadius
+  droppedSliverStats.regions = snapshot.sliver.regions.map(region => ({ ...region }))
 }
 
 /** A tool entry into fresh material: a helix ramp (radius > 0) or a straight plunge
@@ -438,6 +503,12 @@ export interface ProcessParams {
    * retained model wall. Island/hole contours are still cleaned normally.
    */
   skipOuterBoundaryCleanup?: boolean
+  /** WO-2787 fix round 4: the machine-time model for choosing how a would-lift connection
+   *  repositions (engine/index.ts builds it from the operation's feeds and heights). With it,
+   *  the keep-down ladder weighs every candidate it can prove and the lift by estimated time
+   *  and takes the fastest; a tie stays down. Absent: the ladder's first proven rung wins,
+   *  byte-identical to the stream before it existed. */
+  repositionTime?: RepositionTimeModel
 }
 
 export interface FeatureResult {
@@ -776,7 +847,7 @@ export function processFeature(
   // callers/tests are unaffected. Progress-only: emits NO geometry (bytestab invariant).
   onPassProgress?: (frac: number) => void,
 ): FeatureResult {
-  processFeatureRequestRecorder?.({ feature: feat, params })
+  if (!params.repositionTime?.trial) processFeatureRequestRecorder?.({ feature: feat, params })
   const { toolRadius, stepOver, tolerance } = params
   // A missing direction is climb: material on the right (./millingDirection, WO-1896),
   // which is the historical canonical-forward stream.
@@ -793,7 +864,7 @@ export function processFeature(
     resolveIntegralWallFollowLengthFactor(params.integralWallFollowLengthFactor)
 
   wallCleanStats.fired = 0; wallCleanStats.transitions = 0
-  b8GateStats.rejections = 0; b8GateStats.routedAround = 0; b8GateStats.routedAroundChord = 0; b8GateStats.routedDetour = 0; b8GateStats.stoppedShort = 0
+  b8GateStats.rejections = 0; b8GateStats.routedAround = 0; b8GateStats.routedAroundChord = 0; b8GateStats.routedDetour = 0; b8GateStats.stoppedShort = 0; b8GateStats.routedWallChain = 0
   wallCoverStats.boundaryLen = 0; wallCoverStats.coveredLen = 0; wallCoverStats.filledLen = 0
   wallCoverStats.gaps = 0; wallCoverStats.filled = 0
   wallCoverStats.orderedGapConnectionLen = 0; wallCoverStats.filledGapConnectionLen = 0
@@ -1390,7 +1461,7 @@ export function processFeature(
   // The top-level loadSetpoint (default 0.95) wins over any stepper.loadSetpoint so the
   // ProcessParams knob is authoritative; a per-call stepper override is still respected
   // when the top-level field is left undefined.
-  const stepper = createStepper(tool, { ...params.stepper, loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? 0.95 })
+  const stepper = createStepper(tool, { ...params.stepper, materialSide: materialSideFor(millingDirection), loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? 0.95 })
   // WO-439 fix 2: the walker measures its bite inside targetRegion -- the material a
   // roughing pass may actually take. What that excludes is exactly what the raw disk bite
   // used to count and no pass can ever remove: the finishing-stock rim outside the tool's
@@ -1439,6 +1510,43 @@ export function processFeature(
   const finishApproaches: (FinishApproach | undefined)[] = []
   let finishFitRegion: Loops | undefined
   const wallCleanupDirectionFallback: WallCleanupDirectionFallback = { rejected: false }
+  // WO-2787 fix round 7: THE GAP-FILL A REPOSITION LEAVES BEHIND. With the wall finish on and
+  // cleanup as-we-go, every stretch of wall no wall ride covered is ridden at the end of
+  // roughing by the WO-447 gap-fill, at the wall-follow role, and reached by its own travel.
+  // So a kept-down wall ride that covers wall nothing has covered yet SPARES that later ride,
+  // and a lift that leaves the wall standing PAYS it. Measured on gt_fix8 (floor replay,
+  // finishing feed = cut): a lift priced 3.6 s under the wall arc ran 1194.85 ms slower as a
+  // whole program, because the gap-fill then rode the 19.6 mm of wall the arc would have
+  // covered, on every level. The time model reads the new coverage through the gap-fill's own
+  // bookkeeping (creditWallRide over the stream so far), for the main pass loop only: the
+  // gap-fill and the cleanup contour run after the gaps are fixed. Rides a later pass would
+  // also have covered are not foreseen.
+  const gapFillCanRun = !!params.wallFinish && !!params.wallCleanupAsWeGo && !singleWallPass && wallBandContour.length > 0
+  const coverTables = gapFillCanRun && params.repositionTime ? cutRegion.map(buildLoopArcTable) : []
+  const coverFillable = wallBandContour.map(loop => cutRegion.indexOf(loop)).filter(li => li >= 0)
+  const coverSoFar: [number, number][][] = cutRegion.map(() => [])
+  const coverTol = Math.max(arcTol * 4, toolRadius * 0.05)
+  let coverScanned = 0
+  const newWallCoverMm = (rides: Pt[][], extra: Pt[][]): number => {
+    if (wallCleanupDirectionFallback.rejected) return 0
+    for (; coverScanned < passes.length; coverScanned++) {
+      const pass = passes[coverScanned]
+      if (pass.type === 'wallfollow' && pass.points.length >= 2) creditWallRide(coverSoFar, pass.points, cutRegion, coverTables, coverTol, arcTol)
+    }
+    const before = coverSoFar.map(spans => spans.slice())
+    for (const ride of extra) if (ride.length >= 2) creditWallRide(before, ride, cutRegion, coverTables, coverTol, arcTol)
+    const after = before.map(spans => spans.slice())
+    for (const ride of rides) if (ride.length >= 2) creditWallRide(after, ride, cutRegion, coverTables, coverTol, arcTol)
+    let mm = 0
+    for (const li of coverFillable) {
+      const per = coverTables[li].per
+      mm += Math.min(mergedSpanLength(after[li]), per) - Math.min(mergedSpanLength(before[li]), per)
+    }
+    return mm
+  }
+  const mainRepositionTime: RepositionTimeModel | null = params.repositionTime
+    ? (gapFillCanRun ? { ...params.repositionTime, wallGapMm: newWallCoverMm } : params.repositionTime)
+    : null
   let totalPoints = 0
   let firstEngagePoint = true
   // WO-410 WALKER/STEPPER ENGAGE CONTRACT (the termination the phantom disk used to fake):
@@ -1789,6 +1897,11 @@ export function processFeature(
       step = Math.min(Math.max(step, tolerance * 2), toolRadius / 2)
 
       const r = stepper.findNextPoint(cleared, toolPos, toolDir, step, targetArea)
+      if (r.blockedByMillingSide) {
+        endReason = 'no-cut'
+        endDetail = 'no admissible cutting heading on the requested milling side'
+        break
+      }
       let newToolPos = r.toolPos
       let newToolDir = r.toolDir
       deflectionAngle = r.deflectionAngle
@@ -2088,7 +2201,7 @@ export function processFeature(
       // run is still the first `departHeadCount` points after the start.
       const departHead = Math.min(departHeadCount, Math.max(0, cleaned.length - 2))
       try {
-        cleared = appendCutPass(passes, cleaned, cleared, clearedAtPassStart, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, pendingEntry, pendingBoundarySpan, !!params.integralWallFollow, integralWallFollowLengthFactor, !!params.wallCleanupAsWeGo && !singleWallPass, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, wallCleanupDirectionFallback, !!params.liftFallbackHelix, 'cut', null, departHead, exteriorAirAt, singleWallPass ? wallBandContour : null)
+        cleared = appendCutPass(passes, cleaned, cleared, clearedAtPassStart, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, pendingEntry, pendingBoundarySpan, !!params.integralWallFollow, integralWallFollowLengthFactor, !!params.wallCleanupAsWeGo && !singleWallPass, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, wallCleanupDirectionFallback, !!params.liftFallbackHelix, 'cut', null, departHead, exteriorAirAt, singleWallPass ? wallBandContour : null, false, mainRepositionTime)
       } catch (err) {
         if (!(err instanceof UnsafeReentryError)) throw err
         // WO-1178 (attempt 3): AN UNREACHABLE START IS SKIPPED, NOT FATAL. The gate refused every
@@ -2357,7 +2470,7 @@ export function processFeature(
     const seamedContour = reseamClosedTravel(contour, seamSource)
     const enterContour = (seamed: Pt[]): UnsafeReentryError | null => {
       try {
-        cleared = appendCutPass(passes, seamed, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, cleanupEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'cut', null, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, true)
+        cleared = appendCutPass(passes, seamed, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, cleanupEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'cut', null, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, true, params.repositionTime ?? null)
         return null
       } catch (err) {
         if (!(err instanceof UnsafeReentryError)) throw err
@@ -2501,37 +2614,7 @@ export function processFeature(
         // gap pass sends the cutter backward over the just-cut tail.
         const proofTol = pass.type === 'cut' ? Math.min(wallTol, tolerance * 0.25 + arcTol) : wallTol
         if (singleWallPass && pass.type === 'wallfollow') cleared = expandCleared(cleared, pts, toolRadius, arcTol)
-        let prev = projectOnLoops(pts[0], cutRegion)
-        for (let i = 1; i < pts.length; i++) {
-          const cur = projectOnLoops(pts[i], cutRegion)
-          const li = prev.loop
-          // Same loop, both ends genuinely ON the wall, loop has length: otherwise the step
-          // is not evidence that this stretch was ridden and the span stays UNCOVERED --
-          // the conservative direction (an uncovered span is re-examined, never assumed).
-          if (li >= 0 && cur.loop === li && prev.dist <= proofTol && cur.dist <= proofTol && arcTables[li].per > 0) {
-            const lp = cutRegion[li], table = arcTables[li]
-            const s0 = arcCoordOf(lp, table, prev.seg, prev.foot)
-            const s1 = arcCoordOf(lp, table, cur.seg, cur.foot)
-            const fwd = ((s1 - s0) % table.per + table.per) % table.per
-            const span = Math.min(fwd, table.per - fwd)
-            // DID THIS STEP ACTUALLY RIDE THE WALL BETWEEN THESE TWO POINTS? A genuine wall
-            // ride is a SUB-POLYLINE of the loop, so consecutive ride points sit on one facet
-            // or on adjacent vertices and the arc between them EQUALS the straight step, to
-            // within the projection tolerance. A step whose endpoints are both near the wall
-            // but whose arc is far longer than the step did NOT ride that arc -- it cut the
-            // corner, or crossed the field. Crediting it would mark material covered that the
-            // tool never touched, which is the one error this bookkeeping must never make.
-            // Such a step contributes NOTHING and the arc stays a gap, to be re-examined.
-            const chord = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-            const rodeTheArc = span <= chord + 2 * proofTol + 2 * arcTol
-            // Consecutive ride points are ADJACENT on the loop, so the span they cover is
-            // the SHORT way round; taking the long way would credit a whole perimeter to a
-            // single step. Ties (exactly half a perimeter) take the forward sense.
-            if (rodeTheArc && fwd <= table.per - fwd) addCoveredSpan(covered[li], s0, s1, table.per)
-            else if (rodeTheArc) addCoveredSpan(covered[li], s1, s0, table.per)
-          }
-          prev = cur
-        }
+        creditWallRide(covered, pts, cutRegion, arcTables, proofTol, arcTol)
       }
       // Only loops the credited band was computed from are offered gap-fill: the credit and
       // the ride come from the SAME geometry (wallBandContour), so they can never drift, and
@@ -2805,7 +2888,7 @@ export function processFeature(
         const seamedRide = reseamClosedTravel(ride, toolPosition)
         let afterRide: Loops
         try {
-          afterRide = appendCutPass(passes, seamedRide, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, gapEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'wallfollow', priorWallRide, 0, exteriorAirAt, singleWallPass ? wallBandContour : null)
+          afterRide = appendCutPass(passes, seamedRide, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, gapEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'wallfollow', priorWallRide, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, false, params.repositionTime ?? null)
         } catch (err) {
           if (!(err instanceof UnsafeReentryError)) throw err
           // REFUSED GAPS STAY LOUD (WO-447 method 4): this span cannot be reached safely,
@@ -4167,6 +4250,43 @@ function addCoveredSpan(spans: [number, number][], a: number, b: number, per: nu
   else { spans.push([a, per]); spans.push([0, b]) }
 }
 
+/** WO-447 coverage credit, factored out (WO-2787 round 7): project one wall ride onto
+ *  `cutRegion` and record, per loop, the arc spans it genuinely rode. The gap-fill reads the
+ *  whole stream through it; the reposition time model reads a candidate through it. */
+function creditWallRide(covered: [number, number][][], pts: Pt[], cutRegion: Loops, arcTables: LoopArcTable[], proofTol: number, arcTol: number): void {
+  let prev = projectOnLoops(pts[0], cutRegion)
+  for (let i = 1; i < pts.length; i++) {
+    const cur = projectOnLoops(pts[i], cutRegion)
+    const li = prev.loop
+    // Same loop, both ends genuinely ON the wall, loop has length: otherwise the step
+    // is not evidence that this stretch was ridden and the span stays UNCOVERED --
+    // the conservative direction (an uncovered span is re-examined, never assumed).
+    if (li >= 0 && cur.loop === li && prev.dist <= proofTol && cur.dist <= proofTol && arcTables[li].per > 0) {
+      const lp = cutRegion[li], table = arcTables[li]
+      const s0 = arcCoordOf(lp, table, prev.seg, prev.foot)
+      const s1 = arcCoordOf(lp, table, cur.seg, cur.foot)
+      const fwd = ((s1 - s0) % table.per + table.per) % table.per
+      const span = Math.min(fwd, table.per - fwd)
+      // DID THIS STEP ACTUALLY RIDE THE WALL BETWEEN THESE TWO POINTS? A genuine wall
+      // ride is a SUB-POLYLINE of the loop, so consecutive ride points sit on one facet
+      // or on adjacent vertices and the arc between them EQUALS the straight step, to
+      // within the projection tolerance. A step whose endpoints are both near the wall
+      // but whose arc is far longer than the step did NOT ride that arc -- it cut the
+      // corner, or crossed the field. Crediting it would mark material covered that the
+      // tool never touched, which is the one error this bookkeeping must never make.
+      // Such a step contributes NOTHING and the arc stays a gap, to be re-examined.
+      const chord = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+      const rodeTheArc = span <= chord + 2 * proofTol + 2 * arcTol
+      // Consecutive ride points are ADJACENT on the loop, so the span they cover is
+      // the SHORT way round; taking the long way would credit a whole perimeter to a
+      // single step. Ties (exactly half a perimeter) take the forward sense.
+      if (rodeTheArc && fwd <= table.per - fwd) addCoveredSpan(covered[li], s0, s1, table.per)
+      else if (rodeTheArc) addCoveredSpan(covered[li], s1, s0, table.per)
+    }
+    prev = cur
+  }
+}
+
 /** Merged total of flat spans (mm). */
 function mergedSpanLength(spans: [number, number][]): number {
   const merged = mergeSpans(spans)
@@ -4320,6 +4440,10 @@ export interface LandingGateContext {
   boundarySpan: Pt[] | null
   /** Whether the re-seam rung may move the seam forward on `points`. */
   allowReseam: boolean
+  /** Where the gate's fail-loud lines go; console.warn when absent. WO-2787 round 7: the
+   *  reposition time model plans the lift before it is chosen, and holds these lines until
+   *  that lift is actually emitted. */
+  warn?: (message: string) => void
 }
 
 interface ClearedLandingApproach {
@@ -4434,6 +4558,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
     passes, clearedBeforePass, cutRegion, cutTree, toolRadius, helixRadius, stepOverDistance,
     arcTol, landingUncutCap, millingDirection, points, boundarySpan, allowReseam,
   } = g
+  const warn = g.warn ?? ((message: string): void => console.warn(message))
   const frac = landingDiskUncutFraction(landing, clearedBeforePass, toolRadius, arcTol)
   if (frac <= landingUncutCap) return { landing }
 
@@ -4514,7 +4639,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
     }
     if (exitsRegion) continue
     if (rideOverloadsUncut(lead, clearedBeforePass, toolRadius, leadCap, arcTol)) continue
-    console.warn(
+    warn(
       `[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is `
       + `${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- `
       + `descending at proven-cleared (${candidate.x.toFixed(2)}, ${candidate.y.toFixed(2)}) then using a `
@@ -4555,7 +4680,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       }
       if (exitsRegion) continue
       if (rideOverloadsUncut(lead, clearedBeforePass, toolRadius, leadCap, arcTol)) continue
-      console.warn(
+      warn(
         `[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is `
         + `${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- `
         + `descending at proven-cleared (${clearPoint.x.toFixed(2)}, ${clearPoint.y.toFixed(2)}) then using a `
@@ -4592,7 +4717,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       }
       if (exitsRegion) continue
       if (rideOverloadsUncut(lead, clearedBeforePass, toolRadius, leadCap, arcTol)) continue
-      console.warn(
+      warn(
         `[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is `
         + `${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- `
         + `descending at proven-cleared (${candidate.x.toFixed(2)}, ${candidate.y.toFixed(2)}) then using a `
@@ -4624,7 +4749,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       const available = leadSweep.length > 0 ? union(clearedBeforePass, leadSweep) : clearedBeforePass
       const missing = difference(skipped, available)
       if (maxInscribedRadius(missing, toolRadius, Math.max(arcTol, 0.01)) > arcTol) continue
-      console.warn(
+      warn(
         `[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is `
         + `${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- descending at `
         + `proven-cleared (${candidate.x.toFixed(2)}, ${candidate.y.toFixed(2)}) then using a `
@@ -4685,7 +4810,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       }
       for (const lead of leads) {
         if (!leadIsLegal(lead) || !leadCoversSkippedPrefix(lead, cutStartIndex)) continue
-        console.warn(
+        warn(
           `[lift-landing] fixed seam at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) cannot accept a legal `
           + `clear-shaft tangent lead -- re-seamed ${cutStartIndex} samples forward to `
           + `(${target.x.toFixed(2)}, ${target.y.toFixed(2)}), descending at proven-cleared `
@@ -4716,7 +4841,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
         }
       }
       if (exitsRegion || rideOverloadsUncut(lead, clearedBeforePass, toolRadius, leadCap, arcTol)) continue
-      console.warn(
+      warn(
         `[lift-landing] fixed seam at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) cannot accept a legal `
         + `generic tangent lead -- descending at proven-cleared (${candidate.x.toFixed(2)}, `
         + `${candidate.y.toFixed(2)}) and following the direction-correct recovered boundary span`,
@@ -4805,7 +4930,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       if (exitsRegion) { leadsGouged++; continue }
       const load = contourOverCap(lead, clearedBeforePass, toolRadius, sideLandingCap, arcTol)
       if (load.overLen > 0) { leadsOverloaded++; continue }
-      console.warn(
+      warn(
         `[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is `
         + `${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- landing in the CLEARED AIR `
         + `beside it at (${candidate.x.toFixed(2)}, ${candidate.y.toFixed(2)}) (whole cutter proven clear) and leading `
@@ -4908,7 +5033,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       const load = underRoutedCap(lead)
       if (!load) { routedLeadsRefused++; continue }
       const approach = { ...(departure ? { departure } : {}), travel, lead, family } satisfies ClearedLandingApproach
-      console.warn(
+      warn(
         `[lift-landing] no legal tangent lead reaches (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) after `
         + `${airCandidates} whole-cutter-clear candidate(s) (${leadsGouged} gouged, ${leadsOverloaded} overloaded) -- `
         + `STAYING DOWN via ${family}: ${departureLength.toFixed(2)}mm fed disengage, ${travelLength.toFixed(2)}mm `
@@ -4935,7 +5060,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       : `${airCandidates} whole-cutter-clear point(s) DO stand beside it, but every lead out of them failed: `
         + `${leadsGouged} left cutRegion (would gouge the finish wall) and ${leadsOverloaded} exceeded the `
         + `${sideLandingCap.toFixed(2)}mm engage cap${routedRefusal ? `; ${routedRefusal}` : ''}`
-    console.warn(`[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is ${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% and no verified clear-shaft tangent lead fits -- ${airVerdict} -- descending via HELIX at (${hd.center.x.toFixed(2)}, ${hd.center.y.toFixed(2)}) r=${hd.radius.toFixed(2)}mm`)
+    warn(`[lift-landing] landing disk at (${landing.x.toFixed(2)}, ${landing.y.toFixed(2)}) is ${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% and no verified clear-shaft tangent lead fits -- ${airVerdict} -- descending via HELIX at (${hd.center.x.toFixed(2)}, ${hd.center.y.toFixed(2)}) r=${hd.radius.toFixed(2)}mm`)
     return { landing, helix: hd }
   }
   throw new UnsafeReentryError(
@@ -4945,7 +5070,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
   )
 }
 
-function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, clearedBeforePass: Loops, cutTree: PolyNode[], cutRegion: Loops, toolRadius: number, helixRadius: number, stepOverDistance: number, arcTol: number, optimal: number, entry: AdaptiveEntry | null, boundarySpan: Pt[] | null = null, integralWallFollow = false, integralWallFollowLengthFactor = 2, wallCleanupAsWeGo = false, loopbackFilletPct = 25, millingDirection: AdaptiveMillingDirection = 'climb', landingUncutCap = LANDING_UNCUT_CAP, directionFallback?: WallCleanupDirectionFallback, liftFallbackHelix = false, passType: 'cut' | 'wallfollow' = 'cut', prevMotion: Pt[] | null = null, departHead = 0, exteriorAirDepthAt: ((p: Pt) => number) | null = null, strictWallLoops: Loops | null = null, ringEntry = false): Loops {
+function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, clearedBeforePass: Loops, cutTree: PolyNode[], cutRegion: Loops, toolRadius: number, helixRadius: number, stepOverDistance: number, arcTol: number, optimal: number, entry: AdaptiveEntry | null, boundarySpan: Pt[] | null = null, integralWallFollow = false, integralWallFollowLengthFactor = 2, wallCleanupAsWeGo = false, loopbackFilletPct = 25, millingDirection: AdaptiveMillingDirection = 'climb', landingUncutCap = LANDING_UNCUT_CAP, directionFallback?: WallCleanupDirectionFallback, liftFallbackHelix = false, passType: 'cut' | 'wallfollow' = 'cut', prevMotion: Pt[] | null = null, departHead = 0, exteriorAirDepthAt: ((p: Pt) => number) | null = null, strictWallLoops: Loops | null = null, ringEntry = false, repositionTime: RepositionTimeModel | null = null): Loops {
   if (points.length < 1) return cleared
   // WO-1235: the 3D single-owner contract names the loops whose wall DIRECTION it protects:
   // the islands and bosses of the wall band it finishes. That contract only engages when the
@@ -5085,6 +5210,40 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     ? { type: 'cut' as const, points: prevMotion }
     : lastCut(passes)
   let cutStartIndex = 0
+  // The passes this call ends with: the cut, from `startIndex` (a re-seamed landing skips the
+  // samples before it and starts at the end of its lead, `startPoint`). WO-1178 root cause 1,
+  // DEPARTURE: the walker's curvature-limited first steps off a planted wall start are the
+  // wall ride's tail (held to the cusp cap, see the walker), emitted as a 'lead' -- the fed
+  // engage from the wall into the ring, at cutting feed -- so the ring starts where the fillet
+  // ends. Not a 'wallfollow': that role is a sub-polyline OF the wall (its material-side and
+  // on-wall invariants say so), and this tail leaves the wall by design. Only for a plain cut
+  // whose start the connection above landed on as planned (no re-seam, no entry).
+  // WO-447: the ONLY difference a 'wallfollow' passType makes is the role tag on this push.
+  // Every gate above ran identically. Written as two literal pushes rather than a computed
+  // `type` so the 'cut' object literal is character-for-character what it always was.
+  // WO-2787 round 7: the reposition time model prices a lift with the same passes.
+  const emittedCutPasses = (startIndex: number, startPoint: Pt | undefined): AdaptivePass[] => {
+    const out: AdaptivePass[] = []
+    let emittedPoints = startIndex > 0
+      ? [startPoint ?? points[startIndex], ...points.slice(startIndex)]
+      : points
+    if (passType === 'cut' && departHead > 0 && startIndex === 0 && !entry && points.length > departHead + 1) {
+      out.push({ type: 'lead', points: points.slice(0, departHead + 1) })
+      emittedPoints = points.slice(departHead)
+    }
+    if (passType === 'wallfollow') out.push({ type: 'wallfollow', points: emittedPoints })
+    else out.push({ type: 'cut', points: emittedPoints })
+    return out
+  }
+  // The end of the last lead in `list`: where a re-seamed cut starts.
+  const lastLeadEnd = (list: AdaptivePass[]): Pt | undefined => {
+    for (let index = list.length - 1; index >= 0; index--) {
+      const pass = list[index]
+      if (pass.type !== 'lead' || pass.points.length === 0) continue
+      return pass.points[pass.points.length - 1]
+    }
+    return undefined
+  }
   if (prevCut || staleEntry) {
     // A stale entry's connection starts where the tool physically IS when it executes --
     // at the bottom of the helix just emitted -- not at the end of whatever cut preceded
@@ -5227,6 +5386,146 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     // (when cleanup fired) or between the raw arc endpoints (when it did not).
     const connStart = exitRide ? exitRide.far : lastPoint
     const connEnd = entryRide ? entryRide.far : nextPoint
+
+    // WO-2787 fix round 7: THE LIFT THIS CONNECTION WOULD EMIT, planned once. A lift is not a
+    // plain full-clearance link: the landing gate may move its landing, lead it in, re-seam the
+    // cut forward or keep it down on a cleared approach, and the corridor proof may let it hop
+    // at micro-lift height. The reposition time model prices exactly these passes, and the
+    // assembly below pushes exactly these passes when the lift is chosen -- one plan, so the
+    // priced lift is the emitted lift. Measured before this (astra, gt_fix8, finishing feed
+    // 200): the selector priced a full-clearance lift at 13436 ms and kept a 12463 ms wall arc,
+    // while the emitted lift was a 2 mm micro-lift and the whole lifted program ran 1038.8 ms
+    // faster. Two shapes, as the two lift branches below assemble them:
+    //   - cleanup fired (case iii): the entry ride's landing is gated (shrunk or dropped when
+    //     it would land on uncut stock), the gate reads the stream with the exit ride already
+    //     pushed, and the surviving entry ride follows the lift when the cut is not re-seamed;
+    //   - no cleanup: the plain base link's landing, gated the same way.
+    // The gate's fail-loud lines are held and printed only when this lift is pushed.
+    type LiftAssembly = { passes: AdaptivePass[]; link: Extract<AdaptivePass, { type: 'link' }> | null; routed: AdaptivePass[]; entryRide: WallFollowRide | null; cutStartIndex: number; warnings: string[] }
+    let liftAssemblyMemo: LiftAssembly | null = null
+    const liftAssembly = (): LiftAssembly => {
+      if (liftAssemblyMemo) return liftAssemblyMemo
+      const warnings: string[] = []
+      const warn = (message: string): void => { warnings.push(message) }
+      const cleanupFired = !!(exitRide || entryRide)
+      // LIFT-LANDING GATE (B8 follow-up, 2026-06-12): emit plunges STRAIGHT DOWN at the
+      // lift's landing point. A plain landing (nextPoint, the engagement walker's point) is
+      // safe by construction -- its bite is bounded by the walker's engage band. But the
+      // cusp ENTRY ride relocates the landing to entryRide.far with NO material-state check:
+      // measured on the Bar fixture, a relocated landing sat 3.5mm outside cleared stock =
+      // a 97%-uncut full-width center plunge (R1 material safety / R2 optimal load).
+      // Validate the tool-radius landing disk against clearedBeforePass (the PHYSICAL state
+      // when the plunge executes -- same rationale as the B8 ride gate above). On a trip,
+      // SHRINK the entry ride adaptively (same spirit as wallCleanLoop's reduced-Rf retry
+      // ladder): each candidate is REBUILT by buildWallFollowEntry at half the previous
+      // length -- the same wall-walking construction, just shorter, so it stays a true
+      // sub-polyline of the wall ending exactly at B. If no useful length lands safely,
+      // DROP the relocation entirely so the landing returns to the walker's safe point.
+      let liftEntryRide = entryRide
+      let liftConnEnd = connEnd
+      if (cleanupFired && entryRide) {
+        const frac = landingDiskUncutFraction(entryRide.far, clearedBeforePass, toolRadius, arcTol)
+        if (frac > landingUncutCap) {
+          const origLen = polylineLength(entryRide.points)
+          let resolved: WallFollowRide | null = null
+          let L = origLen
+          for (let k = 0; k < 3; k++) {
+            L = L / 2
+            if (L < MIN_LANDING_RIDE_LEN) break
+            const shrunk = buildWallFollowEntry(points, cutRegion, toolRadius, L, loopbackFilletPct)
+            if (!shrunk) break
+            if (landingDiskUncutFraction(shrunk.far, clearedBeforePass, toolRadius, arcTol) <= landingUncutCap) {
+              resolved = shrunk
+              break
+            }
+          }
+          if (resolved) {
+            // ADR-0003 fail-loud: name the rejected landing, its uncut fraction, and the fix.
+            warn(`[lift-landing] entry-ride landing REJECTED: disk at (${entryRide.far.x.toFixed(2)}, ${entryRide.far.y.toFixed(2)}) is ${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- entry ride shrunk ${origLen.toFixed(2)}mm -> ${polylineLength(resolved.points).toFixed(2)}mm, landing now (${resolved.far.x.toFixed(2)}, ${resolved.far.y.toFixed(2)})`)
+            liftEntryRide = resolved
+            liftConnEnd = resolved.far
+          } else {
+            warn(`[lift-landing] entry-ride landing REJECTED: disk at (${entryRide.far.x.toFixed(2)}, ${entryRide.far.y.toFixed(2)}) is ${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% and no shrunk ride lands safely -- dropping the entry-ride relocation, landing at the walker point (${nextPoint.x.toFixed(2)}, ${nextPoint.y.toFixed(2)})`)
+            liftEntryRide = null
+            liftConnEnd = nextPoint
+          }
+        }
+      }
+      // The exit ride is pushed before the lift, so the gate's prior-motion evidence holds it.
+      const gatePasses = exitRide ? [...passes, { type: 'wallfollow' as const, points: exitRide.points }] : passes
+      const source = cleanupFired ? connStart : lastPoint
+      const plan = cleanupFired
+        ? planGatedLanding({ ...landingGate, passes: gatePasses, warn }, connStart, liftConnEnd, liftEntryRide?.points[1] ?? points[1] ?? liftConnEnd)
+        : planGatedLanding({ ...landingGate, warn }, lastPoint, nextPoint, points[1] ?? nextPoint)
+      const out: AdaptivePass[] = []
+      const routed: AdaptivePass[] = []
+      let link: Extract<AdaptivePass, { type: 'link' }> | null = null
+      if (plan.keepDownApproach) {
+        const approach = plan.keepDownApproach
+        if (approach.departure) out.push({ type: 'lead', points: approach.departure })
+        const travelPass: AdaptivePass = { type: 'loopback', points: approach.travel }
+        routed.push(travelPass)
+        out.push(travelPass)
+        out.push({ type: 'lead', points: approach.lead })
+      } else {
+        link = { type: 'link', points: [source, plan.landing], jumpType: 2 }
+        if (!cleanupFired && boundarySpan) link.boundarySpan = boundarySpan // Phase A: inert, does not affect emit
+        if (plan.helix) link.helixDescent = plan.helix
+        if (plan.clearAirLanding) link.clearAirLanding = true
+        attachFallbackHelix(link)
+        attachMicroLift(link)
+        out.push(link)
+        if (plan.lead) out.push({ type: 'lead', points: plan.lead })
+      }
+      const cutStart = plan.cutStartIndex ?? 0
+      const rideAfter = cleanupFired && cutStart === 0 ? liftEntryRide : null
+      if (rideAfter) out.push({ type: 'wallfollow', points: rideAfter.points })
+      liftAssemblyMemo = { passes: out, link, routed, entryRide: rideAfter, cutStartIndex: cutStart, warnings }
+      return liftAssemblyMemo
+    }
+    // Push the planned lift (after the exit ride, when there is one): its fail-loud lines, its
+    // reason, the passes, and the cut's re-seam.
+    const pushLiftAssembly = (reason: string): void => {
+      const lift = liftAssembly()
+      for (const message of lift.warnings) console.warn(message)
+      if (lift.link) setLiftReason(lift.link, reason)
+      for (const pass of lift.passes) {
+        if (pass.type === 'wallfollow' && lift.entryRide && pass.points === lift.entryRide.points) {
+          assertInsideCutRegion(pass.points, cutTree, wallTol, 'cusp entry')
+        }
+        if (lift.routed.includes(pass)) ROUTED_LOOPBACKS.add(pass)
+        passes.push(pass)
+      }
+      cutStartIndex = lift.cutStartIndex
+    }
+    // WO-2787 round 7: machine time of that lift against staying down, over every level: the
+    // planned lift and the cut it lands into, less what a kept-down ride is followed by (the
+    // entry ride, then the whole cut). The exit ride before both is common and left out, so a
+    // ride is still priced as its own passes alone (estimateRepositionMs).
+    const liftPriceMs = (model: RepositionTimeModel): number => {
+      const lift = liftAssembly()
+      const landed = [...lift.passes, ...emittedCutPasses(lift.cutStartIndex,
+        lift.cutStartIndex > 0 ? (lastLeadEnd(lift.passes) ?? lastLeadEnd(passes)) : undefined)]
+      const stayed: AdaptivePass[] = [...(entryRide ? [{ type: 'wallfollow' as const, points: entryRide.points }] : []), ...emittedCutPasses(0, undefined)]
+      return estimatePassesMs(landed, connStart, model) - estimatePassesMs(stayed, connEnd, model) + liftCoverMs(model)
+    }
+    // WO-2787 round 7: the gap-fill time of wall that is newly covered when `rides` follow the
+    // exit ride, against the entry ride alone (what every kept-down ride ends with). A ride is
+    // credited what it spares; the lift is charged the entry ride it shrinks or drops.
+    const coverMm = (model: RepositionTimeModel, rides: Pt[][]): number =>
+      model.wallGapMm ? model.wallGapMm(rides, exitRide ? [exitRide.points] : []) : 0
+    const entryCoverMm = (model: RepositionTimeModel): number => entryRide ? coverMm(model, [entryRide.points]) : 0
+    const liftCoverMs = (model: RepositionTimeModel): number => {
+      if (!model.wallGapMm) return 0
+      const kept = liftAssembly().entryRide
+      return estimateWallGapMs(entryCoverMm(model) - (kept ? coverMm(model, [kept.points]) : 0), model)
+    }
+    const rideCoverMs = (model: RepositionTimeModel, ride: { points: Pt[]; kind: 'wallfollow' | 'loopback'; feedFrom?: number }): number => {
+      if (!model.wallGapMm) return 0
+      const walls = ridePasses(ride).filter(pass => pass.type === 'wallfollow').map(pass => pass.points)
+      if (walls.length === 0) return 0
+      return estimateWallGapMs(coverMm(model, [...walls, ...(entryRide ? [entryRide.points] : [])]) - entryCoverMm(model), model)
+    }
 
     // ── Phase 2: RETRACT-ELIMINATION (the only keep-down-vs-lift decision) ───────────────
     // A kept-down connection cuts at depth, so it must be safe on two counts:
@@ -5415,11 +5714,64 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       // is already folded into `cleared`, but the ride physically executes BEFORE that pass cuts
       // -- a ride judged against the future state can slot through the very lane the next cut
       // would have cleared.
+      // WO-2787 fix round 4: THE CHOICE IS MADE BY MACHINE TIME when the caller supplies the
+      // time model (engine/index.ts always does). Operator 2026-10-14: "What determines it from a
+      // machinist standpoint is cycletime ... If we can get there faster ... by staying down ...
+      // do that ... When the best option is a lift retract, straight reposition, plunge,
+      // lead-in, and cleanup do that." Every rung below still proves its own candidate exactly
+      // as before; what changes is that a proven ride is no longer taken just because it was
+      // offered first. Each candidate is timed as emit.ts would write it, at every depth level,
+      // through the app's own job estimate (repositionTime.ts), and so is the lift. The fastest
+      // wins; a ride that ties the lift stays down, and between rides the earlier rung keeps a
+      // tie. A candidate that cannot beat the current choice is not proven at all -- the
+      // proofs are the expensive part -- and is recorded with its time as slower. Without the
+      // model the first proven rung wins, byte-identical to the ladder before it.
+      const timeModel = repositionTime
+      const liftMs = timeModel ? liftPriceMs(timeModel) : Infinity
+      // The diagnostic hook outranks the whole-program check's own trials, so a test that
+      // forces a rung gets the program the product would emit around that rung.
+      const forced = timeModel ? (repositionChoiceForce?.(connStart, connEnd) ?? timeModel.force?.(connStart, connEnd) ?? null) : null
+      let rideMs = Infinity
+      const choice: { rung: string; commit: (() => void) | null } = { rung: 'lift', commit: null }
+      const weighed: RepositionChoiceTrace['candidates'] = []
+      type Ride = { points: Pt[]; kind: 'wallfollow' | 'loopback'; feedFrom?: number }
+      const rideTime = (ride: Ride): number => timeModel ? estimateRepositionMs(ride, timeModel) - rideCoverMs(timeModel, ride) : 0
+      // Still looking: the first-rung ladder stops at its first ride; the timed one weighs on.
+      const open = (): boolean => timeModel !== null || !connectionRide
+      const note = (rung: string, ride: Ride, ms: number, outcome: 'feasible' | 'refused' | 'slower', reason?: string): void => {
+        if (timeModel) {
+          const coverMs = ride.points.length >= 2 ? rideCoverMs(timeModel, ride) : 0
+          weighed.push({ rung, kind: ride.kind, points: ride.points, feedFrom: ride.feedFrom, ms, outcome, ...(reason ? { reason } : {}), ...(coverMs ? { coverMs } : {}) })
+        }
+      }
+      const at = (p: Pt): string => `(${p.x.toFixed(2)}, ${p.y.toFixed(2)})`
+      const canWin = (rung: string, ride: Ride, ms: number): boolean => {
+        if (!timeModel) return !connectionRide
+        if (forced !== null) return rung === forced && !connectionRide
+        if (ms <= liftMs && ms < rideMs) return true
+        note(rung, ride, ms, 'slower')
+        liftRecoveryParts.push(`${rung}-slower(${(ms / 1000).toFixed(2)}s)`)
+        return false
+      }
+      // Returns the ride so each call site assigns connectionRide where the compiler sees it.
+      const take = (rung: string, ride: Ride, ms: number, commit: () => void): Ride => {
+        note(rung, ride, ms, 'feasible')
+        if (!timeModel) { commit(); return ride }
+        rideMs = ms
+        choice.rung = rung
+        choice.commit = commit
+        return ride
+      }
+
       const directOverload = primary ? rideOverloadsUncut(primary, clearedBeforePass, toolRadius, cap, arcTol) : null
       if (primary && !directOverload) {
-        connectionRide = { points: primary, kind: 'wallfollow' }
+        const ride: Ride = { points: primary, kind: 'wallfollow' }
+        const ms = rideTime(ride)
+        if (canWin('wall-arc', ride, ms)) connectionRide = take('wall-arc', ride, ms, () => {})
       } else if (primary && directOverload) {
         liftRecoveryParts.push('arc-overload')
+        note('wall-arc', { points: primary, kind: 'wallfollow' }, rideTime({ points: primary, kind: 'wallfollow' }), 'refused',
+          `${directOverload.width.toFixed(2)}mm sustained > ${cap.toFixed(2)}mm cap near ${at(directOverload.at)}`)
       }
 
       // Rung (b)(1) ROUTE-AROUND -- the OTHER boundary arc (B8 stage 2). Only when the direct
@@ -5428,14 +5780,19 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       // rides (island wraps are legitimately longer than the chord; length is a deferred quality
       // tradeoff, not a safety gate -- plan section 5 risk 2), so it is NOT held to the direct
       // ride length-factor budget. First safe alternate wins (shorter-first).
-      if (!connectionRide && primary && directOverload) {
+      if (open() && primary && directOverload) {
         for (let ai = 1; ai < arcs.length; ai++) {
-          if (rideOverloadsUncut(arcs[ai], clearedBeforePass, toolRadius, cap, arcTol)) continue
-          connectionRide = { points: arcs[ai], kind: 'wallfollow' }
-          b8GateStats.routedAround++
-          // ADR-0003 fail-loud: name the reroute (the direct ride was unsafe, but we did NOT
-          // lift -- an alternate at-depth route over cleared stock was found).
-          console.warn(`[integral-wallfollow] direct ride REJECTED (B8 engagement gate): sustained effective cut width ${directOverload.width.toFixed(2)}mm > cap ${cap.toFixed(2)}mm near (${directOverload.at.x.toFixed(2)}, ${directOverload.at.y.toFixed(2)}) -- ROUTED AROUND on the alternate boundary arc (${polylineLength(arcs[ai]).toFixed(1)}mm) instead of lifting`)
+          const ride: Ride = { points: arcs[ai], kind: 'wallfollow' }
+          const ms = rideTime(ride)
+          if (!canWin('wall-arc-around', ride, ms)) continue
+          const aroundOverload = rideOverloadsUncut(arcs[ai], clearedBeforePass, toolRadius, cap, arcTol)
+          if (aroundOverload) { note('wall-arc-around', ride, ms, 'refused', `${aroundOverload.width.toFixed(2)}mm sustained > ${cap.toFixed(2)}mm cap near ${at(aroundOverload.at)}`); continue }
+          connectionRide = take('wall-arc-around', ride, ms, () => {
+            b8GateStats.routedAround++
+            // ADR-0003 fail-loud: name the reroute (the direct ride was unsafe, but we did NOT
+            // lift -- an alternate at-depth route over cleared stock was found).
+            console.warn(`[integral-wallfollow] direct ride REJECTED (B8 engagement gate): sustained effective cut width ${directOverload.width.toFixed(2)}mm > cap ${cap.toFixed(2)}mm near (${directOverload.at.x.toFixed(2)}, ${directOverload.at.y.toFixed(2)}) -- ROUTED AROUND on the alternate boundary arc (${polylineLength(arcs[ai]).toFixed(1)}mm) instead of lifting`)
+          })
           break
         }
       }
@@ -5455,17 +5812,22 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       //     tool width, 1.5x stepover, vs clearedBeforePass) the boundary arcs are held to.
       // No loop bounds the chord, but length is a deferred quality tradeoff, not a safety gate
       // (plan section 5 risk 2), exactly as for the alternate arc.
-      if (!connectionRide && !gougesFinish) {
-        const chordRide: Pt[] = [connStart, connEnd]
-        const chordOverload = rideOverloadsUncut(chordRide, clearedBeforePass, toolRadius, cap, arcTol)
-        if (!chordOverload) {
-          connectionRide = { points: chordRide, kind: 'loopback' }
-          b8GateStats.routedAroundChord++
-          // ADR-0003 fail-loud: name the reroute (no safe boundary arc, but a straight at-depth
-          // route over cleared stock was found instead of conceding the retract).
-          console.warn(`[integral-wallfollow] no safe boundary arc (${primary ? 'arcs slotted' : 'endpoints share no wall'}) -- ROUTED AROUND on the through-cleared straight chord (${chord.toFixed(1)}mm) instead of lifting`)
-        } else {
-          liftRecoveryParts.push('chord-overload')
+      if (open() && !gougesFinish) {
+        const chordRide: Ride = { points: [connStart, connEnd], kind: 'loopback' }
+        const ms = rideTime(chordRide)
+        if (canWin('chord', chordRide, ms)) {
+          const chordOverload = rideOverloadsUncut(chordRide.points, clearedBeforePass, toolRadius, cap, arcTol)
+          if (!chordOverload) {
+            connectionRide = take('chord', chordRide, ms, () => {
+              b8GateStats.routedAroundChord++
+              // ADR-0003 fail-loud: name the reroute (no safe boundary arc, but a straight at-depth
+              // route over cleared stock was found instead of conceding the retract).
+              console.warn(`[integral-wallfollow] no safe boundary arc (${primary ? 'arcs slotted' : 'endpoints share no wall'}) -- ROUTED AROUND on the through-cleared straight chord (${chord.toFixed(1)}mm) instead of lifting`)
+            })
+          } else {
+            liftRecoveryParts.push('chord-overload')
+            note('chord', chordRide, ms, 'refused', `${chordOverload.width.toFixed(2)}mm sustained > ${cap.toFixed(2)}mm cap near ${at(chordOverload.at)}`)
+          }
         }
       }
 
@@ -5482,15 +5844,25 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       // cutting feed, same rideOverloadsUncut proof at the same 1.5x-stepover cap against the
       // physical clearedBeforePass. Only the length bound moves, and only in the direction
       // GOOD-SPEC and the ancestor both name. Shorter arc first.
-      if (!connectionRide && arcs.length > 0) {
-        const travelBudget = KEEP_TOOL_DOWN_DIST_RATIO * chord
+      // WO-2787 fix round 4: with the time model the budget IS the time -- an arc of any length
+      // is weighed against the lift, and the fixed 3x-direct ratio no longer applies.
+      if (open() && arcs.length > 0) {
+        const travelBudget = timeModel ? Infinity : KEEP_TOOL_DOWN_DIST_RATIO * chord
         let overBudget = 0
         for (const arc of arcs) {
+          if (connectionRide && connectionRide.points === arc) continue
           if (polylineLength(arc) > travelBudget) { overBudget++; continue }
-          if (rideOverloadsUncut(arc, clearedBeforePass, toolRadius, cap, arcTol)) continue
-          connectionRide = { points: arc, kind: 'wallfollow' }
-          b8GateStats.routedDetour++
-          console.warn(`[keepdown-route] wall ride rejected on the wall-follow length factor -- ACCEPTED under the tier-1 detour budget (${polylineLength(arc).toFixed(1)}mm <= ${travelBudget.toFixed(1)}mm = ${KEEP_TOOL_DOWN_DIST_RATIO}x direct ${chord.toFixed(1)}mm) instead of lifting (WO-438)`)
+          const ride: Ride = { points: arc, kind: 'wallfollow' }
+          const ms = rideTime(ride)
+          if (!canWin('wall-arc-detour', ride, ms)) continue
+          const detourOverload = rideOverloadsUncut(arc, clearedBeforePass, toolRadius, cap, arcTol)
+          if (detourOverload) { note('wall-arc-detour', ride, ms, 'refused', `${detourOverload.width.toFixed(2)}mm sustained > ${cap.toFixed(2)}mm cap near ${at(detourOverload.at)}`); continue }
+          connectionRide = take('wall-arc-detour', ride, ms, () => {
+            b8GateStats.routedDetour++
+            console.warn(timeModel
+              ? `[keepdown-route] wall ride rejected on the wall-follow length factor -- ACCEPTED as the fastest reposition (${polylineLength(arc).toFixed(1)}mm, ${(ms / 1000).toFixed(2)}s against a ${(liftMs / 1000).toFixed(2)}s lift) instead of lifting (WO-438, WO-2787)`
+              : `[keepdown-route] wall ride rejected on the wall-follow length factor -- ACCEPTED under the tier-1 detour budget (${polylineLength(arc).toFixed(1)}mm <= ${travelBudget.toFixed(1)}mm = ${KEEP_TOOL_DOWN_DIST_RATIO}x direct ${chord.toFixed(1)}mm) instead of lifting (WO-438)`)
+          })
           break
         }
         if (!connectionRide && overBudget === arcs.length) liftRecoveryParts.push('backtrack-detour>budget')
@@ -5509,8 +5881,15 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       // is a different path and proves itself. R3/T5 note: these are opposite-sense TRAVEL
       // moves at traverse speed over ground the proof shows is already clear -- a loopback,
       // not a cut, and never an uncut allowance.
-      if (!connectionRide) {
-        const budget = KEEP_TOOL_DOWN_DIST_RATIO * chord
+      // WO-2787 fix round 4: with the time model the length budget is the distance a
+      // fast-traverse loopback covers, over every level, in the time of the current best
+      // choice (the lift, or a faster ride already proven) -- not 3x the direct move. A
+      // routed ride is never shorter than the direct chord, so a budget at or under it is
+      // not searched.
+      if (open()) {
+        const budget = timeModel
+          ? Math.min(liftMs, rideMs) / 60000 / Math.max(repositionLevelCount(timeModel), 1) * timeModel.ctx.feeds.fastTraverseRate
+          : KEEP_TOOL_DOWN_DIST_RATIO * chord
         // T5, THE TRAVERSE BOUND. A routed ride is emitted as a LOOPBACK: rapid travel at
         // depth, not a cutting move, so it may not shave -- the 1.5x-stepover cap the
         // CUTTING-role wall rides above are held to would let a rapid remove a third of a
@@ -5530,17 +5909,29 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         // anywhere is not sitting on its own terminus; it is crossing stock, and it lifts.
         // Measured on the corpus this is 4-7x tighter than the cutting-role cap.
         const traverseCap = traverseKeepDownCap(stepOverDistance, optimal, arcTol)
-        const routed = planKeepDownRoute(
-          connStart, connEnd, prevCut!.points, collectPriorMotion(), buildTrackGraph(), clearedBeforePass, cutTree,
-          toolRadius, stepOverDistance, arcTol, traverseCap, budget, exteriorAirDepthAt,
-        )
+        const routed = (!timeModel || budget > chord)
+          ? planKeepDownRoute(
+            connStart, connEnd, prevCut!.points, collectPriorMotion(), buildTrackGraph(), clearedBeforePass, cutTree,
+            toolRadius, stepOverDistance, arcTol, traverseCap, budget, exteriorAirDepthAt,
+          )
+          : null
         if (routed) {
-          connectionRide = { points: routed.points, kind: 'loopback' }
-          b8GateStats.routedDetour++
-          // ADR-0003 fail-loud: name the reroute and which family proved it.
-          console.warn(`[keepdown-route] no safe arc or straight chord -- ROUTED AROUND at depth via ${routed.family} (${routed.points.length} pts, ${routed.length.toFixed(1)}mm <= budget ${budget.toFixed(1)}mm = ${KEEP_TOOL_DOWN_DIST_RATIO}x direct ${chord.toFixed(1)}mm) instead of lifting (WO-438)`)
+          const ride: Ride = { points: routed.points, kind: 'loopback' }
+          const ms = rideTime(ride)
+          if (canWin(`routed-${routed.family}`, ride, ms)) {
+            connectionRide = take(`routed-${routed.family}`, ride, ms, () => {
+              b8GateStats.routedDetour++
+              // ADR-0003 fail-loud: name the reroute and which family proved it.
+              console.warn(timeModel
+                ? `[keepdown-route] no faster arc or straight chord -- ROUTED AROUND at depth via ${routed.family} (${routed.points.length} pts, ${routed.length.toFixed(1)}mm, ${(ms / 1000).toFixed(2)}s against a ${(liftMs / 1000).toFixed(2)}s lift) instead of lifting (WO-438, WO-2787)`
+                : `[keepdown-route] no safe arc or straight chord -- ROUTED AROUND at depth via ${routed.family} (${routed.points.length} pts, ${routed.length.toFixed(1)}mm <= budget ${budget.toFixed(1)}mm = ${KEEP_TOOL_DOWN_DIST_RATIO}x direct ${chord.toFixed(1)}mm) instead of lifting (WO-438)`)
+            })
+          }
         } else {
           liftRecoveryParts.push('route-detour>budget')
+          note('routed', { points: [], kind: 'loopback' }, 0, 'refused', timeModel && budget <= chord
+            ? `not searched: no route is shorter than the ${chord.toFixed(1)}mm direct move, and ${budget.toFixed(1)}mm is all the time allows`
+            : `no backtrack, detour or cleared-track route within ${budget.toFixed(1)}mm stays under the ${traverseCap.toFixed(3)}mm traverse cap`)
         }
       }
 
@@ -5553,7 +5944,12 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       // stops clearing, then FEED the engaged tail under the SAME caps the tier-0 cut-through
       // meets. Offered LAST so no cheaper whole-corridor rung is skipped, and refused loudly
       // with the measured reason when it cannot prove -- in which case the retract stays.
-      if (!connectionRide) {
+      // WO-2787 fix round 4: a stop-short ride runs the direct chord, so with the time model it
+      // is only planned while the chord at the faster of the two rates could still win.
+      const stopShortFloorMs = timeModel
+        ? Math.max(repositionLevelCount(timeModel), 1) * chord / Math.max(timeModel.ctx.feeds.fastTraverseRate, timeModel.ctx.feeds.feedRate) * 60000
+        : 0
+      if (open() && (!timeModel || (stopShortFloorMs <= liftMs && stopShortFloorMs < rideMs))) {
         // The SAME two bars this site already holds its other rungs to: rung (b)(4)'s T5
         // traverse cap for a move at traverse speed, and the tier-0 cut-through cap for a
         // move at feed. Neither is loosened for the split.
@@ -5583,14 +5979,76 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
           // cut-through, which ran above at the SAME length bar, the SAME load cap and the
           // SAME gouge veto -- so at this site it can only appear when tier 0 was skipped,
           // never as a second authority over a decision tier 0 already made.
-          connectionRide = stopShort.travel.length >= 2
+          const ride: Ride = stopShort.travel.length >= 2
             ? { points: [stopShort.travel[0], stopShort.travel[1], stopShort.feed[1]], kind: 'loopback' as const, feedFrom: 1 }
             : { points: [stopShort.feed[0], stopShort.feed[1]], kind: 'loopback' as const, feedFrom: 0 }
-          b8GateStats.stoppedShort++
-          // ADR-0003 fail-loud: name the rung that recovered the connection and its proof.
-          console.warn(`[keepdown-stopshort] no safe arc, through-cleared chord or routed detour -- STAYED DOWN instead of lifting (WO-466): ${stopShort.reason}`)
+          const ms = rideTime(ride)
+          if (canWin('stop-short', ride, ms)) {
+            connectionRide = take('stop-short', ride, ms, () => {
+              b8GateStats.stoppedShort++
+              // ADR-0003 fail-loud: name the rung that recovered the connection and its proof.
+              console.warn(`[keepdown-stopshort] no safe arc, through-cleared chord or routed detour -- STAYED DOWN instead of lifting (WO-466): ${stopShort.reason}`)
+            })
+          }
         } else {
           liftRecoveryParts.push(`stopshort-refused(${stopShort.refused})`)
+          note('stop-short', { points: [], kind: 'loopback' }, 0, 'refused', stopShort.refused)
+        }
+      }
+
+      // Rung (b)(6) WALL CHAIN IN THE MILLING DIRECTION (WO-2787; Operator 2026-10-14 on
+      // gt_two_island: "I need to understand the logic of why you wouldn't continue around
+      // (wall follow the correct direction) ... Especially on an island perimeter."). Every
+      // wall rung above pairs two points on ONE wall loop, so a connection from one island's
+      // wall to another's ('no-wall') was only ever offered a straight chord, a stop-short and
+      // detours inside the 3x-direct budget. Measured there: the reposition from island B's
+      // wall to island A's lifted while the ride clockwise round B, across the 4 mm gap and
+      // clockwise round A peaked at 0.44 mm against the 2.25 mm cap
+      // (src/tests/evidence/WO-2787/lift-explained.png). Offer that ride: the start's wall in
+      // the milling direction to where it comes closest to the end's wall, across, and the
+      // end's wall in the milling direction into the end. Each wall leg is bounded only by its
+      // own loop, as rung (b)(1)'s alternate arc is (an island wrap is legitimately longer than
+      // the chord), and the ride meets rung (b)(1)'s proofs: the tool centre stays inside
+      // cutRegion, and rideOverloadsUncut at the 1.5x-stepover cap against clearedBeforePass.
+      // Offered last, so without the time model it only ever replaces a retract; with it, it
+      // is weighed against the lift like every other ride (fix round 4: 240 mm at feed is
+      // slower than a 32 mm lift at most feeds, so there the lift wins).
+      if (open() && arcs.length === 0) {
+        const chain = wallChainInDirection(connStart, connEnd, wallLoops, millingDirection, wallTol)
+        const ride: Ride | null = chain ? { points: chain, kind: 'wallfollow' } : null
+        const ms = ride ? rideTime(ride) : Infinity
+        if (chain && ride && canWin('wall-chain', ride, ms)) {
+          if (routeEscapingSegment(chain, cutTree, toolRadius, wallTol) < 0
+            && !(exteriorAirDepthAt && routeAirExcursion(chain, exteriorAirDepthAt, toolRadius, wallTol))) {
+            const chainOverload = rideOverloadsUncut(chain, clearedBeforePass, toolRadius, cap, arcTol)
+            if (!chainOverload) {
+              connectionRide = take('wall-chain', ride, ms, () => {
+                b8GateStats.routedWallChain++
+                // ADR-0003 fail-loud: name the reroute.
+                console.warn(`[keepdown-wallchain] endpoints on two different walls -- STAYED DOWN riding both walls ${millingDirection} (${polylineLength(chain).toFixed(1)}mm for a ${chord.toFixed(1)}mm direct move) instead of lifting (WO-2787)`)
+              })
+            } else {
+              liftRecoveryParts.push(`wallchain-overload@(${chainOverload.at.x.toFixed(2)}, ${chainOverload.at.y.toFixed(2)})`)
+              note('wall-chain', ride, ms, 'refused', `${chainOverload.width.toFixed(2)}mm sustained > ${cap.toFixed(2)}mm cap near ${at(chainOverload.at)}`)
+            }
+          } else {
+            liftRecoveryParts.push('wallchain-escapes')
+            note('wall-chain', ride, ms, 'refused', 'leaves the machinable region or the stock')
+          }
+        }
+      }
+
+      // WO-2787 fix round 4: the timed ladder commits its fastest ride only now, so the
+      // counters and fail-loud lines name the ride actually emitted.
+      if (timeModel) {
+        if (connectionRide && choice.commit) choice.commit()
+        else if (weighed.some(c => c.outcome === 'slower')) liftRecoveryParts.push(`lift-fastest(${(liftMs / 1000).toFixed(2)}s)`)
+        if (repositionChoiceTrace || timeModel.onChoice) {
+          const liftCover = liftCoverMs(timeModel)
+          const decided: RepositionChoiceTrace = { passIndex: passes.length, connStart, connEnd, liftMs, candidates: weighed, chosen: connectionRide ? choice.rung : 'lift', clearedBeforePass, cutRegion, ...(liftCover ? { liftCoverMs: liftCover } : {}), ...(forced !== null ? { forced: true as const } : {}) }
+          // With a whole-program check listening, it reports the decisions of the program it keeps.
+          if (timeModel.onChoice) timeModel.onChoice(decided)
+          else repositionChoiceTrace?.(decided)
         }
       }
 
@@ -5623,6 +6081,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     }
     if (jumpType === 2 && !connectionRide) {
       liftReason = liftRecoveryParts.length > 0 ? `${liftBaseReason}+${liftRecoveryParts.join('+')}` : liftBaseReason
+      if (!repositionTime?.trial) keepDownLiftTrace?.({ passIndex: passes.length, connStart, connEnd, liftReason: liftReason!, clearedBeforePass, cutRegion })
     }
 
     // WO-466: a STOP-SHORT ride is TWO passes, not one -- the at-depth travel (a loopback, at
@@ -5642,20 +6101,13 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     // removed it, so it can only refuse where it would have allowed, never the reverse. The
     // residual is honest-pessimistic by at most one <= 2 x stepover capsule, and the finish
     // site keeps its returned `cleared` untouched for exactly the same reason (WO-449).
+    // WO-2787 round 6: the split is ridePasses (repositionTime.ts), the same passes the time
+    // model prices the ride as.
     const pushConnectionRide = (ride: { points: Pt[]; kind: 'wallfollow' | 'loopback'; feedFrom?: number }): void => {
-      if (ride.feedFrom === undefined) {
-        const ridePass: AdaptivePass = { type: ride.kind, points: ride.points }
-        if (ride.kind === 'loopback') ROUTED_LOOPBACKS.add(ridePass)
+      for (const ridePass of ridePasses(ride)) {
+        if (ridePass.type === 'loopback') ROUTED_LOOPBACKS.add(ridePass)
         passes.push(ridePass)
-        return
       }
-      const travel = ride.points.slice(0, ride.feedFrom + 1)
-      if (travel.length >= 2) {
-        const travelPass: AdaptivePass = { type: 'loopback', points: travel }
-        ROUTED_LOOPBACKS.add(travelPass)
-        passes.push(travelPass)
-      }
-      passes.push({ type: 'lead', points: ride.points.slice(ride.feedFrom) })
     }
     const pushKeepDownLandingApproach = (approach: ClearedLandingApproach): void => {
       if (approach.departure) passes.push({ type: 'lead', points: approach.departure })
@@ -5884,70 +6336,13 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         // (iii) retract-elimination LIFTED (genuine cross-loop / over-a-hole / long gap). Keep
         //       the LOCAL cusp rides at each arc end; the lift sits between their far ends.
         //
-        // LIFT-LANDING GATE (B8 follow-up, 2026-06-12): emit plunges STRAIGHT DOWN at the
-        // lift's landing point. A plain landing (nextPoint, the engagement walker's point) is
-        // safe by construction -- its bite is bounded by the walker's engage band. But the
-        // cusp ENTRY ride relocates the landing to entryRide.far with NO material-state check:
-        // measured on the Bar fixture, a relocated landing sat 3.5mm outside cleared stock =
-        // a 97%-uncut full-width center plunge (R1 material safety / R2 optimal load).
-        // Validate the tool-radius landing disk against clearedBeforePass (the PHYSICAL state
-        // when the plunge executes -- same rationale as the B8 ride gate above). On a trip,
-        // SHRINK the entry ride adaptively (same spirit as wallCleanLoop's reduced-Rf retry
-        // ladder): each candidate is REBUILT by buildWallFollowEntry at half the previous
-        // length -- the same wall-walking construction, just shorter, so it stays a true
-        // sub-polyline of the wall ending exactly at B. If no useful length lands safely,
-        // DROP the relocation entirely so the landing returns to the walker's safe point.
-        let liftEntryRide = entryRide
-        let liftConnEnd = connEnd
-        if (entryRide) {
-          const frac = landingDiskUncutFraction(entryRide.far, clearedBeforePass, toolRadius, arcTol)
-          if (frac > landingUncutCap) {
-            const origLen = polylineLength(entryRide.points)
-            let resolved: WallFollowRide | null = null
-            let L = origLen
-            for (let k = 0; k < 3; k++) {
-              L = L / 2
-              if (L < MIN_LANDING_RIDE_LEN) break
-              const shrunk = buildWallFollowEntry(points, cutRegion, toolRadius, L, loopbackFilletPct)
-              if (!shrunk) break
-              if (landingDiskUncutFraction(shrunk.far, clearedBeforePass, toolRadius, arcTol) <= landingUncutCap) {
-                resolved = shrunk
-                break
-              }
-            }
-            if (resolved) {
-              // ADR-0003 fail-loud: name the rejected landing, its uncut fraction, and the fix.
-              console.warn(`[lift-landing] entry-ride landing REJECTED: disk at (${entryRide.far.x.toFixed(2)}, ${entryRide.far.y.toFixed(2)}) is ${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% -- entry ride shrunk ${origLen.toFixed(2)}mm -> ${polylineLength(resolved.points).toFixed(2)}mm, landing now (${resolved.far.x.toFixed(2)}, ${resolved.far.y.toFixed(2)})`)
-              liftEntryRide = resolved
-              liftConnEnd = resolved.far
-            } else {
-              console.warn(`[lift-landing] entry-ride landing REJECTED: disk at (${entryRide.far.x.toFixed(2)}, ${entryRide.far.y.toFixed(2)}) is ${(frac * 100).toFixed(1)}% uncut > cap ${(landingUncutCap * 100).toFixed(0)}% and no shrunk ride lands safely -- dropping the entry-ride relocation, landing at the walker point (${nextPoint.x.toFixed(2)}, ${nextPoint.y.toFixed(2)})`)
-              liftEntryRide = null
-              liftConnEnd = nextPoint
-            }
-          }
-        }
+        // The lift is planned once (liftAssembly, above): the landing gate, the entry ride's
+        // landing check and the micro-lift proof, the same passes the time model priced.
         if (exitRide) { assertInsideCutRegion(exitRide.points, cutTree, wallTol, 'cusp exit'); passes.push({ type: 'wallfollow', points: exitRide.points }) }
-        const landingNext = liftEntryRide?.points[1] ?? points[1] ?? liftConnEnd
-        const landingPlan = gateLiftLanding(connStart, liftConnEnd, landingNext)
-        cutStartIndex = landingPlan.cutStartIndex ?? 0
-        if (landingPlan.keepDownApproach) {
-          pushKeepDownLandingApproach(landingPlan.keepDownApproach)
-          if (liftEntryRide && cutStartIndex === 0) { assertInsideCutRegion(liftEntryRide.points, cutTree, wallTol, 'cusp entry'); passes.push({ type: 'wallfollow', points: liftEntryRide.points }) }
-        } else {
-          const liftLink: AdaptivePass = { type: 'link', points: [connStart, landingPlan.landing], jumpType: 2 }
-          // WO-435 T1: liftReason was finalized above (jumpType === 2 && !connectionRide, the
-          // exact condition that puts us in this branch); an absent value here is a genuine
-          // attribution gap, named so the test counts it rather than silently passing.
-          setLiftReason(liftLink, liftReason ?? 'unattributed-case-iii-lifted')
-          if (landingPlan.helix) liftLink.helixDescent = landingPlan.helix
-          if (landingPlan.clearAirLanding) liftLink.clearAirLanding = true
-          attachFallbackHelix(liftLink)
-          attachMicroLift(liftLink)
-          passes.push(liftLink)
-          if (landingPlan.lead) passes.push({ type: 'lead', points: landingPlan.lead })
-          if (liftEntryRide && cutStartIndex === 0) { assertInsideCutRegion(liftEntryRide.points, cutTree, wallTol, 'cusp entry'); passes.push({ type: 'wallfollow', points: liftEntryRide.points }) }
-        }
+        // WO-435 T1: liftReason was finalized above (jumpType === 2 && !connectionRide, the
+        // exact condition that puts us in this branch); an absent value here is a genuine
+        // attribution gap, named so the test counts it rather than silently passing.
+        pushLiftAssembly(liftReason ?? 'unattributed-case-iii-lifted')
       }
     } else if (connectionRide) {
       // CLEANUP off (or not wall-reaching): retract-elimination rode the wall to stay down.
@@ -5991,29 +6386,17 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
             console.warn(`[keep-down] link (${lastPoint.x.toFixed(2)}, ${lastPoint.y.toFixed(2)}) -> (${nextPoint.x.toFixed(2)}, ${nextPoint.y.toFixed(2)}) would plough ${overload.width.toFixed(2)}mm sustained effective width > cap ${cap.toFixed(2)}mm near (${overload.at.x.toFixed(2)}, ${overload.at.y.toFixed(2)}) -- lifting instead (WO-410)`)
           }
         }
-        let landingPlan: ReturnType<typeof gateLiftLanding> | undefined
-        if (effectiveJumpType === 2) landingPlan = gateLiftLanding(lastPoint, nextPoint, points[1] ?? nextPoint)
-        cutStartIndex = landingPlan?.cutStartIndex ?? 0
-        if (landingPlan?.keepDownApproach) {
-          pushKeepDownLandingApproach(landingPlan.keepDownApproach)
-        } else {
-          const link: AdaptivePass = {
-            type: 'link',
-            points: [lastPoint, landingPlan?.landing ?? nextPoint],
-            jumpType: effectiveJumpType,
-          }
+        if (effectiveJumpType === 2) {
           // WO-435 T1: jumpType 1 -> 2 here is either the keepdown-overload gate just above
           // (liftReason set inline) or the connection was already jumpType 2 coming in, whose
           // reason was finalized earlier (jumpType === 2 && !connectionRide). An absent value
           // is a genuine attribution gap, named so the test counts it.
-          if (effectiveJumpType === 2) setLiftReason(link, liftReason ?? 'unattributed-plain-link')
+          pushLiftAssembly(liftReason ?? 'unattributed-plain-link')
+        } else {
+          cutStartIndex = 0
+          const link: AdaptivePass = { type: 'link', points: [lastPoint, nextPoint], jumpType: effectiveJumpType }
           if (boundarySpan) link.boundarySpan = boundarySpan // Phase A: inert, does not affect emit
-          if (landingPlan?.helix) link.helixDescent = landingPlan.helix
-          if (landingPlan?.clearAirLanding) link.clearAirLanding = true
-          attachFallbackHelix(link)
-          attachMicroLift(link)
           passes.push(link)
-          if (landingPlan?.lead) passes.push({ type: 'lead', points: landingPlan.lead })
         }
       }
     }
@@ -6029,34 +6412,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       mode: entry.mode,
     })
   }
-  const cutStartPoint = (() => {
-    if (cutStartIndex <= 0) return undefined
-    for (let index = passes.length - 1; index >= 0; index--) {
-      const pass = passes[index]
-      if (pass.type !== 'lead' || pass.points.length === 0) continue
-      return pass.points[pass.points.length - 1]
-    }
-    return undefined
-  })()
-  let emittedPoints = cutStartIndex > 0
-    ? [cutStartPoint ?? points[cutStartIndex], ...points.slice(cutStartIndex)]
-    : points
-  // WO-1178 root cause 1, DEPARTURE: the walker's curvature-limited first steps off a planted
-  // wall start are the wall ride's tail (held to the cusp cap, see the walker), emitted as a
-  // 'lead' -- the fed engage from the wall into the ring, at cutting feed -- so the ring starts
-  // where the fillet ends. Not a 'wallfollow': that role is a sub-polyline OF the wall (its
-  // material-side and on-wall invariants say so), and this tail leaves the wall by design.
-  // Only for a plain cut whose start the connection above landed on as planned (no re-seam,
-  // no entry).
-  if (passType === 'cut' && departHead > 0 && cutStartIndex === 0 && !entry && points.length > departHead + 1) {
-    passes.push({ type: 'lead', points: points.slice(0, departHead + 1) })
-    emittedPoints = points.slice(departHead)
-  }
-  // WO-447: the ONLY difference a 'wallfollow' passType makes is the role tag on this push.
-  // Every gate above ran identically. Written as two literal pushes rather than a computed
-  // `type` so the 'cut' object literal is character-for-character what it always was.
-  if (passType === 'wallfollow') passes.push({ type: 'wallfollow', points: emittedPoints })
-  else passes.push({ type: 'cut', points: emittedPoints })
+  passes.push(...emittedCutPasses(cutStartIndex, cutStartIndex > 0 ? lastLeadEnd(passes) : undefined))
   return cleared
 }
 
@@ -6438,6 +6794,36 @@ function buildClearedTrackGraph(passes: AdaptivePass[], toolRadius: number, step
   }
 
   return { nodes, near: inRadius, edgeKey, expand, shortestPath }
+}
+
+/** WO-2787 rung (b)(6): a keep-down ride from a point on one wall loop to a point on ANOTHER,
+ *  riding both walls in the milling direction -- along the start's loop to where it comes
+ *  closest to the end's loop, across that gap, then along the end's loop into the end. Null
+ *  when the two points do not stand on two different loops, or when a leg has no single
+ *  milling-direction arc. The caller proves the ride (cut-region, air, load). */
+function wallChainInDirection(a: Pt, b: Pt, loops: Loops, direction: AdaptiveMillingDirection, near: number): Pt[] | null {
+  const pa = projectOnLoops(a, loops), pb = projectOnLoops(b, loops)
+  if (pa.loop < 0 || pb.loop < 0 || pa.loop === pb.loop || pa.dist > near || pb.dist > near) return null
+  const la = loops[pa.loop], lb = loops[pb.loop]
+  // Closest approach between the two loops: each loop's vertices projected onto the other.
+  let gap = { d: Infinity, from: a, to: b }
+  for (const v of la) {
+    const q = projectOnLoops(v, [lb]).foot, d = Math.hypot(q.x - v.x, q.y - v.y)
+    if (d < gap.d) gap = { d, from: v, to: q }
+  }
+  for (const v of lb) {
+    const p = projectOnLoops(v, [la]).foot, d = Math.hypot(v.x - p.x, v.y - p.y)
+    if (d < gap.d) gap = { d, from: p, to: v }
+  }
+  const leg = (from: Pt, to: Pt, loop: Loop): Pt[] | null => {
+    if (Math.hypot(to.x - from.x, to.y - from.y) <= near) return [from, to]
+    const arcs = boundaryArcsBetween([loop], from, to)
+      .filter(arc => wallRouteKeepsDirection(arc, [loop], direction, near))
+    return arcs.length === 1 ? arcs[0] : null
+  }
+  const out = leg(a, gap.from, la)
+  const into = leg(gap.to, b, lb)
+  return out && into ? dedupConsecutive([...out, ...into]) : null
 }
 
 /** WO-438 tier 1, rung (b)(3): a ROUTED keep-down path from `a` to `b` that stays at depth

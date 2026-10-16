@@ -203,6 +203,9 @@ describe('WO-1292 saved imported-body operations', () => {
     fireEvent.click(screen.getByTestId('workbench-boolean'))
     fireEvent.change(screen.getByTestId('boolean-target-select'), { target: { value: 'IMP1' } })
     fireEvent.change(screen.getByTestId('boolean-tool-select'), { target: { value: 'IMP2' } })
+    // WO-2821 refuses an empty subtraction of identical imports. This test
+    // proves applying a valid saved-body operation, so explicitly fuse them.
+    fireEvent.change(screen.getByTestId('boolean-op-select'), { target: { value: 'fuse' } })
     fireEvent.click(screen.getByTestId('dialog-shell-apply'))
     await waitFor(() => expect(hooks().getBodyHandle('F1')).not.toBeUndefined(), { timeout: 30_000 })
     expect(hooks().scheduler.statusOf('F1')).toBe('ok')

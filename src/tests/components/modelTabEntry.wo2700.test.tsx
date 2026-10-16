@@ -1,14 +1,27 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { typedMock } from '../support/typedMock'
+// WO-2853: the STL byte cache (IndexedDB) as an in-memory map, so the real wrap action runs.
+const stlBytes = new Map<string, ArrayBuffer>()
+vi.mock('../../lib/stlCache', () => typedMock<typeof import('../../lib/stlCache')>({
+  cacheSTL: async (id: string, buf: ArrayBuffer) => { stlBytes.set(id, buf) },
+  loadCachedSTL: async (id: string) => stlBytes.get(id) ?? null,
+  removeCachedSTL: async (id: string) => { stlBytes.delete(id) },
+}))
+
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ModeTabStrip } from '../../components/toolbar/ModeTabStrip'
 import { ModelEntryModal } from '../../components/modals/ModelEntryModal'
 import { DesignTree } from '../../components/panels/DesignTree'
+import { BottomConsole } from '../../components/panels/BottomConsole'
+import { textFor } from '../../i18n'
 import { useCamStore } from '../../store'
 import { useUiPrefs } from '../../store/uiPrefs'
 import type { ImportedGeometry } from '../../types'
 
 const state = () => useCamStore.getState()
+const realWrapImportedGeometryAsModelItem = state().wrapImportedGeometryAsModelItem
 function mount() {
   return render(<><ModeTabStrip showPartTab /><DesignTree /><ModelEntryModal /></>)
 }
@@ -185,5 +198,101 @@ describe('WO-2700: plain Model tab means New Model', () => {
     fireEvent.click(screen.getByTestId('model-entry-row-item-1'))
     expect(state().activeModelItemId).toBe('item-1')
     expect(state().workspace).toBe('part')
+  })
+})
+
+// WO-2853 (the operator 2026-10-15): "clicking the model here did not actually open the model. it just flashed the page."
+describe('WO-2853: a curved STL picked with 2+ models opens in Model, no second chooser', () => {
+  function seedPlate() {
+    // The STEP row test above stubs the wrap action on the store; run the real one.
+    act(() => useCamStore.setState({ wrapImportedGeometryAsModelItem: realWrapImportedGeometryAsModelItem }))
+    seedItems(2)
+    const bytes = readFileSync('src/tests/mesh/fixtures/obj_1_Platte C.stl')
+    stlBytes.set('plate', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    const plate: ImportedGeometry = {
+      id: 'plate', name: 'Plate', filename: 'plate.stl', type: 'mesh', format: 'stl',
+      boundingBox: { min: { x: 0, y: 0, z: 0 }, max: { x: 100, y: 100, z: 10 },
+        size: { x: 100, y: 100, z: 10 }, center: { x: 50, y: 50, z: 5 } },
+      position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, loaded: true,
+    }
+    act(() => useCamStore.setState(s => ({ project: { ...s.project, geometry: [plate] } })))
+  }
+  async function expectPlateOpen() {
+    await vi.waitFor(() => expect([state().workspace, state().brepImportError]).toEqual(['part', null]))
+    expect(state().modelStlGeoId).toBe('plate')
+    expect(state().activeModal).toBeNull()
+    expect(screen.queryByText('Choose a Model Item')).toBeNull()
+    expect(['item-0', 'item-1']).not.toContain(state().activeModelItemId)
+    expect(state().project.geometry.map(g => [g.id, g.format])).toEqual([['plate', 'stl']])
+  }
+  it('the chooser row opens the plate', async () => {
+    seedPlate()
+    mount()
+    act(() => { void state().enterModelWorkspace() })
+    expect(screen.getByText('Choose a Model Item')).toBeTruthy()
+    await act(async () => { fireEvent.click(screen.getByTestId('model-entry-import-plate')) })
+    await expectPlateOpen()
+  })
+  it('the tree Edit as model opens the plate', async () => {
+    seedPlate()
+    mount()
+    await act(async () => { fireEvent.click(screen.getByTestId('edit-as-model-btn-plate')) })
+    await expectPlateOpen()
+  })
+  it('negative control: the plain Model tab with 2 models and the plate still asks', () => {
+    seedPlate()
+    mount()
+    const before = state().project
+    fireEvent.click(screen.getByTestId('mode-tab-part'))
+    expectNewDialog()
+    expect(screen.getByTestId('model-entry-import-plate')).toBeTruthy()
+    expect(state().workspace).toBe('cam')
+    expect(state().modelStlGeoId).toBeNull()
+    expect(state().project).toBe(before)
+  })
+  // FIX ROUND 2 (the operator 10-15 ~10:10 PM): "New model in the modal opens a new document with the plate in it."
+  it('open the plate, then Model tab -> Create Model: the new model has no plate', async () => {
+    seedPlate()
+    mount()
+    await act(async () => { fireEvent.click(screen.getByTestId('edit-as-model-btn-plate')) })
+    await expectPlateOpen()
+    fireEvent.click(screen.getByTestId('mode-tab-part'))
+    expectNewDialog()
+    await act(async () => { fireEvent.click(screen.getByTestId('model-entry-new')) })
+    expect(state().workspace).toBe('part')
+    expect(state().modelStlGeoId).toBeNull()
+    expect(state().project.modelItems?.map(m => m.id)).toEqual(['item-0', 'item-1', state().activeModelItemId])
+  })
+  // FIX ROUND 3 (architect picture review 10-15 ~10:35 PM): after Create Model the console strip still said the
+  // Plate "is open as a mesh".
+  it('open the plate, then Model tab -> Create Model: the console strip no longer says the plate is open', async () => {
+    seedPlate()
+    render(<><ModeTabStrip showPartTab /><DesignTree /><ModelEntryModal /><BottomConsole /></>)
+    await act(async () => { fireEvent.click(screen.getByTestId('edit-as-model-btn-plate')) })
+    await expectPlateOpen()
+    expect(state().project.modelItems?.find(m => m.id === state().activeModelItemId)?.name).toBe('Plate')
+    // The Model screen's own line once it has drawn the plate (it is not mounted here).
+    const workbenchText = textFor('sketch-and-model-workbench')
+    act(() => state().addConsoleEvent({ severity: 'info', source: 'workbench',
+      message: workbenchText('SolidsWorkbenchPage.isOpenAsAMeshKeptAsAnSTL', { name: 'Plate', length: '29' }) }))
+    expect(screen.getByTestId('console-strip').textContent).toContain('is open as a mesh')
+    fireEvent.click(screen.getByTestId('mode-tab-part'))
+    await act(async () => { fireEvent.click(screen.getByTestId('model-entry-new')) })
+    expect(state().modelStlGeoId).toBeNull()
+    expect(screen.getByTestId('console-strip').textContent).not.toContain('is open as a mesh')
+  })
+  it('open the plate, then Setup tab -> Model tab -> pick another model: no plate', async () => {
+    seedPlate()
+    mount()
+    await act(async () => { fireEvent.click(screen.getByTestId('edit-as-model-btn-plate')) })
+    await expectPlateOpen()
+    fireEvent.click(screen.getByTestId('mode-tab-setup'))
+    expect(state().workspace).toBe('cam')
+    expect(state().modelStlGeoId).toBeNull()
+    fireEvent.click(screen.getByTestId('mode-tab-part'))
+    await act(async () => { fireEvent.click(screen.getByTestId('model-entry-row-item-0')) })
+    expect(state().workspace).toBe('part')
+    expect(state().activeModelItemId).toBe('item-0')
+    expect(state().modelStlGeoId).toBeNull()
   })
 })

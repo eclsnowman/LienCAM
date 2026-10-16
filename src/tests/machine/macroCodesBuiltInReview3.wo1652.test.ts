@@ -219,7 +219,10 @@ describe('WO-1652 review 3: every way an M6 prelude ends', () => {
   })
 
   it('no pad park: the prelude ends, the plain M6 hold (main) follows; CYCLE START is refused while it runs', async () => {
-    await setUp(FAR_PRELUDE, false)
+    // WO-2764: WO-2478 runs the M6 macro at the same-tool T1 M6 too, and with no pad park
+    // that is a plain hold of its own; preselect T1 so the prelude under test is at T2.
+    await setUp(FAR_PRELUDE, false,
+      ['G21', 'G90', 'T1', 'M3 S10000', 'G1 X2 F6000', 'M5', 'T2 M6', 'M3 S10000', 'G1 X4 F6000', 'M30'].join('\n'))
     await advance(100)
     expect(activeMacroRun()).not.toBeNull()
     expect(await executeOperatorCycleStart()).toBe(false)

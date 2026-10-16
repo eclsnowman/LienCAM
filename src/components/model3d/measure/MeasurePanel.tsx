@@ -4,6 +4,7 @@
 // intents. Visual language matches FeatureTree.tsx/DialogShell.tsx's token
 // set (no hardcoded colors, unlike the older Lab3DView demo surface).
 
+import { useText } from '../../../i18n'
 import { useState } from 'react'
 import { formatReadout, isFailure, type MeasureOutcome } from './measureLogic'
 import type { MeasureMode, MeasureSessionState } from './useMeasureSession'
@@ -15,6 +16,7 @@ export interface MeasurePanelProps {
 }
 
 function OutcomeRow({ outcome }: { outcome: MeasureOutcome }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [open, setOpen] = useState(false)
   if (isFailure(outcome)) {
     return (
@@ -41,7 +43,7 @@ function OutcomeRow({ outcome }: { outcome: MeasureOutcome }) {
               padding: 0,
             }}
           >
-            {open ? 'hide id' : 'show id'}
+            {open ? workbenchText('MeasurePanel.hideId') : workbenchText('MeasurePanel.showId')}
           </button>
         )}
       </div>
@@ -58,6 +60,7 @@ function OutcomeRow({ outcome }: { outcome: MeasureOutcome }) {
 }
 
 export function MeasurePanel({ state, onModeChange, onClear }: MeasurePanelProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <div
       data-testid="measure-panel"
@@ -87,8 +90,7 @@ export function MeasurePanel({ state, onModeChange, onClear }: MeasurePanelProps
             cursor: 'pointer',
           }}
         >
-          Single
-        </button>
+          {workbenchText('MeasurePanel.single')}</button>
         <button
           type="button"
           data-testid="measure-mode-between"
@@ -103,8 +105,7 @@ export function MeasurePanel({ state, onModeChange, onClear }: MeasurePanelProps
             cursor: 'pointer',
           }}
         >
-          Between two
-        </button>
+          {workbenchText('MeasurePanel.betweenTwo')}</button>
         <button
           type="button"
           data-testid="measure-clear"
@@ -119,23 +120,19 @@ export function MeasurePanel({ state, onModeChange, onClear }: MeasurePanelProps
             cursor: 'pointer',
           }}
         >
-          Clear
-        </button>
+          {workbenchText('MeasurePanel.clear')}</button>
       </div>
       {state.mode === 'between' && state.armedCount < 2 && (
         <div style={{ color: 'var(--text-muted)', marginBottom: 4 }} data-testid="measure-armed-hint">
-          pick {2 - state.armedCount} more entit{2 - state.armedCount === 1 ? 'y' : 'ies'}
-        </div>
+          {workbenchText('MeasurePanel.pick')}{2 - state.armedCount}{workbenchText('MeasurePanel.moreEntit', { value1: String((2 - state.armedCount === 1 ? 'y' : 'ies')) })}</div>
       )}
       {state.busy && (
         <div data-testid="measure-busy" style={{ color: 'var(--text-muted)' }}>
-          measuring...
-        </div>
+          {workbenchText('MeasurePanel.measuring')}</div>
       )}
       {!state.busy && state.outcomes.length === 0 && (
         <div style={{ color: 'var(--text-muted)' }} data-testid="measure-empty">
-          (nothing selected)
-        </div>
+          {workbenchText('MeasurePanel.nothingSelected')}</div>
       )}
       {!state.busy && state.outcomes.map((o, i) => <OutcomeRow key={i} outcome={o} />)}
     </div>

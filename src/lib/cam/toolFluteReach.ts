@@ -1,5 +1,28 @@
 const AXIAL_REACH_EPSILON_MM = 1e-6
 
+/** A selected loop as an operator message may refer to it. */
+export interface OperatorLoop {
+  id: string
+  name?: string
+}
+
+/**
+ * Name a loop in an operator-facing message the way the operation's Geometry
+ * list names it: by its own name. Loop ids are content hashes (`mec:...`,
+ * assignStableLoopIds) and never reach the screen; a loop without a name is
+ * described by `unnamed` instead.
+ */
+export function operatorLoopRef(loop: OperatorLoop, unnamed = 'a selected loop', noun = 'loop'): string {
+  const name = loop.name?.trim()
+  return name ? `${noun} "${name}"` : unnamed
+}
+
+/** The "for loop ..." clause of a refusal, or nothing when the loop has no name. */
+export function operatorLoopTarget(loop: OperatorLoop, noun = 'loop'): string | undefined {
+  const name = loop.name?.trim()
+  return name ? `for ${noun} "${name}"` : undefined
+}
+
 export interface ToolFluteReachCheck {
   operation: string
   topZ: number

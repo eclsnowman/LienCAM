@@ -1,3 +1,7 @@
+import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 // ProbingPanel - workpiece probing (WO-297: split out of ToolsProbePanel per
 // Operator's rejection of sharing the screen with the tool table -
 // docs/ui-ux/probing-workspace-requirements.md). WO-385 expands the workspace
@@ -6,7 +10,8 @@
 // offset write.
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { create } from 'zustand'
+import { activeToolFromLibrary, faceAngleFromTouches, useProbingSession, useProbingSessionRef, useProbingSessionState } from '../../lib/machine/probingSession'
+export { activeToolFromLibrary, __resetProbingSessionForTest } from '../../lib/machine/probingSession'
 import { controlMachine, useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
 import { ProbeLamp, useProbeSignals } from './ProbeLamp'
@@ -43,7 +48,7 @@ import {
 } from '../../lib/machine/machineSession'
 import { useProbeRoutineStore } from '../../store/probeRoutineStore'
 import { toolSetterRoutines } from '../../lib/machine/probeRoutineLibrary'
-import { machineHasNoHomeSwitches, type Tool } from '../../types'
+import { machineHasNoHomeSwitches } from '../../types'
 import {
   DEFAULT_MESH_FADE_MM,
   DEFAULT_MESH_MARGIN_MM,
@@ -75,7 +80,6 @@ import {
   calculateBossCenter,
   calculateCorner,
   calculateEdge,
-  calculateYawAngle,
   faceRunOff,
   lineAngleInWorkDeg,
   planSecondSideProbeZero,
@@ -126,26 +130,6 @@ interface ProbeStatus {
   text: string
 }
 
-// WO-1634: Operator probes with the cutter in the collet, not a dedicated
-// stylus - "That's pretty typical for low-cost cncs that don't have a
-// dedicated actual three-dimensional probe." The tip radius the touch
-// routines compensate with should default to whatever tool is actually
-// in the spindle, named the same way WO-1323 names a tool in G-code text:
-// the library entry only when its T-number is unambiguous, never a guess
-// among duplicates. WO-2105: duplicates are settled by the machine's own tool
-// table - the entry whose diameter is the one the table holds for that T.
-export function activeToolFromLibrary(
-  activeTool: number | null,
-  toolLibrary: readonly Tool[],
-  tableDiaMm: number | null = null,
-): Tool | null {
-  if (activeTool === null) return null
-  const matches = toolLibrary.filter((tool) => tool.toolNumber === activeTool)
-  if (matches.length === 1) return matches[0]
-  if (tableDiaMm === null || !(tableDiaMm > 0)) return null
-  return matches.find((tool) => Math.abs(tool.diameter - tableDiaMm) < 0.001) ?? null
-}
-
 /** The tip radius used, and said to be the default, when the probe tool has
  *  no diameter anywhere yet. */
 const DEFAULT_TIP_RADIUS_MM = 1.5
@@ -155,13 +139,13 @@ const DEFAULT_TIP_RADIUS_MM = 1.5
  *  every confirmed Z0 write (either screen, the DRO, the pendant, the mesh)
  *  records its time in the session. */
 function WorkZeroInUse({ machineId, wcs }: { machineId: string; wcs: WcsId | null }) {
+  useText('probing-screens')
   const record = workZeroZSetRecord(machineId, wcs)
   const text = wcs === null
-    ? 'No work offset is active yet - Z0 is written to the active one.'
+    ? probeText('probingPanel1')
     : record === null
-      ? `${wcs} Z0: not set from LienCAM since it opened - the controller's stored ${wcs} Z is in use.`
-      : `${wcs} Z0 in use: set at ${new Date(record.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-        + `${record.thisConnection ? '' : ' (an earlier connection)'}.`
+      ? probeText('probingPanel2', { value1: String(wcs), value2: String(wcs) })
+      : probeText('probingPanel6', { value1: String(wcs), value2: String(new Date(record.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })), value3: String(record.thisConnection ? '' : ' (an earlier connection)') })
   return (
     <div className="control-probe-field-note" data-testid="control-work-probe-z0-in-use">
       {text}
@@ -210,19 +194,19 @@ const ANGLE_FACES: ReadonlyArray<{ value: string; face: string; probe: string }>
 const ROUTINE_OPTIONS: ReadonlyArray<{ kind: WorkProbeKind; label: string; short: string }> = [
   // WO-2061: the Tools screen's Probe work Z0, first - the same routine.
   // WO-2063: the brief's order, three across.
-  { kind: 'workZero', label: 'Z0', short: 'Top of stock' },
-  { kind: 'edge', label: 'Edge', short: 'Single X/Y face' },
-  { kind: 'outsideCorner', label: 'Outside corner', short: 'Two outside faces' },
-  { kind: 'insideCorner', label: 'Inside corner', short: 'Two inside faces' },
-  { kind: 'angle', label: 'Angle', short: 'Two-point alignment' },
-  { kind: 'bore', label: 'Bore', short: 'Round inside center' },
-  { kind: 'boss', label: 'Boss', short: 'Round outside center' },
-  { kind: 'rectPocket', label: 'Rect pocket', short: 'Four inside faces' },
-  { kind: 'rectBoss', label: 'Rect boss', short: 'Four outside faces' },
-  { kind: 'zSurface', label: 'Z surface', short: 'Map cutting surface' },
-  { kind: 'toolZ', label: 'Tool Z', short: 'Measure active tool' },
+  { kind: 'workZero', label: 'Z0', short: probeText('probingPanel7') },
+  { kind: 'edge', label: probeText('probingPanel8'), short: probeText('probingPanel9') },
+  { kind: 'outsideCorner', label: probeText('probingPanel10'), short: probeText('probingPanel11') },
+  { kind: 'insideCorner', label: probeText('probingPanel12'), short: probeText('probingPanel13') },
+  { kind: 'angle', label: probeText('probingPanel14'), short: probeText('probingPanel15') },
+  { kind: 'bore', label: probeText('probingPanel16'), short: probeText('probingPanel17') },
+  { kind: 'boss', label: probeText('probingPanel18'), short: probeText('probingPanel19') },
+  { kind: 'rectPocket', label: probeText('probingPanel20'), short: probeText('probingPanel21') },
+  { kind: 'rectBoss', label: probeText('probingPanel22'), short: probeText('probingPanel23') },
+  { kind: 'zSurface', label: probeText('probingPanel24'), short: probeText('probingPanel25') },
+  { kind: 'toolZ', label: probeText('probingPanel26'), short: probeText('probingPanel27') },
   // WO-2166: the loaded Probe tool's X / Y radius on a known reference.
-  { kind: 'calibrate', label: 'Calibrate', short: 'Probe X / Y radius' },
+  { kind: 'calibrate', label: probeText('probingPanel28'), short: probeText('probingPanel29') },
 ]
 
 interface WorkProbePreview {
@@ -264,11 +248,7 @@ function secondSideAxisLines(
   const unit = unitLabel(units)
   return plan.axes.map(
     (axis) =>
-      `${axis.axis}: the feature sits at ${fmtMachineLength(axis.featureFirstSideMm, units)} on ` +
-      `"${plan.firstSideName}", so after the turn it must read ` +
-      `${fmtMachineLength(axis.featureSecondSideMm, units)} here. The probe found it at ` +
-      `${fmtMachineLength(axis.probedMachineMm, units)}, so this side's ${axis.axis} zero is ` +
-      `${fmtMachineLength(axis.workZeroMachineMm, units)} ${unit}.`,
+      probeText('probingPanel37', { value1: String(axis.axis), value2: String(fmtMachineLength(axis.featureFirstSideMm, units)), value3: String(plan.firstSideName), value4: String(fmtMachineLength(axis.featureSecondSideMm, units)), value5: String(fmtMachineLength(axis.probedMachineMm, units)), value6: String(axis.axis), value7: String(fmtMachineLength(axis.workZeroMachineMm, units)), value8: String(unit) }),
   )
 }
 
@@ -295,21 +275,21 @@ function SecondSideWorking({
   wcs: WcsId
   units: ReturnType<typeof useDisplayUnits>
 }) {
+  useText('probing-screens')
   return (
     <div className="pbn-confirm-working" data-testid="control-second-side-working">
       <span>{preview.resultText}</span>
       {(preview.secondSide ?? []).map((line) => (
         <span key={line} data-testid="control-second-side-line">{line}</span>
       ))}
-      <span data-testid="control-second-side-writes">
-        Writes {wcs} {offsetWritesText(preview.values, units)}
+      <span data-testid="control-second-side-writes">{probeText('probingPanel39', { value1: jsxTextValue(wcs), value2: jsxTextValue(offsetWritesText(preview.values, units)) })}
       </span>
     </div>
   )
 }
 
 /** WO-2063: the Probing screen's Stop (docs/design/PROBING-SCREEN-V2.md). */
-export const PROBE_STOP_TOOLTIP = 'Stop - cancels the running probe routine. Not an E-STOP: nothing latches.'
+export const PROBE_STOP_TOOLTIP = probeText('probingPanel40')
 
 const WCS_LIST: WcsId[] = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59']
 
@@ -323,23 +303,23 @@ function probePlanEnvelopeRefusal(
   context: ProbePlanRefusalContext,
 ): string {
   if (status === 'unknown') {
-    return "The machine's travel limits are not known yet - the controller settings have not been read."
+    return probeText('probingPanel41')
   }
   if (status === 'no-datum') {
     return noHomeSwitchesRefusal(
       context === 'automatic probe cycle'
-        ? 'set the machine position before planning an automatic probe cycle.'
-        : 'set the machine position before planning mesh travel.',
+        ? probeText('probingPanel42')
+        : probeText('probingPanel43'),
     )
   }
   if (status === 'not-homed') {
     return context === 'automatic probe cycle'
-      ? 'Home the machine before planning an automatic probe cycle.'
-      : 'Home the machine before planning mesh travel.'
+      ? probeText('probingPanel44')
+      : probeText('probingPanel45')
   }
   return context === 'automatic probe cycle'
-    ? 'The homed machine position has not been reported yet - wait for a position update before planning an automatic probe cycle.'
-    : 'The homed machine position has not been reported yet - wait for a position update before planning mesh travel.'
+    ? probeText('probingPanel46')
+    : probeText('probingPanel47')
 }
 
 /** A Face choice ("X+", "Y-"), or null for anything else. A tampered option
@@ -362,8 +342,8 @@ function withMeshResultSentence(scene: ProbeScene, mesh: { active: boolean; work
   const last = scene.steps.length - 1
   if (!mesh || last < 0) return scene
   const sentence = mesh.active
-    ? `The mesh is applied to ${mesh.workOffset}.`
-    : `The mesh is measured. Confirm applies it to ${mesh.workOffset}.`
+    ? probeText('probingPanel48', { value1: String(mesh.workOffset) })
+    : probeText('probingPanel49', { value1: String(mesh.workOffset) })
   return { ...scene, steps: scene.steps.map((step, i) => (i === last ? { ...step, sentence } : step)) }
 }
 
@@ -393,6 +373,7 @@ export function WorkProbeResultPanel({
   disabled: boolean
   onApply: () => void
 }) {
+  useText('probing-screens')
   const offsetText = offsetWritesText(preview.values, units)
 
   return (
@@ -403,7 +384,7 @@ export function WorkProbeResultPanel({
         {preview.secondSide?.map((line) => (
           <span key={line} data-testid="control-second-side-line">{line}</span>
         ))}
-        {offsetText && <span>Would write {wcs} {offsetText} after confirmation.</span>}
+        {offsetText && <span>{probeText('probingPanel52', { value1: jsxTextValue(wcs), value2: jsxTextValue(offsetText) })}</span>}
         <span>{preview.compensation}</span>
       </div>
       {offsetText && (
@@ -412,79 +393,29 @@ export function WorkProbeResultPanel({
           data-testid="control-work-probe-apply"
           disabled={disabled}
           onClick={onApply}
-        >
-          Confirm {wcs} offset
-        </button>
+        >{probeText('probingPanel55', { value1: jsxTextValue(wcs) })}</button>
       )}
     </div>
   )
 }
 
-// WO-1998: ControlPage mounts this panel only while the Probing sub-tab is
-// open, and the Probing tab has no jog - so the operator MUST leave it between
-// the touches of a corner. The chosen routine, its settings and the touches
-// already taken live here, outside the component, until the routine is
-// restarted or changed; they belong to one machine and are dropped when the
-// Control tab is driving another. The path-clear confirmation is deliberately
-// NOT kept: leaving the tab to move the machine is what it has to be re-given for.
-interface ProbingSessionState {
-  machineId: string | null
-  values: Readonly<Record<string, unknown>>
+// WO-2774 (owner 10-08: "the chip and step bar agree with the stopped/not-started
+// line"): while the session holds a stopped run - runEnd 'stopped', the red
+// "Stopped at step N" or "Did not start" line - the header chip reads
+// "Stopped". Published from the session, not the mounted screen: a run
+// followed with the screen closed (WO-2139) still stops, and the chip is on
+// every workspace. Only the session of the machine the Control tab drives.
+function publishProbeRunStopped(): void {
+  const session = useProbingSession.getState()
+  const machineId = controlMachine(useCamStore.getState())?.id ?? 'default'
+  const stopped = session.machineId === machineId && session.values.runEnd === 'stopped'
+  if (useMachineControl.getState().probeRunStopped !== stopped) useMachineControl.getState().setProbeRunStopped(stopped)
 }
+useProbingSession.subscribe(publishProbeRunStopped)
+useCamStore.subscribe(publishProbeRunStopped)
 
-const useProbingSession = create<ProbingSessionState>(() => ({ machineId: null, values: {} }))
-const PROBING_SESSION_UNSET = Symbol('probing-session-unset')
-
-// A disconnect ends the probing session: the touches are machine positions,
-// and nothing vouches for them across a new connection.
-useMachineControl.subscribe((state, previous) => {
-  if (previous.connectionPhase === 'connected' && state.connectionPhase === 'disconnected') {
-    useProbingSession.setState({ machineId: null, values: {} })
-    probingSessionRefs = { machineId: null, refs: new Map() }
-  }
-})
-
-export function __resetProbingSessionForTest(): void {
-  useProbingSession.setState({ machineId: null, values: {} })
-  probingSessionRefs = { machineId: null, refs: new Map() }
-}
-
-// WO-2139: the followed run's step tracker is written as the frame renders
-// (never state per position report), so it lives beside the session, not in it.
-let probingSessionRefs: { machineId: string | null; refs: Map<string, { current: unknown }> } = { machineId: null, refs: new Map() }
-
-/** useRef, kept for the machine's probing session across unmounts. */
-function useProbingSessionRef<T>(machineId: string, key: string, initial: T): { current: T } {
-  if (probingSessionRefs.machineId !== machineId) probingSessionRefs = { machineId, refs: new Map() }
-  let holder = probingSessionRefs.refs.get(key)
-  if (!holder) {
-    holder = { current: initial }
-    probingSessionRefs.refs.set(key, holder)
-  }
-  return holder as { current: T }
-}
-
-type SessionSetter<T> = (next: T | ((current: T) => T)) => void
-
-/** useState, kept for the machine's probing session across unmounts. A
- *  functional update reads the stored value at the moment it runs, so a touch
- *  that lands while the panel is unmounted is still recorded. */
-function useProbingSessionState<T>(machineId: string, key: string, initial: T): [T, SessionSetter<T>] {
-  const stored = useProbingSession((s) => (
-    s.machineId === machineId && key in s.values ? s.values[key] : PROBING_SESSION_UNSET
-  ))
-  const value = stored === PROBING_SESSION_UNSET ? initial : stored as T
-  const set: SessionSetter<T> = (next) => useProbingSession.setState((s) => {
-    const values = s.machineId === machineId ? s.values : {}
-    const current = key in values ? values[key] as T : initial
-    const resolved = typeof next === 'function' ? (next as (current: T) => T)(current) : next
-    if (s.machineId === machineId && key in values && Object.is(resolved, current)) return s
-    return { machineId, values: { ...values, [key]: resolved } }
-  })
-  return [value, set]
-}
-
-export function ProbingPanel() {
+export function ProbingPanel({ machineConsole }: { machineConsole?: ReactNode } = {}) {
+  useText('probing-screens')
   const probeActive = useSyncExternalStore(subscribeProbeCycleActive, isProbeCycleActive, () => false)
   const probePaused = useSyncExternalStore(subscribeProbeCycleActive, isProbeCyclePaused, () => false)
   const probeSignals = useProbeSignals()
@@ -600,10 +531,9 @@ export function ProbingPanel() {
   // WO-2105: where the radius came from, said on the Tip radius row.
   const activeDiaLabel = libraryDiaMm !== null && activeToolEntry
     ? libraryEntriesForActive > 1
-      ? `T${activeTool} ${activeToolEntry.name} - the one of ${libraryEntriesForActive} tool library T${activeTool} entries `
-        + `matching the machine tool table, diameter ${motionValue(libraryDiaMm, units)}`
-      : `T${activeTool} ${activeToolEntry.name} - tool library, diameter ${motionValue(libraryDiaMm, units)}`
-    : `T${activeTool} - machine tool table, diameter ${activeDiaMm === null ? 'not set' : motionValue(activeDiaMm, units)}`
+      ? probeText('probingPanel58', { value1: String(activeTool), value2: String(activeToolEntry.name), value3: String(libraryEntriesForActive), value4: String(activeTool), value5: String(motionValue(libraryDiaMm, units)) })
+      : probeText('probingPanel59', { value1: String(activeTool), value2: String(activeToolEntry.name), value3: String(motionValue(libraryDiaMm, units)) })
+    : probeText('probingPanel61', { value1: String(activeTool), value2: String(activeDiaMm === null ? probeText('probingPanel60') : motionValue(activeDiaMm, units)) })
   const askToolDiameter = activeTool !== null && activeDiaMm === null && !tipRadiusTyped
   useEffect(() => {
     if (tipRadiusTyped) return
@@ -613,7 +543,7 @@ export function ProbingPanel() {
       // question - never silent, never a refusal (WO-1634's rule).
       if (activeTool === null) return
       setTipRadiusMm(DEFAULT_TIP_RADIUS_MM)
-      setTipRadiusSource(`the default - T${activeTool} has no diameter yet`)
+      setTipRadiusSource(probeText('probingPanel62', { value1: String(activeTool) }))
       return
     }
     setTipRadiusMm(activeDiaMm / 2)
@@ -635,9 +565,7 @@ export function ProbingPanel() {
   // every planned clearance at least what it asks for.
   const tipMotionMm = Math.max(tipRadiusXmm, tipRadiusYmm)
   const calibratedSource = activeToolEntry && (calibratedXmm !== null || calibratedYmm !== null)
-    ? `T${activeTool} ${activeToolEntry.name} - `
-      + `${calibratedXmm !== null ? 'calibrated X' : 'X ball'} ${fmtMachineLength(tipRadiusXmm, units)}, `
-      + `${calibratedYmm !== null ? 'calibrated Y' : 'Y ball'} ${fmtMachineLength(tipRadiusYmm, units)} ${unitLabel(units)}`
+    ? probeText('probingPanel70', { value1: String(activeTool), value2: String(activeToolEntry.name), value3: String(calibratedXmm !== null ? 'calibrated X' : 'X ball'), value4: String(fmtMachineLength(tipRadiusXmm, units)), value5: String(calibratedYmm !== null ? 'calibrated Y' : 'Y ball'), value6: String(fmtMachineLength(tipRadiusYmm, units)), value7: String(unitLabel(units)) })
     : null
   // WO-2059: how the face is sensed, one choice per routine, remembered per
   // machine. A plate adds its thickness (the tool table's pad, the same field
@@ -659,9 +587,8 @@ export function ProbingPanel() {
   const withPlate = (text: string) => plateMm <= 0
     ? text
     : perAxisRadius
-      ? `${text} Sensed through the plate: tip radius ${motionValue(tipRadiusXmm, units)} on X + plate ${motionValue(plateMm, units)} = ${motionValue(senseRadiusXmm, units)}; `
-        + `${motionValue(tipRadiusYmm, units)} on Y + plate = ${motionValue(senseRadiusYmm, units)}.`
-      : `${text} Sensed through the plate: tip radius ${motionValue(tipRadiusXmm, units)} + plate ${motionValue(plateMm, units)} = ${motionValue(senseRadiusXmm, units)}.`
+      ? probeText('probingPanel73', { value1: String(text), value2: String(motionValue(tipRadiusXmm, units)), value3: String(motionValue(plateMm, units)), value4: String(motionValue(senseRadiusXmm, units)), value5: String(motionValue(tipRadiusYmm, units)), value6: String(motionValue(senseRadiusYmm, units)) })
+      : probeText('probingPanel74', { value1: String(text), value2: String(motionValue(tipRadiusXmm, units)), value3: String(motionValue(plateMm, units)), value4: String(motionValue(senseRadiusXmm, units)) })
   const [edgeAxis, setEdgeAxis] = useProbingSessionState<WorkProbeAxis>(machineId, 'edgeAxis', 'X')
   // WO-2060: X0 is normally the left face, Y0 the front, so the probe
   // defaults to moving X+ / Y+ (front-left corner, front-face angle).
@@ -833,7 +760,7 @@ export function ProbingPanel() {
       : null
   const surfaceMeshEnvelopeError = useMemo(() => {
     if (!surfaceMeshPlan.ok || !safeMpos || !wpos) return null
-    if (!motionEnvelope.x || !motionEnvelope.y) return 'Read or define the machine XY travel envelope before probing a mesh.'
+    if (!motionEnvelope.x || !motionEnvelope.y) return probeText('probingPanel75')
     const offsetX = safeMpos.x - wpos.x
     const offsetY = safeMpos.y - wpos.y
     const machineBounds = {
@@ -846,7 +773,7 @@ export function ProbingPanel() {
       machineBounds.minX < motionEnvelope.x.min || machineBounds.maxX > motionEnvelope.x.max
       || machineBounds.minY < motionEnvelope.y.min || machineBounds.maxY > motionEnvelope.y.max
     ) {
-      return 'The editable mesh area reaches outside the machine XY travel envelope.'
+      return probeText('probingPanel76')
     }
     return null
   }, [surfaceMeshPlan, safeMpos, wpos, motionEnvelope])
@@ -862,7 +789,7 @@ export function ProbingPanel() {
   const meshEnvelopeRefusal = probePlanEnvelopeRefusal(refusalEnvelopeStatus, 'mesh travel')
   const guidedPlan = useMemo(() => {
     if (workKind === 'zSurface' || workKind === 'toolZ' || workKind === 'workZero') {
-      return { ok: false as const, reason: 'Z probing uses the current XY position and the machine probe travel limit.' }
+      return { ok: false as const, reason: probeText('probingPanel77') }
     }
     if (!safeMpos) {
       return {
@@ -975,21 +902,21 @@ export function ProbingPanel() {
     ? !surfaceMeshPlan.ok || !safeMpos || Boolean(surfaceMeshEnvelopeError)
     : !guidedPlan.ok && !zRoutine
   const runGuidedWhyDisabled: string | null = !connected
-    ? 'Connect to the machine first.'
+    ? probeText('probingPanel78')
     : busy
-      ? 'A probe cycle is running - wait for it to finish.'
+      ? probeText('probingPanel79')
       : machineState === 'hold'
-        ? 'A hold (a tool change waiting on you) owns the machine - press Cycle Start to finish it, or Stop, then run the probe.'
+        ? probeText('probingPanel80')
         : streaming
-          ? 'A program is running - Feed Hold, then Stop, before probing.'
+          ? probeText('probingPanel81')
           : machineState !== 'idle'
-            ? `The machine is ${machineState} - wait until it is idle.`
+            ? probeText('probingPanel82', { value1: String(machineState) })
             : runGuidedPlanBlocked
               ? (workKind === 'zSurface'
                 // The envelope's own cause when there is no safe position
                 // (WO-1045 / WO-988: unread settings, not homed, no datum).
-                ? (!surfaceMeshPlan.ok ? surfaceMeshPlan.reason : surfaceMeshEnvelopeError ?? activeEnvelopeRefusal ?? 'Read the machine position first.')
-                : (!guidedPlan.ok ? guidedPlan.reason : 'This routine has no plan yet.'))
+                ? (!surfaceMeshPlan.ok ? surfaceMeshPlan.reason : surfaceMeshEnvelopeError ?? activeEnvelopeRefusal ?? probeText('probingPanel83'))
+                : (!guidedPlan.ok ? guidedPlan.reason : probeText('probingPanel84')))
               : null
 
   const resetWorkTouches = () => {
@@ -1039,47 +966,41 @@ export function ProbingPanel() {
   const disableSurfaceMesh = () => {
     clearSurfaceMesh()
     setMeshSamples([])
-    setWorkStatus({ kind: 'ok', text: 'Surface mesh compensation disabled; the original program is armed.' })
+    setWorkStatus({ kind: 'ok', text: probeText('probingPanel85') })
   }
 
   // WO-2112: the Angle result - the measured angle and the face it was taken
   // on. The result step and the console both read it from here. Throws what
-  // calculateYawAngle throws; null until both points are touched.
+  // faceAngleFromTouches throws; null until both points are touched.
   const angleMeasurement = (
     along: { first: number; second: number },
     touches: Partial<Record<WorkTouchKey, number>>,
     rotation: { wcs: string; deg: number; overMm: number } | null,
   ): WorkProbePreview | null => {
     if (touches.angleFirst === undefined || touches.angleSecond === undefined) return null
-    // The angle is the line's, whichever way along the face point 2 was taken:
-    // measured with Point 2 on the minus side, the line from point 1 runs
-    // backwards along the axis and reads as ~180 deg.
-    const first = { alongMm: along.first, triggerPositionMm: touches.angleFirst }
-    const second = { alongMm: along.second, triggerPositionMm: touches.angleSecond }
-    const forward = along.second >= along.first
-    const result = calculateYawAngle({
+    const result = faceAngleFromTouches({
       nominalAxis: angleNominalAxis,
       direction: angleProbeDirection,
       tipRadiusMm: senseRadiusOn(angleNominalAxis === 'X' ? 'Y' : 'X'),
-      first: forward ? first : second,
-      second: forward ? second : first,
+      first: { alongMm: along.first, triggerPositionMm: touches.angleFirst },
+      second: { alongMm: along.second, triggerPositionMm: touches.angleSecond },
     })
     const face = ANGLE_FACES.find((f) => f.value === `${angleNominalAxis}${angleProbeDirection}`)
-    const faceWords = face ? ` on the ${face.face} face (probe ${face.probe})` : ''
+    const faceWords = face ? probeText('probingPanel86', { value1: String(face.face), value2: String(face.probe) }) : ''
     // WO-2188: the touches are machine positions; under a work rotation the
     // angle is the one against the rotated work axis, so after Confirm the
     // same face reads 0 (docs/design/WCS-ROTATION.md).
     const fromDeg = rotation?.deg ?? 0
     const deg = lineAngleInWorkDeg(result.thetaDeg, fromDeg)
-    const rotatedWords = fromDeg !== 0 && rotation ? `, with ${describeWorkRotation(rotation.wcs, fromDeg)}` : ''
+    const rotatedWords = fromDeg !== 0 && rotation ? probeText('probingPanel87', { value1: String(describeWorkRotation(rotation.wcs, fromDeg)) }) : ''
     const off = faceRunOff(result.nominalAxis, deg, rotation?.overMm ?? Math.abs(along.second - along.first))
     const over = `${fmtMachineLength(off.overMm, units)} ${unitLabel(units)}`
     const tapText = off.tap === null
-      ? `The face runs square over ${over} - nothing to tap.`
-      : `The face runs off ${fmtMachineLength(off.runOffMm, units)} ${unitLabel(units)} over ${over} - tap the ${off.end} end ${off.tap}.`
+      ? probeText('probingPanel88', { value1: String(over) })
+      : probeText('probingPanel89', { value1: String(fmtMachineLength(off.runOffMm, units)), value2: String(unitLabel(units)), value3: String(over), value4: String(off.end), value5: String(off.tap) })
     return {
-      title: 'Angle result',
-      resultText: `Measured ${deg.toFixed(3).replace(/^-(0\.0+)$/, '$1')} deg from nominal ${result.nominalAxis}${faceWords}${rotatedWords}.`,
+      title: probeText('probingPanel90'),
+      resultText: probeText('probingPanel91', { value1: String(deg.toFixed(3).replace(/^-(0\.0+)$/, '$1')), value2: String(result.nominalAxis), value3: String(faceWords), value4: String(rotatedWords) }),
       compensation: withPlate(result.compensation),
       values: {},
       angleDeg: deg,
@@ -1095,7 +1016,7 @@ export function ProbingPanel() {
         setWorkStatus({
           kind: 'error',
           text: surfaceMeshEnvelopeError ?? (surfaceMeshPlan.ok
-            ? 'Review and confirm the mesh area, safe Z travel, and probe path before motion.'
+            ? probeText('probingPanel92')
             : surfaceMeshPlan.reason),
         })
         return
@@ -1104,7 +1025,7 @@ export function ProbingPanel() {
       setMeshCycleSafeMachineZ(confirmedSafeMachineZ)
       setBusy(true)
       setMeshSamples([])
-      setWorkStatus({ kind: 'ok', text: `Probing ${surfaceMeshPlan.points.length} mesh points - keep the E-STOP in reach.` })
+      setWorkStatus({ kind: 'ok', text: probeText('probingPanel93', { value1: String(surfaceMeshPlan.points.length) }) })
       try {
         const result = await runSurfaceMeshProbeCycle(
           {
@@ -1152,8 +1073,7 @@ export function ProbingPanel() {
           const zeroWcs = useMachineControl.getState().activeWcs
           setZSetResult({
             routine: 'workZero',
-            text: `Work Z0 set: ${zeroWcs ?? 'the active work offset'} Z0 = `
-              + `${formatPosition({ machine: { z: result.probedMachineZ - receiptPlateMm }, format: (v) => fmtMachineLength(v, units) })} ${unitLabel(units)}.`,
+            text: probeText('probingPanel96', { value1: String(zeroWcs ?? 'the active work offset'), value2: String(formatPosition({ machine: { z: result.probedMachineZ - receiptPlateMm }, format: (v) => fmtMachineLength(v, units) })), value3: String(unitLabel(units)) }),
           })
         }
         const receiptState = useCamStore.getState()
@@ -1161,22 +1081,22 @@ export function ProbingPanel() {
           && controlMachine(receiptState).id === receiptMachineId
         let suffix = ''
         if (result.ok && result.probedMachineZ !== null && !receiptIsCurrent) {
-          suffix = ' The machine connection changed before this result could be retained.'
+          suffix = probeText('probingPanel97')
         } else if (result.ok && result.probedMachineZ !== null && receiptTool !== null) {
           probeStore.getState().setReference(receiptMachineId, receiptTool)
           saveToolRecord()
           const refSetterZ = findTool(probeStore.getState().tableFor(receiptMachineId), receiptTool)?.probedMachineZ ?? null
           useMachineControl.getState().pushConsole(
             'rx',
-            `Work Z0 pad fine contact: ${formatPosition({ machine: { z: result.probedMachineZ }, format: (v) => fmtMachineLength(v, units) })} ${unitLabel(units)}; T${receiptTool} marked as the reference tool. `
+            probeText('probingPanel98', { value1: String(formatPosition({ machine: { z: result.probedMachineZ }, format: (v) => fmtMachineLength(v, units) })), value2: String(unitLabel(units)), value3: String(receiptTool) })
               + (refSetterZ === null
-                ? `T${receiptTool} still needs a setter measurement (Measure T${receiptTool}) before Apply length can work.`
-                : `Its setter reading stays ${formatPosition({ machine: { z: refSetterZ }, format: (v) => fmtMachineLength(v, units) })} ${unitLabel(units)}.`),
+                ? probeText('probingPanel99', { value1: String(receiptTool), value2: String(receiptTool) })
+                : probeText('probingPanel100', { value1: String(formatPosition({ machine: { z: refSetterZ }, format: (v) => fmtMachineLength(v, units) })), value2: String(unitLabel(units)) })),
             'info',
           )
-          suffix = ` T${receiptTool} marked as the reference tool.`
+          suffix = probeText('probingPanel101', { value1: String(receiptTool) })
         } else if (result.ok) {
-          suffix = ' No tool number is active, so no reference tool was marked.'
+          suffix = probeText('probingPanel102')
         }
         runOutcome.current = result.ok && receiptIsCurrent
         setWorkStatus({ kind: result.ok && receiptIsCurrent ? 'ok' : 'error', text: result.message + suffix }, result.stopped === true)
@@ -1198,18 +1118,18 @@ export function ProbingPanel() {
         if (result.ok && result.probedMachineZ !== null) {
           // WO-2123: the number just stored - the tool's Setter Z, or the
           // active length (the datum) when no T number is active.
-          const at = `${formatPosition({ machine: { z: result.probedMachineZ }, format: (v) => fmtMachineLength(v, units) })} ${unitLabel(units)} on the setter`
+          const at = probeText('probingPanel103', { value1: String(formatPosition({ machine: { z: result.probedMachineZ }, format: (v) => fmtMachineLength(v, units) })), value2: String(unitLabel(units)) })
           setZSetResult({
             routine: 'toolZ',
             text: activeTool === null
-              ? `Tool length measured: ${at}, held as the active tool length (no T number is active).`
-              : `Tool length measured: T${activeTool} = ${at}, stored as its Setter Z.`,
+              ? probeText('probingPanel104', { value1: String(at) })
+              : probeText('probingPanel105', { value1: String(activeTool), value2: String(at) }),
           })
         }
         const suffix = result.ok
           ? activeTool === null
-            ? ' Held as active tool length (the datum).'
-            : ` Recorded for active T${activeTool}.`
+            ? probeText('probingPanel106')
+            : probeText('probingPanel107', { value1: String(activeTool) })
           : ''
         runOutcome.current = result.ok
         setWorkStatus({ kind: result.ok ? 'ok' : 'error', text: result.message + suffix }, result.stopped === true)
@@ -1244,7 +1164,7 @@ export function ProbingPanel() {
     // the probe move turns with the work axes, so the contact is not at the
     // plan's position along the face. No record of the touch = the plan's.
     const angleContactAlong: Partial<Record<WorkTouchKey, number>> = {}
-    setWorkStatus({ kind: 'ok', text: `Running ${workKind} cycle - keep the E-STOP in reach.` })
+    setWorkStatus({ kind: 'ok', text: probeText('probingPanel108', { value1: String(workKind) }) })
     try {
       const result = await runFeatureProbeCycle(
         guidedPlan.plan,
@@ -1310,8 +1230,8 @@ export function ProbingPanel() {
           tipRadiusMm: senseRadiusOn(edgeAxis),
         })
         return {
-          title: 'Edge result',
-          resultText: `${result.axis} face ${fmtMachineLength(result.coordinateMm, units)} ${unitLabel(units)}.`,
+          title: probeText('probingPanel109'),
+          resultText: probeText('probingPanel110', { value1: String(result.axis), value2: String(fmtMachineLength(result.coordinateMm, units)), value3: String(unitLabel(units)) }),
           compensation: withPlate(result.compensation),
           values: { [result.axis]: result.coordinateMm },
         } satisfies WorkProbePreview
@@ -1332,15 +1252,14 @@ export function ProbingPanel() {
               return {
                 xMm: xEdge.coordinateMm,
                 yMm: yEdge.coordinateMm,
-                compensation: `Probe tip radius compensation: ${fmtMachineLength(x.tipRadiusMm, units)} ${unitLabel(units)} on the X face (X${cornerXDirection}), `
-                  + `${fmtMachineLength(y.tipRadiusMm, units)} ${unitLabel(units)} on the Y face (Y${cornerYDirection}).`,
+                compensation: probeText('probingPanel113', { value1: String(fmtMachineLength(x.tipRadiusMm, units)), value2: String(unitLabel(units)), value3: String(cornerXDirection), value4: String(fmtMachineLength(y.tipRadiusMm, units)), value5: String(unitLabel(units)), value6: String(cornerYDirection) }),
               }
             })()
           : calculateCorner({ x, y })
         return {
-          title: `${workKind === 'insideCorner' ? 'Inside' : 'Outside'} corner result`,
+          title: probeText('probingPanel116', { value1: String(workKind === 'insideCorner' ? probeText('probingPanel114') : probeText('probingPanel115')) }),
           resultText:
-            `Corner at ${formatPosition({ machine: { x: result.xMm, y: result.yMm }, format: (v) => fmtMachineLength(v, units) })} ${unitLabel(units)}.`,
+            probeText('probingPanel117', { value1: String(formatPosition({ machine: { x: result.xMm, y: result.yMm }, format: (v) => fmtMachineLength(v, units) })), value2: String(unitLabel(units)) }),
           compensation: withPlate(result.compensation),
           values: { X: result.xMm, Y: result.yMm },
         } satisfies WorkProbePreview
@@ -1368,16 +1287,13 @@ export function ProbingPanel() {
           ? {
               ...alongX,
               diameterYmm: calculate({ ...touches, tipRadiusMm: senseRadiusYmm }).diameterYmm,
-              compensation: `Probe tip radius compensation: ${fmtMachineLength(senseRadiusXmm, units)} ${unitLabel(units)} on X, ${fmtMachineLength(senseRadiusYmm, units)} ${unitLabel(units)} on Y `
-                + `${inside ? 'added at both walls' : 'subtracted at both faces'} (2x radius per measured diameter).`,
+              compensation: probeText('probingPanel122', { value1: String(fmtMachineLength(senseRadiusXmm, units)), value2: String(unitLabel(units)), value3: String(fmtMachineLength(senseRadiusYmm, units)), value4: String(unitLabel(units)), value5: String(inside ? 'added at both walls' : 'subtracted at both faces') }),
             }
           : alongX
         return {
-          title: `${ROUTINE_OPTIONS.find((option) => option.kind === workKind)?.label ?? workKind} centre result`,
+          title: probeText('probingPanel123', { value1: String(ROUTINE_OPTIONS.find((option) => option.kind === workKind)?.label ?? workKind) }),
           resultText:
-            `Centre at ${formatPosition({ machine: { x: result.centerXmm, y: result.centerYmm }, format: (v) => fmtMachineLength(v, units) })}; ` +
-            `measured ${rectangular ? 'width' : 'diameter'} X ${fmtMachineLength(result.diameterXmm, units)}, ` +
-            `Y ${fmtMachineLength(result.diameterYmm, units)} ${unitLabel(units)}.`,
+            probeText('probingPanel127', { value1: String(formatPosition({ machine: { x: result.centerXmm, y: result.centerYmm }, format: (v) => fmtMachineLength(v, units) })), value2: String(rectangular ? 'width' : 'diameter'), value3: String(fmtMachineLength(result.diameterXmm, units)), value4: String(fmtMachineLength(result.diameterYmm, units)), value5: String(unitLabel(units)) }),
           compensation: withPlate(result.compensation),
           values: { X: result.centerXmm, Y: result.centerYmm },
         } satisfies WorkProbePreview
@@ -1385,11 +1301,11 @@ export function ProbingPanel() {
       if (workKind === 'angle' && angleRunAlongMm) return angleMeasurement(angleRunAlongMm, workTouches, angleRunRotation)
     } catch (error) {
       return {
-        title: 'Probe result invalid',
-        resultText: error instanceof Error ? error.message : 'The captured touches are invalid.',
+        title: probeText('probingPanel128'),
+        resultText: error instanceof Error ? error.message : probeText('probingPanel129'),
         compensation: withPlate(perAxisRadius
-          ? `Probe tip radius compensation requested: ${fmtMachineLength(senseRadiusXmm, units)} ${unitLabel(units)} on X, ${fmtMachineLength(senseRadiusYmm, units)} ${unitLabel(units)} on Y.`
-          : `Probe tip radius compensation requested: ${fmtMachineLength(senseRadiusXmm, units)} ${unitLabel(units)}.`),
+          ? probeText('probingPanel130', { value1: String(fmtMachineLength(senseRadiusXmm, units)), value2: String(unitLabel(units)), value3: String(fmtMachineLength(senseRadiusYmm, units)), value4: String(unitLabel(units)) })
+          : probeText('probingPanel131', { value1: String(fmtMachineLength(senseRadiusXmm, units)), value2: String(unitLabel(units)) })),
         values: {},
       } satisfies WorkProbePreview
     }
@@ -1458,10 +1374,10 @@ export function ProbingPanel() {
     }
     setWorkStatus(
       applied === writes.length
-        ? { kind: 'ok', text: `${workWcs} ${writes.join('/')} work offset applied after confirmation.` }
+        ? { kind: 'ok', text: probeText('probingPanel132', { value1: String(workWcs), value2: String(writes.join('/')) }) }
         : {
             kind: 'error',
-            text: `${workWcs} accepted ${applied} of ${writes.length} offset writes. Verify the offset table before continuing.`,
+            text: probeText('probingPanel133', { value1: String(workWcs), value2: String(applied), value3: String(writes.length) }),
           },
     )
   }
@@ -1491,20 +1407,19 @@ export function ProbingPanel() {
     if (!calibrationResult) return
     if (!loadedProbe) {
       setCalibrationNote(activeTool === null
-        ? 'No tool is loaded, so there is no Probe tool to write these to. Load the Probe tool and press Confirm.'
-        : `T${activeTool} is not a Probe tool, so there is no Probe tool to write these to. Load the Probe tool and press Confirm.`)
+        ? probeText('probingPanel134')
+        : probeText('probingPanel135', { value1: String(activeTool) }))
       return
     }
     const x = calibrationResult.radiusXmm
     const y = calibrationResult.radiusYmm
     const written = useCamStore.getState().updateTool(loadedProbe.id, { probeEffectiveRadiusX: x, probeEffectiveRadiusY: y })
     const tool = `T${activeTool} ${loadedProbe.name}`
-    setCalibrationNote(written ? `Written to ${tool}.` : `${tool} was not changed - the console says why.`)
+    setCalibrationNote(written ? probeText('probingPanel136', { value1: String(tool) }) : probeText('probingPanel137', { value1: String(tool) }))
     if (written) {
       setWorkStatus({
         kind: 'ok',
-        text: `${tool}: calibrated X radius ${fmtMachineLength(x, units)}, Y radius ${fmtMachineLength(y, units)} ${unitLabel(units)} written`
-          + `${calibrationRun ? ` (${calibrationRun.name})` : ''}.`,
+        text: probeText('probingPanel139', { value1: String(tool), value2: String(fmtMachineLength(x, units)), value3: String(fmtMachineLength(y, units)), value4: String(unitLabel(units)), value5: String(calibrationRun ? ` (${calibrationRun.name})` : '') }),
       })
     }
   }
@@ -1660,6 +1575,7 @@ export function ProbingPanel() {
     if (busy) return
     setFollowRun(null)
     setRunEnd(null)
+    setNotStarted(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the session setters are re-created each render
   }, [operatorSetup, busy])
   // Where the machine is on the plan, worked out as the frame renders from
@@ -1749,9 +1665,12 @@ export function ProbingPanel() {
           return { values }
         })
         // WO-2664: a stopped run's reason on screen gives way to this one.
+        // WO-2768 (owner 10-13, restoring the 10-04 WO-2557 ruling): only over
+        // an existing stop. A first refused start leaves the card still; its
+        // reason is in the console only.
         const now = useProbingSession.getState()
         const refused = (now.machineId === machineId ? now.values.workStatus : null) as ProbeStatus | null | undefined
-        if (now.machineId === machineId && now.values.runEnd === 'stopped' && refused?.kind === 'error') {
+        if (now.machineId === machineId && refused?.kind === 'error' && now.values.runEnd === 'stopped') {
           setStoppedWhy(refused.text)
           setNotStarted(true)
         }
@@ -1796,7 +1715,7 @@ export function ProbingPanel() {
   const startBlocked = !canAct || runGuidedPlanBlocked
   const estopGate = authorize('estop', { connected })
   const stopGate = authorize('stopReset', { connected })
-  const sensingText = (s: ProbeSensing) => (s === 'plate' ? `Plate held against it (${fmtMachineLength(probeCfg.padThickness, units)} ${unitLabel(units)})` : 'Probe touches part')
+  const sensingText = (s: ProbeSensing) => (s === 'plate' ? probeText('probingPanel140', { value1: String(fmtMachineLength(probeCfg.padThickness, units)), value2: String(unitLabel(units)) }) : probeText('probingPanel141'))
   const row = (label: string, control: ReactNode, testId?: string, source?: string) => (
     <div className="pbn-setup-row" data-testid={testId} key={testId ?? label}>
       <span data-tooltip={source}>{label}</span>
@@ -1827,7 +1746,7 @@ export function ProbingPanel() {
     ? [['--', 'front-left'], ['+-', 'front-right'], ['-+', 'back-left'], ['++', 'back-right']]
     : [['++', 'front-left'], ['-+', 'front-right'], ['+-', 'back-left'], ['--', 'back-right']]
   const angleFaceValue = `${angleNominalAxis}${angleProbeDirection}`
-  const setupTitle = `${ROUTINE_OPTIONS.find((o) => o.kind === workKind)?.label ?? workKind} setup`
+  const setupTitle = probeText('probingPanel142', { value1: String(ROUTINE_OPTIONS.find((o) => o.kind === workKind)?.label ?? workKind) })
 
   const confirmNode = (
     <div
@@ -1849,16 +1768,13 @@ export function ProbingPanel() {
                   {calibrationResult
                     ? (
                         <>
-                          <span data-testid="control-calibrate-radii">
-                            Radius X {fmtMachineLength(calibrationResult.radiusXmm, units)}, Y {fmtMachineLength(calibrationResult.radiusYmm, units)} {unitLabel(units)}
+                          <span data-testid="control-calibrate-radii">{probeText('probingPanel145', { value1: jsxTextValue(fmtMachineLength(calibrationResult.radiusXmm, units)), value2: jsxTextValue(fmtMachineLength(calibrationResult.radiusYmm, units)), value3: jsxTextValue(unitLabel(units)) })}
                           </span>
-                          <span data-testid="control-calibrate-ball">
-                            Ball radius {fmtMachineLength(loadedProbe ? loadedProbe.diameter / 2 : tipRadiusMm, units)} {unitLabel(units)}
-                            {loadedProbe ? ` (T${activeTool} diameter / 2)` : ' (the tip radius on the left)'}
+                          <span data-testid="control-calibrate-ball">{probeText('probingPanel149', { value1: jsxTextValue(fmtMachineLength(loadedProbe ? loadedProbe.diameter / 2 : tipRadiusMm, units)), value2: jsxTextValue(unitLabel(units)), value3: jsxTextValue(loadedProbe ? probeText('probingPanel147', { value1: String(activeTool) }) : probeText('probingPanel148')) })}
                           </span>
                         </>
                       )
-                    : <span>No result yet - run the routine first.</span>}
+                    : <span>{probeText('probingPanel151')}</span>}
                   {calibrationNote && <span data-testid="control-calibrate-note">{calibrationNote}</span>}
                 </div>
                 <button
@@ -1866,18 +1782,16 @@ export function ProbingPanel() {
                   className="modal-btn modal-btn-primary"
                   data-testid="control-work-probe-apply"
                   disabled={!calibrationResult || busy}
-                  data-tooltip={loadedProbe ? `Write the X and Y radius to T${activeTool} ${loadedProbe.name}` : undefined}
+                  data-tooltip={loadedProbe ? probeText('probingPanel152', { value1: String(activeTool), value2: String(loadedProbe.name) }) : undefined}
                   onClick={applyCalibration}
-                >
-                  Confirm
-                </button>
+                >{probeText('probingPanel154')}</button>
               </>
             )
         : workKind === 'angle'
           ? (
               <>
                 <div className="pbn-confirm-working" data-testid="control-work-probe-angle-result">
-                  <span data-testid="control-work-probe-angle-measured">{workPreview ? workPreview.resultText : 'No result yet - run the routine first.'}</span>
+                  <span data-testid="control-work-probe-angle-measured">{workPreview ? workPreview.resultText : probeText('probingPanel155')}</span>
                   {angleRotationSet && <span data-testid="control-work-probe-angle-tap">{angleRotationSet.tapText}</span>}
                 </div>
                 {angleRotationSet && angleDegWords(angleRotationSet.toDeg - angleRotationSet.fromDeg) !== '0' && (
@@ -1886,12 +1800,9 @@ export function ProbingPanel() {
                     className="modal-btn modal-btn-primary"
                     data-testid="control-work-probe-apply"
                     disabled={!canAct || angleRotating}
-                    data-tooltip={`Set ${angleRotationSet.wcs}'s rotation in the controller to ${angleDegWords(angleRotationSet.toDeg)} deg`
-                      + ` (it holds ${angleDegWords(angleRotationSet.fromDeg)} deg now), so work ${angleNominalAxis} runs along this face. It stays until cleared.`}
+                    data-tooltip={probeText('probingPanel158', { value1: String(angleRotationSet.wcs), value2: String(angleDegWords(angleRotationSet.toDeg)), value3: String(angleDegWords(angleRotationSet.fromDeg)), value4: String(angleNominalAxis) })}
                     onClick={() => { void applyAngleRotation() }}
-                  >
-                    Rotate {angleRotationSet.wcs} by {angleDegWords(angleRotationSet.toDeg - angleRotationSet.fromDeg)} deg
-                  </button>
+                  >{probeText('probingPanel162', { value1: jsxTextValue(angleRotationSet.wcs), value2: jsxTextValue(angleDegWords(angleRotationSet.toDeg - angleRotationSet.fromDeg)) })}</button>
                 )}
               </>
             )
@@ -1908,9 +1819,7 @@ export function ProbingPanel() {
                     className="modal-btn modal-btn-ghost"
                     data-testid="control-surface-mesh-show"
                     onClick={() => useCamStore.getState().openModal('mesh-viewer')}
-                  >
-                    Show surface
-                  </button>
+                  >{probeText('probingPanel164')}</button>
                 )}
                 <button
                   type="button"
@@ -1918,40 +1827,36 @@ export function ProbingPanel() {
                   data-testid="control-work-probe-apply"
                   disabled={!visibleSurfaceMesh || visibleSurfaceMesh.active || !canAct}
                   data-tooltip={!visibleSurfaceMesh
-                    ? 'No result yet - run the routine first.'
+                    ? probeText('probingPanel165')
                     : visibleSurfaceMesh.active
-                      ? `Mesh ${visibleSurfaceMesh.pointsX} x ${visibleSurfaceMesh.pointsY} applied to ${visibleSurfaceMesh.workOffset} - compensation is active. Clear it from the strip.`
-                      : `Apply the measured ${visibleSurfaceMesh.pointsX} x ${visibleSurfaceMesh.pointsY} mesh to ${visibleSurfaceMesh.workOffset}: the loaded program runs compensated until Clear or a re-zero of ${visibleSurfaceMesh.workOffset}.`}
+                      ? probeText('probingPanel166', { value1: String(visibleSurfaceMesh.pointsX), value2: String(visibleSurfaceMesh.pointsY), value3: String(visibleSurfaceMesh.workOffset) })
+                      : probeText('probingPanel167', { value1: String(visibleSurfaceMesh.pointsX), value2: String(visibleSurfaceMesh.pointsY), value3: String(visibleSurfaceMesh.workOffset), value4: String(visibleSurfaceMesh.workOffset) })}
                   onClick={() => {
                     const applied = applySurfaceMesh()
                     setWorkStatus({ kind: applied.ok ? 'ok' : 'error', text: applied.message })
                   }}
-                >
-                  Confirm
-                </button>
+                >{probeText('probingPanel169')}</button>
               </div>
               )
           : workKind === 'workZero' || workKind === 'toolZ'
             // WO-2123 (Operator, 09-28): Z0 and Tool Z write at once - no Confirm;
             // their last step shows the number they set.
-            ? <span data-testid="control-work-probe-z-set">{zSetResult?.routine === workKind ? zSetResult.text : 'No result yet - run the routine first.'}</span>
+            ? <span data-testid="control-work-probe-z-set">{zSetResult?.routine === workKind ? zSetResult.text : probeText('probingPanel170')}</span>
           : (
               <>
                 {confirmPreview?.secondSide
                   // WO-2122 (Operator, 09-28): on a second side the step shows the
                   // working and exactly what Confirm writes - the same values.
                   ? <SecondSideWorking preview={confirmPreview} wcs={workWcs} units={units} />
-                  :<span>{confirmPreview ? confirmPreview.resultText : 'No result yet - run the routine first.'}</span>}
+                  :<span>{confirmPreview ? confirmPreview.resultText : probeText('probingPanel171')}</span>}
                 <button
                   type="button"
                   className="modal-btn modal-btn-primary"
                   data-testid="control-work-probe-apply"
                   disabled={!confirmPreview || !canAct || Object.keys(confirmPreview.values).length === 0}
-                  data-tooltip={confirmPreview ? `Write ${workWcs}: ${confirmPreview.compensation}` : undefined}
+                  data-tooltip={confirmPreview ? probeText('probingPanel172', { value1: String(workWcs), value2: String(confirmPreview.compensation) }) : undefined}
                   onClick={applyWorkPreview}
-                >
-                  Confirm
-                </button>
+                >{probeText('probingPanel174')}</button>
               </>
             )}
     </div>
@@ -1964,11 +1869,11 @@ export function ProbingPanel() {
         <PositionPanel workLiveRegardlessOfHoming />
         <section className="panel control-panel" data-testid="control-probe-routine-bar">
           <div className="panel-header">
-            <span className="panel-title">Routine</span>
+            <span className="panel-title">{probeText('probingPanel176')}</span>
             <ProbeLamp kind="probe" value={probeSignals.probe} testId="probing-lamp-probe" />
           </div>
           <div className="panel-body">
-            <div className="pbn-routines" aria-label="Workpiece probe routine">
+            <div className="pbn-routines" aria-label={probeText('probingPanel177')}>
               {ROUTINE_OPTIONS.map(({ kind, label }) => (
                 <button
                   key={kind}
@@ -1998,7 +1903,7 @@ export function ProbingPanel() {
                   {secondSideStatement(secondSide.setup.name, secondSidePlan.parentSetupName, secondSidePlan.axis)}
                 </div>
                 {referenceAxes.map((axis) => row(
-                  `Feature ${axis} on ${secondSidePlan.parentSetupName}`,
+                  probeText('probingPanel178', { value1: String(axis), value2: String(secondSidePlan.parentSetupName) }),
                   <NumCell
                     shown={featureFirstSideMm[axis] === undefined ? '' : fmtMachineLength(featureFirstSideMm[axis]!, units)}
                     editable={canEdit}
@@ -2014,7 +1919,7 @@ export function ProbingPanel() {
               </>
             )}
             {secondSideBlocked && <div className="pbn-setup-note" data-testid="control-second-side-blocked">{secondSideBlocked}</div>}
-            {workKind === 'edge' && row('Face', (
+            {workKind === 'edge' && row(probeText('probingPanel179'), (
               <select className="mform-input" data-testid="control-work-probe-edge-face" value={faceValue} disabled={busy}
                 onChange={(event) => {
                   const face = asWorkProbeFace(event.target.value)
@@ -2023,13 +1928,13 @@ export function ProbingPanel() {
                   setEdgeDirection(face[1])
                   resetWorkTouches()
                 }}>
-                <option value="X+">X left (X+)</option>
-                <option value="X-">X right (X-)</option>
-                <option value="Y+">Y front (Y+)</option>
-                <option value="Y-">Y back (Y-)</option>
+                <option value="X+">{probeText('probingPanel181')}</option>
+                <option value="X-">{probeText('probingPanel183')}</option>
+                <option value="Y+">{probeText('probingPanel185')}</option>
+                <option value="Y-">{probeText('probingPanel187')}</option>
               </select>
             ))}
-            {(workKind === 'insideCorner' || workKind === 'outsideCorner') && row('Corner', (
+            {(workKind === 'insideCorner' || workKind === 'outsideCorner') && row(probeText('probingPanel188'), (
               <select className="mform-input" data-testid="control-work-probe-corner" value={cornerValue} disabled={busy}
                 onChange={(event) => {
                   const v = event.target.value
@@ -2040,7 +1945,7 @@ export function ProbingPanel() {
                 {cornerChoices.map(([value, words]) => <option key={value} value={value}>{words}</option>)}
               </select>
             ))}
-            {workKind === 'angle' && row('Face', (
+            {workKind === 'angle' && row(probeText('probingPanel189'), (
               <select className="mform-input" data-testid="control-work-probe-angle-face" value={angleFaceValue} disabled={busy}
                 onChange={(event) => {
                   const face = asWorkProbeFace(event.target.value)
@@ -2049,83 +1954,81 @@ export function ProbingPanel() {
                   setAngleProbeDirection(face[1])
                   resetWorkTouches()
                 }}>
-                {ANGLE_FACES.map((f) => <option key={f.value} value={f.value}>{`${f.face} (probe ${f.probe})`}</option>)}
+                {ANGLE_FACES.map((f) => <option key={f.value} value={f.value}>{probeText('probingPanel190', { value1: String(f.face), value2: String(f.probe) })}</option>)}
               </select>
             ))}
-            {workKind === 'angle' && row('Point 2', (
+            {workKind === 'angle' && row(probeText('probingPanel191'), (
               <select className="mform-input" data-testid="control-work-probe-angle-along-direction" value={angleAlongDirection} disabled={busy}
                 onChange={(event) => { setAngleAlongDirection(event.target.value as WorkProbeDirection); resetWorkTouches() }}>
-                <option value="+">{angleNominalAxis}+ of point 1</option>
-                <option value="-">{angleNominalAxis}- of point 1</option>
+                <option value="+">{probeText('probingPanel193', { value1: jsxTextValue(angleNominalAxis) })}</option>
+                <option value="-">{probeText('probingPanel195', { value1: jsxTextValue(angleNominalAxis) })}</option>
               </select>
             ))}
-            {workKind === 'angle' && row(`Spacing (${unitLabel(units)})`, dimCell(angleSpacingMm, 'control-work-probe-angle-spacing', (text) => commitPositiveDim(text, setAngleSpacingMm)))}
-            {calibrating && row('Reference', (
+            {workKind === 'angle' && row(probeText('probingPanel196', { value1: String(unitLabel(units)) }), dimCell(angleSpacingMm, 'control-work-probe-angle-spacing', (text) => commitPositiveDim(text, setAngleSpacingMm)))}
+            {calibrating && row(probeText('probingPanel197'), (
               <select className="mform-input" data-testid="control-calibrate-reference" value={calibrationRef.id} disabled={busy}
                 onChange={(event) => { selectCalibrationReference(machineId, event.target.value); resetWorkTouches() }}>
                 {calibrationRefs.list.map((ref) => <option key={ref.id} value={ref.id}>{ref.name}</option>)}
               </select>
             ))}
-            {calibrating && row('Name', (
+            {calibrating && row(probeText('probingPanel198'), (
               <input className="mform-input" data-testid="control-calibrate-reference-name" value={calibrationRef.name} disabled={busy}
                 onChange={(event) => editCalibrationReference(machineId, calibrationRef.id, { name: event.target.value })} />
             ))}
-            {calibrating && row('Kind', (
+            {calibrating && row(probeText('probingPanel199'), (
               <select className="mform-input" data-testid="control-calibrate-reference-kind" value={calibrationRef.kind} disabled={busy}
                 onChange={(event) => {
                   editCalibrationReference(machineId, calibrationRef.id, { kind: event.target.value as CalibrationReferenceKind })
                   resetWorkTouches()
                 }}>
-                <option value="outside">Outside (pin, boss)</option>
-                <option value="inside">Inside (ring, bore)</option>
+                <option value="outside">{probeText('probingPanel201')}</option>
+                <option value="inside">{probeText('probingPanel203')}</option>
               </select>
             ))}
-            {calibrating && row(`Diameter (${unitLabel(units)})`, dimCell(calibrationRef.diameterMm, 'control-calibrate-reference-diameter', (text) => commitPositiveDim(text, (mm) => {
+            {calibrating && row(probeText('probingPanel204', { value1: String(unitLabel(units)) }), dimCell(calibrationRef.diameterMm, 'control-calibrate-reference-diameter', (text) => commitPositiveDim(text, (mm) => {
               editCalibrationReference(machineId, calibrationRef.id, { diameterMm: mm })
               resetWorkTouches()
             })))}
             {calibrating && (
               <div className="pbn-setup-row" key="calibrate-actions">
                 <button className="modal-btn modal-btn-ghost" type="button" data-testid="control-calibrate-reference-add" disabled={busy}
-                  onClick={() => { addCalibrationReference(machineId, calibrationRef); resetWorkTouches() }}>
-                  Add reference
-                </button>
+                  onClick={() => { addCalibrationReference(machineId, calibrationRef); resetWorkTouches() }}>{probeText('probingPanel206')}</button>
                 {calibrationRefs.list.length > 1
                   ? <button className="modal-btn modal-btn-ghost" type="button" data-testid="control-calibrate-reference-remove" disabled={busy}
-                      onClick={() => { removeCalibrationReference(machineId, calibrationRef.id); resetWorkTouches() }}>Remove</button>
+                      onClick={() => { removeCalibrationReference(machineId, calibrationRef.id); resetWorkTouches() }}>{probeText('probingPanel208')}</button>
                   : <span />}
               </div>
             )}
-            {(workKind === 'bore' || workKind === 'boss') && row(`Nominal diameter (${unitLabel(units)})`, dimCell(nominalDiameterMm, 'control-work-probe-nominal-diameter', (text) => commitPositiveDim(text, setNominalDiameterMm)))}
-            {(workKind === 'rectPocket' || workKind === 'rectBoss') && row(`Width X (${unitLabel(units)})`, dimCell(rectSizeXmm, 'control-work-probe-nominal-x', (text) => commitPositiveDim(text, setRectSizeXmm)))}
-            {(workKind === 'rectPocket' || workKind === 'rectBoss') && row(`Width Y (${unitLabel(units)})`, dimCell(nominalSizeYmm, 'control-work-probe-nominal-y', (text) => commitPositiveDim(text, setNominalSizeYmm)))}
+            {(workKind === 'bore' || workKind === 'boss') && row(probeText('probingPanel209', { value1: String(unitLabel(units)) }), dimCell(nominalDiameterMm, 'control-work-probe-nominal-diameter', (text) => commitPositiveDim(text, setNominalDiameterMm)))}
+            {(workKind === 'rectPocket' || workKind === 'rectBoss') && row(probeText('probingPanel210', { value1: String(unitLabel(units)) }), dimCell(rectSizeXmm, 'control-work-probe-nominal-x', (text) => commitPositiveDim(text, setRectSizeXmm)))}
+            {(workKind === 'rectPocket' || workKind === 'rectBoss') && row(probeText('probingPanel211', { value1: String(unitLabel(units)) }), dimCell(nominalSizeYmm, 'control-work-probe-nominal-y', (text) => commitPositiveDim(text, setNominalSizeYmm)))}
             {/* The Bore video's setup: where the routine's top comes from - a
                 hole's is work Z0 (WO-2057); the others touch it first (the
                 plan's own top touch). One source: the plan Start probing runs.
                 WO-2266: Boss and Rect boss choose between the two. */}
-            {sideRoutine && row('Top', bossRoutine
+            {sideRoutine && row(probeText('probingPanel212'), bossRoutine
               ? (
                   <select className="mform-input" data-testid="control-work-probe-top" value={topSource} disabled={busy}
                     onChange={(event) => setBossTop(event.target.value as 'touch' | 'workZero')}>
-                    <option value="touch">Touch it first</option>
-                    <option value="workZero">Use work Z0</option>
+                    <option value="touch">{probeText('probingPanel214')}</option>
+                    <option value="workZero">{probeText('probingPanel216')}</option>
                   </select>
                 )
               : (
                   <select className="mform-input" data-testid="control-work-probe-top" value={topSource} disabled={busy} onChange={() => {}}>
-                    <option value={topSource}>{topSource === 'touch' ? 'Touch it first' : 'Use work Z0'}</option>
+                    <option value={topSource}>{topSource === 'touch' ? probeText('probingPanel217') : probeText('probingPanel218')}</option>
                   </select>
                 ))}
             {/* WO-2108: how far that first touch searches down - the routines
                 that touch the top (not a hole's, whose top is work Z0). */}
-            {topTouchRoutine && row(`Search down for the top, up to (${unitLabel(units)})`, (
+            {topTouchRoutine && row(probeText('probingPanel219', { value1: String(unitLabel(units)) }), (
               <NumCell
                 shown={fmtMachineLength(Math.min(topSearchMm, probeCfg.maxTravel), units)}
                 min={1}
                 max={probeCfg.maxTravel}
                 editable={canEdit}
-                ariaLabel="Search down for the top, up to"
-                tooltip={`Search down for the top, up to: ${fmtMachineLength(1, units)} to ${fmtMachineLength(probeCfg.maxTravel, units)} ${unitLabel(units)}`}
+                ariaLabel={probeText('probingPanel220')}
+                tooltip={probeText('probingPanel221', { value1: String(fmtMachineLength(1, units)), value2: String(fmtMachineLength(probeCfg.maxTravel, units)), value3: String(unitLabel(units)) })}
                 onCommit={(text) => {
                   // Reuse the existing canonical parser/range; only the display
                   // changes. Compare raw values so a finer edit is retained.
@@ -2137,30 +2040,30 @@ export function ProbingPanel() {
                   if (raw.value !== result.value && fmtMachineLength(raw.value, units) !== fmtMachineLength(result.value, units)) {
                     const verb = raw.value < 1 ? 'below' : 'above'
                     useCamStore.getState().addConsoleEvent({ severity: 'warning', source: 'input',
-                      message: `Search down for the top, up to: ${fmtMachineLength(raw.value, units)} is ${verb} ${fmtMachineLength(result.value, units)} ${unitLabel(units)} - set to ${fmtMachineLength(result.value, units)} ${unitLabel(units)}` })
+                      message: probeText('probingPanel222', { value1: String(fmtMachineLength(raw.value, units)), value2: String(verb), value3: String(fmtMachineLength(result.value, units)), value4: String(unitLabel(units)), value5: String(fmtMachineLength(result.value, units)), value6: String(unitLabel(units)) }) })
                   }
                   return false // reset the draft even when both round alike
                 }}
               />
             ), 'control-work-probe-top-search')}
-            {sensingRoutine && row(workKind === 'zSurface' ? 'Point 1 sensed by' : workKind === 'workZero' ? 'Z0 sensed by' : 'Sensed by', (
+            {sensingRoutine && row(workKind === 'zSurface' ? probeText('probingPanel223') : workKind === 'workZero' ? probeText('probingPanel224') : probeText('probingPanel225'), (
               <select className="mform-input" data-testid="control-work-probe-sensing" value={sensing} disabled={busy}
                 onChange={(event) => setProbeSensing(machineId, sensingRoutine, event.target.value as ProbeSensing)}>
                 <option value="probe">{sensingText('probe')}</option>
                 <option value="plate">{sensingText('plate')}</option>
               </select>
             ))}
-            {sensingRoutine && workKind !== 'workZero' && sensing === 'plate' && row(`Plate (${unitLabel(units)})`, dimCell(probeCfg.padThickness, 'control-work-probe-plate-thickness', (text) => commitNonNegativeDim(text, (mm) => {
+            {sensingRoutine && workKind !== 'workZero' && sensing === 'plate' && row(probeText('probingPanel226', { value1: String(unitLabel(units)) }), dimCell(probeCfg.padThickness, 'control-work-probe-plate-thickness', (text) => commitNonNegativeDim(text, (mm) => {
               probeStore.getState().setProbeConfig(machineId, { padThickness: mm })
               saveToolRecord()
             })))}
-            {sideRoutine && row(`Probing depth (${unitLabel(units)})`, dimCell(depthBelowTopMm, 'control-work-probe-depth', (text) => commitPositiveDim(text, setDepthBelowTopMm)))}
-            {sideRoutine && row(`Clearance (${unitLabel(units)})`, dimCell(probeCfg.surfaceClearance, 'control-work-probe-face-distance', (text) => commitPositiveDim(text, (value) => {
+            {sideRoutine && row(probeText('probingPanel227', { value1: String(unitLabel(units)) }), dimCell(depthBelowTopMm, 'control-work-probe-depth', (text) => commitPositiveDim(text, setDepthBelowTopMm)))}
+            {sideRoutine && row(probeText('probingPanel228', { value1: String(unitLabel(units)) }), dimCell(probeCfg.surfaceClearance, 'control-work-probe-face-distance', (text) => commitPositiveDim(text, (value) => {
               probeStore.getState().setProbeConfig(machineId, { surfaceClearance: value })
               saveToolRecord()
             })))}
-            {fromTopRoutine && row(`Start within (${unitLabel(units)})`, dimCell(startDistanceMm, 'control-work-probe-start-within', (text) => commitPositiveDim(text, setStartDistanceMm)))}
-            {sideRoutine && row(`Tip radius${activeTool !== null && tipRadiusSource && !tipRadiusSource.startsWith('the default') ? ` (T${activeTool})` : ''} (${unitLabel(units)})`, (
+            {fromTopRoutine && row(probeText('probingPanel229', { value1: String(unitLabel(units)) }), dimCell(startDistanceMm, 'control-work-probe-start-within', (text) => commitPositiveDim(text, setStartDistanceMm)))}
+            {sideRoutine && row(probeText('probingPanel230', { value1: String(activeTool !== null && tipRadiusSource && !tipRadiusSource.startsWith('the default') ? ` (T${activeTool})` : ''), value2: String(unitLabel(units)) }), (
               <NumCell
                 shown={fmtMachineLength(tipRadiusMm, units)}
                 editable={canEdit}
@@ -2174,8 +2077,8 @@ export function ProbingPanel() {
                   return true
                 }}
               />
-            ), undefined, tipRadiusTyped ? 'Tip radius typed on this screen' : (calibratedSource ?? tipRadiusSource) === null ? undefined : `Tip radius from ${calibratedSource ?? tipRadiusSource}`)}
-            {sideRoutine && askToolDiameter && row(`T${activeTool} diameter (${unitLabel(units)})`, (
+            ), undefined, tipRadiusTyped ? probeText('probingPanel231') : (calibratedSource ?? tipRadiusSource) === null ? undefined : probeText('probingPanel232', { value1: String(calibratedSource ?? tipRadiusSource) }))}
+            {sideRoutine && askToolDiameter && row(probeText('probingPanel233', { value1: String(activeTool), value2: String(unitLabel(units)) }), (
               <NumCell
                 shown=""
                 editable={canEdit}
@@ -2190,92 +2093,95 @@ export function ProbingPanel() {
                 }}
               />
             ))}
-            {sideRoutine && workKind !== 'angle' && !calibrating && row('Work offset', (
+            {sideRoutine && workKind !== 'angle' && !calibrating && row(probeText('probingPanel234'), (
               <select className="mform-input" data-testid="control-work-probe-wcs" value={workWcs} disabled={busy}
                 onChange={(event) => setWorkWcs(event.target.value as WcsId)}>
                 {WCS_LIST.map((wcs) => <option key={wcs}>{wcs}</option>)}
               </select>
             ))}
-            {workKind === 'workZero' && probePads.length > 1 && row('Pad choice', (
+            {workKind === 'workZero' && probePads.length > 1 && row(probeText('probingPanel235'), (
               <select className="mform-input" data-testid="control-work-probe-z0-pad-select" value={activeProbePadId} disabled={!canEdit}
                 onChange={(event) => { probeStore.getState().selectProbePad(machineId, event.target.value); saveToolRecord() }}>
                 {probePads.map((pad, index) => (
-                  <option key={pad.id} value={pad.id}>Pad {index + 1} - {fmtMachineLength(pad.thickness, units)} {unitLabel(units)}</option>
+                  <option key={pad.id} value={pad.id}>{probeText('probingPanel237', { value1: jsxTextValue(index + 1), value2: jsxTextValue(fmtMachineLength(pad.thickness, units)), value3: jsxTextValue(unitLabel(units)) })}</option>
                 ))}
               </select>
             ))}
-            {workKind === 'workZero' && workZeroSensing === 'plate' && row(`Plate (${unitLabel(units)})`, dimCell(workZeroCfg.padThickness, 'control-work-probe-z0-pad', (text) => {
+            {workKind === 'workZero' && workZeroSensing === 'plate' && row(probeText('probingPanel238', { value1: String(unitLabel(units)) }), dimCell(workZeroCfg.padThickness, 'control-work-probe-z0-pad', (text) => {
               const mm = parseDimToMm(text, units)
               if (!Number.isFinite(mm)) return false
               probeStore.getState().setProbeConfig(machineId, { padThickness: mm })
               saveToolRecord()
               return true
             }))}
-            {workKind === 'workZero' && row(`Clearance (${unitLabel(units)})`, dimCell(workZeroCfg.surfaceClearance, 'control-work-probe-z0-clearance', (text) => commitPositiveDim(text, (value) => {
+            {workKind === 'workZero' && row(probeText('probingPanel239', { value1: String(unitLabel(units)) }), dimCell(workZeroCfg.surfaceClearance, 'control-work-probe-z0-clearance', (text) => commitPositiveDim(text, (value) => {
               probeStore.getState().setProbeConfig(machineId, { surfaceClearance: value })
               saveToolRecord()
             })))}
-            {workKind === 'workZero' && row('Work offset', <span data-testid="control-probing-target-wcs">{activeWcs ?? 'the active one'}</span>)}
+            {workKind === 'workZero' && row(probeText('probingPanel240'), <span data-testid="control-probing-target-wcs">{activeWcs ?? probeText('probingPanel241')}</span>)}
             {workKind === 'workZero' && <WorkZeroInUse machineId={machineId} wcs={activeWcs} />}
             {workKind === 'zSurface' && !surfaceMeshPlan.ok && <div className="pbn-setup-note" data-testid="control-surface-mesh-plan-error">{surfaceMeshPlan.reason}</div>}
             {workKind === 'zSurface' && surfaceMeshPlan.ok && [
-              row(`Margin (${unitLabel(units)})`, dimCell(meshMarginMm, 'control-surface-mesh-margin', (text) => commitNonNegativeDim(text, (value) => {
+              row(probeText('probingPanel242', { value1: String(unitLabel(units)) }), dimCell(meshMarginMm, 'control-surface-mesh-margin', (text) => commitNonNegativeDim(text, (value) => {
                 setMeshMarginMm(value)
                 setMeshBoundsOverride(null)
               }))),
-              row(`Fade to flat (${unitLabel(units)})`, dimCell(meshFadeMm, 'control-surface-mesh-fade', (text) => commitPositiveDim(text, setMeshFadeMm))),
-              row(`Largest height change (${unitLabel(units)})`, dimCell(meshHeightChangeMm, 'control-surface-mesh-height-change', (text) => commitNonNegativeDim(text, setMeshHeightChangeMm))),
-              row(`Clearance (${unitLabel(units)})`, dimCell(probeCfg.surfaceClearance, 'control-work-probe-face-distance', (text) => commitPositiveDim(text, (value) => {
+              row(probeText('probingPanel243', { value1: String(unitLabel(units)) }), dimCell(meshFadeMm, 'control-surface-mesh-fade', (text) => commitPositiveDim(text, setMeshFadeMm))),
+              row(probeText('probingPanel244', { value1: String(unitLabel(units)) }), dimCell(meshHeightChangeMm, 'control-surface-mesh-height-change', (text) => commitNonNegativeDim(text, setMeshHeightChangeMm))),
+              row(probeText('probingPanel245', { value1: String(unitLabel(units)) }), dimCell(probeCfg.surfaceClearance, 'control-work-probe-face-distance', (text) => commitPositiveDim(text, (value) => {
                 probeStore.getState().setProbeConfig(machineId, { surfaceClearance: value })
                 saveToolRecord()
               }))),
-              row('Points X', <NumCell shown={String(meshPointsX)} editable={canEdit} testId="control-surface-mesh-points-x" onCommit={(text) => commitMeshCount(text, setMeshPointsX)} />),
-              row('Points Y', <NumCell shown={String(meshPointsY)} editable={canEdit} testId="control-surface-mesh-points-y" onCommit={(text) => commitMeshCount(text, setMeshPointsY)} />),
+              row(probeText('probingPanel246'), <NumCell shown={String(meshPointsX)} editable={canEdit} testId="control-surface-mesh-points-x" onCommit={(text) => commitMeshCount(text, setMeshPointsX)} />),
+              row(probeText('probingPanel247'), <NumCell shown={String(meshPointsY)} editable={canEdit} testId="control-surface-mesh-points-y" onCommit={(text) => commitMeshCount(text, setMeshPointsY)} />),
               ...(['minX', 'maxX', 'minY', 'maxY'] as const).map((key) => row(
-                `${key === 'minX' ? 'Min X' : key === 'maxX' ? 'Max X' : key === 'minY' ? 'Min Y' : 'Max Y'} (${unitLabel(units)})`,
+                probeText('probingPanel252', { value1: String(key === 'minX' ? probeText('probingPanel248') : key === 'maxX' ? probeText('probingPanel249') : key === 'minY' ? probeText('probingPanel250') : probeText('probingPanel251')), value2: String(unitLabel(units)) }),
                 dimCell(surfaceMeshPlan.setup.bounds[key], `control-surface-mesh-${key.toLowerCase()}`, (text) => commitDim(text, (value) => updateMeshBound(key, value))),
                 `control-surface-mesh-row-${key}`,
               )),
               <div className="pbn-setup-row" key="mesh-actions">
                 <button className="modal-btn modal-btn-ghost" type="button" data-testid="control-surface-mesh-reset-bounds"
-                  disabled={!canEdit || meshBoundsOverride === null} onClick={() => setMeshBoundsOverride(null)}>
-                  Reset to cutting area
-                </button>
+                  disabled={!canEdit || meshBoundsOverride === null} onClick={() => setMeshBoundsOverride(null)}>{probeText('probingPanel254')}</button>
                 {/* WO-2283: an applied mesh belongs to its work system, whatever program is loaded. */}
                 {activeSurfaceMesh?.active
                   ? <button className="modal-btn modal-btn-danger" type="button" data-testid="control-surface-mesh-disable"
-                      disabled={!canEdit || streaming} onClick={disableSurfaceMesh}>Disable compensation</button>
+                      disabled={!canEdit || streaming} onClick={disableSurfaceMesh}>{probeText('probingPanel256')}</button>
                   : <span />}
               </div>,
             ]}
-            {workKind === 'toolZ' && setterChoices.length > 1 && row('Tool setter routine', (
+            {workKind === 'toolZ' && setterChoices.length > 1 && row(probeText('probingPanel257'), (
               <select className="mform-input" data-testid="control-probe-setter-routine-select" value={chosenSetterRoutine.id} disabled={busy}
                 onChange={(event) => setSetterRoutineId(event.target.value)}>
                 {setterChoices.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             ))}
-            {workKind === 'toolZ' && row('Records', <span data-testid="control-probing-target-wcs">{activeTool === null ? 'the active tool length' : `T${activeTool}`}</span>)}
-            {workKind === 'toolZ' && toolSetter && row('Setter at', <span>{formatPosition({ machine: toolSetter, axes: ['x', 'y'], format: v => `${fmtMachineLength(v, units)} ${unitLabel(units)}` })}</span>)}
+            {workKind === 'toolZ' && row(probeText('probingPanel258'), <span data-testid="control-probing-target-wcs">{activeTool === null ? probeText('probingPanel259') : `T${activeTool}`}</span>)}
+            {workKind === 'toolZ' && toolSetter && row(probeText('probingPanel260'), <span>{formatPosition({ machine: toolSetter, axes: ['x', 'y'], format: v => `${fmtMachineLength(v, units)} ${unitLabel(units)}` })}</span>)}
           </div>
         </section>
       </div>
 
+      {/* Only the drawings yield height to Main's console; the side rails retain their layout. */}
+      <div data-testid="probing-center" style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto', gap: 'var(--space-2)', minWidth: 0, minHeight: 0 }}>
       <StepCard
         scene={runEnd === 'done' && workKind === 'angle'
           ? withMeasuredAngle(scene, workPreview?.angleDeg ?? null)
           : workKind === 'zSurface' ? withMeshResultSentence(withMeshHeights(scene, meshHeights, heightText), visibleSurfaceMesh) : scene}
         shown={shownIndex}
-        onShow={(i) => { setShownStep(i); setRunEnd(null) }}
+        onShow={(i) => { setShownStep(i); setRunEnd(null); setNotStarted(false) }}
         live={live}
         // WO-2587: plan-anchored XY decides whether the tip is in-frame;
         // work Z supplies depth. Tool Z uses a separate schematic setter trip.
         reportedTip={reportedTip}
         runState={runState}
-        stoppedWhy={runState === 'stopped' ? stoppedWhy : null}
-        notStarted={runState === 'stopped' && notStarted}
+        stoppedWhy={runState === 'stopped' || notStarted ? stoppedWhy : null}
+        notStarted={notStarted && runState === 'stopped'}
         confirm={confirmNode}
         refusal={!zRoutine && !guidedPlan.ok ? guidedPlan.reason : null}
       />
+
+      {machineConsole}
+      </div>
 
       <div className="pbn-col pbn-col-right control-col-scroll" data-testid="control-probing-right">
         <JogPanel />
@@ -2289,15 +2195,13 @@ export function ProbingPanel() {
               data-testid="control-probe-run-guided"
               style={{ gridColumn: '1 / -1' }}
               disabled={startBlocked}
-              data-tooltip={runGuidedWhyDisabled ?? `Run ${ROUTINE_OPTIONS.find((o) => o.kind === workKind)?.label ?? workKind}`}
+              data-tooltip={runGuidedWhyDisabled ?? probeText('probingPanel261', { value1: String(ROUTINE_OPTIONS.find((o) => o.kind === workKind)?.label ?? workKind) })}
               onClick={() => void startProbing()}
-            >
-              Start probing
-            </button>
+            >{probeText('probingPanel263')}</button>
             <button type="button" className="modal-btn modal-btn-ghost pbn-start" data-testid="control-probe-pause"
               disabled={!probeActive || stopGate.disabled}
               onClick={() => { if (probePaused) resumeProbing(); else pauseProbing() }}>
-              {probePaused ? 'Resume' : 'Pause'}
+              {probePaused ? probeText('probingPanel264') : probeText('probingPanel265')}
             </button>
             <button
               type="button"
@@ -2306,9 +2210,7 @@ export function ProbingPanel() {
               disabled={stopGate.disabled}
               data-tooltip={stopGate.refusal ?? PROBE_STOP_TOOLTIP}
               onClick={() => { stopProbing() }}
-            >
-              Stop
-            </button>
+            >{probeText('probingPanel267')}</button>
           </div>
         </section>
       </div>

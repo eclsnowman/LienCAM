@@ -564,6 +564,9 @@ interface UiPrefsState {
   uiTheme: UiThemeId
   /** WO-1200: a persisted light/dark axis independent of uiTheme. */
   uiColorMode: UiColorMode
+  /** WO-2672: On by default per the owner, October 13; preserve explicit Off. */
+  programListingColours: boolean
+  setProgramListingColours: (enabled: boolean) => void
 
   /** WO-1154: Auto, or an explicit interface zoom chosen in Settings. */
   uiScale: UiScalePreference
@@ -574,6 +577,14 @@ interface UiPrefsState {
    *  remembered preference both DXF import routes read; browser-local UI setup
    *  like every other field here, never project data. */
   dxfKeepOrigin: boolean
+  projectOpenDirectly: boolean
+  setProjectOpenDirectly: (direct: boolean) => void
+
+  /** WO-2759: Record diagnostic history (Help > Report a problem). On by
+   *  default and disclosed there. Off stops NEW persistent diagnostic events;
+   *  history already stored stays until Clear or expiry. */
+  diagnosticHistoryRecording: boolean
+  setDiagnosticHistoryRecording: (on: boolean) => void
 
   /** WO-1904: set the DXF drawing-origin preference (a boolean has exactly two
    *  answers - a non-boolean write is a caller bug and writes nothing). */
@@ -810,7 +821,12 @@ export const useUiPrefs = create<UiPrefsState>()(
       probeSensingByMachine: {},
       uiScale: UI_SCALE_DEFAULT,
       uiColorMode: DEFAULT_UI_COLOR_MODE,
+      programListingColours: true,
       dxfKeepOrigin: false,
+      projectOpenDirectly: false,
+      setProjectOpenDirectly: (direct) => set({ projectOpenDirectly: direct === true }),
+      diagnosticHistoryRecording: true,
+      setDiagnosticHistoryRecording: (on) => set({ diagnosticHistoryRecording: on === true }),
       language: SOURCE_LANGUAGE,
 
       setPanelWidth: (side, width) =>
@@ -1028,6 +1044,8 @@ export const useUiPrefs = create<UiPrefsState>()(
         set(isUiThemeId(theme) ? { uiTheme: theme } : {}),
       setUiColorMode: (mode) =>
         set(isUiColorMode(mode) ? { uiColorMode: mode } : {}),
+      setProgramListingColours: (enabled) =>
+        set(typeof enabled === 'boolean' ? { programListingColours: enabled } : {}),
 
       // WO-1122: a boolean has exactly two answers, so there is nothing to
       // validate - anything else arriving here is a caller bug and writing
@@ -1183,10 +1201,14 @@ export const useUiPrefs = create<UiPrefsState>()(
           uiTheme: isUiThemeId(p.uiTheme) ? p.uiTheme : DEFAULT_UI_THEME,
           uiScale: isUiScalePreference(p.uiScale) ? p.uiScale : UI_SCALE_DEFAULT,
           uiColorMode: isUiColorMode(p.uiColorMode) ? p.uiColorMode : DEFAULT_UI_COLOR_MODE,
+          programListingColours: typeof p.programListingColours === 'boolean' ? p.programListingColours : true,
           // WO-1904: absent/tampered falls back to the shipped default (false
           // = re-centre), so every pre-WO blob keeps today's DXF behaviour.
           dxfKeepOrigin:
             typeof p.dxfKeepOrigin === 'boolean' ? p.dxfKeepOrigin : false,
+          projectOpenDirectly: p.projectOpenDirectly === true,
+          // WO-2759: absent or tampered keeps the disclosed default (on).
+          diagnosticHistoryRecording: p.diagnosticHistoryRecording !== false,
           // WO-2319: absent, or a language whose catalog is gone, shows English.
           language: isAvailableLanguage(p.language) ? p.language : SOURCE_LANGUAGE,
           // WO-137: a non-number, out-of-range, or absent persisted value

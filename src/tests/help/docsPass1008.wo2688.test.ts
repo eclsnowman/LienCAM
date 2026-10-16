@@ -28,8 +28,9 @@ describe('WO-2688 landed behavior in the real Help topics', () => {
 
   it('replaces probe stop reasons without inferring causes', () => {
     const text = prose('probing-tab')
-    expect(text).toContain('full reason in red on the probing screen')
-    expect(text).toContain('a refused start shows Did not start and its reason')
+    // Accepted WO-2665 keeps the complete diagnostic in the shared Console.
+    expect(text).toContain('expand the Console to read the full diagnostic')
+    expect(text).toContain('a refused start shows Did not start. The picture gives a brief reason')
     expect(text).toContain('A new stop or refused start replaces the previous reason')
     expect(text).toContain('without guessing a cause')
   })
@@ -43,12 +44,14 @@ describe('WO-2688 landed behavior in the real Help topics', () => {
     expect(prose('control-tab-overview')).toContain('fit side by side at the default panel width')
   })
 
-  it('documents exact UCCNC overrides and limits output indicators to Vacuum', () => {
+  it('documents exact UCCNC overrides and optional macro output readback', () => {
     const text = prose('control-run-job')
     expect(text).toContain('UCCNC sends the exact percentage in one command; GRBL uses its reset and steps')
     expect(text).toContain('print no clamp warning; a confirmed different value still gets a clamp message')
     expect(text).toContain("The Vacuum button lights from the controller's reported output state")
-    expect(text).toContain('Macro buttons do not yet share this indicator behavior')
+    // Accepted WO-2677 replaces the earlier Vacuum-only limitation.
+    expect(text).toContain('Drives output is optional and starts at none')
+    expect(text).toContain('an unlit button alone does not prove the physical output is off')
     expect(text).toContain('Line 5: Vacuum on (M7, port 3 pin 16)')
   })
 

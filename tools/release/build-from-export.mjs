@@ -3,7 +3,6 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -50,13 +49,66 @@ export function describeArtifacts(directory, version) {
 function command(root, out, label, args, env = {}) {
   const log = join(out, `${label}.log`)
   console.log(`${label}: ${args.join(' ')}`)
+  const childEnv = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', CSC_IDENTITY_AUTO_DISCOVERY: 'false', ...env }
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE']) delete childEnv[key]
   const run = spawnSync(process.execPath, args, {
     cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024,
     // Inherited Node resolution hooks must not reach the private install.
-    env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', CSC_IDENTITY_AUTO_DISCOVERY: 'false', ...env },
+    env: childEnv,
   })
   writeFileSync(log, `${run.stdout ?? ''}${run.stderr ?? ''}`)
   if (run.error || run.status !== 0) throw new Error(`${label} failed (${run.status}): ${run.error?.message ?? `see ${log}`}`)
+}
+
+// A retained export below the private checkout needs explicit resolution boundaries.
+// The Node hook covers npm/build-tool imports; the Vite plugin covers its own resolver.
+export function prepareExportBuildIsolation(root, npm) {
+  const nodeGuard = join(root, '.liencam-release-node-guard.mjs')
+  const viteConfig = join(root, '.liencam-release-vite.config.mjs')
+  const config = ['vite.config.mts', 'vite.config.ts', 'vite.config.mjs', 'vite.config.js']
+    .find(name => existsSync(join(root, name))) ?? 'vite.config.mts'
+  writeFileSync(nodeGuard, `import { registerHooks } from 'node:module';
+import { realpathSync } from 'node:fs';
+import { relative, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const roots = ${JSON.stringify([root, dirname(dirname(npm))])}.map(p => realpathSync(p));
+registerHooks({ resolve(specifier, context, nextResolve) {
+  const result = nextResolve(specifier, context);
+  if (result.url.startsWith('file:')) {
+    const file = realpathSync(fileURLToPath(result.url));
+    if (!roots.some(root => { const rel = relative(root, file); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); }))
+      throw new Error('Release isolation: Node resolved outside export/toolchain: ' + file);
+  }
+  return result;
+} });
+`)
+  writeFileSync(viteConfig, `import original from ${JSON.stringify('./' + config)};
+import { mergeConfig } from 'vite';
+import { realpathSync } from 'node:fs';
+import { relative, isAbsolute } from 'node:path';
+const root = realpathSync(${JSON.stringify(root)});
+function check(id) {
+  const file = id.split('?')[0];
+  if (!isAbsolute(file)) return;
+  const rel = relative(root, realpathSync(file));
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('Release isolation: Vite resolved outside export: ' + file);
+}
+export default async env => mergeConfig(typeof original === 'function' ? await original(env) : await original, {
+  plugins: [{ name: 'liencam-release-isolation', enforce: 'pre',
+    async resolveId(source, importer, options) {
+      const result = await this.resolve(source, importer, { ...options, skipSelf: true });
+      if (result && !result.external) check(result.id);
+      return result;
+    },
+    load(id) { check(id); return null; },
+  }],
+});
+`)
+  return {
+    viteConfig,
+    env: { GIT_CEILING_DIRECTORIES: dirname(root), NODE_PATH: '',
+      NODE_OPTIONS: `--import=${pathToFileURL(nodeGuard).href}` },
+  }
 }
 
 // WO-2463: the export has no .git, so the build is told which commit it is.
@@ -132,7 +184,8 @@ export async function smokePackagedApp({ appPath, outDir, version, commit, examp
     await journey.step(2, 'packaged About version and build commit', async () => {
       const page = journey.page
       await page.getByTestId('toolbar-help').click()
-      await page.getByRole('button', { name: 'About LienCAM', exact: true }).click()
+      // WO-2831 put an About button in the header too; this is Help's.
+      await page.getByTestId('help-center').getByRole('button', { name: 'About LienCAM', exact: true }).click()
       aboutText = await page.getByTestId('about-modal').locator('.about-version').innerText()
       assert(aboutText === `Version ${version}`, `About reads ${aboutText}; expected Version ${version}`)
       aboutCommit = await page.getByTestId('about-modal').locator('.about-build dd').first().innerText() // "Build commit"
@@ -176,12 +229,16 @@ export async function smokePackagedApp({ appPath, outDir, version, commit, examp
 export async function buildFromExport({ source = 'HEAD', version = RELEASE_VERSION, outDir,
   root = ROOT, platform = process.platform, exporter, run = command, smoke = smokePackagedApp } = {}) {
   if (platform !== 'win32') throw new Error('Windows installer builds require Windows')
-  const out = resolve(outDir ?? mkdtempSync(join(tmpdir(), 'liencam-release-evidence-')))
+  const evidenceRoot = resolve(root, 'archive', 'evidence')
+  if (outDir == null) mkdirSync(evidenceRoot, { recursive: true })
+  const out = resolve(outDir ?? mkdtempSync(join(evidenceRoot, 'release-')))
   mkdirSync(out, { recursive: true })
   if (readdirSync(out).length) throw new Error(`Evidence output must be empty: ${out}`)
   // A plain new directory, never a git worktree and never a dependency link.
   // Retained on success/failure so the artifact and build inputs stay reviewable.
-  const tree = mkdtempSync(join(tmpdir(), 'liencam-release-export-'))
+  const exportRoot = resolve(root, 'archive', 'retired-exports')
+  mkdirSync(exportRoot, { recursive: true })
+  const tree = mkdtempSync(join(exportRoot, 'release-build-'))
   const record = { version, source, exportedTree: tree, artifactDirectory: join(tree, 'release') }
   writeFileSync(join(out, 'inputs.json'), `${JSON.stringify(record, null, 2)}\n`)
   try {
@@ -193,11 +250,13 @@ export async function buildFromExport({ source = 'HEAD', version = RELEASE_VERSI
     writeFileSync(join(out, 'export-isolation.json'), `${JSON.stringify({ forbiddenPaths: [], links: [], ...exported }, null, 2)}\n`)
     stampVersion(tree, version)
     const npm = process.env.npm_execpath ?? join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js')
-    run(tree, out, 'npm-ci', [npm, 'ci', '--no-audit', '--no-fund'])
+    const isolation = prepareExportBuildIsolation(tree, npm)
+    run(tree, out, 'npm-ci', [npm, 'ci', '--no-audit', '--no-fund'], isolation.env)
     record.buildCommit = buildCommitLabel(exported.commit)
-    run(tree, out, 'build', [npm, 'run', 'build'], releaseBuildEnv(exported.commit))
+    run(tree, out, 'build', [npm, 'run', 'build', '--', '--config', isolation.viteConfig],
+      { ...isolation.env, ...releaseBuildEnv(exported.commit) })
     record.examples = shippedExamples(tree)
-    run(tree, out, 'package', [join(tree, 'node_modules/electron-builder/cli.js'), '--win', 'nsis', 'portable', '--x64', '-c.forceCodeSigning=false'])
+    run(tree, out, 'package', [join(tree, 'node_modules/electron-builder/cli.js'), '--win', 'nsis', 'portable', '--x64', '-c.forceCodeSigning=false'], isolation.env)
     const resources = join(tree, 'release/win-unpacked/resources')
     const listing = []
     const visit = (directory, prefix = '') => readdirSync(directory, { withFileTypes: true }).forEach(entry => {

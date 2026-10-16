@@ -16,11 +16,18 @@
 // With NO edits both return the input untouched - the same ArrayBuffer object,
 // not a copy - so an unedited STL is byte-for-byte what it is today
 // (ADR-0051 s1.1).
+//
+// WO-2763: zero-area triangles (an OpenCascade-meshed dome has one at the
+// sphere pole) are left out of the mesh before anything else sees it - a facet
+// with no area is no geometry, and leaving it in made the Model screen take no
+// pick on the part. Facet ids stay file triangle indices. A file without any
+// is untouched: the mesh is importStl's own object.
 
+import { dropZeroAreaTriangles } from '../analysis';
 import { exportBinaryStl, importStl } from '../stl';
 import type { MeshBuffers, StlImportResult } from '../types';
 import { replayMeshEdits } from './replay';
-import { sourceFacetIdsOf } from './idView';
+import { NO_SOURCE_FACET, sourceFacetIdsOf } from './idView';
 import type { MeshEditRecord, MeshEditReplayStop } from './types';
 
 export interface ResolvedStlMesh {
@@ -43,18 +50,22 @@ export function resolveEditedStlMesh(
   edits: readonly MeshEditRecord[] | undefined,
 ): ResolvedStlMesh {
   const source = importStl(bytes);
+  const base = dropZeroAreaTriangles(source.mesh);
+  const baseIds = base.keptTriangles ?? sourceFacetIdsOf(source.mesh);
   if (!hasEdits(edits)) {
     return {
-      mesh: source.mesh,
-      sourceFacetIds: sourceFacetIdsOf(source.mesh),
+      mesh: base.mesh,
+      sourceFacetIds: baseIds,
       source,
       appliedCount: 0,
     };
   }
-  const replayed = replayMeshEdits(source.mesh, edits);
+  const replayed = replayMeshEdits(base.mesh, edits);
   return {
     mesh: replayed.mesh,
-    sourceFacetIds: replayed.sourceFacetIds,
+    sourceFacetIds: base.keptTriangles === null
+      ? replayed.sourceFacetIds
+      : replayed.sourceFacetIds.map((id) => (id === NO_SOURCE_FACET ? NO_SOURCE_FACET : baseIds[id])),
     source,
     appliedCount: replayed.appliedCount,
     ...(replayed.stopped ? { stopped: replayed.stopped } : {}),

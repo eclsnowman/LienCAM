@@ -60,6 +60,16 @@ function commitNumericField(testId: string, raw: string): void {
   fireEvent.blur(input)
 }
 
+// WO-2858: the hover readout names the body ("Face on Hole F2"), never a face
+// key. The hovered keys are the hole's own faces the pick highlight paints.
+function hoveredHoleFaceId(): string {
+  expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe('Face on Hole F2')
+  const hovered = (hooks().getBodyFaceIds('F2') ?? []).filter((id) => hooks().getPickHighlightState(id) === 'hovered')
+  expect(hovered.length).toBeGreaterThan(0)
+  expect(hovered.every((id) => id.startsWith('F2:HOL:'))).toBe(true)
+  return hovered[0]
+}
+
 function hooks(): SolidsWorkbenchHooks {
   const value = window.__solidsWorkbenchHooks
   if (value === undefined) throw new Error('__solidsWorkbenchHooks not installed')
@@ -203,8 +213,7 @@ describe('SolidsWorkbenchPage resize-hole: armed in-viewport pick (WO UI-58, pri
     h.runtime().rayOverride = { origin: { x: 20, y: 5, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
     fireEvent.pointerMove(screen.getByTestId('solids-workbench-canvas'))
     await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
-    const hoveredFaceId = screen.getByTestId('solids-workbench-hover-readout').textContent?.match(/^Face (\S+) on/)?.[1]
-    expect(hoveredFaceId).not.toBeUndefined()
+    const hoveredFaceId = hoveredHoleFaceId()
     // FAILS-IF the pickModeArmed enumeration (:2490 preflight site) drops the resize-hole term: the
     // repaint effect (re-run by the SAME pickHoverInfo change that produced the readout above) would
     // paint from the empty bridge.selection instead and this reads back 'none'.
@@ -977,8 +986,7 @@ describe('SolidsWorkbenchPage resize-hole: constructed interleave for the post-a
     h.runtime().rayOverride = { origin: { x: 20, y: 5, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
     fireEvent.pointerMove(screen.getByTestId('solids-workbench-canvas'))
     await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
-    const hoveredFaceId = screen.getByTestId('solids-workbench-hover-readout').textContent?.match(/^Face (\S+) on/)?.[1]
-    expect(hoveredFaceId).not.toBeUndefined()
+    const hoveredFaceId = hoveredHoleFaceId()
     fireEvent.click(screen.getByTestId('solids-workbench-canvas'))
     await waitFor(() => expect(screen.getByTestId('resize-hole-anchor-entry')).toBeTruthy(), { timeout: 20_000 })
     expect(screen.getByTestId('resize-hole-anchor-entry-current').textContent).toContain('6 mm')

@@ -281,13 +281,16 @@ describe('Offset Plane workbench product seam', () => {
     runtime.rayOverride = { origin: { x: 100, y: 0, z: 5 }, direction: { x: -1, y: 0, z: 0 } }
     const canvas = screen.getByTestId('solids-workbench-canvas')
     fireEvent.pointerMove(canvas)
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain(positiveXFaceId))
+    // WO-2858: the readout names the body, never the face key; the highlight names the face.
+    await waitFor(() => expect(hooks().getPickHighlightState(positiveXFaceId)).toBe('hovered'))
+    expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe('Face on Extrude F1')
     expect(canvas.style.cursor).toBe('crosshair')
-    expect(hooks().getPickHighlightState(positiveXFaceId)).toBe('hovered')
 
     fireEvent.click(canvas)
     await waitFor(() => expect((screen.getByTestId('offset-plane-source') as HTMLSelectElement).value).toBe('datum:RP1-support'))
-    expect(screen.getByTestId('offset-plane-source').textContent).toContain(`Face ${positiveXFaceId} of`)
+    // WO-2858: the support option describes the face and names its body, never its key.
+    expect(screen.getByTestId('offset-plane-source').textContent).toContain('flat face facing +X at X 40.00 mm of Extrude F1')
+    expect(screen.getByTestId('offset-plane-source').textContent).not.toContain(positiveXFaceId)
     expect(hooks().getPickHighlightState(positiveXFaceId)).toBe('selected')
     expect(hooks().dag.getNode('datum:RP1-support')).toBeUndefined()
     expect(hooks().history.size()).toBe(historySizeBefore)
@@ -296,12 +299,13 @@ describe('Offset Plane workbench product seam', () => {
     // source identity forces the preview session to capture this second face.
     runtime.rayOverride = { origin: { x: -100, y: 0, z: 5 }, direction: { x: 1, y: 0, z: 0 } }
     fireEvent.pointerMove(canvas)
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain(negativeXFaceId))
-    expect(hooks().getPickHighlightState(negativeXFaceId)).toBe('hovered')
+    await waitFor(() => expect(hooks().getPickHighlightState(negativeXFaceId)).toBe('hovered'))
+    expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe('Face on Extrude F1')
     fireEvent.click(canvas)
     const supportId = 'datum:RP1-support-2'
     await waitFor(() => expect((screen.getByTestId('offset-plane-source') as HTMLSelectElement).value).toBe(supportId))
-    expect(screen.getByTestId('offset-plane-source').textContent).toContain(`Face ${negativeXFaceId} of`)
+    expect(screen.getByTestId('offset-plane-source').textContent).toContain('flat face facing -X at X 0.00 mm of Extrude F1')
+    expect(screen.getByTestId('offset-plane-source').textContent).not.toContain(negativeXFaceId)
     expect(hooks().getPickHighlightState(negativeXFaceId)).toBe('selected')
     expect(hooks().dag.getNode(supportId)).toBeUndefined()
     expect(hooks().history.size()).toBe(historySizeBefore)
@@ -367,7 +371,9 @@ describe('Offset Plane workbench product seam', () => {
     fireEvent.click(screen.getByTestId('solids-workbench-canvas'))
     const supportId = 'datum:RP1-support'
     await waitFor(() => expect((screen.getByTestId('offset-plane-source') as HTMLSelectElement).value).toBe(supportId))
-    expect(screen.getByTestId('offset-plane-source').textContent).toContain(`Face ${faceId} of Hole F2`)
+    // WO-2858: the support option describes the face and names its body, never its key.
+    expect(screen.getByTestId('offset-plane-source').textContent).toContain('flat face facing +X at X 40.00 mm of Hole F2')
+    expect(screen.getByTestId('offset-plane-source').textContent).not.toContain(faceId)
     expect(hooks().dag.getNode(supportId)).toBeUndefined()
     expect(hooks().history.size()).toBe(historySizeBefore)
 
@@ -457,12 +463,14 @@ describe('Offset Plane workbench product seam', () => {
     }
     const canvas = screen.getByTestId('solids-workbench-canvas')
     fireEvent.pointerMove(canvas)
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain(pickFace.id))
-    expect(hooks().getPickHighlightState(pickFace.id)).toBe('hovered')
+    // WO-2858: the readout names the imported body, never the face key.
+    await waitFor(() => expect(hooks().getPickHighlightState(pickFace.id)).toBe('hovered'))
+    expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe('Face on Imported fixture')
     fireEvent.click(canvas)
     const supportId = 'datum:RP1-support'
     await waitFor(() => expect((screen.getByTestId('offset-plane-source') as HTMLSelectElement).value).toBe(supportId))
-    expect(screen.getByTestId('offset-plane-source').textContent).toMatch(/Face .+ of Imported fixture/)
+    expect(screen.getByTestId('offset-plane-source').textContent).toContain('flat face facing down at Z -18.00 mm of Imported fixture')
+    expect(screen.getByTestId('offset-plane-source').textContent).not.toContain(pickFace.id)
     expect(hooks().dag.getNode(supportId)).toBeUndefined()
     expect(hooks().history.size()).toBe(historySizeBefore)
 
@@ -546,10 +554,12 @@ describe('Offset Plane workbench product seam', () => {
     expect(canvas.style.cursor).toBe('default')
     expect(hooks().getPickHighlightState(negativeXFaceId)).toBe('none')
     fireEvent.click(canvas)
+    // WO-2858: the refusal names the face by its shape and body, never its key.
     await waitFor(() => {
-      const refusal = useCamStore.getState().consoleEvents.find((event) => event.message.includes(negativeXFaceId))
-      expect(refusal?.message).toMatch(/not planar/i)
+      const refusal = useCamStore.getState().consoleEvents.find((event) => event.message.startsWith('Offset Plane refused:'))
+      expect(refusal?.message).toBe('Offset Plane refused: round face along Z of Extrude F1 is not planar or has a degenerate frame.')
     })
+    expect(useCamStore.getState().consoleEvents.some((event) => event.message.includes(negativeXFaceId))).toBe(false)
     expect((screen.getByTestId('offset-plane-source') as HTMLSelectElement).value).toBe('datum:XY')
     expect(hooks().dag.nodeIds().filter((id) => id.includes('support'))).toEqual([])
     expect(hooks().history.size()).toBe(historySizeBefore)

@@ -1,3 +1,4 @@
+import { useText } from '../../../../i18n'
 import { useState } from 'react'
 import { useSketcherTool } from '../useSketcherTool'
 import { sketcherTools } from '../toolController'
@@ -52,6 +53,7 @@ function editPathPatternChain(edit: (chain: PathPatternChainState) => PathPatter
  * and the document now arrive through the host port.
  */
 export function SketchConfirmOverlay({ port }: { port: SketcherOverlaysPort }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const isSketch = port.useIsSketchActive()
   const tool = useSketcherTool((s) => s.tool)
   const chain = useSketcherTool((s) => s.chain)
@@ -184,7 +186,7 @@ export function SketchConfirmOverlay({ port }: { port: SketcherOverlaysPort }) {
   }
 
   return (
-    <div className="sketch-confirm-overlay" role="dialog" aria-label={`${model.title} confirm`}>
+    <div className="sketch-confirm-overlay" role="dialog" aria-label={workbenchText('SketchConfirmOverlay.confirm', { title: String(model.title) })}>
       <span className="sketch-confirm-title">{model.title}</span>
       {model.modeOptions && (
         <span className="sketch-confirm-field sketch-confirm-chamfer-modes">
@@ -210,9 +212,9 @@ export function SketchConfirmOverlay({ port }: { port: SketcherOverlaysPort }) {
               type="button"
               className="sketch-prompt-btn"
               onClick={() => editChamferChain((c) => chamferToggleSwap(c))}
-              data-tooltip="Swap which leg gets d1 / the distance"
+              data-tooltip={workbenchText('SketchConfirmOverlay.swapWhichLegGetsD1TheDistance')}
             >
-              <span>Swap</span>
+              <span>{workbenchText('SketchConfirmOverlay.swap')}</span>
             </button>
           )}
         </span>
@@ -324,7 +326,7 @@ export function SketchConfirmOverlay({ port }: { port: SketcherOverlaysPort }) {
           className="sketch-prompt-btn sketch-prompt-btn-confirm"
           onClick={() => { if (hasFieldError) return; apply() }}
           disabled={hasFieldError}
-          data-tooltip={`${model.applyLabel} (Enter)`}
+          data-tooltip={workbenchText('SketchConfirmOverlay.enter', { applyLabel: String(model.applyLabel) })}
         >
           <Check size={12} aria-hidden />
           <span>{model.applyLabel}</span>
@@ -332,10 +334,10 @@ export function SketchConfirmOverlay({ port }: { port: SketcherOverlaysPort }) {
         <button
           className="sketch-prompt-btn"
           onClick={escape}
-          data-tooltip="Cancel (Esc) - back one step"
+          data-tooltip={workbenchText('SketchConfirmOverlay.cancelEscBackOneStep')}
         >
           <X size={12} aria-hidden />
-          <span>Cancel</span>
+          <span>{workbenchText('SketchConfirmOverlay.cancel')}</span>
         </button>
       </span>
     </div>

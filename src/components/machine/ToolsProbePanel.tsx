@@ -1,3 +1,7 @@
+import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 // ToolsProbePanel - sender-side tool table + fixed-pad Z probe (MACHINE-
 // CONTROL stage 10). One panel, two sections, per the plan: the per-machine
 // tool length table (reference star, G43.1 apply, inline-editable cells) and
@@ -16,6 +20,7 @@ import { useMemo, useState } from 'react'
 import { ArrowDownToLine, Plus, Star, Trash2 } from 'lucide-react'
 import { controlMachine, useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
+import { currentToolOf } from '../../lib/machine/currentTool'
 import { saveMachineToolRecord, useMachineToolTable } from '../../store/machineToolTableStore'
 import {
   findTool,
@@ -67,6 +72,7 @@ export const TOOLS_JOG_PANEL_KEY = 'control-tools-jog'
 export const TOOLS_PANEL_MIN_PX = 440
 
 export function ToolsProbePanel() {
+  useText('probing-screens')
   const machine = useCamStore(controlMachine)
   const hasSetter = Boolean(fixedToolSetterPosition(machine))
   const machineId = machine?.id ?? 'default'
@@ -103,6 +109,9 @@ export function ToolsProbePanel() {
   const machineState = useMachineControl((s) => s.machineState)
   const jobPhase = useMachineControl((s) => s.job.phase)
   const activeTool = useMachineControl((s) => s.activeTool)
+  // WO-2878: the live-tool star names the same tool as the Control chip and
+  // TOOL glance. Measuring still defaults to the store's activeTool.
+  const currentTool = useMachineControl(currentToolOf)
   const tlo = useMachineControl((s) => s.tlo)
   const machineZ = useMachineControl((s) => s.mpos?.z)
   const probeSignals = useProbeSignals()
@@ -119,15 +128,15 @@ export function ToolsProbePanel() {
   // WO-2008: a disabled probe control says WHY. A tool-change hold parks the
   // machine in Hold, which is the state that used to grey Measure with no word.
   const whyNotIdle = !connected
-    ? 'Connect to the machine first.'
+    ? probeText('toolsProbePanel1')
     : busy
-      ? 'A probe is running - wait for it to finish.'
+      ? probeText('toolsProbePanel2')
       : machineState === 'hold'
-        ? 'A hold (a tool change waiting on you) owns the machine - press Cycle Start to finish it, or Stop, then measure.'
+        ? probeText('toolsProbePanel3')
         : streaming
-          ? 'A program is running - Feed Hold, then Stop, before measuring.'
+          ? probeText('toolsProbePanel4')
           : machineState !== 'idle'
-            ? `The machine is ${machineState} - wait until it is idle.`
+            ? probeText('toolsProbePanel5', { value1: String(machineState) })
             : null
   const addToolText = addText.trim()
   const addToolInvalid = !Number.isInteger(Number(addToolText)) || addToolText === ''
@@ -168,13 +177,13 @@ export function ToolsProbePanel() {
       const receiptIsCurrent = (receiptState.control.sessionGeneration ?? 0) === receiptGeneration
         && controlMachine(receiptState).id === receiptMachineId
       if (result.ok && result.contacts && receiptIsCurrent) {
-        const label = mode === 'measureTool' ? 'Measure tool' : 'Probe work Z0'
+        const label = mode === 'measureTool' ? probeText('toolsProbePanel6') : probeText('toolsProbePanel7')
         const fast = result.contacts.fastMachineZ === null
-          ? 'FAST machine Z unavailable'
-          : `FAST machine Z ${fmtMachineLength(result.contacts.fastMachineZ, units)} ${unitLabel(units)}`
+          ? probeText('toolsProbePanel8')
+          : probeText('toolsProbePanel9', { value1: String(fmtMachineLength(result.contacts.fastMachineZ, units)), value2: String(unitLabel(units)) })
         useMachineControl.getState().pushConsole(
           'rx',
-          `${label} contacts: ${fast}; FINE machine Z ${fmtMachineLength(result.contacts.fineMachineZ, units)} ${unitLabel(units)}.`,
+          probeText('toolsProbePanel10', { value1: String(label), value2: String(fast), value3: String(fmtMachineLength(result.contacts.fineMachineZ, units)), value4: String(unitLabel(units)) }),
           'info',
         )
       }
@@ -197,10 +206,10 @@ export function ToolsProbePanel() {
         const refSetterZ = findTool(store.getState().tableFor(receiptMachineId), receiptTool)?.probedMachineZ ?? null
         useMachineControl.getState().pushConsole(
           'rx',
-          `Work Z0 pad fine contact: machine Z ${fmtMachineLength(result.probedMachineZ, units)} ${unitLabel(units)}; T${receiptTool} marked as the reference tool. `
+          probeText('toolsProbePanel11', { value1: String(fmtMachineLength(result.probedMachineZ, units)), value2: String(unitLabel(units)), value3: String(receiptTool) })
             + (refSetterZ === null
-              ? `T${receiptTool} still needs a setter measurement (Measure T${receiptTool}) before Apply length can work.`
-              : `Its setter reading stays machine Z ${fmtMachineLength(refSetterZ, units)} ${unitLabel(units)}.`),
+              ? probeText('toolsProbePanel12', { value1: String(receiptTool), value2: String(receiptTool) })
+              : probeText('toolsProbePanel13', { value1: String(fmtMachineLength(refSetterZ, units)), value2: String(unitLabel(units)) })),
           'info',
         )
       } else if (result.ok && result.probedMachineZ !== null && receiptIsCurrent && receiptTool !== null) {
@@ -210,7 +219,7 @@ export function ToolsProbePanel() {
         useMachineControl.getState().setActiveTool(receiptTool)
         useMachineControl.getState().pushConsole(
           'rx',
-          `Tool setter fine contact: machine Z ${fmtMachineLength(result.probedMachineZ, units)} ${unitLabel(units)}; recorded in the table for T${receiptTool}.`,
+          probeText('toolsProbePanel14', { value1: String(fmtMachineLength(result.probedMachineZ, units)), value2: String(unitLabel(units)), value3: String(receiptTool) }),
           'info',
         )
       } else if (
@@ -229,21 +238,21 @@ export function ToolsProbePanel() {
         })
         useMachineControl.getState().pushConsole(
           'rx',
-          `Tool setter fine contact: machine Z ${fmtMachineLength(result.probedMachineZ, units)} ${unitLabel(units)} on ${machine?.name ?? receiptMachineId}; retained as an available unassigned measurement.`,
+          probeText('toolsProbePanel15', { value1: String(fmtMachineLength(result.probedMachineZ, units)), value2: String(unitLabel(units)), value3: String(machine?.name ?? receiptMachineId) }),
           'info',
         )
       }
       const suffix =
         result.ok && result.probedMachineZ !== null && !receiptIsCurrent
-          ? ' The machine connection changed before this result could be retained.'
+          ? probeText('toolsProbePanel16')
           : result.ok && receiptTool !== null
           ? mode === 'workZero'
-            ? ` T${receiptTool} marked as the reference tool.`
-            : ` Recorded for T${receiptTool}.`
+            ? probeText('toolsProbePanel17', { value1: String(receiptTool) })
+            : probeText('toolsProbePanel18', { value1: String(receiptTool) })
           : result.ok
             ? mode === 'measureTool'
-              ? ' Held as active tool length (the datum).'
-              : ' No tool number is active, so no reference tool was marked.'
+              ? probeText('toolsProbePanel19')
+              : probeText('toolsProbePanel20')
             : ''
       setStatus({
         kind: result.ok && receiptIsCurrent ? 'ok' : 'error',
@@ -269,7 +278,7 @@ export function ToolsProbePanel() {
   const refEntry = table.reference === null ? undefined : findTool(table, table.reference)
   const applyReason = applyResult && !applyResult.ok
     ? table.reference !== null && (!refEntry || refEntry.probedMachineZ === null)
-      ? `Ref tool T${table.reference} has no setter reading - measure T${table.reference} on the setter (Measure T${table.reference}) before Apply length can work.`
+      ? probeText('toolsProbePanel21', { value1: String(table.reference), value2: String(table.reference), value3: String(table.reference) })
       : applyResult.reason
     : null
   const availableForThisSession = connected
@@ -279,24 +288,23 @@ export function ToolsProbePanel() {
   const toolsPanel = (
     <section className="panel control-panel" data-testid="control-tools-panel">
       <div className="panel-header">
-        <span className="panel-title">Tools</span>
-        <span className="control-offsets-meta">
-          TLO {tlo === null ? '-' : fmtMachineLength(tlo, units)} {unitLabel(units)}
+        <span className="panel-title">{probeText('toolsProbePanel23')}</span>
+        <span className="control-offsets-meta">{probeText('toolsProbePanel25', { value1: jsxTextValue(tlo === null ? '-' : fmtMachineLength(tlo, units)), value2: jsxTextValue(unitLabel(units)) })}
         </span>
       </div>
       <div className="panel-body control-tools-body">
         {table.tools.length > 0 && (
           <div className="control-tools-table" data-testid="control-tools-table">
             <div className="control-tools-row control-tools-head">
-              <span data-tooltip="Reference tool - the one work Z0 was set with">Ref</span>
-              <span>Tool</span>
-              <span>Setter Z ({unitLabel(units)})</span>
-              <span>Dia</span>
+              <span data-tooltip={probeText('toolsProbePanel26')}>{probeText('toolsProbePanel28')}</span>
+              <span>{probeText('toolsProbePanel30')}</span>
+              <span>{probeText('toolsProbePanel32', { value1: jsxTextValue(unitLabel(units)) })}</span>
+              <span>{probeText('toolsProbePanel34')}</span>
               <span />
             </div>
             {table.tools.map((t) => {
               const isRef = table.reference === t.tool
-              const isActive = activeTool === t.tool
+              const isActive = currentTool === t.tool
               const isSelected = probeTool === t.tool
               return (
                 <div
@@ -311,10 +319,10 @@ export function ToolsProbePanel() {
                     disabled={!canEdit}
                     data-tooltip={
                       isRef
-                        ? 'This is the reference tool (work Z0 was set with it)'
-                        : 'Make this the reference tool'
+                        ? probeText('toolsProbePanel35')
+                        : probeText('toolsProbePanel36')
                     }
-                    aria-label={isRef ? `T${t.tool} is the reference tool` : `Make T${t.tool} the reference tool`}
+                    aria-label={isRef ? probeText('toolsProbePanel37', { value1: String(t.tool) }) : probeText('toolsProbePanel38', { value1: String(t.tool) })}
                     onClick={(e) => {
                       e.stopPropagation()
                       store.getState().setReference(machineId, isRef ? null : t.tool)
@@ -322,10 +330,10 @@ export function ToolsProbePanel() {
                       useMachineControl.getState().pushConsole(
                         'rx',
                         isRef
-                          ? `Tool table: T${t.tool} is no longer the reference tool.`
+                          ? probeText('toolsProbePanel39', { value1: String(t.tool) })
                           : t.probedMachineZ === null
-                            ? `Tool table: T${t.tool} selected as reference; it still needs a setter measurement.`
-                            : `Tool table: T${t.tool} selected as reference at machine Z ${fmtMachineLength(t.probedMachineZ, units)} ${unitLabel(units)}.`,
+                            ? probeText('toolsProbePanel40', { value1: String(t.tool) })
+                            : probeText('toolsProbePanel41', { value1: String(t.tool), value2: String(fmtMachineLength(t.probedMachineZ, units)), value3: String(unitLabel(units)) }),
                         'info',
                       )
                     }}
@@ -334,7 +342,7 @@ export function ToolsProbePanel() {
                   </button>
                   <span className={`control-tool-num ${isActive ? 'control-tool-num-active' : ''}`}>
                     T{t.tool}
-                    {isActive && <span className="control-tool-live" data-tooltip="Active tool (from the controller)">*</span>}
+                    {isActive && <span className="control-tool-live" data-tooltip={probeText('toolsProbePanel42')}>*</span>}
                   </span>
                   <span className="control-tool-len-cell" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <NumCell
@@ -360,8 +368,8 @@ export function ToolsProbePanel() {
                       style={{ fontSize: 10, opacity: 0.7 }}
                       data-testid={`control-tool-len-source-${t.tool}`}
                       data-tooltip={t.measuredAt !== null
-                        ? 'Measured by the probe'
-                        : 'Typed by hand - not a probe reading'}
+                        ? probeText('toolsProbePanel43')
+                        : probeText('toolsProbePanel44')}
                     >
                       {t.measuredAt !== null ? 'measured' : 'typed'}
                     </span>
@@ -383,8 +391,8 @@ export function ToolsProbePanel() {
                     className="panel-action-btn"
                     data-testid={`control-tool-remove-${t.tool}`}
                     disabled={!canEdit}
-                    data-tooltip={`Remove T${t.tool} from the table`}
-                    aria-label={`Remove T${t.tool} from the table`}
+                    data-tooltip={probeText('toolsProbePanel45', { value1: String(t.tool) })}
+                    aria-label={probeText('toolsProbePanel46', { value1: String(t.tool) })}
                     onClick={(e) => {
                       e.stopPropagation()
                       store.getState().removeTool(machineId, t.tool)
@@ -400,9 +408,7 @@ export function ToolsProbePanel() {
           </div>
         )}
         {table.tools.length > 0 && table.reference === null && (
-          <div className="control-offsets-meta" data-testid="control-tools-ref-needed">
-            No tool is starred Ref. Star the tool you set work Z0 with before Apply length can work.
-          </div>
+          <div className="control-offsets-meta" data-testid="control-tools-ref-needed">{probeText('toolsProbePanel48')}</div>
         )}
         {availableForThisSession && (
           <div
@@ -412,17 +418,14 @@ export function ToolsProbePanel() {
             data-session-generation={availableMeasurement.sessionGeneration}
             data-measured-at={availableMeasurement.measuredAt}
           >
-            <span>
-              Available setter touch on {machine?.name ?? machineId}: machine Z{' '}
-              {fmtMachineLength(availableMeasurement.machineZ, units)} {unitLabel(units)}. Select a tool to attach it.
-            </span>
+            <span>{probeText('toolsProbePanel52', { value1: jsxTextValue(machine?.name ?? machineId), value2: jsxTextValue(' '), value3: jsxTextValue(fmtMachineLength(availableMeasurement.machineZ, units)), value4: jsxTextValue(unitLabel(units)) })}</span>
             <button
               className="modal-btn modal-btn-ghost"
               data-testid="control-tool-attach-measurement"
               disabled={!canEdit || selected === null}
               data-tooltip={selected === null
-                ? 'Select an existing tool row first'
-                : `Attach this setter contact to T${selected}`}
+                ? probeText('toolsProbePanel53')
+                : probeText('toolsProbePanel54', { value1: String(selected) })}
               onClick={() => {
                 if (selected === null) return
                 const attached = store.getState().attachAvailableMeasurement(
@@ -432,12 +435,11 @@ export function ToolsProbePanel() {
                 )
                 if (!attached) return
                 save()
-                const text = `Attached setter contact machine Z ${fmtMachineLength(attached.machineZ, units)} ${unitLabel(units)} to T${selected}.`
+                const text = probeText('toolsProbePanel55', { value1: String(fmtMachineLength(attached.machineZ, units)), value2: String(unitLabel(units)), value3: String(selected) })
                 setStatus({ kind: 'ok', text })
-                useMachineControl.getState().pushConsole('rx', `Tool table: ${text}`, 'info')
+                useMachineControl.getState().pushConsole('rx', probeText('toolsProbePanel56', { value1: String(text) }), 'info')
               }}
-            >
-              Attach{selected === null ? '' : ` to T${selected}`}
+            >{probeText('toolsProbePanel59', { value1: jsxTextValue(selected === null ? '' : probeText('toolsProbePanel58', { value1: String(selected) })) })}
             </button>
           </div>
         )}
@@ -456,11 +458,10 @@ export function ToolsProbePanel() {
             className="modal-btn modal-btn-ghost"
             data-testid="control-tool-add"
             disabled={addToolInvalid}
-            data-tooltip={addToolInvalid ? 'Type a whole tool number in the T# box first.' : `Add T${addToolText} to the tool table`}
+            data-tooltip={addToolInvalid ? probeText('toolsProbePanel60') : probeText('toolsProbePanel61', { value1: String(addToolText) })}
             onClick={onAddTool}
           >
-            <Plus size={12} /> Add tool
-          </button>
+            <Plus size={12} />{probeText('toolsProbePanel63')}</button>
           <button
             className="modal-btn modal-btn-ghost"
             data-testid="control-tool-apply"
@@ -469,8 +470,8 @@ export function ToolsProbePanel() {
               applyReason !== null
                 ? applyReason
                 : probeTool !== null && applyResult?.ok
-                  ? `Send ${applyResult.line} for T${probeTool}`
-                  : 'Pick a measured tool first'
+                  ? probeText('toolsProbePanel64', { value1: String(applyResult.line), value2: String(probeTool) })
+                  : probeText('toolsProbePanel65')
             }
             onClick={() => {
               if (applyResult?.ok && applyToolLengthOffset(applyResult.deltaMm)) {
@@ -478,38 +479,32 @@ export function ToolsProbePanel() {
                 const measured = table.tools.find((entry) => entry.tool === probeTool)
                 setStatus({
                   kind: 'ok',
-                  text: `Length offset applied for T${probeTool} (${applyResult.line}).`,
+                  text: probeText('toolsProbePanel66', { value1: String(probeTool), value2: String(applyResult.line) }),
                 })
                 useMachineControl.getState().pushConsole(
                   'rx',
                   reference && measured
-                    ? `Tool length: T${probeTool} setter contact ${measured.probedMachineZ === null ? '-' : fmtMachineLength(measured.probedMachineZ!, units)} ${unitLabel(units)} minus reference T${reference.tool} ${reference.probedMachineZ === null ? '-' : fmtMachineLength(reference.probedMachineZ!, units)} ${unitLabel(units)} = ${fmtMachineLength(applyResult.deltaMm, units)} ${unitLabel(units)}; applied ${applyResult.line}.`
-                    : `Tool length: applied ${applyResult.line} for T${probeTool}.`,
+                    ? probeText('toolsProbePanel67', { value1: String(probeTool), value2: String(measured.probedMachineZ === null ? '-' : fmtMachineLength(measured.probedMachineZ!, units)), value3: String(unitLabel(units)), value4: String(reference.tool), value5: String(reference.probedMachineZ === null ? '-' : fmtMachineLength(reference.probedMachineZ!, units)), value6: String(unitLabel(units)), value7: String(fmtMachineLength(applyResult.deltaMm, units)), value8: String(unitLabel(units)), value9: String(applyResult.line) })
+                    : probeText('toolsProbePanel68', { value1: String(applyResult.line), value2: String(probeTool) }),
                   'info',
                 )
               }
             }}
-          >
-            Apply length
-          </button>
+          >{probeText('toolsProbePanel70')}</button>
           <button
             className="modal-btn modal-btn-ghost"
             data-testid="control-tool-g49"
             disabled={!canAct || tlo === null || tlo === 0}
-            data-tooltip="Clear the tool length offset (G49)"
+            data-tooltip={probeText('toolsProbePanel71')}
             onClick={() => {
-              if (clearToolLengthOffset()) setStatus({ kind: 'ok', text: 'Length offset cleared (G49).' })
+              if (clearToolLengthOffset()) setStatus({ kind: 'ok', text: probeText('toolsProbePanel72') })
             }}
-          >
-            Clear
-          </button>
+          >{probeText('toolsProbePanel74')}</button>
         </div>
 
         <div className="control-probe-section">
           <div className="control-probe-cfg">
-            <label>
-              Fast ({feedLabel(units)})
-              <NumCell
+            <label>{probeText('toolsProbePanel76', { value1: jsxTextValue(feedLabel(units)) })}<NumCell
                 shown={fmtFeed(probeCfg.fastFeed, units)}
                 editable={canEdit}
                 testId="control-probe-cfg-fast"
@@ -519,9 +514,7 @@ export function ToolsProbePanel() {
                 })}
               />
             </label>
-            <label>
-              Fine ({feedLabel(units)})
-              <NumCell
+            <label>{probeText('toolsProbePanel78', { value1: jsxTextValue(feedLabel(units)) })}<NumCell
                 shown={fmtFeed(probeCfg.slowFeed, units)}
                 editable={canEdit}
                 testId="control-probe-cfg-slow"
@@ -531,9 +524,7 @@ export function ToolsProbePanel() {
                 })}
               />
             </label>
-            <label>
-              Retract ({unitLabel(units)})
-              <NumCell
+            <label>{probeText('toolsProbePanel80', { value1: jsxTextValue(unitLabel(units)) })}<NumCell
                 shown={fmtMachineLength(probeCfg.retract, units)}
                 editable={canEdit}
                 testId="control-probe-cfg-retract"
@@ -543,9 +534,7 @@ export function ToolsProbePanel() {
                 })}
               />
             </label>
-            <label>
-              Max travel ({unitLabel(units)})
-              <NumCell
+            <label>{probeText('toolsProbePanel82', { value1: jsxTextValue(unitLabel(units)) })}<NumCell
                 shown={fmtMachineLength(probeCfg.maxTravel, units)}
                 editable={canEdit}
                 testId="control-probe-cfg-travel"
@@ -563,23 +552,23 @@ export function ToolsProbePanel() {
             </div>
             <div className="control-probe-summary">
               <div className="control-probe-summary-row">
-                <span className="control-probe-summary-label">Pad compensation</span>
+                <span className="control-probe-summary-label">{probeText('toolsProbePanel84')}</span>
                 <span className="control-offsets-meta" data-testid="control-probe-pad-assumption">
                   {workZeroSensing === 'plate'
-                    ? `Work Z0 will be set ${fmtMachineLength(probeCfg.padThickness, units)} ${unitLabel(units)} below pad contact.`
-                    : 'Work Z0 will be set at the contact - the probe touches the part, no pad is subtracted.'}
+                    ? probeText('toolsProbePanel85', { value1: String(fmtMachineLength(probeCfg.padThickness, units)), value2: String(unitLabel(units)) })
+                    : probeText('toolsProbePanel86')}
                 </span>
               </div>
               <div className="control-probe-summary-row">
-                <span className="control-probe-summary-label">Z search</span>
+                <span className="control-probe-summary-label">{probeText('toolsProbePanel88')}</span>
                 <span className="control-offsets-meta" data-testid="control-probe-z0-search-plan">
                   {partProbeSearch.basis === 'machine-limit'
-                    ? `Search from machine Z ${fmtMachineLength(partProbeSearch.startMachineZ!, units)} down to the machine Z limit ${fmtMachineLength(partProbeSearch.bottomMachineZ!, units)} (${fmtMachineLength(partProbeSearch.travelMm, units)} ${unitLabel(units)}).`
+                    ? probeText('toolsProbePanel89', { value1: String(fmtMachineLength(partProbeSearch.startMachineZ!, units)), value2: String(fmtMachineLength(partProbeSearch.bottomMachineZ!, units)), value3: String(fmtMachineLength(partProbeSearch.travelMm, units)), value4: String(unitLabel(units)) })
                     : partProbeSearch.basis === 'operator-override'
                       ? partProbeSearch.targetMachineZ === partProbeSearch.bottomMachineZ
-                        ? `Search from machine Z ${fmtMachineLength(partProbeSearch.startMachineZ!, units)} down to the machine Z limit ${fmtMachineLength(partProbeSearch.bottomMachineZ!, units)} (${fmtMachineLength(partProbeSearch.travelMm, units)} ${unitLabel(units)}); the saved Max travel is longer.`
-                        : `Search from machine Z ${fmtMachineLength(partProbeSearch.startMachineZ!, units)} down ${fmtMachineLength(partProbeSearch.travelMm, units)} ${unitLabel(units)}, stopping at machine Z ${fmtMachineLength(partProbeSearch.targetMachineZ!, units)} before the machine Z limit.`
-                      : `Search down ${fmtMachineLength(partProbeSearch.travelMm, units)} ${unitLabel(units)} using Max travel${partProbeSearch.bottomMachineZ !== null ? '; current machine Z is not reported' : '; the machine Z limit is not stated'}.`}
+                        ? probeText('toolsProbePanel90', { value1: String(fmtMachineLength(partProbeSearch.startMachineZ!, units)), value2: String(fmtMachineLength(partProbeSearch.bottomMachineZ!, units)), value3: String(fmtMachineLength(partProbeSearch.travelMm, units)), value4: String(unitLabel(units)) })
+                        : probeText('toolsProbePanel91', { value1: String(fmtMachineLength(partProbeSearch.startMachineZ!, units)), value2: String(fmtMachineLength(partProbeSearch.travelMm, units)), value3: String(unitLabel(units)), value4: String(fmtMachineLength(partProbeSearch.targetMachineZ!, units)) })
+                      : probeText('toolsProbePanel94', { value1: String(fmtMachineLength(partProbeSearch.travelMm, units)), value2: String(unitLabel(units)), value3: String(partProbeSearch.bottomMachineZ !== null ? probeText('toolsProbePanel92') : probeText('toolsProbePanel93')) })}
                 </span>
               </div>
             </div>
@@ -590,9 +579,7 @@ export function ToolsProbePanel() {
                   pad there is nothing to pick and the select stays hidden. */}
               <div className="control-probe-pad-choice">
                 {probePads.length > 1 && (
-                  <label>
-                    Pad choice
-                    <select
+                  <label>{probeText('toolsProbePanel98')}<select
                       className="control-offset-input"
                       data-testid="control-probe-pad-select"
                       value={activeProbePadId}
@@ -603,16 +590,13 @@ export function ToolsProbePanel() {
                       }}
                     >
                       {probePads.map((pad, index) => (
-                        <option key={pad.id} value={pad.id}>
-                          Pad {index + 1} - {fmtMachineLength(pad.thickness, units)} {unitLabel(units)}
+                        <option key={pad.id} value={pad.id}>{probeText('toolsProbePanel97', { value1: jsxTextValue(index + 1), value2: jsxTextValue(fmtMachineLength(pad.thickness, units)), value3: jsxTextValue(unitLabel(units)) })}
                         </option>
                       ))}
                     </select>
                   </label>
                 )}
-                <label>
-                  Pad ({unitLabel(units)})
-                  <NumCell
+                <label>{probeText('toolsProbePanel100', { value1: jsxTextValue(unitLabel(units)) })}<NumCell
                     shown={fmtMachineLength(probeCfg.padThickness, units)}
                     editable={canEdit}
                     testId="control-probe-cfg-pad"
@@ -626,14 +610,13 @@ export function ToolsProbePanel() {
                   className="modal-btn modal-btn-ghost"
                   data-testid="control-probe-pad-add"
                   disabled={!canEdit}
-                  data-tooltip="Save the current thickness as another selectable part pad"
+                  data-tooltip={probeText('toolsProbePanel101')}
                   onClick={() => {
                     store.getState().addProbePad(machineId, probeCfg.padThickness)
                     save()
                   }}
                 >
-                  <Plus size={12} /> Add pad
-                </button>
+                  <Plus size={12} />{probeText('toolsProbePanel103')}</button>
               </div>
             </div>
           </div>
@@ -642,9 +625,7 @@ export function ToolsProbePanel() {
         {/* WO-297: workpiece probing (edge/corner/bore/boss, second-side zero)
             used to live here. An operator who knows the old place must not
             find a hole - it moved to its own Probing tab, unchanged. */}
-        <span className="control-offsets-meta" data-testid="control-tools-probing-pointer">
-          Use Probing for edge, corner, bore and boss measurements.
-        </span>
+        <span className="control-offsets-meta" data-testid="control-tools-probing-pointer">{probeText('toolsProbePanel105')}</span>
       </div>
     </section>
   )
@@ -655,21 +636,21 @@ export function ToolsProbePanel() {
   const probeCard = (
     <section className="panel control-panel control-tools-probe-card" data-testid="control-tools-probe-card">
       <div className="panel-header">
-        <span className="panel-title">Probe</span>
+        <span className="panel-title">{probeText('toolsProbePanel107')}</span>
       </div>
       <div className="panel-body control-tools-probe-card-body">
         <div className="control-probe-actions">
               <div
                 className="control-probe-sensing"
                 role="radiogroup"
-                aria-label="Work Z0 sensed by"
+                aria-label={probeText('toolsProbePanel108')}
                 data-testid="control-probe-z0-sensing"
                 style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}
               >
-                <span>Work Z0 sensed by</span>
+                <span>{probeText('toolsProbePanel110')}</span>
                 {([
-                  ['probe', 'The probe touches the part'],
-                  ['plate', `A plate held against it (${fmtMachineLength(probeCfg.padThickness, units)} ${unitLabel(units)})`],
+                  ['probe', probeText('toolsProbePanel111')],
+                  ['plate', probeText('toolsProbePanel112', { value1: String(fmtMachineLength(probeCfg.padThickness, units)), value2: String(unitLabel(units)) })],
                 ] as const).map(([value, label]) => (
                   <label key={value} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <input
@@ -691,11 +672,11 @@ export function ToolsProbePanel() {
                 data-testid="control-probe-z0"
                 disabled={!canAct}
                 data-tooltip={workZeroSensing === 'plate'
-                  ? 'Jog the tool over the pad first. Probes down, then sets work Z0 through the pad thickness.'
-                  : 'Jog the tool over the part first. Probes down, then sets work Z0 at the contact.'}
+                  ? probeText('toolsProbePanel113')
+                  : probeText('toolsProbePanel114')}
                 onClick={() => void runProbe('workZero')}
               >
-                <ArrowDownToLine size={13} /> {busy ? 'Probing...' : 'Probe work Z0'}
+                <ArrowDownToLine size={13} /> {busy ? probeText('toolsProbePanel115') : probeText('toolsProbePanel116')}
               </button>
               <button
                 className="control-jog-btn control-motion-outline control-probe-btn"
@@ -705,14 +686,14 @@ export function ToolsProbePanel() {
                   whyNotIdle !== null
                     ? whyNotIdle
                     : probeTool !== null
-                    ? `Probe the ${hasSetter ? 'setter' : 'pad'} and record the length of T${probeTool}`
+                    ? probeText('toolsProbePanel117', { value1: String(hasSetter ? 'setter' : 'pad'), value2: String(probeTool) })
                     : hasSetter
-                      ? 'Probe the tool setter and hold the length as the active tool datum'
-                      : 'Pick a tool row (or load a tool) so the measurement has a T number'
+                      ? probeText('toolsProbePanel118')
+                      : probeText('toolsProbePanel119')
                 }
                 onClick={() => void runProbe('measureTool')}
               >
-                <ArrowDownToLine size={13} /> {busy ? 'Probing...' : `Measure ${probeTool !== null ? `T${probeTool}` : 'tool'}`}
+                <ArrowDownToLine size={13} /> {busy ? probeText('toolsProbePanel120') : probeText('toolsProbePanel121', { value1: String(probeTool !== null ? `T${probeTool}` : 'tool') })}
               </button>
         </div>
             {status && (
@@ -726,11 +707,9 @@ export function ToolsProbePanel() {
                 className="modal-btn modal-btn-ghost control-probe-unlock"
                 data-testid="control-probe-unlock"
                 onClick={() => {
-                  if (recoverFromProbeAlarm()) setStatus({ kind: 'ok', text: 'Unlocked - motion mode restored.' })
+                  if (recoverFromProbeAlarm()) setStatus({ kind: 'ok', text: probeText('toolsProbePanel122') })
                 }}
-              >
-                Unlock
-              </button>
+              >{probeText('toolsProbePanel124')}</button>
             )}
           </div>
         )}
@@ -753,10 +732,10 @@ export function ToolsProbePanel() {
       minSize={MACHINE_PANEL_RIGHT_MIN}
       maxSize={MACHINE_PANEL_RIGHT_MAX}
       fillMinSize={TOOLS_PANEL_MIN_PX}
-      label="Resize the Tools and jog panels"
+      label={probeText('toolsProbePanel125')}
       first={toolsPanel}
       second={
-        <aside className="control-tools-jog" aria-label="Tools jog controls" data-testid="control-tools-jog">
+        <aside className="control-tools-jog" aria-label={probeText('toolsProbePanel126')} data-testid="control-tools-jog">
           <div className="control-col-scroll">
             <JogPanel />
             {probeCard}

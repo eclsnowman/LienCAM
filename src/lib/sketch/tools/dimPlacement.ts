@@ -234,10 +234,9 @@ export function clampInitialDimPlacementAnchor(
 // more than the bias) still gives H/V. Tune here (~15-20 deg feels right).
 export const ALIGN_BIAS_RAD = (18 * Math.PI) / 180
 
-/** Default witness tick half-length (world mm) for the preview leader.
- *  Cosmetic only -- the committed leader sizes ticks in screen pixels at
- *  render time (buildDimensionGraphics); the preview cannot see the zoom,
- *  so it uses a small constant unless the caller overrides it. */
+/** Default world tick for pure geometry callers without a camera.
+ *  Both preview and committed painters rebuild guides in screen units;
+ *  placement values and anchors do not depend on this cosmetic fallback. */
 const DEFAULT_TICK_MM = 1.5
 
 // ---- Arrowheads (mainstream-CAD dimension terminators) ---------------------
@@ -248,7 +247,7 @@ const DEFAULT_TICK_MM = 1.5
 // LineSegments flattener in sketchLayer draws it as the two barb strokes, and
 // dimensionHitDistance walks the same two segments -- so preview, commit and
 // hit-test share one construction. Sizes are expressed as multiples of the
-// caller's `tick` unit (screen-px on commit, a small constant on preview) so
+// caller's `tick` unit (screen-px in both painters) so
 // arrowheads stay a consistent on-screen size at any zoom.
 const ARROW_ANGLE_RAD = (20 * Math.PI) / 180 // barb half-angle off the shaft
 const ARROW_LEN_MULT = 2.6                    // arrowhead length = tick * this

@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { SectionHead } from './DefinitionFields'
 import { SpindleLinkSection, resolvedSpindleLink } from './SpindleLinkSection'
 import { SectionNoneSet } from './DefinitionFields'
@@ -16,6 +19,7 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 type SpindleSectionProps = Pick<MachineDefinitionPanelState, 'source' | 'spindleLink' | 'spindleLinkIsForeign' | 'spindleLinkOtherMachine' | 'spindleStoredIsStated' | 'unsent' | 'vfdEdit'>
 
 export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spindleLinkOtherMachine, spindleStoredIsStated, unsent, vfdEdit }: SpindleSectionProps) {
+  useText('control-screens-not-probing')
   // WO-1704: `directionInverted` (SpindleLinkSection) is the one direction
   // editor when a VFD link exists - the step/dir `Spindledir*` pins below are
   // the alternative for a machine that really drives step/dir, not a second
@@ -33,7 +37,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
   return (
     <><div data-testid="machine-def-group-spindle">
                 <SectionHead
-                  title="Spindle"
+                  title={controlText('SpindleSection.text001')}
                   summary="The Modbus link, then speed command, encoder, pulleys and PID - relays are rows on the Outputs list"
                   testId="machine-def-panel-head-spindle"
                 />
@@ -57,7 +61,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                 />
                 <div data-testid="machine-def-panel-spindle-speed">
                   <SectionHead
-                    title="Speed command"
+                    title={controlText('SpindleSection.text002')}
                     summary="PWM and step/direction settings from this machine's profile"
                     testId="machine-def-panel-spindle-head-speed"
                   />
@@ -100,7 +104,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                         `Spindlesetupsettings.${negate}`,
                       ]))}
                     >
-                      <thead><tr><th>Command output</th><th>port</th><th>pin</th><th>active low</th></tr></thead>
+                      <thead><tr><th>{controlText('SpindleSection.text003')}</th><th>{controlText('SpindleSection.text004')}</th><th>{controlText('SpindleSection.text005')}</th><th>{controlText('SpindleSection.text006')}</th></tr></thead>
                       <tbody>
                         {commandOutputRows.map(([label, port, pin, negate]) => (
                           <tr key={label}
@@ -131,7 +135,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                 >
                   <div>
                     <SectionHead
-                      title="Encoder feedback"
+                      title={controlText('SpindleSection.text007')}
                       summary="Quadrature input and scale"
                       testId="machine-def-panel-spindle-head-encoder"
                     />
@@ -154,7 +158,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                   </div>
                   <div>
                     <SectionHead
-                      title="PID feedback"
+                      title={controlText('SpindleSection.text008')}
                       summary="Closed-loop spindle tuning"
                       testId="machine-def-panel-spindle-head-pid"
                     />
@@ -187,7 +191,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                       what is actually stated; the row count is the table's job
                       to show, not the heading's to claim. */}
                   <SectionHead
-                    title="Pulley ranges"
+                    title={controlText('SpindleSection.text009')}
                     summary={(() => {
                       const set = SPINDLE_PULLEY_ROWS.filter((row) =>
                         ['Pulleyratio', 'Pulleyminvel', 'Pulleymaxvel'].some(
@@ -221,10 +225,10 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                     style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 18px', marginBottom: 8 }}
                   >
                     <SpindleNotSent
-                      label="use pulley ranges" settingKey="Usepulleys" settings={unsent}
+                      label={controlText('SpindleSection.text010')} settingKey="Usepulleys" settings={unsent}
                     />
                     <SpindleNotSent
-                      label="active pulley" settingKey="Pulleyinuse" settings={unsent}
+                      label={controlText('SpindleSection.text011')} settingKey="Pulleyinuse" settings={unsent}
                     />
                   </div>
                   <div style={{ overflowX: 'auto', paddingBottom: 2 }}>
@@ -237,7 +241,7 @@ export function SpindleSection({ source, spindleLink, spindleLinkIsForeign, spin
                           .map((stem) => `Spindlesetupsettings.${stem}${row}`)
                       )))}
                     >
-                      <thead><tr><th>Pulley</th><th>ratio</th><th>minimum velocity</th><th>maximum velocity</th></tr></thead>
+                      <thead><tr><th>{controlText('SpindleSection.text012')}</th><th>{controlText('SpindleSection.text013')}</th><th>{controlText('SpindleSection.text014')}</th><th>{controlText('SpindleSection.text015')}</th></tr></thead>
                       <tbody>
                         {SPINDLE_PULLEY_ROWS.map((row) => (
                           <tr

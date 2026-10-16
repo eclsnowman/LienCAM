@@ -13,6 +13,7 @@
 // the list and the sketch chooser's own list/title classes, so this modal
 // introduces NO new CSS surface.
 
+import { useText } from '../../i18n'
 import { useEffect, useRef } from 'react'
 import { X, Box, Plus } from 'lucide-react'
 import { useCamStore } from '../../store'
@@ -31,6 +32,7 @@ const EMPTY_MODEL_ITEMS: ModelItemRecord[] = []
 const EMPTY_GEOMETRY: ImportedGeometry[] = []
 
 export function ModelEntryModal() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeModal = useCamStore((s) => s.activeModal)
   const closeModal = useCamStore((s) => s.closeModal)
   const modelItems = useCamStore((s) => s.project.modelItems ?? EMPTY_MODEL_ITEMS)
@@ -93,7 +95,7 @@ export function ModelEntryModal() {
       >
         <div className="modal-header">
           <Box size={15} className="modal-header-icon" />
-          <span className="modal-title">{newOnly ? 'New Model' : 'Choose a Model Item'}</span>
+          <span className="modal-title">{newOnly ? workbenchText('ModelEntryModal.newModel') : workbenchText('ModelEntryModal.chooseAModelItem')}</span>
           <button className="modal-close-btn" onClick={closeModal}>
             <X size={14} />
           </button>
@@ -106,14 +108,14 @@ export function ModelEntryModal() {
             onClick={handleNew}
           >
             <Plus size={18} />
-            <span className="op-type-name">{newOnly ? 'Create Model' : 'New Model Item'}</span>
+            <span className="op-type-name">{newOnly ? workbenchText('ModelEntryModal.createModel') : workbenchText('ModelEntryModal.newModelItem')}</span>
           </button>
 
           {/* Same shape as the Sketch window: create on top, then every existing entry to open. */}
-          <div className="sketch-entry-list-title">Or choose an existing model</div>
+          <div className="sketch-entry-list-title">{workbenchText('ModelEntryModal.chooseExistingModel')}</div>
           {modelItems.length === 0 && importedParts.length === 0 ? (
             <div className="sketch-entry-empty" data-testid="model-entry-empty">
-              No models in this project yet - import a STEP or STL file, or create a new model.
+              {workbenchText('ModelEntryModal.emptyProject')}
             </div>
           ) : (
             <div className="sketch-entry-list" data-testid="model-entry-list">
@@ -123,10 +125,10 @@ export function ModelEntryModal() {
                   className="sketch-entry-row"
                   data-testid={`model-entry-row-${item.id}`}
                   onClick={() => handleOpen(item.id)}
-                  data-tooltip={`Open ${item.name}`}
+                  data-tooltip={workbenchText('ModelEntryModal.open', { name: item.name })}
                 >
                   <span className="sketch-entry-row-name">{item.name}</span>
-                  <span className="sketch-entry-row-meta">model</span>
+                  <span className="sketch-entry-row-meta">{workbenchText('ModelEntryModal.model')}</span>
                 </button>
               ))}
               {importedParts.map((geo) => (
@@ -135,10 +137,10 @@ export function ModelEntryModal() {
                   className="sketch-entry-row"
                   data-testid={`model-entry-import-${geo.id}`}
                   onClick={() => handleOpenImported(geo.id)}
-                  data-tooltip={`Edit ${geo.name} as a model`}
+                  data-tooltip={workbenchText('ModelEntryModal.editImportedModel', { name: geo.name })}
                 >
                   <span className="sketch-entry-row-name">{geo.name}</span>
-                  <span className="sketch-entry-row-meta">imported {geo.format === 'stl' ? 'STL' : 'STEP'} - opens as a model</span>
+                  <span className="sketch-entry-row-meta">{workbenchText('ModelEntryModal.importedModel', { format: geo.format === 'stl' ? 'STL' : 'STEP' })}</span>
                 </button>
               ))}
             </div>
@@ -147,8 +149,7 @@ export function ModelEntryModal() {
 
         <div className="modal-footer">
           <button className="modal-btn modal-btn-ghost" onClick={closeModal}>
-            Cancel
-          </button>
+            {workbenchText('ModelEntryModal.cancel')}</button>
         </div>
       </div>
     </div>

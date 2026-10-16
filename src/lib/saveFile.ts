@@ -11,16 +11,18 @@ type SaveHost = { saveFile?: (filename: string, data: string | Uint8Array) => Pr
 
 const BROWSER_REVOKE_DELAY_MS = 60_000
 
+/** Keep a file component readable while making it safe on Windows. */
+export function safeFilenameComponent(name: string, fallback: string): string {
+  const clean = Array.from(name, char => char.charCodeAt(0) < 32 ? '-' : char)
+    .join('').replace(/[<>:"/\\|?*]/g, '-').trim().replace(/[. ]+$/g, '')
+  if (!clean) return fallback
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(clean) ? `_${clean}` : clean
+}
+
 /** Keep project/body names readable while making each component safe on Windows. */
 export function modelExportFilename(projectName: string, format: 'step' | 'stl', bodyName?: string): string {
-  const component = (name: string, fallback: string): string => {
-    const clean = Array.from(name, char => char.charCodeAt(0) < 32 ? '-' : char)
-      .join('').replace(/[<>:"/\\|?*]/g, '-').trim().replace(/[. ]+$/g, '')
-    if (!clean) return fallback
-    return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(clean) ? `_${clean}` : clean
-  }
-  const project = component(projectName, operatorText('saveFile1'))
-  return `${project}${bodyName === undefined ? '' : `-${component(bodyName, operatorText('saveFile2'))}`}.${format}`
+  const project = safeFilenameComponent(projectName, operatorText('saveFile1'))
+  return `${project}${bodyName === undefined ? '' : `-${safeFilenameComponent(bodyName, operatorText('saveFile2'))}`}.${format}`
 }
 
 /** Resolves to where the file went ('download' in a browser), or null if the operator cancelled.

@@ -99,8 +99,8 @@ describe('WO-2176 Calibrate\'s scene is Boss\'s / Bore\'s scene', () => {
     expect(differences(drawn(boss), drawn(pin))).toEqual([])
     const words = boss.steps.map((s, i) => [s.sentence, pin.steps[i].sentence]).filter(([a, b]) => a !== b)
     expect(words).toEqual([
-      ['Jog over the middle of the boss (by eye is fine), less than 25 mm above the top.',
-        'Jog over the middle of the reference (by eye is fine), less than 25 mm above the top.'],
+      ['Jog over the middle of the boss, less than 25 mm above the top.',
+        'Jog over the middle of the reference, less than 25 mm above the top.'],
       ['Press Start probing to run Boss.', 'Press Start probing to run Calibrate.'],
       // Exact WO-2284 exception: Boss gains the outside-face explanation;
       // Calibrate keeps the main words. No sentence is removed from comparison.

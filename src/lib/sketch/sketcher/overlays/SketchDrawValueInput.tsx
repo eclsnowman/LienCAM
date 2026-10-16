@@ -1,3 +1,4 @@
+import { useText } from '../../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useSketcherTool } from '../useSketcherTool'
 import { sketcherTools } from '../toolController'
@@ -41,6 +42,7 @@ interface Props {
 }
 
 export function SketchDrawValueInput({ port }: Props) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const isSketch = port.useIsSketchActive()
   const activeSketch = port.useSketch()
   const sketchTool = useSketcherTool((s) => s.tool)
@@ -225,8 +227,7 @@ export function SketchDrawValueInput({ port }: Props) {
       <span className="sketch-dim-unit" ref={unitRef}>{unitLabel(units)}</span>
       {isStagedSizeTool && editing && (
         <span className="sketch-draw-value-hint">
-          Enter sets {sketchTool === 'fillet' ? 'radius' : 'setback'}, then Enter to apply
-        </span>
+          {workbenchText('SketchDrawValueInput.enterSetsThenEnterToApply', { value1: String((sketchTool === 'fillet' ? workbenchText('SketchDrawValueInput.radius') : workbenchText('SketchDrawValueInput.setback'))) })}</span>
       )}
     </div>
   )

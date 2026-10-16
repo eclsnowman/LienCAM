@@ -214,6 +214,66 @@
     },
     {
       "action": "exclude",
+      "path": "src/tests/adaptive-clearing/engine/millingDirection.wo2752.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/evidence/WO-2752/full-suite-g58-level2.json. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/cam/chamferClearSpaceEntry.wo2754.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/evidence/WO-2754/actual-overlap-contact-fixture.json, src/tests/evidence/WO-2754/capsule-cell-witness-fixture.json, src/tests/evidence/WO-2754/endpoint-stock-witness-fixture.json, src/tests/evidence/WO-2754/exit-stock-witness-fixture.json, src/tests/evidence/WO-2754/prior-cut-union-witness-fixture.json. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/cam3d/adaptiveMillingDirection.wo2752.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/evidence/WO-2752/full-suite-g58-level2.json, src/tests/evidence/WO-2752/replay.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/examples/adaptiveDirection.wo2752.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/evidence/WO-2752/full-suite-g58-level2.json, src/tests/evidence/WO-2752/replay.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/geom/simplifyGeometry.wo2505.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/evidence/WO-2505/local-refit-experiment.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/i18n/extract.wo2322.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/evidence/WO-2322/rendered-english.setup.ts, src/tests/evidence/WO-2322/resume-source-check.d.mts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/i18n/extract.wo2324.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/lib/machine/liencncSeed.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/i18n/extract.wo2325.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/cycleStartTipNamesM0Pause.wo2776.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/probingScreenConsole.wo2665.test.tsx",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/programListingColours.wo2672.test.tsx",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/secondRunListingLights.wo2777.test.ts",
+      "reason": "WO-2454: WO-2785 import closure: imports excluded src/lib/machine/liencncSeed.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
       "path": "src/tests/evidence/",
       "reason": "Keep private machine sessions, captures, and operator evidence out of the public tree."
     },
@@ -361,6 +421,41 @@
       "action": "exclude",
       "path": "src/tests/machine/mdiInAPauseNoFalseEndLine.wo2563.test.ts",
       "reason": "WO-2454: WO-2622 closure reconciliation: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/adaptive-clearing/engine/chordAfterDirection.wo2787.test.ts",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/tests/evidence/WO-2787/timechoicePayload.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/approvedProbingEveryRoute.wo2800.test.ts",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/lib/machine/liencncSeed.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/refusedLoadAfterMdi.wo2826.test.tsx",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/refusedLoadDisarmsOldFile.wo2833.test.ts",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/refusedLoadReadyOnceFixed.wo2772.test.tsx",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/tests/machine/support/operatorMachineAsTestData.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/simulatedProbeTipRadius.wo2779.test.ts",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/lib/machine/liencncSeed.ts. Retain in the private suite; public inputs are unavailable."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/simulatorToolZAndCustomProbesMatchMachine.wo2811.test.ts",
+      "reason": "WO-2454: WO-2875 closure reconciliation: imports excluded src/lib/machine/liencncSeed.ts. Retain in the private suite; public inputs are unavailable."
     },
     {
       "action": "exclude",
@@ -2306,8 +2401,24 @@
         "reason": "WO-2537: Third-party plate or derivative; redistribution rights are not granted."
       },
       {
+        "path": "src/tests/components/modelTabEntry.wo2700.test.tsx",
+        "reason": "WO-2537: Third-party plate or derivative; redistribution rights are not granted."
+      },
+      {
+        "path": "src/tests/store/curvedStlOpensWithManyModels.wo2853.test.ts",
+        "reason": "WO-2537: Third-party plate or derivative; redistribution rights are not granted."
+      },
+      {
         "path": "src/tests/release/exportShipsOnlyWhatItMay.wo2537.test.ts",
         "reason": "WO-2537: Requires the private Git inventory and non-redistributable fixtures for negative controls."
+      },
+      {
+        "path": "src/tests/cam/adaptiveStockEdgeFlips.wo2169.test.ts",
+        "reason": "WO-2850: known alpha.2 regression from WO-2752 milling direction (boss-taper flips 15.2% vs limit 10%); the operator 2026-10-15: ship, fix first after. Limit not loosened; back on the public list when WO-2850 lands."
+      },
+      {
+        "path": "src/tests/cam3d/intermediateStepdown.wo1361.test.ts",
+        "reason": "WO-2850: known alpha.2 regression from WO-2752 milling direction (dome leftover 2.72 mm vs limit 1.5 mm); the operator 2026-10-15: ship, fix first after. Limit not loosened; back on the public list when WO-2850 lands."
       }
     ]
   },
@@ -2457,6 +2568,16 @@
       }
     ],
     "ruleExceptions": [
+      {
+        "rule": "personal:eric",
+        "path": "src/tests/i18n/support/guardAllowList.ts",
+        "reason": "WO-2785: Approved 2026 project copyright-holder line, copied verbatim from AboutModal.tsx by the untranslated-literal guard. Retain the legal attribution; the owner-name prose header is scrubbed."
+      },
+      {
+        "rule": "personal:lien",
+        "path": "src/tests/i18n/support/guardAllowList.ts",
+        "reason": "WO-2785: Approved 2026 project copyright-holder line, copied verbatim from AboutModal.tsx by the untranslated-literal guard. Retain the legal attribution; the owner-name prose header is scrubbed."
+      },
       {
         "rule": "personal:lien",
         "path": "brand/liencam-wordmark.svg",
@@ -3596,6 +3717,46 @@
         "rule": "commercial:fusion-360",
         "path": "src/tests/release/docsReadFixes.wo2626.test.ts",
         "reason": "F81 asserts the post Help and its wiki page omit these names; the regex spells forbidden names as detection test data, not a comparison."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "electron/main.cjs",
+        "reason": "WO-2781: Approved public repository and Pages URLs identify the real project hosting account; these production links and their regression assertions are project destinations, not personal attribution."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/components/modals/AboutModal.tsx",
+        "reason": "WO-2781: Approved public repository and Pages URLs identify the real project hosting account; these production links and their regression assertions are project destinations, not personal attribution."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/lib/diagnostics/githubPrefill.ts",
+        "reason": "WO-2781: Approved public repository and Pages URLs identify the real project hosting account; these production links and their regression assertions are project destinations, not personal attribution."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/tests/diagnostics/reportProblem.wo2759.test.ts",
+        "reason": "WO-2781: Approved public repository and Pages URLs identify the real project hosting account; these production links and their regression assertions are project destinations, not personal attribution."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/tests/projectOpen/about.wo2724.test.tsx",
+        "reason": "WO-2781: Approved public repository and Pages URLs identify the real project hosting account; these production links and their regression assertions are project destinations, not personal attribution."
+      },
+      {
+        "rule": "personal:eclsnowman",
+        "path": "src/tests/projectOpen/desktopRecents.wo2725.test.ts",
+        "reason": "WO-2781: Approved public repository and Pages URLs identify the real project hosting account; these production links and their regression assertions are project destinations, not personal attribution."
+      },
+      {
+        "rule": "commercial:mach3",
+        "path": "src/tests/i18n/support/guardAllowList.ts",
+        "reason": "WO-2781: Controller dialect names in the i18n proper-name token list identify interoperability and retain their spelling; no commercial CAM comparison."
+      },
+      {
+        "rule": "commercial:mach4",
+        "path": "src/tests/i18n/support/guardAllowList.ts",
+        "reason": "WO-2781: Controller dialect names in the i18n proper-name token list identify interoperability and retain their spelling; no commercial CAM comparison."
       }
     ]
   }

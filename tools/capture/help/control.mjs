@@ -4,8 +4,9 @@ import sharp from 'sharp'
 import fs from 'node:fs'
 import path from 'node:path'
 import { withViteCaptureServer, dismissMachineModal, CHROMIUM_CAPTURE_ARGS } from '../lib/harness.mjs'
+import { HELP_EVIDENCE } from './evidence-root.mjs'
 
-const out = path.resolve('src/tests/evidence/WO-2491/control')
+const out = path.resolve(HELP_EVIDENCE, 'control')
 const traceOnly = process.argv.includes('--trace-only')
 fs.mkdirSync(out, { recursive: true })
 // WO-2708 pattern: Windows can reserve 62396-63095; CAPTURE_PORT moves this route off it.

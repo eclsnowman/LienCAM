@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // MacroAskDialog - WO-1715: the dialog a macro's confirm(), choose() or ask()
 // opens, and the answer it hands back to the script.
 //
@@ -43,6 +46,7 @@ export function MacroAskDialog() {
 }
 
 function MacroAskPanel({ ask }: { ask: MacroAskState }) {
+  useText('control-screens-not-probing')
   const { question } = ask
   const [typed, setTyped] = useState(question.kind === 'ask' ? question.defaultValue : '')
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
@@ -61,7 +65,7 @@ function MacroAskPanel({ ask }: { ask: MacroAskState }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [ask.id, cancelAnswer])
 
-  const title = `Macro "${ask.macroName}" asks`
+  const title = controlText('MacroAskDialog.text001', { value1: String(ask.macroName) })
 
   return (
     <div
@@ -84,7 +88,7 @@ function MacroAskPanel({ ask }: { ask: MacroAskState }) {
         <div className="modal-header">
           <MessageCircleQuestion size={15} className="modal-header-icon" />
           <span className="modal-title">{title}</span>
-          <button className="modal-close-btn" data-testid="macro-ask-close" onClick={cancel} aria-label="Cancel">
+          <button className="modal-close-btn" data-testid="macro-ask-close" onClick={cancel} aria-label={controlText('MacroAskDialog.text002')}>
             <X size={14} />
           </button>
         </div>
@@ -130,15 +134,11 @@ function MacroAskPanel({ ask }: { ask: MacroAskState }) {
             type="button"
             className="modal-btn modal-btn-danger"
             data-testid="macro-ask-stop"
-            data-tooltip={`End macro "${ask.macroName}" now - nothing more is sent`}
+            data-tooltip={controlText('MacroAskDialog.text003', { value1: String(ask.macroName) })}
             style={{ marginRight: 'auto' }}
             onClick={() => stopUserMacro()}
-          >
-            Stop macro
-          </button>
-          <button type="button" className="modal-btn modal-btn-ghost" data-testid="macro-ask-cancel" onClick={cancel}>
-            Cancel
-          </button>
+          >{controlText('MacroAskDialog.text004')}</button>
+          <button type="button" className="modal-btn modal-btn-ghost" data-testid="macro-ask-cancel" onClick={cancel}>{controlText('MacroAskDialog.text005')}</button>
           {question.kind === 'confirm' && (
             <button
               type="button"
@@ -146,9 +146,7 @@ function MacroAskPanel({ ask }: { ask: MacroAskState }) {
               data-testid="macro-ask-ok"
               autoFocus
               onClick={() => answerMacroAsk(ask.id, true)}
-            >
-              OK
-            </button>
+            >{controlText('MacroAskDialog.text006')}</button>
           )}
           {question.kind === 'ask' && (
             <button
@@ -156,9 +154,7 @@ function MacroAskPanel({ ask }: { ask: MacroAskState }) {
               className="modal-btn modal-btn-primary"
               data-testid="macro-ask-ok"
               onClick={() => answerMacroAsk(ask.id, typed)}
-            >
-              OK
-            </button>
+            >{controlText('MacroAskDialog.text007')}</button>
           )}
         </div>
       </div>

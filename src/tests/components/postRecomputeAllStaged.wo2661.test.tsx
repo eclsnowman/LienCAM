@@ -476,10 +476,16 @@ describe('WO-2661 Post Process Recompute all runs staged, upstream first', () =>
     await settle()
 
     // The old request belonged to the outgoing document: it starts no batch
-    // and computes nothing in the reopened one.
-    expect(dispatched).not.toContain('drill-2')
+    // in the reopened one. WO-2788 (repinned WO-2792): the reopen's load census
+    // marks drill-2 (ready, no moves) out of date, and Post - still open on
+    // Setup 2 - recomputes it ONCE itself, per operation, and says so. That
+    // compute is the reopened document's own, not the dropped request.
+    expect(batchStarts()).toHaveLength(1)
     expect(useCamStore.getState().toolpathBatch).toBeNull()
-    expect(operation(SETUP_2, 'drill-2').status).not.toBe('computing')
-    expect(operation(SETUP_2, 'drill-2').toolpathMoves ?? []).toEqual([])
+    await vi.waitFor(() => expect(operation(SETUP_2, 'drill-2').status).toBe('ready'))
+    expect(dispatched.filter((id) => id === 'drill-2')).toEqual(['drill-2'])
+    expect(useCamStore.getState().consoleEvents
+      .filter((event) => event.source === 'post').map((event) => event.message))
+      .toEqual([expect.stringMatching(/recomputed 1 out-of-date operation before posting: "Drill 4"/)])
   })
 })

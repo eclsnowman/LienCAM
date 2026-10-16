@@ -16,7 +16,7 @@ export default defineConfig([
   // turned WO-2089's merge lint red while it existed).
   // .test-scratch holds whole-repo copies tests export (gitignored); linting it gives every
   // file two tsconfig roots, and the gate then baseline-lints thousands of files one by one.
-  globalIgnores(['dist', '.worktrees', '.wo*', '.test-scratch', 'src/tests/ui/fixtures/**']),
+  globalIgnores(['dist', 'archive', '.worktrees', '.wo*', '.test-scratch', 'src/tests/ui/fixtures/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -260,6 +260,7 @@ export default defineConfig([
       'src/lib/sketch/sketcher/overlays/SketchDimensionOverlay.tsx',
       'src/lib/sketch/sketcher/overlays/SketchDrawValueInput.tsx',
       'src/lib/sketch/sketcher/overlays/SketchLiveDimsOverlay.tsx',
+      'src/lib/sketch/sketcher/overlays/SketchPatternEditor.tsx',
       'src/lib/sketch/sketcher/overlays/SketchPromptBar.tsx',
       'src/lib/sketch/sketcher/overlays/SketchTextAnchorPill.tsx',
       'src/lib/sketch/sketcher/overlays/SketchTextInput.tsx',

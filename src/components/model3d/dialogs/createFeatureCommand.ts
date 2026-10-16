@@ -7,6 +7,8 @@
 // its serialize() shape ({ type: 'insertNode', ... }) is unchanged for the
 // overwhelming common case.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { CompositeCommand, InsertAtMarkerCommand, InsertNodeCommand, SetHiddenCommand, type Command, type DagNodeInput, type FeatureDag } from '../../../doc'
 import { isDirectEditBodyOpType, isWorkbenchBodyOpType } from '../bodyLineage'
 
@@ -45,7 +47,7 @@ export function createFeatureCommand(dag: FeatureDag, input: DagNodeInput): Comm
  * use this command until it is also a real replayable workbench feature. */
 export function createDirectEditFeatureCommand(dag: FeatureDag, input: DagNodeInput): Command {
   if (input.kind !== 'feature' || !isDirectEditBodyOpType(input.payload?.opType)) {
-    throw new Error(`Direct edit '${input.id}' must be a registered direct-edit feature`)
+    throw new Error(workbenchText('createFeatureCommand.directEditMustBeARegisteredDirectEditFeature', { id: String(input.id) }))
   }
   return createFeatureCommand(dag, input)
 }

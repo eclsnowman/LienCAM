@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { useEffect, useMemo, useState } from 'react'
 import { DialogShell } from './DialogShell'
 
@@ -26,11 +27,7 @@ export interface OffsetPlaneDialogValue {
   hingeAxisId?: string
 }
 
-const TITLES: Record<ConstructionPlaneType, [string, string]> = {
-  offset: ['Offset plane', 'Edit offset plane'],
-  midplane: ['Midplane', 'Edit midplane'],
-  angle: ['Plane at angle', 'Edit plane at angle'],
-}
+
 
 // WO-030 (UI-107 slice 1): the dialog's live-preview seam, following the
 // delivered ShellDialog shape. The intent is geometric only (source + finite
@@ -63,6 +60,12 @@ export interface OffsetPlaneDialogProps {
 }
 
 export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
+  const TITLES: Record<ConstructionPlaneType, [string, string]> = {
+  offset: [workbenchText('OffsetPlaneDialog.offsetPlane'), workbenchText('OffsetPlaneDialog.editOffsetPlane')],
+  midplane: [workbenchText('OffsetPlaneDialog.midplane'), workbenchText('OffsetPlaneDialog.editMidplane')],
+  angle: [workbenchText('OffsetPlaneDialog.planeAtAngle'), workbenchText('OffsetPlaneDialog.editPlaneAtAngle')],
+}
   const [sourceId, setSourceId] = useState(props.initialSourceId)
   const [name, setName] = useState(props.initialName)
   const [distanceText, setDistanceText] = useState(String(props.initialDistance))
@@ -97,13 +100,13 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
       ? angleText.trim().length > 0 && Number.isFinite(angleDeg)
       : distanceText.trim().length > 0 && Number.isFinite(distance)
   const localError = sourceId.length === 0
-    ? 'Choose a source plane.'
+    ? workbenchText('OffsetPlaneDialog.chooseASourcePlane')
     : planeType === 'midplane' && secondSourceId.length === 0
-      ? 'Choose the second plane.'
+      ? workbenchText('OffsetPlaneDialog.chooseTheSecondPlane')
       : name.trim().length === 0
-        ? 'Enter a plane name.'
+        ? workbenchText('OffsetPlaneDialog.enterAPlaneName')
         : !numberReady
-          ? (planeType === 'angle' ? 'Enter an angle in degrees.' : 'Enter a finite signed distance.')
+          ? (planeType === 'angle' ? workbenchText('OffsetPlaneDialog.enterAnAngleInDegrees') : workbenchText('OffsetPlaneDialog.enterAFiniteSignedDistance'))
           : null
   const valueOf = (): OffsetPlaneDialogValue => planeType === 'offset'
     ? { sourceId, name: name.trim(), distance, flipNormal }
@@ -152,7 +155,7 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{planeType === 'midplane' ? 'First plane' : 'Source plane'}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{planeType === 'midplane' ? workbenchText('OffsetPlaneDialog.firstPlane') : workbenchText('OffsetPlaneDialog.sourcePlane')}</span>
           <select
             data-testid="offset-plane-source"
             value={sourceId}
@@ -167,7 +170,7 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
         </label>
         {planeType === 'midplane' && props.mode === 'edit' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Second plane</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('OffsetPlaneDialog.secondPlane')}</span>
             <span data-testid="construction-plane-second-source-name">
               {props.sources.find((source) => source.id === secondSourceId)?.label ?? secondSourceId}
             </span>
@@ -175,7 +178,7 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
         )}
         {planeType === 'midplane' && props.mode === 'create' && (
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Second plane</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('OffsetPlaneDialog.secondPlane')}</span>
             <select
               data-testid="construction-plane-second-source"
               value={secondSourceId}
@@ -184,7 +187,7 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
                 props.onSecondSourceChange?.(event.target.value)
               }}
             >
-              {secondSourceId.length === 0 && <option value="">(click a face or plane)</option>}
+              {secondSourceId.length === 0 && <option value="">{workbenchText('OffsetPlaneDialog.clickAFaceOrPlane')}</option>}
               {props.sources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
             </select>
           </label>
@@ -195,17 +198,17 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
             style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
           >
             {planeType === 'midplane'
-              ? 'Pick planes: click two planar model faces or planes in the viewport, first then second.'
-              : 'Pick source: click a planar model face or plane in the viewport.'}
+              ? workbenchText('OffsetPlaneDialog.pickPlanesClickTwoPlanarModelFacesOrPlanes')
+              : workbenchText('OffsetPlaneDialog.pickSourceClickAPlanarModelFaceOrPlane')}
           </div>
         )}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Name</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('OffsetPlaneDialog.name')}</span>
           <input data-testid="offset-plane-name" value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         {planeType === 'offset' && (
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Signed distance (mm)</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('OffsetPlaneDialog.signedDistanceMm')}</span>
             <input
               data-testid="offset-plane-distance"
               type="number"
@@ -218,7 +221,7 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
         {planeType === 'angle' && (
           <>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Angle (deg)</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('OffsetPlaneDialog.angleDeg')}</span>
               <input
                 data-testid="construction-plane-angle"
                 type="number"
@@ -228,12 +231,12 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Turn about</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('OffsetPlaneDialog.turnAbout')}</span>
               <select data-testid="construction-plane-hinge" value={hingeChoice} onChange={(event) => setHingeChoice(event.target.value)}>
-                <option value="x">The source plane's X axis</option>
-                <option value="y">The source plane's Y axis</option>
+                <option value="x">{workbenchText('OffsetPlaneDialog.theSourcePlaneSXAxis')}</option>
+                <option value="y">{workbenchText('OffsetPlaneDialog.theSourcePlaneSYAxis')}</option>
                 {hingeAxisId !== undefined && !(props.axisOptions ?? []).some((option) => option.id === hingeAxisId) && (
-                  <option value={hingeChoice}>(unavailable: {hingeAxisId})</option>
+                  <option value={hingeChoice}>{workbenchText('OffsetPlaneDialog.unavailable')}{hingeAxisId}{workbenchText('OffsetPlaneDialog.value')}</option>
                 )}
                 {(props.axisOptions ?? []).map((option) => <option key={option.id} value={`axis:${option.id}`}>{option.label}</option>)}
               </select>
@@ -248,8 +251,7 @@ export function OffsetPlaneDialog(props: OffsetPlaneDialogProps) {
             checked={flipNormal}
             onChange={(event) => setFlipNormal(event.target.checked)}
           />
-          Flip plane orientation
-        </label>
+          {workbenchText('OffsetPlaneDialog.flipPlaneOrientation')}</label>
         {(localError ?? error) !== null && (
           <div data-testid="offset-plane-error" style={{ color: 'var(--text-danger)' }}>{localError ?? error}</div>
         )}

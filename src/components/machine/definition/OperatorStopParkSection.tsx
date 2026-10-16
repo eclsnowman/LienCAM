@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { OptionalNumericInput } from '../../ui/NumericInput'
 import { withOperatorStopParkAxis, workholdingStopPark } from '../../../lib/machine/macros/clampPauseMacro'
 import type { MachineConfig } from '../../../types'
@@ -10,14 +13,15 @@ export function OperatorStopParkSection({ machine, onChange }: {
   machine: MachineConfig
   onChange: (mut: (machine: MachineConfig) => MachineConfig) => void
 }) {
+  useText('control-screens-not-probing')
   const set = machine.operatorStopPark ?? null
   const fallback = workholdingStopPark({ ...machine, operatorStopPark: null }, undefined)
   return (
     <div data-testid="machine-def-operator-stop-park" style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-        <strong style={{ fontSize: 'var(--font-size-sm)' }}>Operator stop park</strong>
+        <strong style={{ fontSize: 'var(--font-size-sm)' }}>{controlText('OperatorStopParkSection.title')}</strong>
         <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
-          Machine coordinates (mm). Where an operator stop parks{fallback ? `; blank uses "${fallback.label}"` : ''}.
+          {controlText('OperatorStopParkSection.description')}{fallback ? controlText('OperatorStopParkSection.fallback', { value1: fallback.label }) : ''}.
         </span>
       </div>
       <table className="machine-def-table">
@@ -32,7 +36,7 @@ export function OperatorStopParkSection({ machine, onChange }: {
                     value={set?.[axis]}
                     step={0.1}
                     placeholder={typeof shown === 'number' && Number.isFinite(shown) ? String(shown) : undefined}
-                    ariaLabel={`Operator stop park ${axis.toUpperCase()} machine coordinate`}
+                    ariaLabel={controlText('OperatorStopParkSection.axisLabel', { value1: axis.toUpperCase() })}
                     className="mform-input mform-input-mono"
                     style={{ width: 90 }}
                     onChange={(value) => onChange((current) => withOperatorStopParkAxis(current, axis, value ?? null))}

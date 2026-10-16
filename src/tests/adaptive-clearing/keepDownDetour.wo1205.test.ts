@@ -1,5 +1,7 @@
 // WO-1237: current main already removes Operator's named keep-down detour. Pin the exact
 // production request corpus without retaining WO-1205's now-dormant rejection rule.
+// WO-2787: the detector's positive control runs on a stream recorded at WO-2752's parent
+// (src/tests/evidence/WO-2787/legacy-detour-stream.json); the replay page moved there too.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
@@ -15,6 +17,9 @@ interface FixtureMetric {
   retracts: number
   links: number
   cutLengthMm: number
+  residualAreaMm2: number
+  residualMaxInscribedR: number
+  aborted: string | null
   badChainRides: number
   outAndBackDetours: number
 }
@@ -66,31 +71,40 @@ describe('WO-1237 production keep-down detour regression', () => {
 
   it('keeps the named chain absent and accounts for every recorded adaptive request', async () => {
     if (!page) throw new Error('browser page not initialized')
-    await page.goto(`${BASE}/src/tests/evidence/WO-1205/browser-replay.html`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/src/tests/evidence/WO-2787/browser-replay.html`, { waitUntil: 'domcontentloaded' })
     await page.waitForFunction(
-      () => Boolean(Reflect.get(window, '__wo1237Replay') || Reflect.get(window, '__wo1237ReplayError')),
+      () => Boolean(Reflect.get(window, '__wo2787Replay') || Reflect.get(window, '__wo2787ReplayError')),
       null,
       { timeout: 420_000 },
     )
     const outcome = await page.evaluate(() => ({
-      report: Reflect.get(window, '__wo1237Replay') as {
+      report: Reflect.get(window, '__wo2787Replay') as {
         fixtures: FixtureMetric[]
-        legacyControl: LegacyControl
+        positiveControl: LegacyControl
+        liveLegacy: LegacyControl
+        recordedEngine: string
       } | undefined,
-      error: Reflect.get(window, '__wo1237ReplayError') as string | undefined,
+      error: Reflect.get(window, '__wo2787ReplayError') as string | undefined,
     }))
     if (outcome.error || !outcome.report) throw new Error(outcome.error ?? 'browser replay returned no report')
     console.log('WO-1237 production request accounting:', JSON.stringify(outcome.report.fixtures))
-    console.log('WO-1237 detour-family positive control:', JSON.stringify(outcome.report.legacyControl))
-    expect(outcome.report.fixtures).toHaveLength(8)
-    expect(outcome.report.fixtures.every((fixture) => fixture.badChainRides === 0)).toBe(true)
-    expect(outcome.report.fixtures.every((fixture) => fixture.outAndBackDetours === 0)).toBe(true)
-    expect(outcome.report.legacyControl).toEqual({
+    console.log('WO-2787 detour-family positive control (recorded):', JSON.stringify(outcome.report.positiveControl))
+    console.log('WO-2787 legacy corpus through today\'s engine (reading):', JSON.stringify(outcome.report.liveLegacy))
+    // The control first: the detector must fire before its zero on production means anything.
+    // WO-2787: these are the WO-1237 pins, unchanged. WO-2752 made the live engine stop
+    // producing this stream (live: 4 routed rides, 0 out-and-back, 0 long-forward, 2 near-
+    // reversals), so the rides are recorded at its parent bce92ee126 and replayed here.
+    expect(outcome.report.recordedEngine).toBe('bce92ee126')
+    expect(outcome.report.positiveControl).toEqual({
       routedRides: 6,
       outAndBackDetours: 2,
       longForwardRoutes: 2,
       lowStretchNearReversals: 2,
     })
+    expect(outcome.report.fixtures).toHaveLength(8)
+    expect(outcome.report.fixtures.every((fixture) => fixture.badChainRides === 0)).toBe(true)
+    expect(outcome.report.fixtures.every((fixture) => fixture.outAndBackDetours === 0)).toBe(true)
+    expect(outcome.report.fixtures.every((fixture) => fixture.aborted === null)).toBe(true)
     // WO-1896 re-pin: the production requests ask for climb, which now keeps the material on
     // the cutter's right -- the other stream. Before -> after, per request (passes, links, cut
     // mm): 0: 2, 0, 711.82 -> 2, 0, 711.61 | 1: 10, 1, 772.41 -> 6, 1, 772.20 | 2: 12, 0,
@@ -100,6 +114,15 @@ describe('WO-1237 production keep-down detour regression', () => {
     // Measured on both streams by src/tests/evidence/WO-1896/detour-probe.js: no keep-down or
     // wall ride leaves the stock (WO-1194 air metric 0 everywhere), none travels at depth
     // through standing stock, and the old numbers are exactly the 'conventional' stream now.
+    // WO-2787 re-pin, cause WO-2752 (the stepper refuses a cut on the wrong flank, and the
+    // roll-in measures the real fresh-stock side): with the engine reverted to its parent
+    // bce92ee126 this replay reproduces the previous pin exactly. Before -> after, per request
+    // (passes, links, cut mm): 0: 2, 0, 711.61 -> 2, 0, 708.29 | 1: 6, 1, 772.20 -> 9, 1,
+    // 769.79 | 2: 16, 0, 790.50 -> 18, 1, 764.41 | 3: 22, 1, 788.26 -> 26, 1, 775.30 | 4: 28,
+    // 1, 796.63 -> 27, 0, 765.23 | 5: 20, 1, 881.36 -> 23, 1, 717.87 | 6: 24, 1, 717.76 -> 28,
+    // 1, 717.30 | 7: 6, 1, 435.63 -> 4, 1, 392.19. Retracts stay 0 everywhere and no request
+    // aborts; residual stock is 0.250 -> 0.317 mm^2 summed over all eight (largest single
+    // request 0.140 mm^2), so the 283 mm less cutting is not stock left behind.
     expect(outcome.report.fixtures.map((fixture) => ({
       request: fixture.request,
       passes: fixture.passes,
@@ -107,14 +130,14 @@ describe('WO-1237 production keep-down detour regression', () => {
       links: fixture.links,
       cutLengthMm: Number(fixture.cutLengthMm.toFixed(6)),
     }))).toEqual([
-      { request: 0, passes: 2, retracts: 0, links: 0, cutLengthMm: 711.606806 },
-      { request: 1, passes: 6, retracts: 0, links: 1, cutLengthMm: 772.203234 },
-      { request: 2, passes: 16, retracts: 0, links: 0, cutLengthMm: 790.49949 },
-      { request: 3, passes: 22, retracts: 0, links: 1, cutLengthMm: 788.263654 },
-      { request: 4, passes: 28, retracts: 0, links: 1, cutLengthMm: 796.625149 },
-      { request: 5, passes: 20, retracts: 0, links: 1, cutLengthMm: 881.360708 },
-      { request: 6, passes: 24, retracts: 0, links: 1, cutLengthMm: 717.758394 },
-      { request: 7, passes: 6, retracts: 0, links: 1, cutLengthMm: 435.625812 },
+      { request: 0, passes: 2, retracts: 0, links: 0, cutLengthMm: 708.293942 },
+      { request: 1, passes: 9, retracts: 0, links: 1, cutLengthMm: 769.791412 },
+      { request: 2, passes: 18, retracts: 0, links: 1, cutLengthMm: 764.413115 },
+      { request: 3, passes: 26, retracts: 0, links: 1, cutLengthMm: 775.301264 },
+      { request: 4, passes: 27, retracts: 0, links: 0, cutLengthMm: 765.225413 },
+      { request: 5, passes: 23, retracts: 0, links: 1, cutLengthMm: 717.865131 },
+      { request: 6, passes: 28, retracts: 0, links: 1, cutLengthMm: 717.296005 },
+      { request: 7, passes: 4, retracts: 0, links: 1, cutLengthMm: 392.191132 },
     ])
   }, 480_000)
 })

@@ -1,3 +1,7 @@
+import { jsxTextValue } from '../../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-2063 - the Probing screen's own pieces, laid out to
 // docs/design/PROBING-SCREEN-V2.md (reference: src/tests/evidence/WO-2063/
 // wireframe-v5-1920x1080.png). ProbingPanel owns the state and the runs; these
@@ -9,6 +13,22 @@ import { DisclosureSection } from '../../ui/DisclosureSection'
 import { ProbeStepPicture, meshHeightColor, pictureLayout, probeAt, type PictureMode, type PictureProgress } from './ProbeStepPicture'
 import { moveLength, type P3, type ProbeScene, type ProbeStep, type StepMove } from './probeScene'
 import './probingScreen.css'
+
+// Keep the picture's status brief; the original diagnostic stays in the console.
+// Match only known failure wording. Unknown errors never imply a motion/retry action.
+function briefProbeFailure(reason: string): string {
+  if (/the probe was already touching/i.test(reason)) return probeText('probingScreen1')
+  if (/fine pass lost contact/i.test(reason)) return probeText('probingScreen2')
+  if (/fine pass did not finish/i.test(reason)) return probeText('probingScreen3')
+  if (/(?:no (?:top|wall|touch|contact) found|probe never made contact)/i.test(reason)) return probeText('probingScreen4')
+  if (/E-STOP is latched/i.test(reason)) return probeText('probingScreen5')
+  if (/stopped by Stop\/Reset/i.test(reason)) return probeText('probingScreen6')
+  if (/stopped by Stop(?: during|\.)/i.test(reason)) return probeText('probingScreen7')
+  if (/the probe touched (?:at|during)/i.test(reason)) return probeText('probingScreen8')
+  if (/connection changed|serial link closed/i.test(reason)) return probeText('probingScreen9')
+  if (/controller reported ALARM:/i.test(reason)) return probeText('probingScreen10')
+  return probeText('probingScreen11')
+}
 
 /** The picture box's size, measured (jsdom has no layout: a 1240x675 default). */
 function useBoxSize<T extends HTMLElement>(): [React.RefObject<T | null>, { w: number; h: number }] {
@@ -159,7 +179,7 @@ export function playStepMs(step: ProbeStep): number {
  * WO-2126: the Preview steps hover. It must never read as Start probing
  * (Operator, 09-28 8:02 AM): words, not a play triangle, and it says so.
  */
-export const PREVIEW_STEPS_HOVER = 'Plays the steps in the picture only - the machine does not move. Start probing runs the routine.'
+export const PREVIEW_STEPS_HOVER = probeText('probingScreen12')
 
 /**
  * WO-2126: Play walks the before-Start preview through the steps, one after
@@ -230,7 +250,7 @@ export function StepCard({
   live: LiveStepState | null
   /** 'running' | 'paused' | 'stopped' | 'done' | 'idle' */
   runState: 'idle' | 'running' | 'paused' | 'stopped' | 'done'
-  /** WO-2113: why the run stopped - its console line, word for word. */
+  /** WO-2113: full diagnostic used to derive a brief visible failure summary. */
   stoppedWhy?: string | null
   /** WO-2664: the last Start was refused before any motion; `stoppedWhy` is
    *  its reason, in place of the previous run's. */
@@ -241,6 +261,7 @@ export function StepCard({
   confirm: ReactNode
   refusal: string | null
 }) {
+  useText('probing-screens')
   const [boxRef, size] = useBoxSize<HTMLDivElement>()
   const steps = scene.steps
   const following = live !== null && (runState === 'running' || runState === 'paused')
@@ -296,9 +317,16 @@ export function StepCard({
   const chipSeen = new Set<number>()
   const chipList = steps.flatMap((s, i) => (chipSeen.has(chipOf(i)) ? [] : (chipSeen.add(chipOf(i)), [{ n: chipOf(i), first: i, owner: s.owner }])))
   const chipIndex = Math.max(0, chipList.findIndex((c) => c.n === chipOf(index)))
-  const liveChip = runState === 'done' ? Infinity : following || runState === 'stopped' ? chipOf(live?.step ?? 0) : -Infinity
-  const pictureH = Math.max(200, size.h)
-  const { sideW } = pictureLayout(scene, size.w, pictureH)
+  // WO-2774: "Did not start" shows no run progress - the earlier run's
+  // stopped step and its ticks are not this Start's.
+  const liveChip = runState === 'done' ? Infinity : notStarted ? -Infinity : following || runState === 'stopped' ? chipOf(live?.step ?? 0) : -Infinity
+  // The renderer lays out at least 260px high. A stopped reason plus the
+  // expanded console can leave less room: scale the complete drawing instead
+  // of clipping its lower height labels and probe. Captions keep their size.
+  const pictureScale = Math.min(1, Math.max(1, size.h) / 260)
+  const pictureH = size.h / pictureScale
+  const pictureW = size.w / pictureScale
+  const { sideW } = pictureLayout(scene, pictureW, pictureH)
   // One row of step numbers, whatever the count (Boss has 22): each chip
   // takes its share of the card, 60 px at most; the numbers stay 18 px or more.
   // Back / Next when there is room for them beside full-size numbers; on a
@@ -318,38 +346,45 @@ export function StepCard({
   const chipFont = chipW >= 44 ? 20 : chipW >= 36 ? 19 : 18
   // WO-2184: while a Z surface run is followed, stopped or done, which point it is on.
   const pointWords = scene.mesh && step?.point !== undefined && (following || runState === 'stopped' || runState === 'done')
-    ? `Point ${step.point} of ${scene.mesh.points.length}`
+    ? probeText('probingScreen13', { value1: String(step.point), value2: String(scene.mesh.points.length) })
     : null
   const legend = scene.mesh?.legend ?? null
   // The step named is the plan step (chip) it shows as - one of the chips on screen.
-  const statusWords = runState === 'paused'
-    ? `Paused at step ${chipOf(index)}`
+  const statusWords = notStarted ? probeText('probingScreen14') : runState === 'paused'
+    ? probeText('probingScreen15', { value1: String(chipOf(index)) })
     : runState === 'stopped'
-      ? notStarted ? 'Did not start' : `Stopped at step ${chipOf(live?.step ?? index)}`
+      ? probeText('probingScreen16', { value1: String(chipOf(live?.step ?? index)) })
       : null
   // WO-2664 (machine session 10-07: "no visual indication on the screen that any fault had
   // occurred"): a stopped run's line reads in the console's error red.
-  const stoppedTone = runState === 'stopped' ? { color: 'var(--accent-red)' } : undefined
+  const stoppedTone = runState === 'stopped' || notStarted ? { color: 'var(--accent-red)' } : undefined
 
   return (
     <section className="panel control-panel pbn-card" data-testid="probing-step-card">
-      <div className="pbn-captions" style={{ gridTemplateColumns: `${sideW + 48}px 1fr` }}>
+      <div className="pbn-captions" style={{ gridTemplateColumns: `${(sideW + 48) * pictureScale}px 1fr` }}>
         {/* WO-2127: named by the real view. The side drawing puts its axis to
             the right and Z up: along X it looks toward +Y (Front view), along
             Y it looks toward -X with +Y to the right (Right view). */}
-        <span className="pbn-caption" data-testid="probing-caption-side">{step?.view === 'Y' ? 'Right view' : 'Front view'}</span>
-        <span className="pbn-caption" data-testid="probing-caption-top">Top view</span>
+        <span className="pbn-caption" data-testid="probing-caption-side">{step?.view === 'Y' ? probeText('probingScreen17') : probeText('probingScreen18')}</span>
+        <span className="pbn-caption" data-testid="probing-caption-top">{probeText('probingScreen20')}</span>
       </div>
       <div className="pbn-picture-box" ref={boxRef} data-testid="probing-picture-box">
         {step
-          ? <ProbeStepPicture scene={scene} step={step} width={size.w} height={pictureH} progress={progress} touched={touched}
+          ? <div style={{ width: pictureW, height: pictureH, transform: `scale(${pictureScale})`, transformOrigin: 'top left' }}>
+            <ProbeStepPicture scene={scene} step={step} width={pictureW} height={pictureH} progress={progress} touched={touched}
               mode={mode} real={following && glided ? glided : real} reportedTip={following || runState === 'stopped' ? reportedTip : null} missed={missed}
               previewPhase={following ? 'live' : preview === null || preview.held ? 'still' : preview.move === 0 && preview.t === 0 ? 'start' : 'playing'} />
-          : <div className="pbn-refusal" data-testid="probing-scene-refusal">{refusal ?? scene.refusal ?? 'This routine has no steps yet.'}</div>}
+          </div>
+          : <div className="pbn-refusal" data-testid="probing-scene-refusal">{refusal ?? scene.refusal ?? probeText('probingScreen21')}</div>}
       </div>
       <div className="pbn-sentence-row">
         <p className="pbn-sentence" data-testid="probing-step-sentence" data-owner={step?.owner}>
-          {step?.sentence ?? ''}
+          {statusWords ? (
+            <span className="pbn-run-line" data-testid="probing-run-line">
+              <span className="pbn-run-state" data-testid="probing-run-state" style={stoppedTone}>{statusWords}</span>
+              {(runState === 'stopped' || notStarted) && stoppedWhy && <span className="pbn-run-why" data-testid="probing-run-why" style={stoppedTone}>{briefProbeFailure(stoppedWhy)}</span>}
+            </span>
+          ) : step?.sentence ?? ''}
         </p>
         {step?.confirm && confirm}
         {legend && (
@@ -357,7 +392,7 @@ export function StepCard({
             <span data-testid="probing-mesh-low">{legend.low}</span>
             <span className="pbn-mesh-ramp" aria-hidden="true" style={{ background: `linear-gradient(to right, ${meshHeightColor(0)}, ${meshHeightColor(0.5)}, ${meshHeightColor(1)})` }} />
             <span data-testid="probing-mesh-high">{legend.high}</span>
-            <span className="pbn-mesh-range" data-testid="probing-mesh-range">range {legend.range}</span>
+            <span className="pbn-mesh-range" data-testid="probing-mesh-range">{probeText('probingScreen23', { value1: jsxTextValue(legend.range) })}</span>
           </div>
         )}
       </div>
@@ -368,13 +403,13 @@ export function StepCard({
         style={{ '--pbn-chip-w': `${chipW}px`, '--pbn-chip-font': `${chipFont}px` } as React.CSSProperties}
       >
         {paging && (
-          <button type="button" className="pbn-page" data-testid="probing-step-back" disabled={chipIndex <= 0} onClick={() => onShow(chipList[chipIndex - 1].first)}>Back</button>
+          <button type="button" className="pbn-page" data-testid="probing-step-back" disabled={chipIndex <= 0} onClick={() => onShow(chipList[chipIndex - 1].first)}>{probeText('probingScreen25')}</button>
         )}
         <ol className="pbn-chips">
           {shownChips.map((ci) => {
             const s = chipList[ci]
             const done = s.n < liveChip
-            const current = ci === chipIndex
+            const current = ci === chipIndex && !notStarted
             return (
               <li key={s.n}>
                 <button
@@ -389,8 +424,8 @@ export function StepCard({
                 >
                   <span className="pbn-chip-n">{s.n}</span>
                   <span className="pbn-chip-foot">
-                    {done && <Check size={16} strokeWidth={3} className="pbn-chip-tick" aria-label="done" />}
-                    {s.owner === 'you' && <span className="pbn-chip-you">YOU</span>}
+                    {done && <Check size={16} strokeWidth={3} className="pbn-chip-tick" aria-label={probeText('probingScreen26')} />}
+                    {s.owner === 'you' && <span className="pbn-chip-you">{probeText('probingScreen28')}</span>}
                   </span>
                 </button>
               </li>
@@ -398,7 +433,7 @@ export function StepCard({
           })}
         </ol>
         {paging && (
-          <button type="button" className="pbn-page" data-testid="probing-step-next" disabled={chipIndex >= chipList.length - 1} onClick={() => onShow(chipList[chipIndex + 1].first)}>Next</button>
+          <button type="button" className="pbn-page" data-testid="probing-step-next" disabled={chipIndex >= chipList.length - 1} onClick={() => onShow(chipList[chipIndex + 1].first)}>{probeText('probingScreen30')}</button>
         )}
         {canPlay && (
           <button
@@ -410,16 +445,11 @@ export function StepCard({
             data-tooltip={PREVIEW_STEPS_HOVER}
             onClick={togglePlay}
           >
-            <span>{play.playing ? 'Stop preview' : 'Preview steps'}</span>
+            <span>{play.playing ? probeText('probingScreen31') : probeText('probingScreen32')}</span>
           </button>
         )}
         {pointWords && <span className="pbn-point-counter" data-testid="probing-point-counter">{pointWords}</span>}
-        {statusWords && (
-          <span className={`pbn-run-line${runState === 'stopped' && stoppedWhy ? ' pbn-run-line-why' : ''}`} data-testid="probing-run-line">
-            <span className="pbn-run-state" data-testid="probing-run-state" style={stoppedTone}>{statusWords}</span>
-            {runState === 'stopped' && stoppedWhy && <span className="pbn-run-why" data-testid="probing-run-why" style={stoppedTone}>{stoppedWhy}</span>}
-          </span>
-        )}
+
       </div>
     </section>
   )
@@ -437,6 +467,7 @@ export function chipWindow(count: number, current: number, fits: number): number
 
 /** The six marks, each drawn as the pictures draw it (the approved key). */
 export function PictureKey() {
+  useText('probing-screens')
   const row = (sample: ReactNode, words: string, id: string) => (
     <li className="pbn-key-row" data-testid={`probing-key-${id}`}>
       <svg className="pbn-key-sample" viewBox="0 0 64 34" width={64} height={34} aria-hidden="true">{sample}</svg>
@@ -445,19 +476,20 @@ export function PictureKey() {
   )
   return (
     <ul className="pbn-key" data-testid="probing-picture-key">
-      {row(<circle cx={32} cy={17} r={12} className="pbn-ghost" />, 'Faded probe: where this step starts', 'ghost')}
-      {row(<><line x1={4} y1={17} x2={44} y2={17} stroke="var(--vp-axis-x)" strokeWidth={5} /><polygon points="60,17 42,7 42,27" fill="var(--vp-axis-x)" /></>, 'Solid arrow: moves to a position', 'move')}
-      {row(<><line x1={4} y1={17} x2={44} y2={17} stroke="var(--vp-axis-x)" strokeWidth={5} strokeDasharray="10 6" /><polygon points="60,17 42,7 42,27" fill="var(--vp-axis-x)" /></>, 'Dashed arrow: probes, stops at the first touch', 'probe')}
-      {row(<><line x1={4} y1={17} x2={44} y2={17} stroke="var(--role-identity-light)" strokeWidth={5} strokeDasharray="3 6" /><polygon points="60,17 42,7 42,27" fill="var(--role-identity-light)" /></>, 'Dotted arrow: you jog the probe here', 'jog')}
-      {row(<circle cx={32} cy={17} r={9} fill="var(--select-viewport)" />, 'Orange dot: where it touched', 'touch')}
-      {row(<><circle cx={17} cy={17} r={13} fill="none" stroke="var(--text-primary)" strokeWidth={2.5} /><text x={17} y={23} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--text-primary)">1</text><circle cx={47} cy={17} r={13} fill="none" stroke="var(--text-primary)" strokeWidth={2.5} /><text x={47} y={23} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--text-primary)">2</text></>, 'Numbers: two moves, in this order', 'numbers')}
+      {row(<circle cx={32} cy={17} r={12} className="pbn-ghost" />, probeText('probingScreen33'), 'ghost')}
+      {row(<><line x1={4} y1={17} x2={44} y2={17} stroke="var(--vp-axis-x)" strokeWidth={5} /><polygon points="60,17 42,7 42,27" fill="var(--vp-axis-x)" /></>, probeText('probingScreen34'), 'move')}
+      {row(<><line x1={4} y1={17} x2={44} y2={17} stroke="var(--vp-axis-x)" strokeWidth={5} strokeDasharray="10 6" /><polygon points="60,17 42,7 42,27" fill="var(--vp-axis-x)" /></>, probeText('probingScreen35'), 'probe')}
+      {row(<><line x1={4} y1={17} x2={44} y2={17} stroke="var(--role-identity-light)" strokeWidth={5} strokeDasharray="3 6" /><polygon points="60,17 42,7 42,27" fill="var(--role-identity-light)" /></>, probeText('probingScreen36'), 'jog')}
+      {row(<circle cx={32} cy={17} r={9} fill="var(--select-viewport)" />, probeText('probingScreen37'), 'touch')}
+      {row(<><circle cx={17} cy={17} r={13} fill="none" stroke="var(--text-primary)" strokeWidth={2.5} /><text x={17} y={23} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--text-primary)">1</text><circle cx={47} cy={17} r={13} fill="none" stroke="var(--text-primary)" strokeWidth={2.5} /><text x={47} y={23} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--text-primary)">2</text></>, probeText('probingScreen38'), 'numbers')}
     </ul>
   )
 }
 
 export function MoreAboutStep({ sections }: { sections: Array<{ heading: string; lines: string[] }> }) {
+  useText('probing-screens')
   if (sections.length === 0) {
-    return <p className="pbn-more-empty" data-testid="probing-more-empty">Nothing more to this step - the picture and its sentence say it all.</p>
+    return <p className="pbn-more-empty" data-testid="probing-more-empty">{probeText('probingScreen40')}</p>
   }
   return (
     <div className="pbn-more" data-testid="probing-more">
@@ -473,6 +505,7 @@ export function MoreAboutStep({ sections }: { sections: Array<{ heading: string;
 
 /** The right column's two disclosures: they open one at a time. */
 export function KeyAndMore({ more }: { more: Array<{ heading: string; lines: string[] }> }) {
+  useText('probing-screens')
   // Open with the key where the column has room for it under the jog pad and
   // above the E-STOP (1080 tall); on a shorter screen both start closed, so
   // the E-STOP, Start probing and Stop are never pushed off the screen.
@@ -481,7 +514,7 @@ export function KeyAndMore({ more }: { more: Array<{ heading: string; lines: str
     <>
       <section className={`panel control-panel pbn-disclosure${open === 'key' ? ' pbn-disclosure-open' : ''}`} data-testid="probing-key-panel">
         <DisclosureSection
-          title="Picture key"
+          title={probeText('probingScreen41')}
           open={open === 'key'}
           onToggle={() => setOpen((o) => (o === 'key' ? null : 'key'))}
           testId="probing-key-toggle"
@@ -491,7 +524,7 @@ export function KeyAndMore({ more }: { more: Array<{ heading: string; lines: str
       </section>
       <section className={`panel control-panel pbn-disclosure pbn-more-panel${open === 'more' ? ' pbn-disclosure-open pbn-more-open' : ''}`} data-testid="probing-more-panel">
         <DisclosureSection
-          title="More about this step"
+          title={probeText('probingScreen42')}
           open={open === 'more'}
           onToggle={() => setOpen((o) => (o === 'more' ? null : 'more'))}
           testId="probing-more-toggle"

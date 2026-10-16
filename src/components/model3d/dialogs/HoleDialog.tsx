@@ -1,3 +1,4 @@
+import { featureDisplayName, readableInternalIds } from '../../../lib/operatorLabels'
 // WO UI-13A: hole dialog -- GEO-5's makeHole wired into the 3D modeling workspace UI,
 // combined with linear/circular PLACEMENT in one dialog per the WO's own
 // invitation ("ONE dialog w/ pattern options is acceptable if the backend
@@ -34,6 +35,8 @@
 // exactly the committed result. The page owns the FeaturePreviewSession;
 // Apply routes through onApplyGuard BEFORE any history command executes.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, DagNodeSnapshot, FeatureDag } from '../../../doc'
@@ -90,7 +93,7 @@ export function computeHoleSnapCandidates(
     const frame = frames.get(payload.planeNodeId)
     if (frame === undefined) continue
     for (const sample of camSketchPointSamples(payload.sketch)) {
-      out.push({ id: `${id}:${sample.id}`, label: `${sample.label} (${id})`, world: projectSketchPointToWorld(frame, sample.local) })
+      out.push({ id: `${id}:${sample.id}`, label: `${sample.label} (${featureDisplayName(id, node.payload)})`, world: projectSketchPointToWorld(frame, sample.local) })
     }
   }
   return out
@@ -222,6 +225,7 @@ export function HolePointPickerOverlay({
   projectToCanvas,
   onPick,
 }: HolePointPickerOverlayProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [localHoveredId, setLocalHoveredId] = useState<string | null>(null)
   const candidatesRef = useRef(candidates)
@@ -284,7 +288,7 @@ export function HolePointPickerOverlay({
             data-testid={`hole-point-pick-${candidate.id}`}
             data-hole-point-id={candidate.id}
             data-hovered={hovered ? 'true' : 'false'}
-            aria-label={`Use ${candidate.label}`}
+            aria-label={workbenchText('HoleDialog.use', { label: String(candidate.label) })}
             data-tooltip={candidate.label}
             onPointerEnter={() => setHoveredId(candidate.id)}
             onPointerLeave={() => setHoveredId(
@@ -346,80 +350,81 @@ function readPlacement(value: unknown): HolePlacement | undefined {
 }
 
 function holeStyleError(style: unknown): string | undefined {
-  if (typeof style !== 'object' || style === null) return 'Hole style is missing.'
+  if (typeof style !== 'object' || style === null) return workbenchText('HoleDialog.holeStyleIsMissing')
   const value = style as Partial<HoleStyle> & Record<string, unknown>
-  if (value.kind !== 'simple' && value.kind !== 'counterbore' && value.kind !== 'countersink') return 'Hole style is invalid.'
-  if (typeof value.diameter !== 'number' || !Number.isFinite(value.diameter) || value.diameter <= 0) return 'Hole diameter must be greater than zero.'
+  if (value.kind !== 'simple' && value.kind !== 'counterbore' && value.kind !== 'countersink') return workbenchText('HoleDialog.holeStyleIsInvalid')
+  if (typeof value.diameter !== 'number' || !Number.isFinite(value.diameter) || value.diameter <= 0) return workbenchText('HoleDialog.holeDiameterMustBeGreaterThanZero')
   if (value.kind === 'counterbore') {
-    if (typeof value.cbDiameter !== 'number' || !Number.isFinite(value.cbDiameter) || value.cbDiameter <= 0) return 'Counterbore diameter must be greater than zero.'
-    if (typeof value.cbDepth !== 'number' || !Number.isFinite(value.cbDepth) || value.cbDepth <= 0) return 'Counterbore depth must be greater than zero.'
+    if (typeof value.cbDiameter !== 'number' || !Number.isFinite(value.cbDiameter) || value.cbDiameter <= 0) return workbenchText('HoleDialog.counterboreDiameterMustBeGreaterThanZero')
+    if (typeof value.cbDepth !== 'number' || !Number.isFinite(value.cbDepth) || value.cbDepth <= 0) return workbenchText('HoleDialog.counterboreDepthMustBeGreaterThanZero')
   }
   if (value.kind === 'countersink') {
-    if (typeof value.csDiameter !== 'number' || !Number.isFinite(value.csDiameter) || value.csDiameter <= 0) return 'Countersink diameter must be greater than zero.'
-    if (typeof value.csAngleDeg !== 'number' || !Number.isFinite(value.csAngleDeg) || value.csAngleDeg <= 0 || value.csAngleDeg >= 180) return 'Countersink angle must be between 0 and 180 degrees.'
+    if (typeof value.csDiameter !== 'number' || !Number.isFinite(value.csDiameter) || value.csDiameter <= 0) return workbenchText('HoleDialog.countersinkDiameterMustBeGreaterThanZero')
+    if (typeof value.csAngleDeg !== 'number' || !Number.isFinite(value.csAngleDeg) || value.csAngleDeg <= 0 || value.csAngleDeg >= 180) return workbenchText('HoleDialog.countersinkAngleMustBeBetween0And180Degrees')
   }
   return undefined
 }
 
 function holeDepthError(depth: unknown): string | undefined {
-  if (typeof depth !== 'object' || depth === null) return 'Hole depth is missing.'
+  if (typeof depth !== 'object' || depth === null) return workbenchText('HoleDialog.holeDepthIsMissing')
   const value = depth as { kind?: unknown; distance?: unknown }
   if (value.kind === 'throughAll') return undefined
-  if (value.kind !== 'blind') return 'Hole depth type is invalid.'
-  if (typeof value.distance !== 'number' || !Number.isFinite(value.distance) || value.distance <= 0) return 'Blind depth must be greater than zero.'
+  if (value.kind !== 'blind') return workbenchText('HoleDialog.holeDepthTypeIsInvalid')
+  if (typeof value.distance !== 'number' || !Number.isFinite(value.distance) || value.distance <= 0) return workbenchText('HoleDialog.blindDepthMustBeGreaterThanZero')
   return undefined
 }
 
 function placementError(placement: HolePlacement, hasNormal: boolean): string | undefined {
   if (placement.kind === 'single') return undefined
-  if (!hasNormal) return 'Pattern edit refused: the original hole has no stored face normal.'
-  if (!Number.isInteger(placement.count) || placement.count < 2) return 'Hole pattern count must be at least 2.'
-  if (placement.kind === 'linear' && (!Number.isFinite(placement.spacing) || placement.spacing <= 0)) return 'Hole pattern spacing must be greater than zero.'
-  if (placement.kind === 'circular' && (!Number.isFinite(placement.radius) || placement.radius <= 0)) return 'Hole pattern radius must be greater than zero.'
-  if (placement.kind === 'circular' && !Number.isFinite(placement.startAngleDeg)) return 'Hole pattern start angle must be finite.'
+  if (!hasNormal) return workbenchText('HoleDialog.patternEditRefusedTheOriginalHoleHasNoStored')
+  if (!Number.isInteger(placement.count) || placement.count < 2) return workbenchText('HoleDialog.holePatternCountMustBeAtLeast2')
+  if (placement.kind === 'linear' && (!Number.isFinite(placement.spacing) || placement.spacing <= 0)) return workbenchText('HoleDialog.holePatternSpacingMustBeGreaterThanZero')
+  if (placement.kind === 'circular' && (!Number.isFinite(placement.radius) || placement.radius <= 0)) return workbenchText('HoleDialog.holePatternRadiusMustBeGreaterThanZero')
+  if (placement.kind === 'circular' && !Number.isFinite(placement.startAngleDeg)) return workbenchText('HoleDialog.holePatternStartAngleMustBeFinite')
   return undefined
 }
 
 function editReferenceError(dag: FeatureDag, featureId: string): string | undefined {
   const node = dag.getNode(featureId)
   if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'hole') {
-    return `Hole edit refused: '${featureId}' is not a Hole feature`
+    return workbenchText('HoleDialog.holeEditRefusedIsNotAHoleFeature', { featureId: String(featureId) })
   }
   const ownerId = node.payload.ownerId
   if (typeof ownerId !== 'string' || ownerId.length === 0 || dag.getNode(ownerId) === undefined) {
-    return `Hole edit refused: owner '${String(ownerId)}' is not available`
+    return workbenchText('HoleDialog.holeEditRefusedOwnerIsNotAvailable', { value1: String(String(ownerId)) })
   }
   if (!node.consumes.includes(ownerId)) {
-    return `Hole edit refused: owner '${ownerId}' is missing from the feature dependencies`
+    return workbenchText('HoleDialog.holeEditRefusedOwnerIsMissingFromTheFeature', { ownerId: String(ownerId) })
   }
   const order = dag.featureOrder()
   if (order.indexOf(ownerId) < 0 || order.indexOf(ownerId) >= order.indexOf(featureId)) {
-    return `Hole edit refused: owner '${ownerId}' is not an upstream body feature`
+    return workbenchText('HoleDialog.holeEditRefusedOwnerIsNotAnUpstreamBody', { ownerId: String(ownerId) })
   }
   if (typeof node.payload.faceId !== 'string' || node.payload.faceId.length === 0) {
-    return `Hole edit refused: '${featureId}' has no valid face reference`
+    return workbenchText('HoleDialog.holeEditRefusedHasNoValidFaceReference', { featureId: String(featureId) })
   }
   const points = readPoints(node.payload.points)
-  if (points === undefined) return `Hole edit refused: '${featureId}' has no valid placement points`
+  if (points === undefined) return workbenchText('HoleDialog.holeEditRefusedHasNoValidPlacementPoints', { featureId: String(featureId) })
   const styleError = holeStyleError(node.payload.style)
-  if (styleError !== undefined) return `Hole edit refused: ${styleError}`
+  if (styleError !== undefined) return workbenchText('HoleDialog.holeEditRefused', { styleError: String(styleError) })
   const depthError = holeDepthError(node.payload.depth)
-  if (depthError !== undefined) return `Hole edit refused: ${depthError}`
+  if (depthError !== undefined) return workbenchText('HoleDialog.holeEditRefused2', { depthError: String(depthError) })
 
   if (node.payload.placement === undefined) {
-    if (points.length > 1) return `Hole edit refused: '${featureId}' is a legacy pattern with no placement metadata`
+    if (points.length > 1) return workbenchText('HoleDialog.holeEditRefusedIsALegacyPatternWithNo', { featureId: String(featureId) })
     return undefined
   }
   const placement = readPlacement(node.payload.placement)
   if (placement === undefined || readVec3(node.payload.seed) === undefined) {
-    return `Hole edit refused: '${featureId}' has invalid placement metadata`
+    return workbenchText('HoleDialog.holeEditRefusedHasInvalidPlacementMetadata', { featureId: String(featureId) })
   }
   const normal = readVec3(node.payload.normal)
   const patternError = placementError(placement, normal !== undefined)
-  return patternError === undefined ? undefined : `Hole edit refused: ${patternError}`
+  return patternError === undefined ? undefined : workbenchText('HoleDialog.holeEditRefused3', { patternError: String(patternError) })
 }
 
 export function HoleDialog(props: HoleDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const { dag, history, onApplied, onClose } = props
   const editing = props.mode === 'edit'
   const existing = editing ? dag.getNode(props.featureId) : undefined
@@ -501,7 +506,7 @@ export function HoleDialog(props: HoleDialogProps) {
   const referenceError = editing ? editReferenceError(dag, props.featureId) : undefined
   const configurationError =
     readVec3(seed) === undefined
-      ? 'Hole seed point must contain finite coordinates.'
+      ? workbenchText('HoleDialog.holeSeedPointMustContainFiniteCoordinates')
       : holeStyleError(style) ?? holeDepthError(depth) ?? placementError(placement, !editing || existingNormal !== undefined)
   const invalid = referenceError !== undefined || configurationError !== undefined
 
@@ -560,7 +565,7 @@ export function HoleDialog(props: HoleDialogProps) {
         seed: intentSeed,
         normal: intentNormal,
         placement: intentPlacement,
-        name: `Hole ${previewFeatureId}`,
+        name: workbenchText('HoleDialog.hole', { previewFeatureId: String(previewFeatureId) }),
       },
     }
   }, [blindDistance, cbDepth, cbDiameter, count, csAngleDeg, csDiameter, depthKind, diameter, editing, existingPayloadKey, faceId, hasExistingNormal, invalid, normal.x, normal.y, normal.z, ownerId, placementKind, previewFeatureId, radius, seed.x, seed.y, seed.z, spacing, startAngleDeg, styleKind])
@@ -578,7 +583,7 @@ export function HoleDialog(props: HoleDialogProps) {
     // lesson, REQUIRED from day one). A refusal never reaches execute.
     if (onApplyGuard !== undefined) {
       if (previewIntent === null) {
-        setApplyError('Hole Apply refused: the accepted preview is no longer available.')
+        setApplyError(workbenchText('HoleDialog.holeApplyRefusedTheAcceptedPreviewIsNoLonger'))
         return
       }
       const refusal = await onApplyGuard(previewIntent)
@@ -592,7 +597,7 @@ export function HoleDialog(props: HoleDialogProps) {
       const live = dag.getNode(props.featureId)
       const liveReferenceError = editReferenceError(dag, props.featureId)
       if (live === undefined || liveReferenceError !== undefined) {
-        setApplyError(liveReferenceError ?? `Hole edit refused: '${props.featureId}' is no longer available`)
+        setApplyError(liveReferenceError ?? workbenchText('HoleDialog.holeEditRefusedIsNoLongerAvailable', { featureId: String(props.featureId) }))
         return
       }
       const nextPayload: Record<string, unknown> = {
@@ -617,7 +622,7 @@ export function HoleDialog(props: HoleDialogProps) {
     }
 
     const id = nextId(dag, 'F')
-    const payload = { opType: 'hole', ownerId, faceId, points, style, depth, seed, normal, placement, name: `Hole ${id}` }
+    const payload = { opType: 'hole', ownerId, faceId, points, style, depth, seed, normal, placement, name: workbenchText('HoleDialog.hole2', { id: String(id) }) }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [ownerId], payload }))
     } catch (err) {
@@ -630,7 +635,7 @@ export function HoleDialog(props: HoleDialogProps) {
 
   return (
     <DialogShell
-      title={editing ? 'Edit Hole' : 'Hole'}
+      title={editing ? workbenchText('HoleDialog.editHole') : workbenchText('HoleDialog.hole3')}
       onApply={() => { void handleApply() }}
       onCancel={onClose}
       applyDisabled={invalid || (previewControlled && props.previewState?.status === 'refused')}
@@ -641,14 +646,13 @@ export function HoleDialog(props: HoleDialogProps) {
       floatingPalette
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ borderTop: '1px solid var(--border-subtle, #2a3540)', paddingBottom: 8, color: 'var(--text-muted)' }}>Seed point</div>
+        <div style={{ borderTop: '1px solid var(--border-subtle, #2a3540)', paddingBottom: 8, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.seedPoint')}</div>
         {!editing && snapCandidates.length > 0 && (
           <div
             data-testid="hole-viewport-point-hint"
             style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}
           >
-            Pick a highlighted sketch point in the viewport, or use Snap to below.
-          </div>
+            {workbenchText('HoleDialog.pickAHighlightedSketchPointInTheViewportOr')}</div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 12, color: 'var(--text-muted)' }}>X</span>
@@ -666,7 +670,7 @@ export function HoleDialog(props: HoleDialogProps) {
         </label>
         {snapCandidates.length > 0 && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 80, color: 'var(--text-muted)' }}>Snap to</span>
+            <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.snapTo')}</span>
             <select
               data-testid="hole-snap-select"
               value={selectedSnapId}
@@ -678,7 +682,7 @@ export function HoleDialog(props: HoleDialogProps) {
               }}
               style={{ flex: 1 }}
             >
-              <option value="">-- pick a sketch point --</option>
+              <option value="">{workbenchText('HoleDialog.pickASketchPoint')}</option>
               {snapCandidates.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.label}
@@ -688,15 +692,15 @@ export function HoleDialog(props: HoleDialogProps) {
           </label>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 80, color: 'var(--text-muted)' }}>Style</span>
+          <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.style')}</span>
           <select data-testid="hole-style-select" value={styleKind} onChange={(e) => setStyleKind(e.target.value as HoleStyle['kind'])} style={{ flex: 1 }}>
-            <option value="simple">Simple</option>
-            <option value="counterbore">Counterbore</option>
-            <option value="countersink">Countersink</option>
+            <option value="simple">{workbenchText('HoleDialog.simple')}</option>
+            <option value="counterbore">{workbenchText('HoleDialog.counterbore')}</option>
+            <option value="countersink">{workbenchText('HoleDialog.countersink')}</option>
           </select>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 80, color: 'var(--text-muted)' }}>Diameter</span>
+          <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.diameter')}</span>
           <span data-testid="hole-diameter" style={{ flex: 1 }}>
             <NumericInput value={diameter} onChange={setDiameter} min={0.1} style={{ width: '100%' }} />
           </span>
@@ -704,13 +708,13 @@ export function HoleDialog(props: HoleDialogProps) {
         {styleKind === 'counterbore' && (
           <>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 80, color: 'var(--text-muted)' }}>CB diameter</span>
+              <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.cbDiameter')}</span>
               <span data-testid="hole-cb-diameter" style={{ flex: 1 }}>
                 <NumericInput value={cbDiameter} onChange={setCbDiameter} min={0.1} style={{ width: '100%' }} />
               </span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 80, color: 'var(--text-muted)' }}>CB depth</span>
+              <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.cbDepth')}</span>
               <span data-testid="hole-cb-depth" style={{ flex: 1 }}>
                 <NumericInput value={cbDepth} onChange={setCbDepth} min={0.1} style={{ width: '100%' }} />
               </span>
@@ -720,13 +724,13 @@ export function HoleDialog(props: HoleDialogProps) {
         {styleKind === 'countersink' && (
           <>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 80, color: 'var(--text-muted)' }}>CS diameter</span>
+              <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.csDiameter')}</span>
               <span data-testid="hole-cs-diameter" style={{ flex: 1 }}>
                 <NumericInput value={csDiameter} onChange={setCsDiameter} min={0.1} style={{ width: '100%' }} />
               </span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 80, color: 'var(--text-muted)' }}>CS angle</span>
+              <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.csAngle')}</span>
               <span data-testid="hole-cs-angle" style={{ flex: 1 }}>
                 <NumericInput value={csAngleDeg} onChange={setCsAngleDeg} min={1} max={179} style={{ width: '100%' }} />
               </span>
@@ -734,37 +738,37 @@ export function HoleDialog(props: HoleDialogProps) {
           </>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 80, color: 'var(--text-muted)' }}>Depth</span>
+          <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.depth')}</span>
           <select data-testid="hole-depth-select" value={depthKind} onChange={(e) => setDepthKind(e.target.value as 'blind' | 'throughAll')} style={{ flex: 1 }}>
-            <option value="blind">Blind</option>
-            <option value="throughAll">Through all</option>
+            <option value="blind">{workbenchText('HoleDialog.blind')}</option>
+            <option value="throughAll">{workbenchText('HoleDialog.throughAll')}</option>
           </select>
         </label>
         {depthKind === 'blind' && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 80, color: 'var(--text-muted)' }}>Depth (mm)</span>
+            <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.depthMm')}</span>
             <span data-testid="hole-blind-distance" style={{ flex: 1 }}>
               <NumericInput value={blindDistance} onChange={setBlindDistance} min={0.1} style={{ width: '100%' }} />
             </span>
           </label>
         )}
-        <div style={{ borderTop: '1px solid var(--border-subtle, #2a3540)', paddingTop: 8, color: 'var(--text-muted)' }}>Placement</div>
+        <div style={{ borderTop: '1px solid var(--border-subtle, #2a3540)', paddingTop: 8, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.placement')}</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 80, color: 'var(--text-muted)' }}>Pattern</span>
+          <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.pattern')}</span>
           <select
             data-testid="hole-placement-select"
             value={placementKind}
             onChange={(e) => setPlacementKind(e.target.value as HolePlacement['kind'])}
             style={{ flex: 1 }}
           >
-            <option value="single">Single</option>
-            <option value="linear">Linear</option>
-            <option value="circular">Circular</option>
+            <option value="single">{workbenchText('HoleDialog.single')}</option>
+            <option value="linear">{workbenchText('HoleDialog.linear')}</option>
+            <option value="circular">{workbenchText('HoleDialog.circular')}</option>
           </select>
         </label>
         {placementKind !== 'single' && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 80, color: 'var(--text-muted)' }}>Count</span>
+            <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.count')}</span>
             <span data-testid="hole-pattern-count" style={{ flex: 1 }}>
               <NumericInput value={count} onChange={(v) => setCount(Math.round(v))} min={2} step={1} style={{ width: '100%' }} />
             </span>
@@ -772,7 +776,7 @@ export function HoleDialog(props: HoleDialogProps) {
         )}
         {placementKind === 'linear' && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 80, color: 'var(--text-muted)' }}>Spacing</span>
+            <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.spacing')}</span>
             <span data-testid="hole-pattern-spacing" style={{ flex: 1 }}>
               <NumericInput value={spacing} onChange={setSpacing} min={0.1} style={{ width: '100%' }} />
             </span>
@@ -781,13 +785,13 @@ export function HoleDialog(props: HoleDialogProps) {
         {placementKind === 'circular' && (
           <>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 80, color: 'var(--text-muted)' }}>Bolt radius</span>
+              <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.boltRadius')}</span>
               <span data-testid="hole-pattern-radius" style={{ flex: 1 }}>
                 <NumericInput value={radius} onChange={setRadius} min={0.1} style={{ width: '100%' }} />
               </span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 80, color: 'var(--text-muted)' }}>Start angle</span>
+              <span style={{ width: 80, color: 'var(--text-muted)' }}>{workbenchText('HoleDialog.startAngle')}</span>
               <span data-testid="hole-pattern-start-angle" style={{ flex: 1 }}>
                 <NumericInput value={startAngleDeg} onChange={setStartAngleDeg} style={{ width: '100%' }} />
               </span>
@@ -807,15 +811,15 @@ export function HoleDialog(props: HoleDialogProps) {
             {props.previewState?.status === 'refused'
               ? props.previewState.message
               : props.previewState?.status === 'pending'
-                ? 'Updating preview...'
+                ? workbenchText('HoleDialog.updatingPreview')
                 : props.previewState?.status === 'ready'
-                  ? 'Live preview ready'
+                  ? workbenchText('HoleDialog.livePreviewReady')
                   : ''}
           </div>
         )}
         {referenceError !== undefined && (
           <div data-testid="hole-reference-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {referenceError}
+            {readableInternalIds(referenceError)}
           </div>
         )}
         {configurationError !== undefined && (
@@ -825,7 +829,7 @@ export function HoleDialog(props: HoleDialogProps) {
         )}
         {applyError !== undefined && (
           <div data-testid="hole-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {applyError}
+            {readableInternalIds(applyError)}
           </div>
         )}
       </div>

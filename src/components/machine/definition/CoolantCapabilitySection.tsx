@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type MachineConfig } from '../../../types'
 import { type SettingSource } from './DefinitionFields'
 import { machineVacuumCapability } from '../../../types'
@@ -49,6 +53,7 @@ export function CoolantCapabilitySection({ machine, onChange }: {
    *  because `MotionSection` still passes it through. */
   settings?: SettingSource
 }) {
+  useText('control-screens-not-probing')
   /**
    * WO-1692: A MACHINE WITH A CONTROLLER DEFINITION HAS AN OUTPUTS LIST
    * (WO-1651), AND THE LIST'S CAM ROLE COLUMN IS NOW WHERE ITS FLOOD, MIST AND
@@ -96,15 +101,15 @@ export function CoolantCapabilitySection({ machine, onChange }: {
     : null
   const vacuumMapping = vacuum
     ? vacuumRelay
-      ? `${vacuum.onCode} -> port ${vacuumRelay.port} pin ${vacuumRelay.pin}`
+      ? controlText('CoolantCapabilitySection.text001', { value1: String(vacuum.onCode), value2: String(vacuumRelay.port), value3: String(vacuumRelay.pin) })
       : vacuum.onCode === 'M7' || vacuum.onCode === 'M8'
-        ? `${vacuum.onCode} -> no relay assigned in this profile`
-        : `${vacuum.onCode} custom macro`
+        ? controlText('CoolantCapabilitySection.text002', { value1: String(vacuum.onCode) })
+        : controlText('CoolantCapabilitySection.text003', { value1: String(vacuum.onCode) })
     : null
   return (
     <div data-testid="machine-def-panel-coolant" style={{ marginTop: 12 }}>
       <SectionHead
-        title="Coolant and dust extraction"
+        title={controlText('CoolantCapabilitySection.text004')}
         summary={[...COOLANT_CHANNELS
           .map(({ channel, label }) =>
             `${label.toLowerCase()} ${describeCoolantCapability(
@@ -119,12 +124,12 @@ export function CoolantCapabilitySection({ machine, onChange }: {
         style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
       >
         {hasOutputsList
-          ? 'Which outputs are flood, mist or vacuum is set on the outputs list below - give a '
-            + "row that CAM role to say this machine has it, clear the role to say it does not. "
-            + 'Nothing here is sent to the controller.'
-          : 'Does this machine actually have these? Nothing here is sent to the controller - it is '
-            + 'what LienCAM shows you. A channel answered No loses its button on the Control page; '
-            + 'a channel nobody has answered keeps it.'}
+          ? controlText('CoolantCapabilitySection.text005')
+            + controlText('CoolantCapabilitySection.text006')
+            + controlText('CoolantCapabilitySection.text007')
+          : controlText('CoolantCapabilitySection.text008')
+            + controlText('CoolantCapabilitySection.text009')
+            + controlText('CoolantCapabilitySection.text010')}
       </div>
       {!hasOutputsList && <table
         className="mform-axis-table"
@@ -133,9 +138,9 @@ export function CoolantCapabilitySection({ machine, onChange }: {
       >
         <thead>
           <tr>
-            <th>Coolant</th>
-            <th data-tooltip="Whether this machine has this kind of coolant at all. Unanswered is not No.">has it</th>
-            <th data-tooltip="What the Control page's spindle panel does with the answer">on the Control page</th>
+            <th>{controlText('CoolantCapabilitySection.text011')}</th>
+            <th data-tooltip={controlText('CoolantCapabilitySection.text012')}>{controlText('CoolantCapabilitySection.text013')}</th>
+            <th data-tooltip={controlText('CoolantCapabilitySection.text014')}>{controlText('CoolantCapabilitySection.text015')}</th>
           </tr>
         </thead>
         <tbody>
@@ -155,13 +160,13 @@ export function CoolantCapabilitySection({ machine, onChange }: {
                   <span
                     data-drives-this-app=""
                     data-testid={`machine-def-coolant-${channel}`}
-                    data-tooltip={`Does this machine have ${label.toLowerCase()} coolant `
-                      + `(${code})? Stored with this machine, read by the Control page, `
-                      + 'and never sent to the controller.'}
+                    data-tooltip={controlText('CoolantCapabilitySection.text016', { value1: String(label.toLowerCase()) })
+                      + controlText('CoolantCapabilitySection.text017', { value1: String(code) })
+                      + controlText('CoolantCapabilitySection.text018')}
                   >
                     <select
                       className="mform-select"
-                      aria-label={`Does this machine have ${label.toLowerCase()} coolant`}
+                      aria-label={controlText('CoolantCapabilitySection.text019', { value1: String(label.toLowerCase()) })}
                       data-testid={`machine-def-coolant-select-${channel}`}
                       value={stated === null ? '' : stated ? 'yes' : 'no'}
                       onChange={(e) => {
@@ -171,9 +176,9 @@ export function CoolantCapabilitySection({ machine, onChange }: {
                           : withCoolantCapability(m, channel, next === '' ? null : false))
                       }}
                     >
-                      <option value="">Not stated</option>
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
+                      <option value="">{controlText('CoolantCapabilitySection.text020')}</option>
+                      <option value="yes">{controlText('CoolantCapabilitySection.text021')}</option>
+                      <option value="no">{controlText('CoolantCapabilitySection.text022')}</option>
                     </select>
                   </span>
                 </td>
@@ -182,25 +187,25 @@ export function CoolantCapabilitySection({ machine, onChange }: {
                   style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
                 >
                   {stated === false
-                    ? `no ${label} button`
+                    ? controlText('CoolantCapabilitySection.text023', { value1: String(label) })
                     : stated === true
-                      ? `${label} button shown`
-                      : `${label} button shown - nobody has said`}
+                      ? controlText('CoolantCapabilitySection.text024', { value1: String(label) })
+                      : controlText('CoolantCapabilitySection.text025', { value1: String(label) })}
                 </td>
               </tr>
             )
           })}
           <tr data-testid="machine-def-panel-coolant-row-vacuum">
-            <td>Vacuum</td>
+            <td>{controlText('CoolantCapabilitySection.text026')}</td>
             <td>
               <span
                 data-drives-this-app=""
                 data-testid="machine-def-coolant-vacuum"
-                data-tooltip="Whether this machine has vacuum dust extraction. Stored with this machine and never sent to the controller."
+                data-tooltip={controlText('CoolantCapabilitySection.text027')}
               >
                 <select
                   className="mform-select"
-                  aria-label="Does this machine have vacuum dust extraction"
+                  aria-label={controlText('CoolantCapabilitySection.text028')}
                   data-testid="machine-def-coolant-select-vacuum"
                   value={vacuumStated === null ? '' : vacuumStated ? 'yes' : 'no'}
                   onChange={(e) => {
@@ -214,25 +219,25 @@ export function CoolantCapabilitySection({ machine, onChange }: {
                     useMachineControl.getState().pushConsole(
                       'tx',
                       mapped
-                        ? `Vacuum is on this machine and starts with ${mapped.onCode}; the Control page shows a Vacuum button and the post emits ${mapped.onCode} around the program.`
+                        ? controlText('CoolantCapabilitySection.text029', { value1: String(mapped.onCode), value2: String(mapped.onCode) })
                         : answer === 'no'
-                          ? 'This machine has no vacuum: no Vacuum button on the Control page and no vacuum command in posted programs.'
-                          : 'Nobody has said whether this machine has vacuum, so no Vacuum button is shown and no vacuum command is posted.',
+                          ? controlText('CoolantCapabilitySection.text030')
+                          : controlText('CoolantCapabilitySection.text031'),
                       'info',
                     )
                   }}
                 >
-                  <option value="">Not stated</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
+                  <option value="">{controlText('CoolantCapabilitySection.text032')}</option>
+                  <option value="yes">{controlText('CoolantCapabilitySection.text033')}</option>
+                  <option value="no">{controlText('CoolantCapabilitySection.text034')}</option>
                 </select>
                 {vacuum && (
                   <input
                     key={vacuum.onCode}
                     className="mform-input mform-input-mono"
-                    aria-label="Vacuum on M-code"
+                    aria-label={controlText('CoolantCapabilitySection.text035')}
                     data-testid="machine-def-vacuum-code"
-                    data-tooltip={`Manual edits: ${RESERVED_VACUUM_M_CODE_REASON} LienCAM keeps one meaning per code: whenever any answer here is saved, a Vacuum code that a shown Mist or Flood button already owns moves to the first free custom M-code from M10 through M19 and the console says so. That applies whichever answer you change first, and M8 stays only on a machine whose definition says it has no flood.`}
+                    data-tooltip={controlText('CoolantCapabilitySection.text036', { value1: String(RESERVED_VACUUM_M_CODE_REASON) })}
                     defaultValue={vacuum.onCode}
                     onBlur={(e) => {
                       if (e.currentTarget.value.trim().toUpperCase() === vacuum.onCode) return
@@ -261,7 +266,7 @@ export function CoolantCapabilitySection({ machine, onChange }: {
                       if (settled === code) {
                         useMachineControl.getState().pushConsole(
                           'tx',
-                          `Vacuum now starts with ${code} because you set it in this machine's definition; the Control page's Vacuum button sends ${code} and the post emits it around the program.`,
+                          controlText('CoolantCapabilitySection.text037', { value1: String(code), value2: String(code) }),
                           'info',
                         )
                       }
@@ -276,10 +281,10 @@ export function CoolantCapabilitySection({ machine, onChange }: {
               style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
             >
               {vacuumStated === null
-                ? 'no Vacuum button - nobody has said'
+                ? controlText('CoolantCapabilitySection.text038')
                 : vacuumStated === false
-                  ? 'no Vacuum button'
-                  : `Vacuum button shown; ${vacuumMapping}`}
+                  ? controlText('CoolantCapabilitySection.text039')
+                  : controlText('CoolantCapabilitySection.text040', { value1: String(vacuumMapping) })}
             </td>
           </tr>
         </tbody>
@@ -300,22 +305,22 @@ export function CoolantCapabilitySection({ machine, onChange }: {
         style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginTop: 6 }}
       >
         {machine.coolant
-          ? 'Posted programs may carry coolant for this machine.'
-          : 'Posted programs carry no coolant for this machine - no mist or flood.'}
+          ? controlText('CoolantCapabilitySection.text041')
+          : controlText('CoolantCapabilitySection.text042')}
         {vacuum
-          ? ` Posted programs start vacuum with ${vacuum.onCode}; M9 turns it off.`
-          : ' No vacuum output is mapped.'}
-        {" That is the Machine Library's Coolant tick - the same question as the answers above, "}
-        {'asked once for the whole machine, and either place keeps the other in step. A channel '}
-        {'answered No loses its button on the Control page AND is posted dry, so this page and '}
-        {'your G-code say the same thing.'}
+          ? controlText('CoolantCapabilitySection.text043', { value1: String(vacuum.onCode) })
+          : controlText('CoolantCapabilitySection.text044')}
+        {controlText('CoolantCapabilitySection.text045')}
+        {controlText('CoolantCapabilitySection.text046')}
+        {controlText('CoolantCapabilitySection.text047')}
+        {controlText('CoolantCapabilitySection.text048')}
         {!coolantRecordAgrees(machine) && (
           <span
             data-testid="machine-def-panel-coolant-disagrees"
             style={{ color: 'var(--accent-amber)' }}
           >
-            {' Something else has set that tick against these answers. Answer a channel again '}
-            {'to put them back in step.'}
+            {controlText('CoolantCapabilitySection.text049')}
+            {controlText('CoolantCapabilitySection.text050')}
           </span>
         )}
       </div>
@@ -336,19 +341,19 @@ export function CoolantCapabilitySection({ machine, onChange }: {
  * wiring and not about whether anything is plumbed to it. They are shown
  * beside the question as evidence, and they are never read as the answer.
  */
-export const COOLANT_CHANNELS = [
+export const COOLANT_CHANNELS = liveCatalog(() => ([
   {
     channel: 'mist' as const,
-    label: 'Mist',
+    label: controlText('CoolantCapabilitySection.text051'),
     code: 'M7',
     pinKey: 'Spindlesetupsettings.M7relaypin',
   },
   {
     channel: 'flood' as const,
-    label: 'Flood',
+    label: controlText('CoolantCapabilitySection.text052'),
     code: 'M8',
     pinKey: 'Spindlesetupsettings.M8relaypin',
   },
-]
+]))
 
 export const COOLANT_RELAYS_ENABLED_KEY = 'Spindlesetupsettings.Floodmistrelaysenabled'

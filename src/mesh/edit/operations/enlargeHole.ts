@@ -103,6 +103,10 @@ export interface EnlargeHoleParameters {
   axisDirection: [number, number, number];
   /** WO-2117: a depth edit - the depth he asked for, mm from the opening... */
   depthMm?: number;
+  /** Measured selected cylinder extent: the shrink plug stays inside it. */
+  boreRangeMm?: [number, number];
+  /** Diameter-step cutter exits here; the other end stays at the shoulder. */
+  boreOpenEnd?: 'low' | 'high';
   /** ...or right through the part */
   through?: true;
   /** WO-2117: the depth it had when he asked, mm - reported */
@@ -121,6 +125,8 @@ const PARAMETER_KEYS = new Set([
   'through',
   'fromDepthMm',
   'fromThrough',
+  'boreRangeMm',
+  'boreOpenEnd',
 ]);
 
 const FEATURE_WORDS: Record<FeatureKind, string> = {
@@ -272,8 +278,7 @@ export function boreSegments(radiusMm: number): number {
 }
 
 /** A closed, outward-wound prism on the bore axis: the cutter, or the plug. */
-function prism(origin: Vec3, axis: Vec3, radius: number, from: number, to: number): MeshBuffers {
-  const segments = boreSegments(radius);
+function prism(origin: Vec3, axis: Vec3, radius: number, from: number, to: number, segments = boreSegments(radius)): MeshBuffers {
   const u = perpendicular(axis);
   const v = cross(axis, u);
   const at = (k: number, s: number): Vec3 => {
@@ -1034,6 +1039,18 @@ export function enlargeHole(
   // The part as recognition saw it (WO-1925); `mesh` itself when uncracked.
   const part = crackWelded(mesh);
   const span = cutSpan(part, facets, origin, axis);
+  // WO-2804: complete recognition may connect this step to an internal cone.
+  // Its open ring is not permission to bore through the pilot. Conversely,
+  // the cylinder/mouth-chamfer seam is not a closed end (round 6). Protect the
+  // shoulder while letting the cutter exit the explicitly proved opening.
+  // The shrink plug stays in the measured cylinder. Records lacking the new
+  // open-end field retain their previous bounded/cap-derived replay semantics.
+  if (parameters.boreRangeMm) {
+    span.from = parameters.boreOpenEnd === 'low' ? span.from : parameters.boreRangeMm[0];
+    span.to = parameters.boreOpenEnd === 'high' ? span.to : parameters.boreRangeMm[1];
+    [span.holeFrom, span.holeTo] = parameters.boreRangeMm;
+    span.through = false;
+  }
 
   try {
     // Shrinking: fill what is there first. The plug runs the hole's own extent
@@ -1054,14 +1071,68 @@ export function enlargeHole(
       working = plugged.result.mesh;
     }
 
+    // At an existing mouth of the requested diameter an inscribed prism
+    // leaves interrupted cone slivers and collapsed tangent triangles. New
+    // open-end step cuts put their side midpoints on the asked circle instead;
+    // corner excess is bounded by the SAME radial chord budget. Older records
+    // and all other diameter/depth routes retain their original cutter.
+    const cutterSegments = boreSegments(parameters.boreOpenEnd ? radius + CHORD_BUDGET_MM : radius);
+    const cutterRadius = parameters.boreOpenEnd
+      ? radius / Math.cos(Math.PI / cutterSegments)
+      : radius;
     const { result, leftTriangle } = booleanMeshWithAncestry(
       module,
       working,
-      prism(origin, axis, radius, span.from, span.to),
+      prism(origin, axis, cutterRadius, span.from, span.to, cutterSegments),
       { operation: 'difference' },
     );
-    const bore = booleanAncestry(working, result.mesh, leftTriangle);
-    return { mesh: result.mesh, ancestry: fill ? composeAncestry(fill, bore) : bore };
+    let boreMesh = result.mesh;
+    let boreParents = leftTriangle;
+    if (parameters.boreOpenEnd) {
+      // Float32 Boolean intersections can collapse triangles to exactly zero
+      // area. They carry no surface; keeping them creates repeated edges and
+      // correctly trips recognition's ambiguous-topology guard. Remove only
+      // those triangles, with the identical ancestry permutation. Never weld
+      // nearby points or discard a nonzero facet to make recognition pass.
+      const topology = weldMesh(boreMesh);
+      const retained = Array.from(topology.areas).flatMap((area, f) => area === 0 ? [] : [f]);
+      if (retained.length !== facetCount(boreMesh)) {
+        boreMesh = { positions: boreMesh.positions, indices: Uint32Array.from(retained.flatMap(f =>
+          Array.from(boreMesh.indices.subarray(f * 3, f * 3 + 3)))) };
+        boreParents = Int32Array.from(retained.map(f => leftTriangle[f]));
+      }
+    }
+    const bore = booleanAncestry(working, boreMesh, boreParents);
+    const ancestry = fill ? composeAncestry(fill, bore) : bore;
+    if (parameters.boreOpenEnd) {
+      // A re-bored wall is still the picked cylinder. LEFT ancestry alone
+      // loses that identity when the cutter replaces its entire surface.
+      // Retain logical facet descendants on that wall only; generated caps
+      // stay new and every surviving LEFT facet keeps its exact ancestry.
+      const wallPosition = (body: MeshBuffers, f: number) => {
+        const [a, b, c] = facetVertices(body, f);
+        if (Math.abs(dot(unit(cross(sub(b, a), sub(c, a))), axis)) > 1e-6) return null;
+        const centre: Vec3 = a.map((v, i) => (v + b[i] + c[i]) / 3) as Vec3;
+        const t = station(centre, origin, axis);
+        const radial = unit(sub(sub(centre, origin), axis.map(v => v * t) as Vec3));
+        return { t, radial };
+      };
+      const predecessors = facets.flatMap(f => {
+        const p = wallPosition(part, f);
+        return p ? [{ f, ...p }] : [];
+      });
+      const axialScale = Math.max(1, span.holeTo - span.holeFrom);
+      for (let f = 0; f < facetCount(boreMesh); f++) {
+        if (boreParents[f] !== BOOLEAN_TRIANGLE_ADDED) continue;
+        const p = wallPosition(boreMesh, f);
+        if (!p || !predecessors.length) continue;
+        const distance = (old: typeof predecessors[number]) =>
+          1 - dot(p.radial, old.radial) + Math.abs(p.t - old.t) / axialScale;
+        const old = predecessors.reduce((a, b) => distance(b) < distance(a) ? b : a);
+        ancestry.triangles[old.f].push(f);
+      }
+    }
+    return { mesh: boreMesh, ancestry };
   } catch (err) {
     throw namedRefusal(err);
   }
@@ -1166,7 +1237,11 @@ export const enlargeHoleOperation: MeshEditOperation<EnlargeHoleParameters> = {
     }
     const diameterMm = measurement(given.diameterMm, 'diameter');
     const fromDiameterMm = measurement(given.fromDiameterMm, 'existing diameter');
+    if (given.boreOpenEnd !== undefined && (given.boreRangeMm === undefined || (given.boreOpenEnd !== 'low' && given.boreOpenEnd !== 'high'))) {
+      throw new Error('The selected counterbore opening must be the low or high end of its measured range.');
+    }
     if (given.depthMm !== undefined || given.through !== undefined) {
+      if (given.boreRangeMm !== undefined) throw new Error('A selected bore range belongs to a diameter edit, not a depth edit.');
       return validateDepthEdit(given, feature as FeatureKind, diameterMm, fromDiameterMm);
     }
     if (Math.abs(diameterMm - fromDiameterMm) < 1e-6) {
@@ -1181,6 +1256,8 @@ export const enlargeHoleOperation: MeshEditOperation<EnlargeHoleParameters> = {
       fromDiameterMm,
       axisOrigin: triple(given.axisOrigin, 'axisOrigin'),
       axisDirection: triple(given.axisDirection, 'axisDirection'),
+      ...(given.boreRangeMm !== undefined ? { boreRangeMm: boreRange(given.boreRangeMm) } : {}),
+      ...(given.boreOpenEnd !== undefined ? { boreOpenEnd: given.boreOpenEnd as 'low' | 'high' } : {}),
     };
   },
 
@@ -1246,3 +1323,10 @@ function triple(value: unknown, label: string): [number, number, number] {
 }
 
 registerMeshEditOperation(enlargeHoleOperation);
+
+function boreRange(value: unknown): [number, number] {
+  if (!Array.isArray(value) || value.length !== 2 || value.some(v => typeof v !== 'number' || !Number.isFinite(v)) || value[1] <= value[0]) {
+    throw new Error('The selected counterbore needs two finite, increasing axial stations.');
+  }
+  return [value[0], value[1]];
+}

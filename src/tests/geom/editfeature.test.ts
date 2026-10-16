@@ -8,14 +8,14 @@
 //
 // CLASS MATRIX (asserted below; mirrored in coordination/reports/GEO-10.report.json).
 // GEO-10-R1: every REFUSED pair has its OWN named diagnostics test (no pair is
-// "covered by code guard only"); the faceOffset non-planar refusal is a single
-// surfaceType!='plane' guard proven by three distinct curved surface types.
+// "covered by code guard only"). WO-2813 supports recognized cylinder/cone
+// holes; torus remains a named refusal.
 //   faceOffset   x planar block face (solid neighbours) .. SUPPORTED (#fo-pull, #fo-push)
 //   faceOffset   x planar face w/ a HOLE (cyl neighbour) . SUPPORTED (#fo-holed-pull, #fo-holed-push)
 //   faceOffset   x planar offset that breaks the solid ... REFUSED   (#fo-refuse-overcut)
 //   faceOffset   x non-solid boolean outcome (isSolid) ... REFUSED   (#fo-refuse-nonsolid)
-//   faceOffset   x cylinder wall (non-planar) ............ REFUSED   (#fo-refuse-cyl)
-//   faceOffset   x cone wall (non-planar) ................ REFUSED   (#fo-refuse-cone)
+//   faceOffset   x cylinder hole wall ................... SUPPORTED (WO-2813)
+//   faceOffset   x cone hole wall ....................... SUPPORTED (WO-2813)
 //   faceOffset   x torus corner blend (Tray, non-planar) . REFUSED   (#fo-refuse-torus)
 //   holeDiameter x throughHole ........................... SUPPORTED (#hd-through-grow/shrink)
 //   holeDiameter x blindHole ............................. SUPPORTED (#hd-blind-grow)
@@ -130,15 +130,15 @@ describe('GEO-10 editFeature V1 (real occt-wasm kernel)', () => {
     await engine.disposeAll()
   }, 60_000)
 
-  it('#fo-refuse-cyl: faceOffset on a CYLINDER wall face refuses STRUCTURED (named class)', async () => {
+  it('WO-2813: faceOffset on a CYLINDER hole wall grows its radius, preserving the source and face id', async () => {
     const { body, hole } = await holedBox(engine, { kind: 'simple', diameter: 6 }, { kind: 'throughAll' }, ['throughHole'])
-    // the hole wall is a cylinder face id — non-planar, out of the faceOffset class.
     const wallId = hole.faceIds[0]
+    const before = await vol(engine, body)
     const r = await engine.editFeature({ featureId: 'E1', body, featureKey: wallId as string, delta: 1, kind: 'faceOffset' })
-    expect(r.ok).toBe(false)
-    expect(r.diagnostics[0].code).toBe('DEFEATURE_UNSUPPORTED')
-    expect(String(r.diagnostics[0].params!.surfaceType)).toBe('cylinder')
-    expect(r.body).toBeUndefined()
+    expect(r.ok, JSON.stringify(r.diagnostics)).toBe(true)
+    expect(await vol(engine, r.body!) - before).toBeCloseTo(-Math.PI * (4 ** 2 - 3 ** 2) * BOX.z, 2)
+    expect(await vol(engine, body)).toBeCloseTo(before, 6)
+    expect((await engine.resolve(r.body!, [wallId]))[0].status).toBe('exact')
     await engine.disposeAll()
   }, 60_000)
 
@@ -156,10 +156,9 @@ describe('GEO-10 editFeature V1 (real occt-wasm kernel)', () => {
     await engine.disposeAll()
   }, 120_000)
 
-  it('#fo-refuse-cone: faceOffset on a CONE wall face refuses STRUCTURED (named class)', async () => {
-    // A countersink hole contributes a real CONE face — offset it and prove the
-    // single surfaceType!=plane guard names 'cone' (third curved representative,
-    // alongside cylinder + torus, so no non-planar surface type is code-guard-only).
+  it('WO-2813: faceOffset on a CONE hole wall offsets it parallel, preserving the source and face id', async () => {
+    // A 90-degree countersink's +1 normal offset grows its mouth by sqrt(2).
+    // Compare the frustum-minus-pilot volume independently of the engine result.
     const { drill } = await holedBox(
       engine,
       { kind: 'countersink', diameter: 6, csDiameter: 12, csAngleDeg: 90 },
@@ -168,11 +167,13 @@ describe('GEO-10 editFeature V1 (real occt-wasm kernel)', () => {
     )
     const coneEntry = Object.entries(drill.elementMap!.geometry!).find(([, g]) => g.surfaceType === 'cone')
     expect(coneEntry).toBeDefined()
+    const before = await vol(engine, drill.body!)
     const r = await engine.editFeature({ featureId: 'E1', body: drill.body!, featureKey: coneEntry![0], delta: 1, kind: 'faceOffset' })
-    expect(r.ok).toBe(false)
-    expect(r.diagnostics[0].code).toBe('DEFEATURE_UNSUPPORTED')
-    expect(String(r.diagnostics[0].params!.surfaceType)).toBe('cone')
-    expect(r.body).toBeUndefined()
+    expect(r.ok, JSON.stringify(r.diagnostics)).toBe(true)
+    const countersinkExtra = (radius: number) => Math.PI / 3 * (radius - 3) ** 2 * (radius + 6)
+    expect(await vol(engine, r.body!) - before).toBeCloseTo(-(countersinkExtra(6 + Math.SQRT2) - countersinkExtra(6)), 2)
+    expect(await vol(engine, drill.body!)).toBeCloseTo(before, 6)
+    expect((await engine.resolve(r.body!, [coneEntry![0] as StableId]))[0].status).toBe('exact')
     await engine.disposeAll()
   }, 60_000)
 
@@ -326,7 +327,10 @@ describe('GEO-10 editFeature V1 (real occt-wasm kernel)', () => {
     expect(Number(resized!.params.diameter)).toBeCloseTo(7, 1)
     const afterCones = Object.values(r.elementMap!.geometry!).filter((g) => g.surfaceType === 'cone')
     expect(afterCones).toHaveLength(1)
-    expect(afterCones[0].area).toBeGreaterThan(beforeCones[0].area)
+    // WO-2762 (RH-4): the countersink keeps its d12 top, so a wider pilot leaves a
+    // narrower cone band - it used to scale the whole countersink up.
+    expect(afterCones[0].area).toBeLessThan(beforeCones[0].area)
+    expect(afterCones[0].area).toBeGreaterThan(0)
     const res = await engine.resolve(r.body!, hole.faceIds)
     expect(res.every((x) => x.status !== 'lost')).toBe(true)
     await engine.disposeAll()

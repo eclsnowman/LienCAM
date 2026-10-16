@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { DEMO_EXAMPLES, ProjectStartupFlow, demoExampleAssetUrl } from '../../components/modals/DemoExamplePickerModal'
 import { isDemoBuild } from '../../lib/demoBuild'
 import { useCamStore } from '../../store'
+import { useProjectPicker } from '../../lib/projectOpen/picker'
 import { createSampleMachine } from '../../lib/machine/sampleMachine'
 import { ConfirmModal } from '../../components/modals/ConfirmModal'
 import { clearProjectSaveBaseline } from '../../store/projectSaveBaseline'
@@ -26,6 +27,7 @@ const fixture = readFileSync('examples/01-fixture-plate/fixture-plate.camproject
 const real = { ...createSampleMachine(), id: 'operator', name: 'Operator Machine' }
 
 beforeEach(() => {
+  useProjectPicker.getState().close()
   vi.stubEnv('VITE_DEMO_BUILD', 'true')
   act(() => useCamStore.setState({
     project: initial.project, machineLibrary: [createSampleMachine()],
@@ -33,7 +35,7 @@ beforeEach(() => {
     appSettings: { ...initial.appSettings, defaultMachineId: null },
   }))
 })
-afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); useProjectPicker.getState().close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('WO-2393 production first-open flow', () => {
   it('rebases Vite absolute imported URLs and public walkthrough URLs under the demo mount', () => {
@@ -67,9 +69,9 @@ describe('WO-2393 production first-open flow', () => {
     expect(DEMO_EXAMPLES.every((e) => e.path.endsWith('.camproject'))).toBe(true)
     expect(DEMO_EXAMPLES.some((e) => /Sample Parts|\.stl/i.test(e.path))).toBe(false)
     render(<ProjectStartupFlow />)
-    await screen.findByRole('dialog', { name: 'Try an example' })
-    const dialog = screen.getByRole('dialog', { name: 'Try an example' })
-    expect(Array.from(dialog.querySelectorAll('.machine-choice-name'), (element) => element.textContent))
+    await screen.findByRole('dialog', { name: 'Open a project' })
+    const dialog = screen.getByRole('dialog', { name: 'Open a project' })
+    expect(Array.from(dialog.querySelectorAll('.project-example-card strong'), (element) => element.textContent))
       .toEqual(DEMO_EXAMPLES.map((example) => example.label))
     expect(Array.from(dialog.querySelectorAll('[data-example-url]'), (element) => element.getAttribute('data-example-url')))
       .toEqual(DEMO_EXAMPLES.map((example) => demoExampleAssetUrl(example.path, example.url)))
@@ -82,7 +84,7 @@ describe('WO-2393 production first-open flow', () => {
     act(() => useCamStore.setState({ machineLibrary: [createSampleMachine(), real] }))
     render(<ProjectStartupFlow />)
     fireEvent.click(await screen.findByRole('button', { name: /Fixture Plate/ }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Try an example' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Open a project' })).toBeNull())
     const example = DEMO_EXAMPLES.find((e) => e.label === 'Fixture Plate')!
     expect(fetchMock).toHaveBeenCalledWith(demoExampleAssetUrl(example.path, example.url))
     expect(load).toHaveBeenCalledOnce()
@@ -102,7 +104,7 @@ describe('WO-2393 production first-open flow', () => {
     act(() => useCamStore.setState({ machineLibrary: [createSampleMachine(), real] }))
     render(<ProjectStartupFlow />)
     await screen.findByText('Choose a machine for this project')
-    expect(screen.queryByRole('dialog', { name: 'Try an example' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Open a project' })).toBeNull()
     fireEvent.click(screen.getByText('Use this machine'))
     expect(useCamStore.getState().project.machine.id).toBe('operator')
   })
@@ -116,7 +118,7 @@ describe('WO-2393 production first-open flow', () => {
 
   it('dismisses to the empty app and never reopens during the session', async () => {
     const view = render(<ProjectStartupFlow />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Start with an empty project' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Close' }))
     view.rerender(<ProjectStartupFlow />)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(useCamStore.getState().project.geometry).toHaveLength(0)
@@ -125,7 +127,7 @@ describe('WO-2393 production first-open flow', () => {
   it('skips any restored saved project, including an empty one', () => {
     act(() => useCamStore.setState({ project: { ...initial.project, id: 'saved-empty-project' } }))
     render(<ProjectStartupFlow />)
-    expect(screen.queryByRole('dialog', { name: 'Try an example' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Open a project' })).toBeNull()
   })
 
   it('waits for asynchronous hydration before deciding first open', async () => {
@@ -146,10 +148,10 @@ describe('WO-2393 production first-open flow', () => {
 
   it('allows Escape dismissal and traps focus inside the picker', async () => {
     render(<ProjectStartupFlow />)
-    const dialog = await screen.findByRole('dialog', { name: 'Try an example' })
+    const dialog = await screen.findByRole('dialog', { name: 'Open a project' })
     expect(dialog.contains(document.activeElement)).toBe(true)
     fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true })
-    expect(document.activeElement?.textContent).toBe('Start with an empty project')
+    expect(document.activeElement?.textContent).toBe('Close')
     fireEvent.keyDown(dialog, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -159,7 +161,7 @@ describe('WO-2393 production first-open flow', () => {
     window.addEventListener('keydown', behind)
     try {
       render(<ProjectStartupFlow />)
-      const dialog = await screen.findByRole('dialog', { name: 'Try an example' })
+      const dialog = await screen.findByRole('dialog', { name: 'Open a project' })
       fireEvent.keyDown(dialog, { key: 'g' })
       expect(behind).not.toHaveBeenCalled()
     } finally { window.removeEventListener('keydown', behind) }
@@ -181,7 +183,7 @@ describe('WO-2393 production first-open flow', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('could not be opened')
     expect(useCamStore.getState().project.id).toBe(initial.project.id)
     expect(useCamStore.getState().project).toBe(before)
-    expect(screen.getByRole('dialog', { name: 'Try an example' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Open a project' })).toBeTruthy()
     await waitFor(() => expect(screen.getByRole('button', { name: /Fixture Plate/ }).hasAttribute('disabled')).toBe(false))
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -201,7 +203,7 @@ describe('WO-2393 production first-open flow', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('HTTP 404')
     expect(useCamStore.getState().project.id).toBe(initial.project.id)
     expect(useCamStore.getState().project).toBe(before)
-    expect(screen.getByRole('dialog', { name: 'Try an example' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Open a project' })).toBeTruthy()
     await waitFor(() => expect(screen.getByRole('button', { name: /Fixture Plate/ }).hasAttribute('disabled')).toBe(false))
     expect(fetchMock).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: /Fixture Plate/ }))

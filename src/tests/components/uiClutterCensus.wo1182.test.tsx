@@ -97,6 +97,8 @@ const PINNED: Record<string, { hints: number; disabled: number }> = {
   // WO-2437 (Operator ruling 2026-10-03, card Q-OPERATOR-STOP-AS-AN-OPERATION-TY): the Machine actions
   // group's Operator stop is a new type in this dialog. A new surface, zero hints, zero disabled.
   'operation:operator-stop': { hints: 0, disabled: 0 },
+  // WO-2478 adds Run macro; this fixture has no callable macro to select.
+  'operation:run-macro': { hints: 0, disabled: 1 },
   'control:offsets-panel': { hints: 0, disabled: 0 },
   'control:offsets-workspace': { hints: 1, disabled: 6 },
   // WO-2063 (Probing screen v2, 2026-09-27) mounts the shared JogPanel in the probing tab's

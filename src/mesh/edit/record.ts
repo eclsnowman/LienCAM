@@ -40,7 +40,7 @@ export function createMeshEditRecord(mesh: MeshBuffers, edit: NewMeshEdit): Mesh
     throw new Error(`A "${edit.kind}" edit must select at least one facet.`);
   }
   const total = facetCount(mesh);
-  const facets = [...new Set(edit.facets)].sort((a, b) => a - b);
+  let facets = [...new Set(edit.facets)].sort((a, b) => a - b);
   for (const facet of facets) {
     if (!Number.isInteger(facet) || facet < 0 || facet >= total) {
       throw new Error(
@@ -51,6 +51,10 @@ export function createMeshEditRecord(mesh: MeshBuffers, edit: NewMeshEdit): Mesh
   }
   const parameters = edit.parameters ?? {};
   operation.validate(parameters);
+
+  if (operation.completeSelection) {
+    facets = [...new Set(operation.completeSelection(mesh, facets))].sort((a, b) => a - b);
+  }
 
   const sourceFacets = edit.sourceFacetIds
     ? facets.map((facet) => edit.sourceFacetIds![facet]).filter((id) => id !== undefined)

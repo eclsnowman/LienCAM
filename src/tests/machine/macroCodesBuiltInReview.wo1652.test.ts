@@ -43,7 +43,7 @@ const { executeOperatorCycleStart } = await import('../../lib/machine/operatorTr
 
 const MACHINE = 'wo1652-review-m6'
 const PAD = { id: 'm6-pad', label: 'Fixed tool probe', x: 5, y: 5, z: 5 }
-const PROGRAM = ['G21', 'G90', 'T1 M6', 'G1 X2 F6000', 'T2 M6', 'G1 X4 F6000', 'M30'].join('\n')
+const PROGRAM = ['G21', 'G90', 'T1', 'G1 X2 F6000', 'T2 M6', 'G1 X4 F6000', 'M30'].join('\n')
 
 function consoleText(): string {
   return useMachineControl.getState().consoleLines.map((entry) => entry.text).join('\n')

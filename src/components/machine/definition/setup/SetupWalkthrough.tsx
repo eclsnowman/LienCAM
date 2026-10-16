@@ -1,3 +1,7 @@
+import { liveCatalog } from '../catalogText'
+import { textFor, useText } from '../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useState } from 'react'
 import { AXIS_NAMES, createDefaultControllerDefinition } from '../../../../types'
 import type { MachineDefinitionPanelState } from '../useMachineDefinitionPanel'
@@ -23,15 +27,15 @@ import './SetupWalkthrough.css'
 const STEP_KEYS = ['what', 'axes', 'home', 'spindle', 'outputs', 'probing', 'review'] as const
 type StepKey = typeof STEP_KEYS[number]
 
-const STEP_LABELS: Record<StepKey, string> = {
-  what: 'What is this machine',
-  axes: 'Axes and travel',
-  home: 'Where is home',
-  spindle: 'Spindle',
-  outputs: 'Outputs and coolant',
-  probing: 'Probe and tool setter',
-  review: 'Check and save',
-}
+const STEP_LABELS: Record<StepKey, string> = liveCatalog(() => ({
+  what: controlText('SetupWalkthrough.text001'),
+  axes: controlText('SetupWalkthrough.text002'),
+  home: controlText('SetupWalkthrough.text003'),
+  spindle: controlText('SetupWalkthrough.text004'),
+  outputs: controlText('SetupWalkthrough.text005'),
+  probing: controlText('SetupWalkthrough.text006'),
+  review: controlText('SetupWalkthrough.text007'),
+}))
 
 // AUDIT FIX (fix round 2): the review step's five Open buttons (WO-1688's
 // OverviewCards, reused verbatim per outcome 4) were wired to a no-op - five
@@ -78,6 +82,7 @@ export type SetupWalkthroughProps = MachineDefinitionPanelState & {
 }
 
 export function SetupWalkthrough(props: SetupWalkthroughProps) {
+  useText('control-screens-not-probing')
   const { def, draft, editDraft, onExit } = props
   const [stepIndex, setStepIndex] = useState(0)
   const [status, setStatus] = useState<Record<StepKey, StepStatus>>(() => {
@@ -210,18 +215,12 @@ export function SetupWalkthrough(props: SetupWalkthroughProps) {
               data-testid="setup-walkthrough-back"
               disabled={stepIndex === 0}
               onClick={back}
-            >
-              Back
-            </button>
+            >{controlText('SetupWalkthrough.text008')}</button>
             {!isLast && (
-              <button type="button" className="control-chip-btn" data-testid="setup-walkthrough-skip" onClick={skip}>
-                Skip
-              </button>
+              <button type="button" className="control-chip-btn" data-testid="setup-walkthrough-skip" onClick={skip}>{controlText('SetupWalkthrough.text009')}</button>
             )}
             {!isLast && (
-              <button type="button" className="control-chip-btn" data-testid="setup-walkthrough-next" onClick={next}>
-                Next
-              </button>
+              <button type="button" className="control-chip-btn" data-testid="setup-walkthrough-next" onClick={next}>{controlText('SetupWalkthrough.text010')}</button>
             )}
             {onExit && (
               <button
@@ -230,9 +229,7 @@ export function SetupWalkthrough(props: SetupWalkthroughProps) {
                 data-testid="setup-walkthrough-exit"
                 style={{ marginLeft: 'auto' }}
                 onClick={onExit}
-              >
-                Exit without finishing
-              </button>
+              >{controlText('SetupWalkthrough.text011')}</button>
             )}
           </div>
         </div>

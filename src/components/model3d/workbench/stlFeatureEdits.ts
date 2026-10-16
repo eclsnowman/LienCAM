@@ -19,7 +19,10 @@
 // Nothing here writes the journal directly; the store does, through its own
 // actions, so CAM sees the edited part exactly as it did from Setup.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { Command } from '../../../doc'
+import { enqueueStlJournalMutation } from './stlJournalQueue'
 import type { FeatureClass, FeatureVerdict } from '../../../geom/geom-service'
 import {
   blendRadiusChangeRefusal,
@@ -27,12 +30,15 @@ import {
   booleanBodyRefusal,
   booleanBodySelection,
   CHANGE_BLEND_RADIUS_KIND,
+  CHANGE_CHAMFER_SIZE_KIND,
+  chamferSizeChangeRefusal,
   createMeshEditRecord,
   ENLARGE_HOLE_KIND,
   enlargeHoleRefusal,
   flatFaceMoveOutcome,
   holeBreaksInto,
   MOVE_FLAT_FACE_KIND,
+  MOVE_HOLE_KIND,
   NO_SOURCE_FACET,
   REMOVE_ROUND_FEATURE_KIND,
   replayMeshEdits,
@@ -48,21 +54,26 @@ import { weldMesh, type WeldedMesh } from '../../../mesh/recognition/topology'
 import type { MeshBuffers } from '../../../mesh/types'
 import type { StlModelFeature } from './stlModelBody'
 
-export type StlEditTool = 'defeature' | 'resize-hole' | 'push-pull' | 'fillet'
+export type StlEditTool = 'defeature' | 'resize-hole' | 'move-hole' | 'push-pull' | 'fillet' | 'chamfer'
 
 /** One edit, exactly the argument Setup's buttons gave `addMeshEdit`. */
 export interface StlMeshEditInput {
+  id?: string
   kind: string
   facets: number[]
   parameters: Record<string, unknown>
 }
 
 export type StlFeatureEditRequest =
+  | { tool: 'move-hole'; feature: StlModelFeature; translation: [number, number, number] }
   | { tool: 'defeature'; feature: StlModelFeature }
-  /** WO-2117: with `depth`, Hole depth - the diameter stays `diameterMm` */
-  | { tool: 'resize-hole'; feature: StlModelFeature; diameterMm: number; depth?: number | 'through' }
+  /** WO-2117: with `depth`, Hole depth - the diameter stays `diameterMm`.
+   *  WO-2762: with `step` 'counterbore', `diameterMm` is the counterbore's and
+   *  only that step is bored; the pilot is left as it is. */
+  | { tool: 'resize-hole'; feature: StlModelFeature; diameterMm: number; depth?: number | 'through'; step?: 'counterbore' }
   | { tool: 'push-pull'; feature: StlModelFeature; distanceMm: number }
   | { tool: 'fillet'; feature: StlModelFeature; radiusMm: number }
+  | { tool: 'chamfer'; feature: StlModelFeature; distanceMm: number }
 
 export interface PlannedStlEdit {
   edit: StlMeshEditInput
@@ -82,12 +93,77 @@ export function stlToolAccepts(tool: StlEditTool, feature: StlModelFeature): boo
   switch (tool) {
     case 'defeature':
       return target.family === 'round' || target.family === 'blend'
+    case 'move-hole':
     case 'resize-hole':
       return target.family === 'round' && target.feature.kind !== 'boss'
     case 'push-pull':
       return target.family === 'flat'
+    case 'chamfer':
+      return target.family === 'blend' && target.blend.kind === 'chamfer'
     case 'fillet':
       return target.family === 'blend' && target.blend.kind === 'fillet'
+  }
+}
+
+/**
+ * WO-2762: the counterbore step of a mesh counterbore - its wider bore and
+ * the flat shoulder that bore stands on - or null when `feature` is not a
+ * counterbore. Boring just these facets cuts from the shoulder out through
+ * the top (the shoulder closes that end, as a blind hole's floor does), so
+ * the step is kept and the pilot below it is not touched.
+ */
+export function stlCounterboreStep(feature: StlModelFeature, mesh?: MeshBuffers, sourceIds?: Uint32Array): { diameterMm: number; wallSourceFacetIds: number[]; sourceFacetIds: number[]; boreRangeMm: [number, number]; boreOpenEnd?: 'low' | 'high' } | null {
+  const target = feature.target
+  if (target.family !== 'round' || target.feature.kind !== 'counterbore') return null
+  const walls = target.feature.bands.filter((band) => band.surface === 'cylinder')
+  if (walls.length < 2) return null
+  const wide = walls.reduce((a, b) => (b.diameterMm > a.diameterMm ? b : a))
+  if (wide.diameterMm <= target.feature.diameterMm + 1e-6) return null
+  const inBands = new Set(target.feature.bands.flatMap((band) => band.sourceFacetIds))
+  // Complete support includes blind floors and OTHER shoulders. A step's
+  // shoulder is planar, at this cylinder's endpoint, and reaches its rim.
+  // No mesh is needed by pick/title consumers, which use only the wall IDs.
+  const shoulder: number[] = []
+  const supportPlanes: number[] = []
+  if (mesh && sourceIds) {
+    const { origin, direction } = target.feature.axis
+    for (const f of currentFacetsOf(sourceIds, target.feature.sourceFacetIds.filter(id => !inBands.has(id)))) {
+      const points = [0, 1, 2].map(k => {
+        const i = mesh.indices[f * 3 + k] * 3
+        const v = [mesh.positions[i] - origin[0], mesh.positions[i + 1] - origin[1], mesh.positions[i + 2] - origin[2]]
+        const t = v.reduce((n, x, a) => n + x * direction[a], 0)
+        return { t, r: Math.hypot(...v.map((x, a) => x - t * direction[a])) }
+      })
+      if (points.every(p => Math.abs(p.t - points[0].t) < 1e-3)) supportPlanes.push(points[0].t)
+      const atEnd = wide.axialRangeMm.some(t => points.every(p => Math.abs(p.t - t) < 1e-3))
+      if (atEnd && points.some(p => Math.abs(p.r - wide.diameterMm / 2) < .02)) shoulder.push(sourceIds[f])
+    }
+  }
+  // WO-2804 round 6: a cylinder/cone seam is not a floor. Follow only
+  // mouth cones to a terminal opening; another cylinder or a supported
+  // floor keeps that side bounded. Pick/title
+  // consumers need no mesh; only the planner records this geometric proof.
+  const opensAt = (side: 'low' | 'high'): boolean => {
+    const bands = target.feature.bands.filter(b => b !== wide && (side === 'low'
+      ? b.axialRangeMm[1] <= wide.axialRangeMm[0] + 1e-3
+      : b.axialRangeMm[0] >= wide.axialRangeMm[1] - 1e-3))
+    if (!bands.every(b => b.surface === 'cone')) return false
+    const end = side === 'low'
+      ? Math.min(...target.feature.bands.map(b => b.axialRangeMm[0]))
+      : Math.max(...target.feature.bands.map(b => b.axialRangeMm[1]))
+    return !supportPlanes.some(t => Math.abs(t - end) < 1e-3)
+  }
+  let boreOpenEnd: 'low' | 'high' | undefined
+  if (mesh && sourceIds) {
+    if (opensAt('low')) boreOpenEnd = 'low'
+    else if (opensAt('high')) boreOpenEnd = 'high'
+  }
+  return {
+    diameterMm: wide.diameterMm,
+    wallSourceFacetIds: wide.sourceFacetIds,
+    boreRangeMm: [...wide.axialRangeMm],
+    ...(boreOpenEnd ? { boreOpenEnd } : {}),
+    sourceFacetIds: [...wide.sourceFacetIds, ...shoulder].sort((a, b) => a - b),
   }
 }
 
@@ -107,8 +183,13 @@ function editFor(
   facets: number[],
   request: StlFeatureEditRequest,
   roundFeatures: readonly RecognizedFeature[],
+  counterbore: ReturnType<typeof stlCounterboreStep>,
 ): { edit: StlMeshEditInput; note?: string } | { refusal: string } {
   const target = request.feature.target
+  if (request.tool === 'move-hole' && target.family === 'round') {
+    return { edit: { kind: MOVE_HOLE_KIND, facets,
+      parameters: { translation: request.translation, axisDirection: [...target.feature.axis.direction] } } }
+  }
   if (request.tool === 'defeature' && target.family === 'round') {
     const refusal = roundFeatureRemovalRefusal(mesh, facets)
     if (refusal) return { refusal }
@@ -135,7 +216,7 @@ function editFor(
   if (request.tool === 'resize-hole' && target.family === 'round' && request.depth !== undefined) {
     const feature = target.feature
     const facts = holeDepthFacts(mesh, facets, feature.axis.origin, feature.axis.direction)
-    if (facts === null) return { refusal: 'Neither end of this hole opens onto the part, so LienCAM cannot tell where its depth is measured from.' }
+    if (facts === null) return { refusal: workbenchText('stlFeatureEdits.neitherEndOfThisHoleOpensOntoThePart') }
     const parameters = {
       feature: feature.kind,
       fromDiameterMm: feature.diameterMm,
@@ -152,21 +233,31 @@ function editFor(
   }
   if (request.tool === 'resize-hole' && target.family === 'round') {
     const feature = target.feature
+    // WO-2762: a counterbore at or under its pilot's diameter is cut as asked
+    // (LIENCAM.md rule 11) and the console says what the hole became.
+    const pilotText = String(Number(feature.diameterMm.toFixed(3)))
+    const stepNote: string | null = counterbore === null ? null
+      : Math.abs(request.diameterMm - feature.diameterMm) <= 1e-6 ? workbenchText('stlFeatureEdits.counterboreIsNowThePilot', { value1: pilotText })
+        : request.diameterMm < feature.diameterMm ? workbenchText('stlFeatureEdits.counterboreNowNarrowerThanPilot', { value1: pilotText })
+          : null
     const parameters = {
       feature: feature.kind,
-      fromDiameterMm: feature.diameterMm,
+      fromDiameterMm: counterbore?.diameterMm ?? feature.diameterMm,
       diameterMm: request.diameterMm,
+      ...(counterbore ? { boreRangeMm: counterbore.boreRangeMm, ...(counterbore.boreOpenEnd ? { boreOpenEnd: counterbore.boreOpenEnd } : {}) } : {}),
       axisOrigin: [...feature.axis.origin],
       axisDirection: [...feature.axis.direction],
     }
     const refusal = enlargeHoleRefusal(mesh, facets, parameters)
     if (refusal) return { refusal }
     const into = holeBreaksInto(feature, roundFeatures, request.diameterMm)
+    const breaksInto: string | null = into.length > 0
+      ? workbenchText('stlFeatureEdits.atMmTheHoleNowBreaksIntoThe', { value1: String(request.diameterMm.toFixed(2)), value2: String(into.map((f) => describeFeature(f)).join(workbenchText('stlFeatureEdits.the'))) })
+      : null
+    const note = [stepNote, breaksInto].filter((n): n is string => n !== null).join(' ')
     return {
       edit: { kind: ENLARGE_HOLE_KIND, facets, parameters },
-      ...(into.length > 0
-        ? { note: `at ${request.diameterMm.toFixed(2)} mm the hole now breaks into the ${into.map((f) => describeFeature(f)).join(', the ')}.` }
-        : {}),
+      ...(note !== '' ? { note } : {}),
     }
   }
   if (request.tool === 'push-pull' && target.family === 'flat') {
@@ -183,6 +274,11 @@ function editFor(
       ...(outcome.note ? { note: outcome.note } : {}),
     }
   }
+  if (request.tool === 'chamfer' && target.family === 'blend') {
+    const refusal = chamferSizeChangeRefusal(mesh, facets, request.distanceMm)
+    if (refusal) return { refusal }
+    return { edit: { kind: CHANGE_CHAMFER_SIZE_KIND, facets, parameters: { distanceMm: request.distanceMm } } }
+  }
   if (request.tool === 'fillet' && target.family === 'blend') {
     const refusal = blendRadiusChangeRefusal(mesh, facets, request.radiusMm)
     if (refusal) return { refusal }
@@ -194,11 +290,12 @@ function editFor(
       },
     }
   }
-  return { refusal: `${toolWord(request.tool)} does not edit a ${request.feature.kind.replace(/-/g, ' ')}.` }
+  return { refusal: workbenchText('stlFeatureEdits.doesNotEditA', { value1: String(toolWord(request.tool)), value2: String(request.feature.kind.replace(/-/g, ' ')) }) }
 }
 
 function toolWord(tool: StlEditTool): string {
-  return tool === 'defeature' ? 'Defeature' : tool === 'resize-hole' ? 'Resize Hole' : tool === 'push-pull' ? 'Push/Pull' : 'Fillet'
+  if (tool === 'chamfer') return 'Chamfer'
+  return tool === 'move-hole' ? workbenchText('MoveHoleEntry.title') : tool === 'defeature' ? workbenchText('stlFeatureEdits.defeature') : tool === 'resize-hole' ? workbenchText('stlFeatureEdits.resizeHole') : tool === 'push-pull' ? workbenchText('stlFeatureEdits.pushPull') : workbenchText('stlFeatureEdits.fillet')
 }
 
 /**
@@ -215,12 +312,23 @@ export function planStlFeatureEdits(
   let mesh = start.mesh
   let sourceFacetIds = start.sourceFacetIds
   const edits: PlannedStlEdit[] = []
+  // WO-2802: local to THIS pure preview. A dependent/duplicate removal is
+  // satisfied only when successful removal replay actually lost ALL its ids.
+  // A stale selection, previous journal or non-removal cannot use this path.
+  const removedSourceIds = new Set<number>()
   for (const request of requests) {
-    const facets = currentFacetsOf(sourceFacetIds, request.feature.sourceFacetIds)
+    // WO-2762: a counterbore-step resize selects that step's facets alone.
+    const step = request.tool === 'resize-hole' && request.step === 'counterbore' && request.depth === undefined
+      ? stlCounterboreStep(request.feature, mesh, sourceFacetIds)
+      : null
+    const facets = currentFacetsOf(sourceFacetIds, step?.sourceFacetIds ?? request.feature.sourceFacetIds)
     if (facets.length === 0) {
-      return { ok: false, feature: request.feature, reason: 'It is no longer on this part.' }
+      const wanted = request.feature.sourceFacetIds
+      if (request.tool === 'defeature' && wanted.length > 0 &&
+        wanted.every((id) => id !== NO_SOURCE_FACET && removedSourceIds.has(id))) continue
+      return { ok: false, feature: request.feature, reason: workbenchText('stlFeatureEdits.itIsNoLongerOnThisPart') }
     }
-    const planned = editFor(mesh, facets, request, start.roundFeatures)
+    const planned = editFor(mesh, facets, request, start.roundFeatures, step)
     if ('refusal' in planned) return { ok: false, feature: request.feature, reason: planned.refusal }
     // Apply it through the registry exactly as replay will, so the preview is
     // the shape the journal will resolve to.
@@ -233,6 +341,13 @@ export function planStlFeatureEdits(
     replayed.sourceFacetIds.forEach((input, output) => {
       composed[output] = input === NO_SOURCE_FACET ? NO_SOURCE_FACET : (sourceFacetIds[input] ?? NO_SOURCE_FACET)
     })
+    if (request.tool === 'defeature') {
+      const remaining = new Set(composed)
+      for (const facet of record.facets) {
+        const id = sourceFacetIds[facet]
+        if (id !== undefined && id !== NO_SOURCE_FACET && !remaining.has(id)) removedSourceIds.add(id)
+      }
+    }
     mesh = replayed.mesh
     sourceFacetIds = composed
     edits.push({ edit: planned.edit, ...(planned.note ? { note: planned.note } : {}) })
@@ -568,9 +683,9 @@ export interface StlPartMesh {
  *  is not) and its outward normal. */
 export function stlFaceRef(part: StlPartMesh, feature: StlModelFeature): { point: Vec3Tuple; normal: Vec3Tuple } {
   const target = feature.target
-  if (target.family !== 'flat') throw new Error(`The ${feature.label} is not a flat face.`)
+  if (target.family !== 'flat') throw new Error(workbenchText('stlFeatureEdits.theIsNotAFlatFace', { label: String(feature.label) }))
   const [facet] = currentFacetsOf(part.sourceFacetIds, feature.sourceFacetIds)
-  if (facet === undefined) throw new Error(`The ${feature.label} is no longer on this part.`)
+  if (facet === undefined) throw new Error(workbenchText('stlFeatureEdits.theIsNoLongerOnThisPart', { label: String(feature.label) }))
   const round = (n: number) => Math.round(n * 1e6) / 1e6
   const normal = target.face.plane.normal.map(round) as Vec3Tuple
   const point: Vec3Tuple = [0, 0, 0]
@@ -632,18 +747,18 @@ export function stlHoleDepth(
 /** The console line for an edit the software cannot make (COHESION-STANDARD
  *  13.2: what did not happen, then the operation's own sentence). */
 export function stlEditRefusalLine(partName: string, feature: StlModelFeature, reason: string): string {
-  return `Not changed: the ${feature.label} on "${partName}". ${reason}`
+  return workbenchText('stlFeatureEdits.notChangedTheOn', { label: String(feature.label), partName: String(partName), reason: String(reason) })
 }
 
 /** WO-2120: the tool that does edit a feature Fillet was clicked on. */
 function toolForFeature(feature: StlModelFeature): string {
   const target = feature.target
   if (target.family === 'round') {
-    return target.feature.kind === 'boss' ? 'Defeature removes that boss' : 'Resize hole or Defeature changes that hole'
+    return target.feature.kind === 'boss' ? workbenchText('stlFeatureEdits.defeatureRemovesThatBoss') : workbenchText('stlFeatureEdits.resizeHoleOrDefeatureChangesThatHole')
   }
-  if (target.family === 'blend') return `Defeature removes that ${target.blend.kind}`
-  if (target.family === 'flat') return 'Push/Pull moves that face'
-  return 'that is'
+  if (target.family === 'blend') return workbenchText('stlFeatureEdits.defeatureRemovesThat', { kind: String(target.blend.kind) })
+  if (target.family === 'flat') return workbenchText('stlFeatureEdits.pushPullMovesThatFace')
+  return workbenchText('stlFeatureEdits.thatIs')
 }
 
 /** WO-2120: what a Fillet click on the STL says when it lands on something
@@ -654,11 +769,11 @@ function toolForFeature(feature: StlModelFeature): string {
 export function stlFilletPickLine(features: readonly StlModelFeature[], picked: StlModelFeature | null, partName: string): string {
   const fillets = features.filter((feature) => stlToolAccepts('fillet', feature)).length
   const answer = fillets === 0
-    ? `"${partName}" has no rounded edge for Fillet to change`
-    : `that is not a rounded edge - "${partName}" has ${fillets}; click one of those`
+    ? workbenchText('stlFeatureEdits.hasNoRoundedEdgeForFilletToChange', { partName: String(partName) })
+    : workbenchText('stlFeatureEdits.thatIsNotARoundedEdgeHasClickOne', { partName: String(partName), fillets: String(fillets) })
   return picked === null
-    ? `Not changed: ${answer}.`
-    : `Not changed: ${answer}. ${toolForFeature(picked)}: the ${picked.label}.`
+    ? workbenchText('stlFeatureEdits.notChanged', { answer: String(answer) })
+    : workbenchText('stlFeatureEdits.notChangedThe', { answer: String(answer), value2: String(toolForFeature(picked)), label: String(picked.label) })
 }
 
 // ---------------------------------------------------------------- Defeature
@@ -724,7 +839,8 @@ export interface StlMeshEditPort {
  * The first `do` finds the edits already recorded - the tool's Apply records
  * them before the step is pushed, because recording reads the cached bytes and
  * is asynchronous while CommandHistory is not. Later undo/redo calls are
- * chained, so an undo pressed while a redo is still recording waits for it.
+ * queued per part with every creation and replacement, so rapid history
+ * requests cannot interleave their store writes across command instances.
  * The journal is the store's; this command holds only ids and plain data.
  */
 export class StlMeshEditCommand implements Command {
@@ -744,7 +860,9 @@ export class StlMeshEditCommand implements Command {
   ) {
     this.port = port
     this.geoId = geoId
-    this.edits = edits
+    // Tree edits and later replacement commands refer to these stable IDs.
+    // Redo of the original creation must restore them, not mint new rows.
+    this.edits = edits.map((edit, index) => ({ ...edit, id: recorded[index].id }))
     this.recordIds = recorded.map((r) => r.id)
   }
 
@@ -761,20 +879,20 @@ export class StlMeshEditCommand implements Command {
   do(): void {
     if (this.applied) return
     this.applied = true
-    this.chain = this.chain.then(async () => {
+    this.chain = enqueueStlJournalMutation(this.geoId, async () => {
       const ids: string[] = []
       for (const edit of this.edits) ids.push((await this.port.addMeshEdit(this.geoId, edit)).id)
       this.recordIds = ids
-    }).catch((err: unknown) => this.port.fail(`Redo did not re-apply the edit: ${err instanceof Error ? err.message : String(err)}`))
+    }).catch((err: unknown) => this.port.fail(workbenchText('stlFeatureEdits.redoDidNotReApplyTheEdit', { value1: String(err instanceof Error ? err.message : String(err)) })))
   }
 
   undo(): void {
     if (!this.applied) return
     this.applied = false
-    this.chain = this.chain.then(async () => {
+    this.chain = enqueueStlJournalMutation(this.geoId, async () => {
       for (const id of [...this.recordIds].reverse()) await this.port.removeMeshEdit(this.geoId, id)
       this.recordIds = []
-    }).catch((err: unknown) => this.port.fail(`Undo did not remove the edit: ${err instanceof Error ? err.message : String(err)}`))
+    }).catch((err: unknown) => this.port.fail(workbenchText('stlFeatureEdits.undoDidNotRemoveTheEdit', { value1: String(err instanceof Error ? err.message : String(err)) })))
   }
 
   serialize(): unknown {

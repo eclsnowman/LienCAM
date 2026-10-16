@@ -29,6 +29,34 @@ const CSC = 'C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 const OUT = path.join(process.env.TEMP ?? '.', 'liencam-wo1081-harness')
 const EXE = path.join(OUT, 'wo1081-streaming-harness.exe')
 const MOVES = path.join(OUT, 'sampleMachine-file-moves.json')
+const HARNESS = path.join(OUT, 'StreamingHarness.cs')
+
+// WO-2764: WO-1729 replaced the bridge's single faultEnabled/faultUcPin/faultActiveLow/
+// faultDescription fields with one DriveFaultInputState per definition input. The WO-1081
+// harness predates that, so the compiled copy states the same one input (UCpin 1, active
+// low) through the new list; every check it runs is unchanged.
+const OLD_FAULT_FIELDS = [
+  '            Set(machine, "faultEnabled", true);',
+  '            Set(machine, "faultUcPin", 1);',
+  '            Set(machine, "faultActiveLow", true);',
+  '            Set(machine, "faultDescription", "WO-1081 fake drive alarm");',
+].join('\n')
+const DRIVE_FAULT_INPUT = [
+  '            Type faultType = typeof(Machine).GetNestedType("DriveFaultInputState", BindingFlags.NonPublic);',
+  '            object fault = Activator.CreateInstance(faultType, true);',
+  '            faultType.GetField("Name").SetValue(fault, "WO-1081 fake drive alarm");',
+  '            faultType.GetField("UcPin").SetValue(fault, 1);',
+  '            faultType.GetField("ActiveLow").SetValue(fault, true);',
+  '            faultType.GetField("PolarityKnown").SetValue(fault, true);',
+  '            ((System.Collections.IList)Get(machine, "driveFaultInputs")).Add(fault);',
+  '            Set(machine, "faultLatchDescription", "WO-1081 fake drive alarm");',
+].join('\n')
+
+function currentHarness(): string {
+  const source = readFileSync('src/tests/evidence/WO-1081/StreamingHarness.cs', 'utf8').replace(/\r\n/g, '\n')
+  if (!source.includes(OLD_FAULT_FIELDS)) throw new Error('WO-1081 harness no longer sets the pre-WO-1729 fault fields')
+  return source.replace(OLD_FAULT_FIELDS, DRIVE_FAULT_INPUT)
+}
 const ORIGINAL_ID_BASE = 1_000_001
 
 const CAPS: ControllerCapabilities = {
@@ -126,6 +154,7 @@ describe.skipIf(!existsSync(CSC))('WO-1081 CurrentID move streaming', () => {
     expect(sampleMachine.longestCut).toBe(104_422)
     expect(sampleMachine.acceptedParts).toBe(4)
     writeFileSync(MOVES, JSON.stringify(sampleMachine.moves))
+    writeFileSync(HARNESS, currentHarness())
 
     const source = (relative: string) => path.win32.resolve(process.cwd(), relative)
     const compile = spawnSync(CSC, [
@@ -136,7 +165,7 @@ describe.skipIf(!existsSync(CSC))('WO-1081 CurrentID move streaming', () => {
       source('pendant/uccnc-bridge/Json.cs'),
       source('pendant/uccnc-bridge/Vfd.cs'),
       source('src/tests/evidence/WO-1326/FakeUC100.cs'),
-      source('src/tests/evidence/WO-1081/StreamingHarness.cs'),
+      HARNESS,
     ], { cwd: process.cwd(), encoding: 'utf8' })
     expect(compile.status, `${compile.stdout}\n${compile.stderr}`).toBe(0)
 

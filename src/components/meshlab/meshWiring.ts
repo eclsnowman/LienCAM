@@ -2,6 +2,8 @@
 // this WO) is a low-level buffer facade -- everything about making it SAFE and HONEST to drive
 // interactively (welding raw STL topology, guarding perf cliffs, avoiding redundant analysis
 // passes) belongs here, not there.
+import { textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { MeshBuffers, MeshHealthReport, MeshMeasureResult, TessellatedBrepBuffers } from '../../mesh'
 
 /**
@@ -59,9 +61,9 @@ export const HOLLOW_TRIANGLE_GUARD = 2000
 export function hollowGuardMessage(triangleCount: number): string | null {
   if (triangleCount <= HOLLOW_TRIANGLE_GUARD) return null
   return (
-    `Hollow is blocked above ${HOLLOW_TRIANGLE_GUARD.toLocaleString()} triangles ` +
-    `(measured: ~10-20s at ~2,000-6,000 tris, 111s at 25,280 tris -- see M3 report). ` +
-    `Decimate this mesh below the guard first.`
+    workbenchText('meshWiring.hollowIsBlockedAboveTriangles', { value1: String(HOLLOW_TRIANGLE_GUARD.toLocaleString()) }) +
+    workbenchText('meshWiring.measured1020sAt20006000Tris') +
+    workbenchText('meshWiring.decimateThisMeshBelowTheGuardFirst')
   )
 }
 

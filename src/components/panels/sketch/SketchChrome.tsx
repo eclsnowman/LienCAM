@@ -1,9 +1,9 @@
+import { useText } from '../../../i18n'
 import type { MouseEventHandler } from 'react'
 import { Check, Eye, EyeOff, X } from 'lucide-react'
 
-const FINISH_WITH_GEOMETRY_TITLE =
-  'Bake this sketch to its geometry layer and exit sketch mode'
-const FINISH_EMPTY_TITLE = 'Exit sketch mode (empty sketch is discarded)'
+
+
 
 interface SketchFinishButtonProps {
   hasEntities: boolean
@@ -18,6 +18,10 @@ export function SketchFinishButton({
   onClick,
   testId,
 }: SketchFinishButtonProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
+  const FINISH_EMPTY_TITLE = workbenchText('SketchChrome.exitSketchModeEmptySketchIsDiscarded')
+  const FINISH_WITH_GEOMETRY_TITLE =
+  workbenchText('SketchChrome.bakeThisSketchToItsGeometryLayerAndExit')
   return (
     <button
       type="button"
@@ -27,7 +31,7 @@ export function SketchFinishButton({
       data-tooltip={hasEntities ? FINISH_WITH_GEOMETRY_TITLE : FINISH_EMPTY_TITLE}
     >
       <Check size={14} />
-      <span>Finish</span>
+      <span>{workbenchText('SketchChrome.finish')}</span>
     </button>
   )
 }
@@ -40,16 +44,17 @@ interface SketchCancelButtonProps {
 /** One cancel action for both hosts. Unlike Finish, this restores the entry
  * snapshot and exits without baking the live document. */
 export function SketchCancelButton({ onClick, testId }: SketchCancelButtonProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <button
       type="button"
       data-testid={testId}
       className="sketch-cancel-btn"
       onClick={onClick}
-      data-tooltip="Discard sketch edits and restore the entry state"
+      data-tooltip={workbenchText('SketchChrome.discardSketchEditsAndRestoreTheEntryState')}
     >
       <X size={14} />
-      <span>Cancel</span>
+      <span>{workbenchText('SketchChrome.cancel')}</span>
     </button>
   )
 }
@@ -67,6 +72,7 @@ export function SketchGlyphToggle({
   onToggle,
   testId,
 }: SketchGlyphToggleProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const handleClick: MouseEventHandler<HTMLButtonElement> = (event) => {
     event.stopPropagation()
     onToggle()
@@ -81,11 +87,11 @@ export function SketchGlyphToggle({
       className={`sketch-header-toggle${visible ? ' sketch-header-toggle-on' : ''}`}
       onClick={handleClick}
       data-tooltip={visible
-        ? 'Hide constraint glyphs (dimensions stay visible)'
-        : 'Show constraint glyphs'}
+        ? workbenchText('SketchChrome.hideConstraintGlyphsDimensionsStayVisible')
+        : workbenchText('SketchChrome.showConstraintGlyphs')}
     >
       {visible ? <Eye size={12} /> : <EyeOff size={12} />}
-      <span>Show</span>
+      <span>{workbenchText('SketchChrome.show')}</span>
     </button>
   )
 }

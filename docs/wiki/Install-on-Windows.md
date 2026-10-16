@@ -12,8 +12,8 @@ Windows is the platform LienCAM is built and tested on. The desktop app is in al
 
 Download from the project's [Releases page](../releases) on GitHub. Each release lists two Windows files:
 
-- `LienCAM-<version>-win-x64-setup.exe` - the installer. It installs for your own user (no administrator needed), and adds a desktop and Start menu shortcut named LienCAM.
-- `LienCAM-<version>-win-x64-portable.exe` - the portable build. Nothing is installed; keep it anywhere (a USB stick works) and double-click it.
+- `LienCAM-<version>-win-x64-setup.exe` - the installer. Choose installation for anyone who uses this computer or only for you. It adds a desktop and Start menu shortcut named LienCAM.
+- `LienCAM-<version>-win-x64-portable.exe` - the portable build. Nothing is installed; keep the program anywhere (including a USB stick) and double-click it. Settings and saved app data stay in `%APPDATA%\LienCAM` on that PC, shared with an installed copy. A USB stick carries the program, not your settings. Use the backup and restore steps below to move your setup to another PC.
 
 ## The "Windows protected your PC" warning
 
@@ -21,7 +21,7 @@ The installer is not code-signed yet (a certificate costs money and this is a ho
 
 1. On the blue window, click **More info**.
 2. Click **Run anyway**.
-3. Follow the installer: choose **Only for me** (no administrator needed), choose the folder if you like, then **Install**.
+3. On **Choose Installation Options**, select **Anyone who uses this computer** (administrator permission required) or **Only for me** (no administrator needed), then **Install**. There is no folder chooser.
 
 Only do this for a file you downloaded from the project's own Releases page. Each release lists a SHA-256 checksum; compare it with the file if you want to be sure.
 

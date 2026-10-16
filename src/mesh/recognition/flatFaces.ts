@@ -22,7 +22,10 @@
 //   - every facet across its rim must be SHARPLY turned away from it
 //     (`smoothSlope`, WO-1846's own 26.6-degree region-growing angle). One
 //     smoothly-continuing rim edge means the region is a patch of a curved
-//     surface, and it is not offered.
+//     surface, and it is not offered - UNLESS (WO-2798) the surface across
+//     that rim leaves it tangentially: the plate top beside a filleted boss,
+//     the top inside a fillet chain, a pocket floor with floor fillets. Those
+//     are faces, and `tangentRim.ts` tells them from a chord of a curve.
 // KNOWN LIMIT, stated rather than hidden (same shape as WO-1846's chamfer
 // limit): a real flat face whose neighbour leaves it at less than 26.6 degrees
 // - a shallow draft - reads as "still the same smooth surface" and is not
@@ -60,6 +63,7 @@ import {
   type WeldedMesh,
 } from './topology';
 import { meshRecenterShift } from './toolpathTargets';
+import { indexPlanarRegions, smoothRimLeavesTangentially } from './tangentRim';
 
 export interface FlatFaceOptions {
   /**
@@ -242,6 +246,7 @@ export function recognizeFlatFaces(
   // The LOOSE adjacency, for the rim test. Two slopes, one mechanism: the same
   // `buildAdjacency` the round-feature half already uses.
   const { smooth } = buildAdjacency(w, smoothSlope);
+  const regionIndex = indexPlanarRegions(w, regions);
 
   const faces: RecognizedFlatFace[] = [];
   const skipped: FlatFaceSkip[] = [];
@@ -256,9 +261,13 @@ export function recognizeFlatFaces(
       continue;
     }
     // The rim test: one facet across the rim that is still smoothly in line
-    // with this region means this is a piece of a curved surface, not a face.
+    // with this region means this is a piece of a curved surface, not a face -
+    // unless that surface leaves the rim tangentially (WO-2798: a blend).
     const inside = new Set(facets);
-    if (facets.some((f) => smooth[f].some((next) => !inside.has(next)))) {
+    if (
+      facets.some((f) => smooth[f].some((next) => !inside.has(next))) &&
+      !smoothRimLeavesTangentially(w, regionIndex, facets, rawPlane.normal, smooth)
+    ) {
       skip('curved-surface');
       continue;
     }

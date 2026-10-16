@@ -1,3 +1,7 @@
+import { catalogChildren } from '../../catalogText'
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { Check, Cpu } from 'lucide-react'
 import { OverviewCards } from '../../OverviewCards'
 import type { MachineDefinitionPanelState } from '../../useMachineDefinitionPanel'
@@ -20,6 +24,7 @@ type Step7Props = Pick<MachineDefinitionPanelState,
     onOpenArea: (key: keyof OverviewFacts) => void }
 
 export function Step7CheckAndSave({ draft, applying, applyState, applyTooltip, applyIsCurrent, handleApply, commit, connectionPhase, editsConnectedMachine, onOpenArea, onSaved }: Step7Props) {
+  useText('control-screens-not-probing')
   const applyCurrent = applyIsCurrent && applyState !== null
   // AUDIT FIX (fix round 1): the outcome names this button "Apply to the
   // controller now" WHEN CONNECTED - it was rendering unconditionally, so
@@ -31,11 +36,9 @@ export function Step7CheckAndSave({ draft, applying, applyState, applyTooltip, a
   const canApply = connected && editsConnectedMachine
   return (
     <div data-testid="setup-step-review" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Check {draft.name}, then save.</p>
+      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{catalogChildren(controlText('Step7CheckAndSave.text001', { value1: '\u0000value1\u0000' }), { value1: draft.name })}</p>
       {connected && !editsConnectedMachine && (
-        <p data-testid="setup-step-review-not-connected" style={{ margin: 0, color: 'var(--text-secondary)' }}>
-          This machine is not the one connected - apply it from its definition page when it is.
-        </p>
+        <p data-testid="setup-step-review-not-connected" style={{ margin: 0, color: 'var(--text-secondary)' }}>{controlText('Step7CheckAndSave.text002')}</p>
       )}
 
       <OverviewCards draft={draft} setSection={(key) => { onOpenArea(key as keyof OverviewFacts) }} />
@@ -53,10 +56,10 @@ export function Step7CheckAndSave({ draft, applying, applyState, applyTooltip, a
             {applying
               ? 'Applying...'
               : applyCurrent && applyState!.ok
-                ? <><Check size={12} /> Applied</>
+                ? <><Check size={12} />{controlText('Step7CheckAndSave.text003')}</>
                 : applyCurrent
-                  ? <><Cpu size={12} /> Apply failed</>
-                  : <><Cpu size={12} /> Apply to the controller now</>}
+                  ? <><Cpu size={12} />{controlText('Step7CheckAndSave.text004')}</>
+                  : <><Cpu size={12} />{controlText('Step7CheckAndSave.text005')}</>}
           </button>
         )}
         <button
@@ -64,9 +67,7 @@ export function Step7CheckAndSave({ draft, applying, applyState, applyTooltip, a
           className="control-chip-btn"
           data-testid="setup-step-review-save"
           onClick={() => { commit(); onSaved() }}
-        >
-          Save
-        </button>
+        >{controlText('Step7CheckAndSave.text006')}</button>
       </div>
     </div>
   )

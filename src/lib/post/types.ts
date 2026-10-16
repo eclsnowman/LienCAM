@@ -55,6 +55,11 @@ export interface PostOperatorStop {
   message: string
 }
 
+/** Ordered machine actions; positions are resolved onto emitted operations. */
+export type PostMachineAction =
+  | (PostOperatorStop & { kind: 'operator_stop' })
+  | { kind: 'run_macro'; beforeOpId: string | null; macroId: string; name: string }
+
 /** The complete, store-detached input to a post run. */
 export interface PostInput {
   machine: MachineConfig
@@ -64,6 +69,8 @@ export interface PostInput {
     /** WO-2437: retract -> park -> stop blocks between operations. Absent for
      *  a setup with none, which keeps its output byte-identical. */
     operatorStops?: PostOperatorStop[]
+    /** When present, replaces operatorStops and preserves mixed action order. */
+    machineActions?: PostMachineAction[]
   }
   stocks?: PhysicalStock[]
   /** The owning setup id, threaded by buildPostInput so emitted operation spans

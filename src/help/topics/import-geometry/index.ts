@@ -174,6 +174,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'While the file is still one row, right-click it and choose Choose body split... to bring the dialog back, with your earlier choice highlighted.',
       },
       { kind: 'image', slot: 'choice-modal' },
+      {
+        kind: 'paragraph',
+        text: 'Those choices belong to the Geometry list in Setup. Import in the Model tab brings each solid into its own model body automatically and reports the count; Cancel during import drops it.',
+      },
     ],
     images: [
       {

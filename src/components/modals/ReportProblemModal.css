@@ -1,0 +1,193 @@
+/* WO-2759: Help > Report a problem - layout only; colours are the existing theme tokens. */
+.report-problem-backdrop {
+  /* Above Help as an overlay (560) and the dialog it covers (500); below the
+     portaled tooltips and menus (1000) so this dialog's own tips still show. */
+  z-index: 570;
+}
+
+.report-problem-modal {
+  width: min(46rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.report-problem-body {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-problem-intro p,
+.report-problem-category p,
+.report-problem-disclosure p {
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.report-problem-intro {
+  color: var(--text-secondary);
+}
+
+.report-problem-section h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.report-problem-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.report-problem-row select {
+  flex: 1;
+  min-width: 16rem;
+}
+
+.report-problem-categories {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-problem-category {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+
+.report-problem-category label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-problem-category p {
+  margin: 4px 0 0 24px;
+  color: var(--text-secondary);
+}
+
+.report-problem-category .report-problem-row {
+  margin: 6px 0 0 24px;
+}
+
+.report-problem-category-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.report-problem-tag {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-selected);
+  color: var(--text-secondary);
+}
+
+.report-problem-size {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.report-problem-note {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.report-problem-problem {
+  color: var(--text-danger);
+  margin: 0 0 6px;
+}
+
+.report-problem-file {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  margin-bottom: 6px;
+}
+
+.report-problem-file summary {
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.report-problem-file-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.report-problem-hash {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.report-problem-text {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 6px 0 2px;
+  padding: 6px 8px;
+  background: var(--bg-panel-alt);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.report-problem-disclosure {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--warning);
+  background: var(--bg-panel-alt);
+}
+
+.report-problem-image {
+  display: block;
+  max-width: 100%;
+  max-height: 16rem;
+  margin: 6px 0;
+  border: 1px solid var(--border-subtle);
+}
+
+.report-problem-events {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.report-problem-events label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.report-problem-prefill {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+}
+
+.report-problem-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.report-problem-footer .report-problem-note {
+  margin-right: auto;
+}

@@ -28,6 +28,7 @@ import type { EllipseShape } from '../ellipse'
 import { lineAngle, measureDimension, resolvePoint, reversedAngleValueSignValid } from '../tools/dimTool'
 import { reconcileCurveFillets } from '../tools/filletTool'
 import { applyOffsetLinks } from '../tools/offsetTool'
+import { solveDependentFeatures } from './dependentFeatures'
 import { resolveChamferCorner } from '../tools/theoreticalCorner'
 
 export class SketchMappingError extends Error {
@@ -2040,6 +2041,14 @@ const MAX_SOLVE_BATCH_ENTITIES = 150
 export function solveSketchOnWrapper(
   wrapper: GcsWrapper, sketch: Sketch, drag?: DragRequest,
 ): SketchSolveOutcome {
+  if (sketch.patterns?.length || sketch.entities.some(e => e.offsetLink)) {
+    const result = solveDependentFeatures(sketch, drag, (part, request) => solveSketchOnWrapper(wrapper, part, request))
+    if (drag && sketch.solveStatus) {
+      result.status.dof = sketch.solveStatus.dof
+      result.status.fullyDefinedEntities = sketch.solveStatus.fullyDefinedEntities
+    }
+    return result
+  }
   // INERT direct-edit resize: apply any DRIVING ellipse major/minor radius dim
   // to the entity BEFORE the solve (single choke point covering both the
   // single-system and partitioned paths). A no-op fast path when no such dim
@@ -2661,12 +2670,12 @@ function dimensionRefSig(d: SketchDimension): string {
  * reordering (which does not change definedness) does not force a miss.
  */
 export function sketchTopologySignature(sketch: Sketch): string {
-  const ents = sketch.entities.map((e) => `${e.id}:${e.kind}`).sort()
+  const ents = sketch.entities.map((e) => `${e.id}:${e.kind}:${JSON.stringify(e.offsetLink ?? null)}`).sort()
   const cons = sketch.constraints
     .map((c) => `${c.id}:${c.kind}:${constraintRefSig(c)}`).sort()
   const dims = sketch.dimensions
     .map((d) => `${d.id}:${d.kind}:${d.driving ? 'D' : 'R'}:${dimensionRefSig(d)}`).sort()
-  return `#${sketch.id}|E:${ents.join(',')}|C:${cons.join(',')}|D:${dims.join(',')}`
+  return `#${sketch.id}|E:${ents.join(',')}|C:${cons.join(',')}|D:${dims.join(',')}|P:${JSON.stringify(sketch.patterns ?? [])}`
 }
 
 // ---- Partitioned solve (fixed-WASM-heap workaround) -----------------------
@@ -2693,6 +2702,8 @@ function connectedComponents(sketch: Sketch): Set<string>[] {
   }
   for (const c of sketch.constraints) union(constraintRefIds(c))
   for (const d of sketch.dimensions) union(dimensionRefIds(d))
+  for (const e of sketch.entities) if (e.offsetLink) union([e.id, ...e.offsetLink.source.map(r => r.entityId)])
+  for (const p of sketch.patterns ?? []) union([...p.sources, ...p.members.map(m => m.id), ...(p.values.kind === 'mirror' ? [p.values.axisId] : [])])
 
   const byRoot = new Map<string, Set<string>>()
   for (const e of sketch.entities) {
@@ -2760,6 +2771,7 @@ function solvePartitioned(
     const sub: Sketch = {
       ...sketch,
       entities: sketch.entities.filter((e) => batch.has(e.id)),
+      patterns: sketch.patterns?.filter(p => p.sources.every(id => batch.has(id))),
       constraints: sketch.constraints.filter((c) => inBatch(constraintRefIds(c), batch)),
       dimensions: sketch.dimensions.filter((d) => inBatch(dimensionRefIds(d), batch)),
     }

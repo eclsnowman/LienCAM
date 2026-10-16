@@ -17,6 +17,8 @@
 // physical edge resolvable; until then every UI picked-edge-id resolver must
 // REFUSE a pick that lands on a colliding id rather than guess a twin.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { StableId } from '../../../geom/geom-service'
 
 export interface EdgeIdCollision {
@@ -55,11 +57,11 @@ export function edgeIdCollisions(
  *  structured MeasureFailure. Names every colliding id and its collision
  *  count; states the grammar-collapse cause and that disambiguation is GEO-16. */
 export function edgeIdCollisionMessage(collisions: readonly EdgeIdCollision[]): string {
-  const named = collisions.map((c) => `${c.id} (${c.count} distinct edges share this stable id)`).join(', ')
+  const named = collisions.map((c) => workbenchText('edgeIdCollisions.distinctEdgesShareThisStableId', { id: String(c.id), count: c.count })).join(', ')
   return (
-    `measure refused: picked edge ${named} cannot be resolved to a single physical edge -- ` +
-    `the stable-id grammar collapses two-face edges that share an adjacent-face pair ` +
-    `(ICR-3 step 1, docs/stable-id-spec.md). Refusing rather than measuring the wrong edge; ` +
-    `grammar disambiguation is tracked as GEO-16.`
+    workbenchText('edgeIdCollisions.measureRefusedPickedEdgeCannotBeResolvedToA', { named: String(named) }) +
+    workbenchText('edgeIdCollisions.theStableIdGrammarCollapsesTwoFaceEdgesThat') +
+    workbenchText('edgeIdCollisions.icr3Step1DocsStableIdSpecMd') +
+    workbenchText('edgeIdCollisions.grammarDisambiguationIsTrackedAsGEO16')
   )
 }

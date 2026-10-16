@@ -73,11 +73,14 @@ describe('WO-368/WO-384 the probing workspace uses one non-scrolling operator st
     render(React.createElement(ProbingPanel))
 
     const station = screen.getByTestId('control-probing-panel')
+    // WO-2665: the center column holds the step card, with Main's console below it.
+    const center = screen.getByTestId('probing-center')
     expect(Array.from(station.children)).toEqual([
       screen.getByTestId('control-probing-left'),
-      screen.getByTestId('probing-step-card'),
+      center,
       screen.getByTestId('control-probing-right'),
     ])
+    expect(center.firstElementChild).toBe(screen.getByTestId('probing-step-card'))
   })
 
   it('keeps each zone in its own column', () => {

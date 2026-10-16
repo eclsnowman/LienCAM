@@ -25,7 +25,7 @@ export const TOOLS = [
 export async function firstLaunch(journey) {
   const page = journey.page
   // A first start offers the examples (WO-2532); a new user may start empty.
-  assert(await startEmptyIfOffered(journey, { timeout: 30_000 }), 'a first start did not offer "Try an example"')
+  assert(await startEmptyIfOffered(journey, { timeout: 30_000 }), 'a first start offered neither the "Open a project" picker nor "Try an example"')
   await answerMachineChoice(journey)
   const project = await page.getByTestId('tree-name-project').innerText()
   assert(/untitled/i.test(project), `a fresh profile opened project "${project}", not an untitled one`)

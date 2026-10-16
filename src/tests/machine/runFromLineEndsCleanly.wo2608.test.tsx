@@ -325,7 +325,8 @@ describe('WO-2608 restart finishes like a run from the top', () => {
     table.recordProbedZ(machine.id, 2, 12, 1)
     table.setReference(machine.id, 2)
     useMachineControl.setState({ activeTool: 2 })
-    expect((await armProgramFromLine(line)).ok).toBe(true)
+    // WO-2810 (Operator 10-14): the T1 change runs because the operator chose it.
+    expect((await armProgramFromLine(line, 'tool-change-first')).ok).toBe(true)
     autoRun = true
     expect(await executeOperatorCycleStart()).toBe(true)
     await vi.advanceTimersByTimeAsync(2000)

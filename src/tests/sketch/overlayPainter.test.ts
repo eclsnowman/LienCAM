@@ -94,3 +94,19 @@ describe('SketchOverlayPainter disconnected tool previews', () => {
     expect(root.children).toHaveLength(0)
   })
 })
+
+describe('SketchOverlayPainter non-dimension guides', () => {
+  it('keeps plain guide vertices unchanged even for a symmetric three-point path', () => {
+    const root = new THREE.Group()
+    const painter = new SketchOverlayPainter(root, () => 0.01)
+    const guide = [{ x: 0, y: 0 }, { x: 5, y: 2 }, { x: 10, y: 0 }]
+    painter.setToolOverlayDisplay({ dimGuides: [guide] })
+    const lines: THREE.Line[] = []
+    root.traverse(o => { if (o instanceof THREE.Line) lines.push(o) })
+    const positions = lines[0].geometry.getAttribute('position')
+    expect(Array.from({ length: positions.count }, (_, i) => ({ x: positions.getX(i), y: positions.getY(i) }))).toEqual(guide)
+    painter.clearAll()
+    expect(painter.overlayChildCount()).toBe(0)
+    painter.dispose()
+  })
+})

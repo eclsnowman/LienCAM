@@ -466,6 +466,10 @@ for (const backend of ['simulator', 'bridge'] as const) describe(`WO-2651 Contro
     expect(item.disabled).toBe(false)
     await act(async () => { fireEvent.click(item) })
     await advance(300)
+    // WO-2810: the row menu also asks about the unknown fitted tool before arming.
+    expect(useMachineControl.getState().armedFromLine).toBeNull()
+    await act(async () => { fireEvent.click(screen.getByTestId('control-runfrom-toolask-now')) })
+    await advance(300)
     expect(screen.getByTestId('control-runfrom-target').textContent).toBe('4: G0 X20')
     expect((screen.getByTestId('control-runfrom-input') as HTMLInputElement).value).toBe('4')
   })
@@ -501,6 +505,10 @@ for (const backend of ['simulator', 'bridge'] as const) describe(`WO-2651 Contro
     await advance(300)
     expect(loadedProgramText()).toBe(edited)
     lineMenu(7, 'runfrom')
+    await advance(300)
+    // WO-2810: confirm Start now, then measure the same edited-line execution.
+    expect(useMachineControl.getState().armedFromLine).toBeNull()
+    await act(async () => { fireEvent.click(screen.getByTestId('control-runfrom-toolask-now')) })
     await advance(300)
     expect(screen.getByTestId('control-runfrom-target').textContent).toMatch(/^7: .*X23/)
     expect(useMachineControl.getState().armedFromLine).toBe(7)

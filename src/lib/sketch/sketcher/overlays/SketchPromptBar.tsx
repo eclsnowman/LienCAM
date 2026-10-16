@@ -1,3 +1,4 @@
+import { useText } from '../../../../i18n'
 import { useEffect, useRef } from 'react'
 import { useSketcherTool } from '../useSketcherTool'
 import { sketcherTools } from '../toolController'
@@ -69,6 +70,7 @@ export const TOOL_ICONS: Record<SketchToolId, LucideIcon> = {
  * `useCamStore`, so this file lives inside the package.
  */
 export function SketchPromptBar({ port }: { port: SketcherOverlaysPort }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const isSketch = port.useIsSketchActive()
   const tool = useSketcherTool((s) => s.tool)
   const chain = useSketcherTool((s) => s.chain)
@@ -170,13 +172,11 @@ export function SketchPromptBar({ port }: { port: SketcherOverlaysPort }) {
   const Icon = TOOL_ICONS[model.tool]
   return (
     <div ref={barRef} className="sketch-prompt-bar" role="status" aria-live="polite">
-      <span className="sketch-prompt-tool" data-tooltip={`${model.toolLabel} (armed)`}>
+      <span className="sketch-prompt-tool" data-tooltip={workbenchText('SketchPromptBar.armed', { toolLabel: String(model.toolLabel) })}>
         <Icon size={13} aria-hidden />
         <span>{model.toolLabel}</span>
       </span>
-      <span className="sketch-prompt-step-chip">
-        Step {model.stepNumber} of {model.stepCount}
-      </span>
+      <span className="sketch-prompt-step-chip">{workbenchText('SketchPromptBar.combinedStepOf', { value1: String((model.stepNumber) ?? ''), value2: String((model.stepCount) ?? '') })}</span>
       {/* .sketch-prompt-text ellipsizes (overflow:hidden + text-overflow), so a
           long instruction silently loses its tail - "Apply (Enter) adds each
           fil..." in the shipped staged-ghost help capture. Ellipsis without a
@@ -197,25 +197,25 @@ export function SketchPromptBar({ port }: { port: SketcherOverlaysPort }) {
           <button
             className="sketch-prompt-btn sketch-prompt-btn-confirm"
             onClick={sketchToolEnd}
-            data-tooltip="Confirm this step (Enter)"
-            aria-label="Confirm step (Enter)"
+            data-tooltip={workbenchText('SketchPromptBar.confirmThisStepEnter')}
+            aria-label={workbenchText('SketchPromptBar.confirmStepEnter')}
           >
             <Check size={12} aria-hidden />
-            <span>Confirm</span>
-            <kbd>Enter</kbd>
+            <span>{workbenchText('SketchPromptBar.confirm')}</span>
+            <kbd>{workbenchText('SketchPromptBar.enter')}</kbd>
           </button>
         )}
         <button
           className="sketch-prompt-btn"
           onClick={sketchToolEscape}
           data-tooltip={chain
-            ? 'Cancel the in-progress step (Esc); committed geometry stays'
-            : 'Disarm the tool and return to Select (Esc)'}
-          aria-label="Cancel (Esc)"
+            ? workbenchText('SketchPromptBar.cancelTheInProgressStepEscCommittedGeometryStays')
+            : workbenchText('SketchPromptBar.disarmTheToolAndReturnToSelectEsc')}
+          aria-label={workbenchText('SketchPromptBar.cancelEsc')}
         >
           <X size={12} aria-hidden />
-          <span>{chain ? 'Back' : 'Cancel'}</span>
-          <kbd>Esc</kbd>
+          <span>{chain ? workbenchText('SketchPromptBar.back') : workbenchText('SketchPromptBar.cancel')}</span>
+          <kbd>{workbenchText('SketchPromptBar.esc')}</kbd>
         </button>
       </span>
     </div>

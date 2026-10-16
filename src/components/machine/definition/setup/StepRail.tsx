@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { Check, SkipForward } from 'lucide-react'
 
 // WO-1696 (v2/SLICES.md T13) - the left rail. Every step is always reachable
@@ -18,11 +21,12 @@ interface StepRailProps {
 }
 
 export function StepRail({ steps, onSelect }: StepRailProps) {
+  useText('control-screens-not-probing')
   return (
     <nav
       className="setup-walkthrough-rail"
       data-testid="setup-walkthrough-rail"
-      aria-label="Setup steps"
+      aria-label={controlText('StepRail.text001')}
       style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 190 }}
     >
       <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>

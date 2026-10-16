@@ -26,6 +26,8 @@
 //     inert members of `workbenchSketchDocumentPort`. `useTextDraft()` returns '' and
 //     `getTextEditId()` returns null, so `SketchTextInput` never mounts and none of the commands is
 //     reachable. They are contracts, not crash paths.
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useSyncExternalStore } from 'react'
 import * as THREE from 'three'
 
@@ -51,6 +53,7 @@ import { workbenchSketchDocumentPort } from './workbenchSketchDocumentPort'
 /** The package's hooks, supplied by the host. Named `useSessionValue`, not `sel`: it IS a custom
  *  hook, and `rules-of-hooks` says so. */
 function useSessionValue<T>(f: (s: SketchSessionState) => T): T {
+  useText('sketch-and-model-workbench')
   return useSyncExternalStore(
     sketchSessionStore.subscribe,
     () => f(sketchSessionStore.getState()),
@@ -132,15 +135,15 @@ function applyWithVerdict(next: Sketch, addedIds: string[], label: string): bool
   try {
     outcome = solveSketchOnWrapper(d.wrapper, next)
   } catch (err) {
-    d.notice(`${label}: the constraint solver failed (${err instanceof Error ? err.message : String(err)}).`, 'error')
+    d.notice(workbenchText('workbenchOverlaysPort.theConstraintSolverFailed', { label: String(label), value2: String(err instanceof Error ? err.message : String(err)) }), 'error')
     return false
   }
 
   const conflicting = new Set(outcome.status?.conflicting ?? [])
   const rejected = addedIds.filter((id) => conflicting.has(id))
   if (rejected.length > 0 || !outcome.ok) {
-    const why = outcome.ok ? 'it conflicts with the existing constraints' : outcome.message
-    d.notice(`${label} was not applied: ${why}`, 'warning')
+    const why = outcome.ok ? workbenchText('workbenchOverlaysPort.itConflictsWithTheExistingConstraints') : outcome.message
+    d.notice(workbenchText('workbenchOverlaysPort.wasNotApplied', { label: String(label), why: String(why) }), 'warning')
     return false
   }
 
@@ -240,27 +243,27 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
     if (!Number.isFinite(value)) {
       // Charter item 3: validate DATA at the accept point. A NaN here would ride into the solver and
       // out into every coordinate of the sketch, and `NaN > tol` is false in both directions.
-      d.notice('That dimension value is not a number.', 'warning')
+      d.notice(workbenchText('workbenchOverlaysPort.thatDimensionValueIsNotANumber'), 'warning')
       return
     }
     const dim = s.dimensions.find((x) => x.id === dimId)
     if (dim === undefined) return
-    const label = `${constraintKindLabel(dim.kind)} dimension`
+    const label = workbenchText('workbenchOverlaysPort.dimension', { value1: String(constraintKindLabel(dim.kind)) })
     if (dim.kind === 'arcLength' && !(value > 0)) {
-      d.notice(`${label}: arc length must be greater than zero.`, 'warning')
+      d.notice(workbenchText('workbenchOverlaysPort.arcLengthMustBeGreaterThanZero', { label: String(label) }), 'warning')
       return
     }
     // WO-1858: a chamfer setback is a POSITIVE distance from the theoretical
     // corner -- zero or negative names no chamfer at all. Same refusal shape
     // (and the same host parity) as the arc-length guard above.
     if (dim.kind === 'd1xd2' && !(value > 0)) {
-      d.notice(`${label}: setback ${half === 'd2' ? 'D2' : 'D1'} must be greater than zero.`, 'warning')
+      d.notice(workbenchText('workbenchOverlaysPort.setbackMustBeGreaterThanZero', { label: String(label), value2: String(half === 'd2' ? 'D2' : 'D1') }), 'warning')
       return
     }
     if (!dim.driving) {
       d.notice(
-        `${label} is a reference - it tracks the measured value ` +
-        '(toggle it to driving to set a value).',
+        workbenchText('workbenchOverlaysPort.isAReferenceItTracksTheMeasuredValue', { label: String(label) }) +
+        workbenchText('workbenchOverlaysPort.toggleItToDrivingToSetAValue'),
         'warning',
       )
       sketchSessionStore.setState({ dimEditor: null })
@@ -360,7 +363,7 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
       entities: r.sketch.entities, constraints: r.sketch.constraints, dimensions: r.sketch.dimensions,
     })
     workbenchSketchDocumentPort.setSelection([r.blockId])
-    d.notice('Grouped into a block.', 'success')
+    d.notice(workbenchText('workbenchOverlaysPort.groupedIntoABlock'), 'success')
   },
   explodeSelectedBlock: (): void => {
     const { sketch, selectedIds } = sketchSessionStore.getState()
@@ -370,7 +373,7 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
       const e = sketch.entities.find((x) => x.id === id)
       return e !== undefined && e.kind === 'block'
     })
-    if (blockId === undefined) { d.notice('Select a block to explode.', 'info'); return }
+    if (blockId === undefined) { d.notice(workbenchText('workbenchOverlaysPort.selectABlockToExplode'), 'info'); return }
     const r = explodeBlock(sketch, blockId)
     if (!r.ok) { d.notice(r.message, 'warning'); return }
     workbenchSketchDocumentPort.beginStep()
@@ -380,7 +383,7 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
       blockDefs: r.sketch.blockDefs,
     })
     workbenchSketchDocumentPort.setSelection(r.memberIds)
-    d.notice('Exploded block.', 'success')
+    d.notice(workbenchText('workbenchOverlaysPort.explodedBlock'), 'success')
   },
   // SKC-BLOCKS Stage 5: place ANOTHER instance of the selected block. Hoists the
   // block into a shared DEFINITION on first reuse (so editing the block updates
@@ -394,7 +397,7 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
       return e !== undefined && e.kind === 'block'
     })
     if (blockIds.length !== 1) {
-      d.notice('Select a single block to place another instance of.', 'info')
+      d.notice(workbenchText('workbenchOverlaysPort.selectASingleBlockToPlaceAnotherInstanceOf'), 'info')
       return
     }
     const r = insertInstanceOfBlock(sketch, blockIds[0])
@@ -405,7 +408,7 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
       blockDefs: r.sketch.blockDefs,
     })
     workbenchSketchDocumentPort.setSelection([r.blockId])
-    d.notice('Placed another instance. Edit the block to update every instance.', 'success')
+    d.notice(workbenchText('workbenchOverlaysPort.placedAnotherInstanceEditTheBlockToUpdateEvery'), 'success')
   },
   // SKC-BLOCKS Stage 2: direct-edit inert scale/rotation. Neither changes the
   // constraint graph (only the origin is solved), so -- like group/explode --

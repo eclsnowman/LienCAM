@@ -74,6 +74,14 @@ const controllerFormatMentions = [
     source: '   *  M2001, as Fusion\'s UCCNC post writes it). Absent = the stop is M0 alone. */' },
 ]
 
+// WO-2875: WO-2867 (e4e63a8834) names the tool-library file format it imports. Import and
+// interop names stay (owner 2026-10-16 12:35 AM: tool libraries are one); a comparison would not.
+// Listed ahead of the recorded mentions: it sits above them in its file and the sort is stable.
+const importFormatMentions = [
+  { file: 'src/components/modals/ToolLibraryModal.tsx', names: ['Fusion'],
+    source: '    // Arrays and Fusion archives remain library imports, even with one member.' },
+]
+
 describe('WO-2353 non-test public source naming', () => {
   it('has only the explicitly recorded protected scanner hits', () => {
     // These are evidence records, not additions to the release manifest.
@@ -92,7 +100,7 @@ describe('WO-2353 non-test public source naming', () => {
   }, 30_000)
 
   it('has no new named-product prose, including plain format names', () => {
-    const expected = [...mentions.map(anonymizedMention), ...controllerFormatMentions]
+    const expected = [...importFormatMentions, ...mentions.map(anonymizedMention), ...controllerFormatMentions]
       .filter(outsideEngine).sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0)
     expect(runEvidence('mentions').filter(outsideEngine)).toEqual(expected)
   })

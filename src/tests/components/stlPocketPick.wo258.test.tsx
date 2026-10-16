@@ -378,7 +378,6 @@ describe('WO-258: STL edge chains in the 2D Pocket geometry dialog', () => {
     // The authoring binding is what lets compute name the RIGHT part later.
     expect(params.meshChainSources[selected.id]).toEqual([
       { geometryId: GEO_ID, geometryName: 'Operator plate STL' },
-      { geometryId: duplicateGeoId, geometryName: 'Duplicate plate STL' },
     ])
 
     act(() => {

@@ -202,6 +202,9 @@ describe('WO-2599 Stop at a program hold', () => {
     expect(useMachineControl.getState().programText).toBe(file)
     await action(() => fireEvent.change(screen.getByTestId('control-runfrom-input'), { target: { value: '3' } }))
     await action(() => fireEvent.click(screen.getByTestId('control-runfrom-plan')))
+    // WO-2810: an unknown/different fitted tool needs the operator's choice before arming.
+    expect(useMachineControl.getState().armedFromLine).toBeNull()
+    await action(() => fireEvent.click(screen.getByTestId('control-runfrom-toolask-now')))
     await advance(1000)
     expect(useMachineControl.getState().armedFromLine).toBe(3)
     expect(screen.getByText(/Run from line 3 - the machine will first/)).toBeTruthy()
@@ -237,6 +240,9 @@ describe('WO-2599 Stop at a program hold', () => {
     const from = screen.getByTestId('control-runfrom-input')
     await action(() => fireEvent.change(from, { target: { value: '3' } }))
     await action(() => fireEvent.click(screen.getByTestId('control-runfrom-plan')))
+    // WO-2810: retain the Stop/restart oracle after explicitly choosing Start now.
+    expect(useMachineControl.getState().armedFromLine).toBeNull()
+    await action(() => fireEvent.click(screen.getByTestId('control-runfrom-toolask-now')))
     await advance(1000)
     expect(useMachineControl.getState().armedFromLine).toBe(3)
     expect(screen.getByText(/Run from line 3 - the machine will first/)).toBeTruthy()

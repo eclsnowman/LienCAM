@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   CircleCheck,
@@ -75,6 +79,7 @@ import {
 import { useControlPanelCollapsed } from './ControlPanelCollapseToggle'
 import { bridgeHostCapability, restartBridge } from '../../lib/machine/bridgeHost'
 import { machineBridgePort, useUiPrefs } from '../../store/uiPrefs'
+import { useMachineToolTable } from '../../store/machineToolTableStore'
 import { controllerSurface } from '../../lib/machine/controllerSurface'
 import { DRIVE_FAULT_ALARM_PREFIX } from '../../lib/machine/uccncController'
 
@@ -119,17 +124,17 @@ const ESTOP_MODE_UI: Record<EstopControlMode, {
   state: 'armed' | 'needs-reset'
   className: string
   tooltip: string
-}> = {
+}> = liveCatalog(() => ({
   armed: {
-    label: 'E-STOP',
+    label: controlText('ControlTransportBar.text001'),
     mode: 'estop',
     state: 'armed',
     // The static red look. It never blinks.
     className: 'control-estop-armed',
-    tooltip: 'EMERGENCY STOP - immediate halt and controller reset',
+    tooltip: controlText('ControlTransportBar.text002'),
   },
   settling: {
-    label: 'WAIT',
+    label: controlText('ControlTransportBar.text003'),
     mode: 'settling',
     state: 'needs-reset',
     // Deliberately the needs-reset class WHILE DISABLED: app.css blinks
@@ -138,24 +143,24 @@ const ESTOP_MODE_UI: Record<EstopControlMode, {
     // red, flat grey, blinking - out of the stylesheet that already exists.
     className: 'control-estop-needs-reset',
     tooltip:
-      'Stopped. This becomes CLEAR in a moment - the delay is there so an accidental double tap cannot clear the stop you just made.',
+      controlText('ControlTransportBar.text004'),
   },
   stopped: {
-    label: 'CLEAR',
+    label: controlText('ControlTransportBar.text005'),
     mode: 'clear',
     state: 'needs-reset',
     className: 'control-estop-needs-reset',
     tooltip:
-      'CLEAR the E-STOP - the machine is already stopped; this releases the stop and returns this control to E-STOP. Refused until the controller confirms it has stopped.',
+      controlText('ControlTransportBar.text006'),
   },
-}
+}))
 
 /** Shown, unprompted, for the whole settling delay. A control that is merely
  *  disabled and says nothing is the WO-474 defect - the operator taps it,
  *  nothing happens, and no sentence explains why. This one explains before
  *  the tap. */
 export const ESTOP_SETTLING_NOTE =
-  'Stopped. CLEAR unlocks in a moment - so a double tap cannot clear it.'
+  controlText('ControlTransportBar.text007')
 
 export interface EstopControlProps {
   /** Test id for the button. Its sentence line is `${testId}-refusal`. */
@@ -274,27 +279,27 @@ export function bridgePresenceIssue(
   const canRecover = capability !== 'unhosted'
   if (presence.socket === 'closed') {
     const process = presence.process === 'gave-up'
-      ? ' The bridge process stopped unexpectedly.'
+      ? controlText('ControlTransportBar.text008')
       : presence.process === 'stopped'
-        ? ' The bridge process is not running.'
+        ? controlText('ControlTransportBar.text009')
         : presence.process === 'running'
-          ? ' The bridge process is running, but LienCAM is not connected to it.'
+          ? controlText('ControlTransportBar.text010')
           : ''
     return {
       kind: 'socket-closed',
-      headline: 'Bridge disconnected',
+      headline: controlText('ControlTransportBar.text011'),
       detail: canRecover
-        ? `Not connected to the bridge.${process} Use ${presence.process === 'stopped' || presence.process === 'gave-up' ? 'Reconnect' : 'Connect'} before moving.`
-        : 'Not connected to the bridge. Close the bridge window and start it again, then reconnect before moving.',
+        ? controlText('ControlTransportBar.text014', { value1: String(process), value2: String(presence.process === 'stopped' || presence.process === 'gave-up' ? controlText('ControlTransportBar.text012') : controlText('ControlTransportBar.text013')) })
+        : controlText('ControlTransportBar.text015'),
     }
   }
   if (canRecover && (presence.process === 'stopped' || presence.process === 'gave-up')) {
     return {
       kind: 'process-stopped',
-      headline: presence.process === 'gave-up' ? 'Bridge stopped' : 'Bridge not running',
+      headline: presence.process === 'gave-up' ? controlText('ControlTransportBar.text016') : controlText('ControlTransportBar.text017'),
       detail: presence.process === 'gave-up'
-        ? 'The bridge process stopped unexpectedly. Use Reconnect before moving.'
-        : 'The bridge process is not running. Use Reconnect before moving.',
+        ? controlText('ControlTransportBar.text018')
+        : controlText('ControlTransportBar.text019'),
     }
   }
   return null
@@ -310,11 +315,11 @@ export function machineStateChipLabel(input: {
   programHeld?: boolean
   programRunning?: boolean
 }): string {
-  if (input.estopTripped) return 'E-STOP'
-  if (input.alarmMessage?.startsWith(DRIVE_FAULT_ALARM_PREFIX)) return 'Drive fault'
-  if (input.softLimitLatched) return 'Soft limit'
-  if (input.programHeld && input.machineState !== 'alarm' && input.machineState !== 'door') return 'Held'
-  if (input.programRunning && input.machineState === 'idle') return 'Running'
+  if (input.estopTripped) return controlText('ControlTransportBar.text020')
+  if (input.alarmMessage?.startsWith(DRIVE_FAULT_ALARM_PREFIX)) return controlText('ControlTransportBar.text021')
+  if (input.softLimitLatched) return controlText('ControlTransportBar.text022')
+  if (input.programHeld && input.machineState !== 'alarm' && input.machineState !== 'door') return controlText('ControlTransportBar.programHeld')
+  if (input.programRunning && input.machineState === 'idle') return controlText('ControlTransportBar.programRunning')
   return STATE_LABEL[input.machineState] ?? input.machineState
 }
 
@@ -385,7 +390,7 @@ export interface DatumChip {
  *  out loud, in the same breath as the suggestion, and the chip says plainly
  *  that the app cannot check it. Never the other way round: a string that
  *  implied a switch was clear would be worse than the one it replaced. */
-export const DATUM_CHIP = {
+export const DATUM_CHIP = liveCatalog(() => ({
   needsHome: {
     // "HOME FIRST" is still here because that IS the condition (WO-990). What
     // follows it is a CHECK TO RUN, never a state this app is reporting.
@@ -395,21 +400,21 @@ export const DATUM_CHIP = {
     // "...SWITCHES CLEAR" with the question mark cut off is a claim about the
     // machine. Every prefix of an imperative is still an imperative. Pinned in
     // homeInvitation.wo1005.test.tsx, which caught exactly this.
-    text: 'NO DATUM - HOME FIRST, CHECK SWITCHES',
+    text: controlText('ControlTransportBar.text023'),
     title:
-      'This machine has not been homed this session, so it has no machine datum. '
-      + 'Homing establishes one, and a homing cycle drives each axis TOWARDS its '
-      + 'switch: an axis that is already on its switch has no travel left and gets '
-      + 'driven into it. This app cannot see the switches - check every axis is off '
-      + 'its home switch yourself, then Home All.',
+      controlText('ControlTransportBar.text024')
+      + controlText('ControlTransportBar.text025')
+      + controlText('ControlTransportBar.text026')
+      + controlText('ControlTransportBar.text027')
+      + controlText('ControlTransportBar.text028'),
   },
   workCoordinates: {
-    text: 'NO DATUM - WORK COORDINATES',
+    text: controlText('ControlTransportBar.text029'),
     title:
-      'This machine cannot establish a machine datum, so it is working entirely '
-      + 'in the work coordinate system. Set a work zero, then jog and run in Work.',
+      controlText('ControlTransportBar.text030')
+      + controlText('ControlTransportBar.text031'),
   },
-} as const
+} as const))
 
 /**
  * Whether the strip carries the no-datum chip, and which one. Pure, so the
@@ -457,6 +462,7 @@ export function deriveDatumChip(input: {
  * chip goes when the controller says so. No rotation renders nothing at all.
  */
 function WorkRotationChips() {
+  useText('control-screens-not-probing')
   const rotations = useSyncExternalStore(subscribeWorkRotations, workRotations, workRotations)
   const rotated = Object.entries(rotations)
   if (rotated.length === 0) return null
@@ -467,7 +473,7 @@ function WorkRotationChips() {
           <span
             className="control-state-chip control-chip-static"
             role="status"
-            title={`${describeWorkRotation(wcs, degrees)} (${String(degrees)} deg CCW seen from above), held in the controller, which applies it to what runs in ${wcs}. It stays until cleared.`}
+            title={controlText('ControlTransportBar.text032', { value1: String(describeWorkRotation(wcs, degrees)), value2: String(String(degrees)), value3: String(wcs) })}
           >
             {describeWorkRotation(wcs, degrees)}
           </span>
@@ -475,11 +481,9 @@ function WorkRotationChips() {
             type="button"
             className="control-chip-btn"
             data-testid={`control-wcs-rotation-clear-${wcs}`}
-            title={`Clear the ${wcs} rotation (sets it to 0 in the controller)`}
+            title={controlText('ControlTransportBar.text033', { value1: String(wcs) })}
             onClick={() => { void clearWorkRotation(wcs) }}
-          >
-            Clear
-          </button>
+          >{controlText('ControlTransportBar.text034')}</button>
         </span>
       ))}
     </>
@@ -495,10 +499,11 @@ function WorkRotationChips() {
  * (not while a program runs). Nothing applied renders nothing.
  */
 function SurfaceMeshChip() {
+  useText('control-screens-not-probing')
   const mesh = useMachineControl((s) => (s.surfaceMesh?.active ? s.surfaceMesh : null))
   const running = useMachineControl((s) => s.job.phase === 'streaming' || s.job.phase === 'paused')
   if (!mesh) return null
-  const label = `${mesh.workOffset} mesh ${mesh.pointsX}x${mesh.pointsY}`
+  const label = controlText('ControlTransportBar.text035', { value1: String(mesh.workOffset), value2: String(mesh.pointsX), value3: String(mesh.pointsY) })
   return (
     <span className="control-work-rotation" data-testid={`control-wcs-mesh-${mesh.workOffset}`}>
       <button
@@ -506,7 +511,7 @@ function SurfaceMeshChip() {
         className="control-state-chip control-chip-static"
         style={{ cursor: 'pointer' }}
         data-testid="control-wcs-mesh-label"
-        title={`Surface mesh compensation applied to ${mesh.workOffset}: ${mesh.pointsX} x ${mesh.pointsY} measured points. Click to view the flatness. It stays until cleared or ${mesh.workOffset} is re-zeroed.`}
+        title={controlText('ControlTransportBar.text036', { value1: String(mesh.workOffset), value2: String(mesh.pointsX), value3: String(mesh.pointsY), value4: String(mesh.workOffset) })}
         onClick={() => useCamStore.getState().openModal('mesh-viewer')}
       >
         {label}
@@ -515,12 +520,10 @@ function SurfaceMeshChip() {
         type="button"
         className="control-chip-btn"
         data-testid={`control-wcs-mesh-clear-${mesh.workOffset}`}
-        title={`Clear the ${mesh.workOffset} surface mesh (the original program is staged)`}
+        title={controlText('ControlTransportBar.text037', { value1: String(mesh.workOffset) })}
         disabled={running}
         onClick={clearSurfaceMesh}
-      >
-        Clear
-      </button>
+      >{controlText('ControlTransportBar.text038')}</button>
     </span>
   )
 }
@@ -553,18 +556,18 @@ const resetInProgress = () => controllerResetInProgress()
 
 export type ControlView = 'main' | 'offsets' | 'tools' | 'probing' | 'routines' | 'machine'
 
-const CONTROL_VIEWS: Array<[ControlView, string]> = [
-  ['main', 'Main'],
-  ['offsets', 'Offsets'],
-  ['tools', 'Tools'],
+const CONTROL_VIEWS: Array<[ControlView, string]> = liveCatalog(() => ([
+  ['main', controlText('ControlTransportBar.text039')],
+  ['offsets', controlText('ControlTransportBar.text040')],
+  ['tools', controlText('ControlTransportBar.text041')],
   // WO-297: probing left ToolsProbePanel for its own bespoke view - Operator
   // rejected sharing the screen with the tool table
   // (docs/ui-ux/probing-workspace-requirements.md).
-  ['probing', 'Probing'],
+  ['probing', controlText('ControlTransportBar.text042')],
   // WO-411 (Operator ruling 2026-08-21: "Perhaps custom probe needs its own tab? Probe
   // tab is getting pretty busy."): the routine library / editor / preview is
   // its own view, not a station buried under the Probing operator station.
-  ['routines', 'Routines'],
+  ['routines', controlText('ControlTransportBar.text043')],
   // WO-917 (Operator 2026-08-23, card Q-WHICH-TABS-MOVE-UNDER-MACHINE): "machine
   // actions would become just machine and then underneath that there would be
   // sub tabs for the tabs that moved there." Diagnostics and Macros LEFT this
@@ -575,8 +578,8 @@ const CONTROL_VIEWS: Array<[ControlView, string]> = [
   // here unchanged - Operator ruled Offsets keeps its own tab because the Main
   // column's copy is a quick action and the tab is the before-the-job setup
   // workspace that has to grow past 2.5D.
-  ['machine', 'Machine'],
-]
+  ['machine', controlText('ControlTransportBar.text044')],
+]))
 
 /** Fixed operator authority. This is the only Control surface allowed to
  * start, resume, or single-block program/trace motion.
@@ -611,6 +614,7 @@ export function ControlTransportBar({
    * the session store takes over; either way the header labels simulation. */
   selectedConnectionKind?: MachineConnectionKind | null
 } = {}) {
+  useText('control-screens-not-probing')
   const connectionPhase = useMachineControl((s) => s.connectionPhase)
   const connectionKind = useMachineControl((s) => s.connectionKind)
   const connectionDetail = useMachineControl((s) => s.connectionDetail)
@@ -654,6 +658,14 @@ export function ControlTransportBar({
   const bridgeLaunchSettings = useUiPrefs((s) => s.machineLinks[selection.machine.id])
   const machineLibrary = useCamStore((s) => s.machineLibrary)
   const noHomeSwitches = useCamStore((s) => machineHasNoHomeSwitches(controlMachine(s)))
+  // WO-2772: a loaded file's fit is read again against the tool table's
+  // lengths (Tools tab), so CYCLE START re-renders when a length changes.
+  useMachineToolTable((s) => s.byMachine)
+  // WO-2833: and against the work offsets (and their rotations) - a file
+  // refused for travel and fixed by G10 must enable the RENDERED button with
+  // the keyboard start's verdict, not keep the stale refusal greyed.
+  useMachineControl((s) => s.offsets)
+  useSyncExternalStore(subscribeWorkRotations, workRotations, workRotations)
   const state = deriveOperatorTransport({
     connectionPhase,
     machineState,
@@ -706,7 +718,7 @@ export function ControlTransportBar({
   /** The one sentence about a pinned session, written once and used by the
    *  option text and the hover alike. */
   const pinnedNote = selection.camMovedTo
-    ? `pinned while connected; CAM is now on ${selection.camMovedTo.name}`
+    ? controlText('ControlTransportBar.text045', { value1: String(selection.camMovedTo.name) })
     : null
   const datumChip = deriveDatumChip({ connected, homed, noHomeSwitches })
   const hasBridgeSurface = controllerSurface(selection.machine).bridgeSettings
@@ -767,7 +779,7 @@ export function ControlTransportBar({
       announcedIssueWasAfterConnect.current = false
       useMachineControl.getState().pushConsole(
         'rx',
-        'Bridge recovery complete. The machine is connected.',
+        controlText('ControlTransportBar.text046'),
         'info',
       )
     }
@@ -783,7 +795,7 @@ export function ControlTransportBar({
       } catch {
         useMachineControl.getState().pushConsole(
           'tx',
-          'Reconnect refused: this machine does not have a usable bridge port.',
+          controlText('ControlTransportBar.text047'),
           'error',
         )
         return
@@ -798,18 +810,18 @@ export function ControlTransportBar({
           useMachineControl.getState().pushConsole(
             'tx',
             lastLine
-              ? `Reconnect failed. The bridge exited at once; its last line: ${lastLine}`
-              : 'Reconnect failed. The bridge exited at once and printed nothing.',
+              ? controlText('ControlTransportBar.text048', { value1: String(lastLine) })
+              : controlText('ControlTransportBar.text049'),
             'error',
           )
           return
         }
         const reason = result.reason === 'no-socket'
-          ? `the bridge is not answering on port ${result.port}`
+          ? controlText('ControlTransportBar.text050', { value1: String(result.port) })
           : result.reason === 'not-configured'
-            ? 'the bridge is not configured on this computer'
-            : 'this host cannot restart the bridge'
-        useMachineControl.getState().pushConsole('tx', `Reconnect failed: ${reason}.`, 'error')
+            ? controlText('ControlTransportBar.text051')
+            : controlText('ControlTransportBar.text052')
+        useMachineControl.getState().pushConsole('tx', controlText('ControlTransportBar.text053', { value1: String(reason) }), 'error')
         return
       }
       const state = useMachineControl.getState()
@@ -822,17 +834,17 @@ export function ControlTransportBar({
         await connectMachine('bridge')
       }
       if (useMachineControl.getState().connectionPhase !== 'connected') {
-        throw new Error('the restarted bridge did not reach Connected')
+        throw new Error(controlText('ControlTransportBar.text054'))
       }
       useMachineControl.getState().pushConsole(
         'tx',
-        'Bridge restarted and the machine is connected.',
+        controlText('ControlTransportBar.text055'),
         'info',
       )
     } catch (error) {
       useMachineControl.getState().pushConsole(
         'tx',
-        `Reconnect failed: ${error instanceof Error ? error.message : String(error)}.`,
+        controlText('ControlTransportBar.text056', { value1: String(error instanceof Error ? error.message : String(error)) }),
         'error',
       )
     } finally {
@@ -997,17 +1009,15 @@ export function ControlTransportBar({
             data-tooltip={cycleStartGate.refusal ?? state.cycleStartDetail}
             onClick={() => void executeOperatorCycleStart()}
           >
-            <CirclePlay size={14} /> CYCLE START
-          </button>}
+            <CirclePlay size={14} />{controlText('ControlTransportBar.text057')}</button>}
           <button
             className="control-btn-hold control-safety-btn"
             data-testid="control-feedhold"
             disabled={feedHoldGate.disabled}
-            data-tooltip={feedHoldGate.refusal ?? 'Feed Hold - controlled deceleration; the program remains resumable'}
+            data-tooltip={feedHoldGate.refusal ?? controlText('ControlTransportBar.text058')}
             onClick={executeOperatorFeedHold}
           >
-            <CirclePause size={14} /> Feed Hold
-          </button>
+            <CirclePause size={14} />{controlText('ControlTransportBar.text059')}</button>
           {!probeOnly && <button
             className="control-btn-stop control-safety-btn"
             data-testid="control-stop-reset"
@@ -1022,11 +1032,10 @@ export function ControlTransportBar({
             // paths) already refer to this control by that exact name, so
             // renaming the label here would desync the button from the
             // sentence that tells the operator to press it.
-            data-tooltip="Stop/Reset - stops motion right now and clears the queued program, returning the controller to a known, ready state. Not the same as the E-STOP's own reset."
+            data-tooltip={controlText('ControlTransportBar.text060')}
             onClick={executeOperatorStopReset}
           >
-            <CircleStop size={14} /> Stop/Reset
-          </button>}
+            <CircleStop size={14} />{controlText('ControlTransportBar.text061')}</button>}
           {/* WO-082: the way back to the top of the program. It sits with the
               transport because that is where the operator already is when a
               cycle ends, and because the next-action sentence names it by this
@@ -1081,7 +1090,7 @@ export function ControlTransportBar({
               onClick={() => setMachineSingleBlock(!singleBlock)}
               data-tooltip={singleBlock ? SINGLE_BLOCK_STATUS.on : SINGLE_BLOCK_STATUS.off}
             >
-              Single Block
+              {controlText('ControlTransportBar.text064')}
             </button>
           )}
         </>
@@ -1089,7 +1098,7 @@ export function ControlTransportBar({
       {showNav && onSelectView && (
         <>
           <span className="control-strip-sep" aria-hidden="true" />
-          <nav className="control-strip-nav" aria-label="Control workspace views">
+          <nav className="control-strip-nav" aria-label={controlText('ControlTransportBar.text065')}>
             {CONTROL_VIEWS.map(([view, label]) => (
               <button
                 key={view}
@@ -1110,10 +1119,10 @@ export function ControlTransportBar({
           <select
             className="control-view-tab"
             data-testid="control-machine-select"
-            aria-label="Control machine"
+            aria-label={controlText('ControlTransportBar.text066')}
             data-tooltip={pinnedNote
-              ? `Machine used by the Control workspace. ${pinnedNote}`
-              : 'Machine used by the Control workspace'}
+              ? controlText('ControlTransportBar.text067', { value1: String(pinnedNote) })
+              : controlText('ControlTransportBar.text068')}
             // THE ROW'S HEIGHT IS THE RULE (Operator, WO-1070 and this order's
             // acceptance): a native select is as wide as its widest option, so
             // the pinned sentence took this control from 432px to 778px and
@@ -1136,16 +1145,12 @@ export function ControlTransportBar({
               void selectControlMachine(nextId)
             }}
           >
-            <option value="">
-              Follow CAM setup ({followName})
-              {pinnedNote ? ` - ${pinnedNote}` : ''}
-              {selectedValue === '' ? simulatedSuffix : ''}
-            </option>
+            <option value="">{catalogChildren(controlText('ControlTransportBar.text069', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: followName, value2: pinnedNote ? ` - ${pinnedNote}` : '', value3: selectedValue === '' ? simulatedSuffix : '' })}</option>
             {machineLibrary.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
                 {candidate.name}
                 {candidate.id === selection.camMachine.id
-                  ? ' - same as CAM setup (library copy)'
+                  ? controlText('ControlTransportBar.text070')
                   : ''}
                 {candidate.id === selectedValue ? simulatedSuffix : ''}
               </option>
@@ -1176,11 +1181,11 @@ export function ControlTransportBar({
               className="control-chip-btn control-home-outline"
               data-testid="control-bridge-reconnect"
               disabled={bridgeRecovering}
-              title={`${presenceIssue.detail} Recovery restarts the bridge process.`}
+              title={controlText('ControlTransportBar.text071', { value1: String(presenceIssue.detail) })}
               onClick={() => { void recoverBridge() }}
             >
               <RotateCcw size={13} aria-hidden="true" />
-              {bridgeRecovering ? 'Reconnecting...' : 'Reconnect'}
+              {bridgeRecovering ? 'Reconnecting...' : controlText('ControlTransportBar.text072')}
             </button>
           )}
           {/* WO-990: the machine says it has no datum BEFORE anyone reaches
@@ -1231,10 +1236,10 @@ export function ControlTransportBar({
  *  needed"): short enough to read in full on one line at the operator's 264.5px Control
  *  panel (the line has 247px at 12px DM Sans; these measure 226 / 232px). The
  *  Single Block toggle's tooltip shows the same words. */
-export const SINGLE_BLOCK_STATUS = {
-  on: 'Single Block ON - 1 line per CYCLE START',
-  off: 'Single Block OFF - CYCLE START runs it all',
-} as const
+export const SINGLE_BLOCK_STATUS = liveCatalog(() => ({
+  on: controlText('ControlTransportBar.text073'),
+  off: controlText('ControlTransportBar.text074'),
+} as const))
 
 export interface TransportStatusLine {
   kind: 'step-back' | 'rearm' | 'single-block'
@@ -1281,8 +1286,8 @@ export function stepBackSentence(stepBack: {
   error: string | null
 }): string {
   return stepBack.error
-    ? `Back refused: ${stepBack.error}`
-    : `Back armed line ${stepBack.plan!.startLine}. Review the run-from plan, then press CYCLE START.`
+    ? controlText('ControlTransportBar.text075', { value1: String(stepBack.error) })
+    : controlText('ControlTransportBar.text076', { value1: String(stepBack.plan!.startLine) })
 }
 
 /** Last observed Single Block mode (module-level so the two mounts of
@@ -1314,6 +1319,7 @@ export function resetTransportStatusConsole(): void {
  * under its control, not in the program progress row.
  */
 export function ControlStepRow() {
+  useText('control-screens-not-probing')
   const connectionPhase = useMachineControl((s) => s.connectionPhase)
   const machineState = useMachineControl((s) => s.machineState)
   const homed = useMachineControl((s) => s.homed)
@@ -1329,6 +1335,13 @@ export function ControlStepRow() {
   useSyncExternalStore(subscribeMacroRun, activeMacroRun, () => null)
   const programText = useMachineControl((s) => s.programText)
   const noHomeSwitches = useCamStore((s) => machineHasNoHomeSwitches(controlMachine(s)))
+  // WO-2772: the same verdict as CYCLE START, so the same inputs to its
+  // reading of a loaded file - the Control machine, the tool table and
+  // (WO-2833) the work offsets with their rotations.
+  useCamStore((s) => controlMachine(s))
+  useMachineToolTable((s) => s.byMachine)
+  useMachineControl((s) => s.offsets)
+  useSyncExternalStore(subscribeWorkRotations, workRotations, workRotations)
   const review = useSyncExternalStore(subscribeRunFromReview, runFromReview, runFromReview)
   const steppingBack = useSyncExternalStore(subscribeStepBackInProgress, stepBackInProgress, () => false)
   // WO-328: Step (SkipForward) executes a real g-code block through the same
@@ -1408,29 +1421,25 @@ export function ControlStepRow() {
         data-tooltip={
           singleBlockGate.refusal ?? (singleBlock ? SINGLE_BLOCK_STATUS.on : SINGLE_BLOCK_STATUS.off)
         }
-      >
-        Single Block
-      </button>
+      >{controlText('ControlTransportBar.text079')}</button>
       <button
         className="control-step-btn control-uix-step-btn"
         data-testid="control-step-back"
         disabled={backGate.disabled}
-        data-tooltip={backGate.refusal ?? 'Step BACK - re-arm the previous g-code line for CYCLE START'}
+        data-tooltip={backGate.refusal ?? controlText('ControlTransportBar.text080')}
         onClick={() => {
           void stepBackOneLine()
         }}
       >
-        <SkipBack size={13} /> Back
-      </button>
+        <SkipBack size={13} />{controlText('ControlTransportBar.text081')}</button>
       <button
         className="control-step-btn control-uix-step-btn"
         data-testid="control-step-forward"
         disabled={forwardGate.disabled}
-        data-tooltip={forwardGate.refusal ?? 'Step FORWARD - execute the next g-code line'}
+        data-tooltip={forwardGate.refusal ?? controlText('ControlTransportBar.text082')}
         onClick={() => void executeOperatorCycleStart()}
       >
-        <SkipForward size={13} /> Step
-      </button>
+        <SkipForward size={13} />{controlText('ControlTransportBar.text083')}</button>
       {/* WO-414 batch 1 (Operator ruling 2026-08-21: "What here is required? Again, I
           am trying to make the UI less busy."): the two grey sentences that
           used to sit here and under Re-arm ("OFF: CYCLE START runs

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 // @ts-expect-error external recorder has no TS declaration
 import { validateSequence } from '../../../tools/capture/clips-v2/v01.mjs'
 
-const evidence = 'src/tests/evidence/WO-2571/'
+const evidence = 'src/tests/evidence/WO-2631/freeze/v01/'
 const sequence = () => JSON.parse(readFileSync('tools/capture/clips-v2/v01.json', 'utf8'))
 describe('WO-2552 delivered Toe Clamps walkthrough', () => {
   it('permits one real Play and camera actions, rejects skipping the program and invalid timing', () => {

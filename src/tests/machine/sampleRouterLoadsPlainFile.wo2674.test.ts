@@ -84,12 +84,9 @@ describe('WO-2674 the sample router loads a plain file with no red line', () => 
     // On main this was three refusals; the desk check saw the first, Z on line 6.
     expect(result.refusals).toEqual([])
     expect(result.warnings).toEqual([])
-    // It says what it could not judge, as a plain note, never a red line.
-    // WO-2712: the sample's stated travel is now known; what is not yet
-    // known is where the work zero sits on it.
-    expect(result.notes).toContain(
-      'Work zero not set on Z - travel on Z is unchecked until you set it.',
-    )
+    // WO-2775: the simulator reports its default G54 at connect, so Load
+    // checks travel on every axis and no longer emits an unchecked-zero note.
+    expect(result.notes).toEqual([])
     expect(JSON.stringify(useMachineControl.getState().consoleLines))
       .not.toContain('has no controller definition or resolved')
     expect(loaded.overlongLines).toEqual([])

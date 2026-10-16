@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { OptionalNumericInput } from '../../ui/NumericInput'
 import {
   UNASSIGNED_PIN,
@@ -27,11 +30,12 @@ function DefinitionPinField({ label, name, testId, value, onChange }: {
   value: PinRef
   onChange: (pin: PinRef) => void
 }) {
+  useText('control-screens-not-probing')
   return (
     <div
       data-testid={testId}
       data-wired=""
-      data-tooltip={`${name} - port, pin, active low; Apply sends this to the bridge`}
+      data-tooltip={controlText('DriveSignalsSection.text001', { value1: String(name) })}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)',
@@ -40,22 +44,22 @@ function DefinitionPinField({ label, name, testId, value, onChange }: {
       {label !== '' && <span style={{ flex: 'none', width: 44 }}>{label}</span>}
       <PinNumberBox
         value={value.port}
-        ariaLabel={`${name} port`}
+        ariaLabel={controlText('DriveSignalsSection.text002', { value1: String(name) })}
         invalid={false}
         onChange={(port) => { onChange({ ...value, port }) }}
       />
       <PinNumberBox
         value={value.pin}
-        ariaLabel={`${name} pin`}
+        ariaLabel={controlText('DriveSignalsSection.text003', { value1: String(name) })}
         invalid={false}
         onChange={(pin) => { onChange({ ...value, pin }) }}
       />
       <input
         type="checkbox"
-        aria-label={`${name} negate`}
+        aria-label={controlText('DriveSignalsSection.text004', { value1: String(name) })}
         data-tooltip={value.negate === null
-          ? 'Active low - UNKNOWN. Nobody has stated this signal polarity.'
-          : 'Active low'}
+          ? controlText('DriveSignalsSection.text005')
+          : controlText('DriveSignalsSection.text006')}
         ref={(element) => { if (element) element.indeterminate = value.negate === null }}
         data-negate-unknown={value.negate === null ? '' : undefined}
         checked={value.negate === true}
@@ -73,6 +77,7 @@ function DefinitionPinField({ label, name, testId, value, onChange }: {
  * ordinary panel draft and therefore uses its existing Save/reload path.
  */
 export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditProps) {
+  useText('control-screens-not-probing')
   const inputs = machine.controllerDefinition?.driveFaultInputs ?? []
 
   const writeInputs = (next: PinRef[]): void => {
@@ -94,7 +99,7 @@ export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditPro
   return (
     <div data-testid="machine-def-drive-fault-inputs" style={{ marginTop: 12 }}>
       <SectionHead
-        title="Drive-fault inputs"
+        title={controlText('DriveSignalsSection.text007')}
         summary={inputs.length === 0
           ? 'none stated'
           : `${inputs.length} input${inputs.length === 1 ? '' : 's'} stated`}
@@ -103,17 +108,12 @@ export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditPro
       <div
         data-testid="machine-def-drive-fault-inputs-contract"
         style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-      >
-        Each drive alarm is its physical port, pin, and polarity. The machine may state any
-        number of them; controller-specific profile row numbers are not stored here.
-      </div>
+      >{controlText('DriveSignalsSection.text008')}</div>
       {inputs.length === 0 ? (
         <div
           data-testid="machine-def-drive-fault-inputs-none"
           style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', marginBottom: 8 }}
-        >
-          No drive-fault inputs stated.
-        </div>
+        >{controlText('DriveSignalsSection.text009')}</div>
       ) : (
         <table
           className="mform-axis-table"
@@ -121,7 +121,7 @@ export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditPro
           style={{ width: 'max-content', maxWidth: '100%' }}
         >
           <thead>
-            <tr><th>#</th><th>port / pin / active low</th><th /></tr>
+            <tr><th>#</th><th>{controlText('DriveSignalsSection.text010')}</th><th /></tr>
           </thead>
           <tbody>
             {inputs.map((pin, index) => (
@@ -142,9 +142,7 @@ export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditPro
                     className="control-chip-btn"
                     data-testid={`machine-def-drive-fault-input-remove-${index}`}
                     onClick={() => { writeInputs(inputs.filter((_, candidate) => candidate !== index)) }}
-                  >
-                    Remove
-                  </button>
+                  >{controlText('DriveSignalsSection.text011')}</button>
                 </td>
               </tr>
             ))}
@@ -157,9 +155,7 @@ export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditPro
         data-testid="machine-def-drive-fault-input-add"
         onClick={() => { writeInputs([...inputs, { ...UNASSIGNED_PIN }]) }}
         style={{ marginTop: 8 }}
-      >
-        Add drive-fault input
-      </button>
+      >{controlText('DriveSignalsSection.text012')}</button>
     </div>
   )
 }
@@ -171,6 +167,7 @@ export function DriveFaultInputsSection({ machine, onChange }: DefinitionEditPro
  * record exists so a board-owned waveform needs no invented values.
  */
 export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
+  useText('control-screens-not-probing')
   const pump = machine.controllerDefinition?.chargePump
 
   const writePump = (next: ChargePumpDefinition | undefined): void => {
@@ -192,17 +189,15 @@ export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
   return (
     <div data-testid="machine-def-charge-pump" style={{ marginTop: 12 }}>
       <SectionHead
-        title="Charge pump"
+        title={controlText('DriveSignalsSection.text013')}
         summary={pump === undefined ? 'not stated' : pump.enabled ? 'on' : 'off'}
         testId="machine-def-charge-pump-head"
       />
       <label
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)' }}
-      >
-        State
-        <select
+      >{controlText('DriveSignalsSection.text014')}<select
           className="mform-select"
-          aria-label="Charge pump state"
+          aria-label={controlText('DriveSignalsSection.text015')}
           data-testid="machine-def-charge-pump-state"
           value={state}
           onChange={(event) => {
@@ -211,9 +206,9 @@ export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
             else writePump({ ...pump, enabled: next === 'on' })
           }}
         >
-          <option value="absent">Not stated</option>
-          <option value="off">Off</option>
-          <option value="on">On</option>
+          <option value="absent">{controlText('DriveSignalsSection.text016')}</option>
+          <option value="off">{controlText('DriveSignalsSection.text017')}</option>
+          <option value="on">{controlText('DriveSignalsSection.text018')}</option>
         </select>
       </label>
 
@@ -225,22 +220,18 @@ export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
                 <span
                   data-testid="machine-def-charge-pump-pin-absent"
                   style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
-                >
-                  Output pin not stated.
-                </span>
+                >{controlText('DriveSignalsSection.text019')}</span>
                 <button
                   type="button"
                   className="control-chip-btn"
                   data-testid="machine-def-charge-pump-pin-define"
                   onClick={() => { patchPump({ pin: { ...UNASSIGNED_PIN } }) }}
-                >
-                  Define output pin
-                </button>
+                >{controlText('DriveSignalsSection.text020')}</button>
               </>
             ) : (
               <>
                 <DefinitionPinField
-                  label="Pin"
+                  label={controlText('DriveSignalsSection.text021')}
                   name="charge pump"
                   testId="machine-def-charge-pump-pin"
                   value={pump.pin}
@@ -255,17 +246,13 @@ export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
                     delete next.pin
                     writePump(next)
                   }}
-                >
-                  Remove pin
-                </button>
+                >{controlText('DriveSignalsSection.text022')}</button>
               </>
             )}
           </div>
           <label
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 'var(--font-size-sm)' }}
-          >
-            Frequency (Hz)
-            <OptionalNumericInput
+          >{controlText('DriveSignalsSection.text023')}<OptionalNumericInput
               value={pump.frequencyHz}
               onChange={(frequencyHz) => {
                 if (frequencyHz === undefined) {
@@ -278,8 +265,8 @@ export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
               }}
               min={0}
               step={1}
-              placeholder="not stated"
-              ariaLabel="Charge pump frequency (Hz)"
+              placeholder={controlText('DriveSignalsSection.text024')}
+              ariaLabel={controlText('DriveSignalsSection.text025')}
               className="mform-input mform-input-mono"
               style={{ width: 92 }}
             />
@@ -293,10 +280,7 @@ export function ChargePumpSection({ machine, onChange }: DefinitionEditProps) {
             <div
               data-testid="machine-def-charge-pump-frequency-note"
               style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', marginTop: 4 }}
-            >
-              UCCNC: this bridge cannot apply a stated charge-pump frequency, so Apply to
-              Machine cannot complete while this field has a value.
-            </div>
+            >{controlText('DriveSignalsSection.text026')}</div>
           )}
         </div>
       )}

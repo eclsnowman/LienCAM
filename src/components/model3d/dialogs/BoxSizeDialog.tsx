@@ -13,6 +13,7 @@
 //   - apply : executes an EditFeaturePayloadCommand through the caller's
 //             CommandHistory -- undo/redo now cover this edit for free.
 
+import { useText } from '../../../i18n'
 import { useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -43,6 +44,7 @@ function readSize(dag: FeatureDag, featureId: string): Vec3 {
 }
 
 export function BoxSizeDialog({ dag, history, featureId, onPreview, onCancelPreview, onApplied, onClose }: BoxSizeDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [size, setSize] = useState<Vec3>(() => readSize(dag, featureId))
 
   const updateAxis = (axis: keyof Vec3) => (value: number) => {
@@ -65,7 +67,7 @@ export function BoxSizeDialog({ dag, history, featureId, onPreview, onCancelPrev
   }
 
   return (
-    <DialogShell title="Box size" onApply={handleApply} onCancel={handleCancel}>
+    <DialogShell title={workbenchText('BoxSizeDialog.boxSize')} onApply={handleApply} onCancel={handleCancel}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(['x', 'y', 'z'] as const).map((axis) => (
           <label key={axis} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -73,7 +75,7 @@ export function BoxSizeDialog({ dag, history, featureId, onPreview, onCancelPrev
             <span data-testid={`box-size-${axis}`} style={{ flex: 1 }}>
               <NumericInput value={size[axis]} onChange={updateAxis(axis)} min={0.1} style={{ width: '100%' }} />
             </span>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('BoxSizeDialog.mm')}</span>
           </label>
         ))}
       </div>

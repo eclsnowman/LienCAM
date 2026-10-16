@@ -28,8 +28,11 @@ import {
 import { SKETCH_TOOL_LABELS } from './promptBar'
 import { SHORTCUT_KEY_BY_TOOL } from './tools/shortcuts'
 import { decodeCenterSelectionRef } from './centerReferences'
+import { patternForSelection } from './patterns'
 
 export type ContextMenuAction =
+  | { kind: 'edit-pattern' }
+  | { kind: 'break-pattern' }
   | { kind: 'confirm-step' }                                   // sketchToolEnd
   | { kind: 'cancel-tool' }                                    // disarm to select
   | { kind: 'toggle-construction' }                            // mode / selection flip
@@ -177,6 +180,10 @@ function buildBaseSketchContextMenu(args: ContextMenuArgs): ContextMenuItem[] {
       }
     }
     if (hasRawEntities) {
+      if (patternForSelection(sketch, selectedIds)) {
+        items.push({ id: 'edit-pattern', label: 'Edit pattern', action: { kind: 'edit-pattern' } },
+          { id: 'break-pattern', label: 'Break pattern', action: { kind: 'break-pattern' } })
+      }
       items.push({
         id: 'copy-selection',
         label: 'Copy (Ctrl+C)',

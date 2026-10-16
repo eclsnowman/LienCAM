@@ -1,3 +1,5 @@
+import { textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 /**
  * Reusable scratch-evaluation lifecycle for feature create/edit previews.
  *
@@ -118,7 +120,7 @@ export class FeaturePreviewSession<TBaseline, TIntent, TMaterialized, TCandidate
       return Promise.resolve({
         status: this.state === 'cancelled' ? 'cancelled' : 'error',
         generation: this.generation,
-        reason: this.state === 'cancelled' ? undefined : `Preview session is ${this.state}.`,
+        reason: this.state === 'cancelled' ? undefined : workbenchText('featurePreviewSession.previewSessionIs', { state: String(this.state) }),
       } as FeaturePreviewResult)
     }
 
@@ -139,9 +141,9 @@ export class FeaturePreviewSession<TBaseline, TIntent, TMaterialized, TCandidate
 
   /** Transfer the already-evaluated candidate to Apply exactly once. */
   async takeCandidate(): Promise<TCandidate> {
-    if (this.state !== 'active') throw new Error(`Preview candidate is unavailable: session is ${this.state}.`)
-    if (this.running || this.pending) throw new Error('Preview candidate is unavailable while evaluation is pending.')
-    if (this.candidate === undefined) throw new Error('Preview candidate is unavailable: no accepted preview exists.')
+    if (this.state !== 'active') throw new Error(workbenchText('featurePreviewSession.previewCandidateIsUnavailableSessionIs', { state: String(this.state) }))
+    if (this.running || this.pending) throw new Error(workbenchText('featurePreviewSession.previewCandidateIsUnavailableWhileEvaluationIsPending'))
+    if (this.candidate === undefined) throw new Error(workbenchText('featurePreviewSession.previewCandidateIsUnavailableNoAcceptedPreviewExists'))
 
     const transferred = this.candidate
     this.candidate = undefined
@@ -258,7 +260,7 @@ export class FeaturePreviewSession<TBaseline, TIntent, TMaterialized, TCandidate
       } else if (next) {
         next.resolve(this.state === 'cancelled'
           ? { status: 'cancelled', generation: next.generation }
-          : { status: 'error', generation: next.generation, reason: `Preview session is ${this.state}.` })
+          : { status: 'error', generation: next.generation, reason: workbenchText('featurePreviewSession.previewSessionIs', { state: String(this.state) }) })
       }
     }
   }
@@ -274,7 +276,7 @@ export class FeaturePreviewSession<TBaseline, TIntent, TMaterialized, TCandidate
       if (this.state !== 'active') {
         this.preFeature = materialized
         await this.disposePreFeatureOnce()
-        throw new Error('Preview session closed while materializing its pre-feature body.')
+        throw new Error(workbenchText('featurePreviewSession.previewSessionClosedWhileMaterializingItsPreFeatureBody'))
       }
       this.preFeature = materialized
       return materialized

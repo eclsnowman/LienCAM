@@ -1,3 +1,4 @@
+import { featureDisplayName } from '../../lib/operatorLabels'
 import type { FeatureDag } from '../../doc'
 
 /** Runtime/type source for every feature op dispatched by the workbench body
@@ -220,7 +221,7 @@ export function resolveBodyTargetLineage(
   persistedBodyId: string,
 ): BodyTargetLineageResolution {
   const bodyIds = new Set(bodyFeatureIds)
-  if (!bodyIds.has(persistedBodyId)) return { ok: false, reason: 'lost', candidates: [] }
+  if (!bodyIds.has(persistedBodyId)) return { ok: false, reason: "lost", candidates: [] }
 
   const live = [...new Set(liveBodyIds)]
   const invalidLiveId = live.find((id) => !bodyIds.has(id))
@@ -252,8 +253,8 @@ export function resolveBodyTargetLineage(
 
   const candidates = live.filter((id) => descendants.has(id))
   if (candidates.length === 1) return { ok: true, bodyId: candidates[0] }
-  if (candidates.length === 0) return { ok: false, reason: 'lost', candidates: [] }
-  return { ok: false, reason: 'ambiguous', candidates }
+  if (candidates.length === 0) return { ok: false, reason: "lost", candidates: [] }
+  return { ok: false, reason: "ambiguous", candidates }
 }
 
 /** Project current body leaves onto stable user-facing lineages.
@@ -282,13 +283,12 @@ export function projectBodyLineages(
 }
 
 /** The user-facing label of a feature node: its payload `name`, else the node
- *  id. Shared by the workbench (hover readouts, body rows) and the headless
+ *  readable feature identity. Shared by the workbench (hover readouts, body rows) and the headless
  *  model-body replay (IMPORT-FANOUT-HEADLESS) so both derive a body's CAM-row
  *  name identically. Lifted verbatim from SolidsWorkbenchPage.tsx. */
 export function featureLabel(dag: FeatureDag, id: string): string {
   const node = dag.getNode(id)
-  const name = node?.payload.name
-  return typeof name === 'string' && name.length > 0 ? name : id
+  return featureDisplayName(id, node?.payload ?? {})
 }
 
 /** Body-producing feature nodes (extrude/revolve/boolean results, plus the

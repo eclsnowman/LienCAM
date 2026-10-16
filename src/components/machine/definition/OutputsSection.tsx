@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useState } from 'react'
 import { type MachineConfig } from '../../../types'
 import { type MachineOutputDefinition } from '../../../types'
@@ -20,12 +24,12 @@ import { DefNumber } from './DefinitionFields'
 /** The CAM role a row may claim, and the blank choice that means "no role -
  *  a pump, a dust boot or air, switched by its word and never asked for
  *  abstractly" (see the module doc). */
-const CAM_ROLE_OPTIONS: { value: CoolantChannel | ''; label: string }[] = [
-  { value: '', label: '-' },
-  { value: 'flood', label: 'Flood' },
-  { value: 'mist', label: 'Mist' },
-  { value: 'vacuum', label: 'Vacuum' },
-]
+const CAM_ROLE_OPTIONS: { value: CoolantChannel | ''; label: string }[] = liveCatalog(() => ([
+  { value: '', label: controlText('OutputsSection.text001') },
+  { value: 'flood', label: controlText('OutputsSection.text002') },
+  { value: 'mist', label: controlText('OutputsSection.text003') },
+  { value: 'vacuum', label: controlText('OutputsSection.text004') },
+]))
 
 
 /**
@@ -87,6 +91,7 @@ export function OutputsSection({ machine, onChange }: {
   machine: MachineConfig
   onChange: (mut: (m: MachineConfig) => MachineConfig) => void
 }) {
+  useText('control-screens-not-probing')
   const outputs = machine.controllerDefinition?.outputs ?? []
 
   const writeOutputs = (next: MachineOutputDefinition[]): void => {
@@ -204,7 +209,7 @@ export function OutputsSection({ machine, onChange }: {
       ? { ...o, disabled: inUse ? undefined : true }
       : o)))
   }
-  const controllerName = machine.controller === 'uccnc' ? 'UCCNC' : "this machine's controller"
+  const controllerName = machine.controller === 'uccnc' ? 'UCCNC' : controlText('OutputsSection.text005')
 
   /** A code another entry already switches - a real machine shape, so it is
    *  said rather than refused (see the module doc). */
@@ -213,13 +218,13 @@ export function OutputsSection({ machine, onChange }: {
     const other = outputs.find((o, i) => i !== index && (o.onCode === code || o.offCode === code))
     return other === undefined
       ? undefined
-      : `${code} also switches "${other.name || 'another output'}".`
+      : controlText('OutputsSection.text007', { value1: String(code), value2: String(other.name || controlText('OutputsSection.text006')) })
   }
 
   return (
     <div data-testid="machine-def-panel-outputs" style={{ marginTop: 12 }}>
       <SectionHead
-        title="Outputs"
+        title={controlText('OutputsSection.text008')}
         summary={outputs.length === 0
           ? 'none defined'
           : outputs.map((o) => o.name || o.onCode).join(', ')}
@@ -228,18 +233,12 @@ export function OutputsSection({ machine, onChange }: {
       <div
         data-testid="machine-def-panel-outputs-boundary"
         style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-      >
-        Every switchable thing on this machine - flood, mist, a vacuum, a pump, air - is one row
-        here: the word that switches it, the pin it switches, and how long motion waits after. An
-        imported profile's relays show up here too; rename or rewire them like any other row.
-      </div>
+      >{controlText('OutputsSection.text009')}</div>
       {outputs.length === 0 ? (
         <div
           data-testid="machine-def-panel-outputs-none"
           style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', marginBottom: 8 }}
-        >
-          No outputs defined.
-        </div>
+        >{controlText('OutputsSection.text010')}</div>
       ) : (
         <table
           className="mform-axis-table"
@@ -248,12 +247,12 @@ export function OutputsSection({ machine, onChange }: {
         >
           <thead>
             <tr>
-              <th>Name</th>
-              <th data-tooltip="The word that switches this output on">on code</th>
-              <th data-tooltip="The word that switches this output off - blank means only the shared M9 does">off code</th>
-              <th data-tooltip="Where it is wired - port, pin, active low">port / pin / active low</th>
-              <th data-tooltip="Which CAM channel this output IS - flood, mist or vacuum. Blank means a pump, a dust boot or air: switched by its own word, never asked for abstractly. Giving a row a role is how this machine states it has that capability; clearing it says it does not.">CAM role</th>
-              <th data-tooltip="How long motion waits after this switches on, milliseconds">on delay</th>
+              <th>{controlText('OutputsSection.text011')}</th>
+              <th data-tooltip={controlText('OutputsSection.text012')}>{controlText('OutputsSection.text013')}</th>
+              <th data-tooltip={controlText('OutputsSection.text014')}>{controlText('OutputsSection.text015')}</th>
+              <th data-tooltip={controlText('OutputsSection.text016')}>{controlText('OutputsSection.text017')}</th>
+              <th data-tooltip={controlText('OutputsSection.text018')}>{controlText('OutputsSection.text019')}</th>
+              <th data-tooltip={controlText('OutputsSection.text020')}>{controlText('OutputsSection.text021')}</th>
               <th />
             </tr>
           </thead>
@@ -293,7 +292,7 @@ export function OutputsSection({ machine, onChange }: {
               checked={inUse}
               onChange={(e) => { setGroupInUse(group, e.target.checked) }}
             />
-            {` ${group.charAt(0).toUpperCase()}${group.slice(1)} in use (${controllerName} switches ${groupCodes(group).join(' and ')} together)`}
+            {controlText('OutputsSection.text022', { value1: String(group.charAt(0).toUpperCase()), value2: String(group.slice(1)), value3: String(controllerName), value4: String(groupCodes(group).join(' and ')) })}
           </label>
         )
       })}
@@ -302,9 +301,7 @@ export function OutputsSection({ machine, onChange }: {
         className="control-chip-btn"
         data-testid="machine-def-outputs-add"
         onClick={addOutput}
-      >
-        Add output
-      </button>
+      >{controlText('OutputsSection.text023')}</button>
     </div>
   )
 }
@@ -332,13 +329,14 @@ function OutputRow({
   onRoleChange: (role: CoolantChannel | '') => void
   onRemove: () => void
 }) {
+  useText('control-screens-not-probing')
   return (
     <tr data-testid={`machine-def-output-row-${index}`} data-wired="">
       <td>
         <input
           className="mform-input"
           type="text"
-          aria-label={`output ${index + 1} name`}
+          aria-label={controlText('OutputsSection.text024', { value1: String(index + 1) })}
           data-testid={`machine-def-output-name-${index}`}
           value={output.name}
           onChange={(e) => { onPatch({ name: e.target.value }) }}
@@ -348,7 +346,7 @@ function OutputRow({
       <td>
         <OutputCodeField
           testId={`machine-def-output-oncode-${index}`}
-          ariaLabel={`output ${index + 1} on code`}
+          ariaLabel={controlText('OutputsSection.text025', { value1: String(index + 1) })}
           value={output.onCode}
           allowEmpty={false}
           conflict={onCodeConflict}
@@ -358,7 +356,7 @@ function OutputRow({
       <td>
         <OutputCodeField
           testId={`machine-def-output-offcode-${index}`}
-          ariaLabel={`output ${index + 1} off code`}
+          ariaLabel={controlText('OutputsSection.text026', { value1: String(index + 1) })}
           value={output.offCode ?? ''}
           allowEmpty
           conflict={offCodeConflict}
@@ -382,27 +380,25 @@ function OutputRow({
           <label style={{ display: 'block', fontSize: 'var(--font-size-sm)', marginTop: 2 }}>
             <input
               type="checkbox"
-              aria-label={`output ${index + 1} switched on`}
+              aria-label={controlText('OutputsSection.text027', { value1: String(index + 1) })}
               data-testid={`machine-def-output-enabled-${index}`}
               checked={false}
               onChange={(e) => { if (e.target.checked) onPatch({ disabled: undefined }) }}
             />
-            {' in use'}
+            {controlText('OutputsSection.text028')}
           </label>
         )}
         {turnedOff && (
           <div
             data-testid={`machine-def-output-disabled-${index}`}
             style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}
-          >
-            Turned off - wired to port {output.pin.port} pin {output.pin.pin}; this machine's controller will not switch {offCodes}.
-          </div>
+          >{catalogChildren(controlText('OutputsSection.text029', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: output.pin.port, value2: output.pin.pin, value3: offCodes })}</div>
         )}
       </td>
       <td>
         <select
           className="mform-select"
-          aria-label={`output ${index + 1} CAM role`}
+          aria-label={controlText('OutputsSection.text030', { value1: String(index + 1) })}
           data-testid={`machine-def-output-role-${index}`}
           value={displayedRole}
           onChange={(e) => { onRoleChange(e.target.value as CoolantChannel | '') }}
@@ -429,9 +425,7 @@ function OutputRow({
           className="control-chip-btn"
           data-testid={`machine-def-output-remove-${index}`}
           onClick={onRemove}
-        >
-          Remove
-        </button>
+        >{controlText('OutputsSection.text031')}</button>
       </td>
     </tr>
   )

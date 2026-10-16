@@ -131,14 +131,18 @@ describe('ResolvedHeightPlanInspector V2-only presentation', () => {
     fireEvent.click(within(clearanceCalculation).getByText('How was this calculated?'))
     expect(clearanceCalculation.open).toBe(true)
     expect(clearanceCalculation.textContent).toContain('Machine Z: 118 mm')
-    expect(clearanceCalculation.textContent).toContain('Owner: Setup (setup-7)')
+    // WO-2858: owners, evidence, features and artifacts read as words; the ids
+    // they replaced (setup-7, fixture-min, hole-4, target-field-1) never show.
+    expect(clearanceCalculation.textContent).toContain('Owner: Setup')
     expect(clearanceCalculation.textContent)
-      .toContain('fixture_envelope / safety_clearance_min (fixture-min)')
+      .toContain('Fixture Envelope / Safety Clearance Min')
+    expect(clearanceCalculation.textContent).not.toMatch(/setup-7|fixture-min/)
 
     const bottomCalculation = within(inspector).getByTestId('resolved-height-bottom-calculation')
     expect(bottomCalculation.textContent).toContain('Target to cutter-center offset: 0.5 mm')
-    expect(bottomCalculation.textContent).toContain('Hole hole-4: WCS Z -8.25 mm (User Override)')
-    expect(bottomCalculation.textContent).toContain('target-field-1')
+    expect(bottomCalculation.textContent).toContain('Hole 1: WCS Z -8.25 mm (User Override)')
+    expect(bottomCalculation.textContent).toContain('Target evidence: height-field-v1 (wcs)')
+    expect(bottomCalculation.textContent).not.toMatch(/hole-4|target-field-1/)
     expect(bottomCalculation.textContent)
       .toContain('Warning: Fixture height was inferred from the selected setup.')
   })

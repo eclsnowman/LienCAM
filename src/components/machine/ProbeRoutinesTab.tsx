@@ -1,3 +1,8 @@
+import { catalogChildren } from './probing/catalogText'
+import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-411 - the Routines view of the Control page (Operator ruling 2026-08-21: "Perhaps
 // custom probe needs its own tab? Probe tab is getting pretty busy."). The
 // routine library / editor / preview station (ProbeRoutineEditor) was born as
@@ -34,6 +39,7 @@ import { ProbeRoutineEditor } from './ProbeRoutineEditor'
 import { activeToolFromLibrary } from './ProbingPanel'
 
 export function ProbeRoutinesTab() {
+  useText('probing-screens')
   const probeSignals = useProbeSignals()
   const machine = useCamStore(controlMachine)
   const machineId = machine?.id ?? 'default'
@@ -123,9 +129,7 @@ export function ProbeRoutinesTab() {
   // machine is not homed. Only the tip radius stays, as one small field in
   // the picker row - it is the one live number the operator owns here.
   const tipRadiusField = (
-    <label className="control-routines-tip" data-testid="control-routines-tip-radius">
-      Tip radius ({unitLabel(units)})
-      <NumCell
+    <label className="control-routines-tip" data-testid="control-routines-tip-radius">{catalogChildren(probeText('probeRoutinesTab4', { value1: '\u0000value1\u0000' }), { value1: unitLabel(units) })}<NumCell
         shown={fmtMachineLength(tipRadiusMm, units)}
         editable
         testId="control-routines-tip-radius-cell"
@@ -139,8 +143,7 @@ export function ProbeRoutinesTab() {
         }}
       />
       {tipRadiusSource && (
-        <span className="control-probe-field-note" data-testid="control-routines-tip-radius-source">
-          from {tipRadiusSource}
+        <span className="control-probe-field-note" data-testid="control-routines-tip-radius-source">{probeText('probeRoutinesTab3', { value1: jsxTextValue(tipRadiusSource) })}
         </span>
       )}
     </label>
@@ -149,7 +152,7 @@ export function ProbeRoutinesTab() {
   return (
     <section className="panel control-panel" data-testid="control-routines-panel">
       <div className="panel-header">
-        <span className="panel-title">Routines</span>
+        <span className="panel-title">{probeText('probeRoutinesTab6')}</span>
         <ProbeLamp kind="probe" value={probeSignals.probe} testId="routines-lamp-probe" />
       </div>
       <div className="panel-body control-routines-body">

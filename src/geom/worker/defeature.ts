@@ -108,6 +108,8 @@ export type FeatureType =
   | 'chamferPlanar'
   | 'filletCurvedCorner'
   | 'sliver'
+  | 'filletChain'
+  | 'chamferChain'
 
 /** A recognized feature, hash-only. `removable:false` carries `refuseReason`. */
 export interface RecognizedFeature {
@@ -149,6 +151,10 @@ export interface RecognizedFeature {
    *  only on an IN-CLASS `filletCurvedCorner`; its presence is what makes the feature
    *  removable. Carries the fully-solved sharp geometry so the heal never re-solves. */
   blendPlan?: BlendRibbonPlan
+  /** WO-2762: a counterbored hole's counterbore (spotface) wall - the widest
+   *  cylinder face(s) of a stack with two or more bore radii. Resize Hole edits
+   *  that step alone when the operator picks one of these faces. */
+  counterboreHashes?: number[]
   /** WO-2079: face hashes handled by the patched native RemoveFeatures path.
    *  Used only for an independently selected fillet absorbed by a pocket/boss;
    *  the owning pocket keeps its complete face set and its existing manual heal. */
@@ -666,6 +672,9 @@ export function recognizeFeatures(k: OcctKernel, shape: ShapeHandle, recs?: Face
     //         to its sharp corner; every other torus keeps a structured refusal that
     //         NAMES the gate it failed. Never approximated, never crashed. ----
     const frames = new Map<number, AnalyticFrame | null>()
+    // WO-2766: tori refused here are still the blends of whatever boss or
+    // pocket they sit in; the loop pass below may take them in.
+    const refusedTori = new Set<number>()
     // edge-ownership map, built once and only if the body carries a torus at all.
     let blendOwners: Map<number, number[]> | null = null
     for (const f of faces) {
@@ -683,6 +692,7 @@ export function recognizeFeatures(k: OcctKernel, shape: ShapeHandle, recs?: Face
         // recognizer legitimately owns — e.g. a countersink cone adjacent to a fillet.)
         features.push(refuseCurved(f, res.reason))
         consumed.add(f.hash)
+        refusedTori.add(f.hash)
       }
     }
 
@@ -776,6 +786,15 @@ export function recognizeFeatures(k: OcctKernel, shape: ShapeHandle, recs?: Face
       const type: FeatureType = (hasCone || distinctRadii.size > 1) ? 'counterboreStack' : (openings >= 2 && !floorCap) ? 'throughHole' : 'blindHole'
       const minR = radii.length ? Math.min(...radii) : 0
       const depth = axialSpan(bore, s.dir)
+      // WO-2762: the counterbore step - the widest bore cylinder of a stack with
+      // more than one radius - so Resize Hole can edit that step alone.
+      const maxR = radii.length ? Math.max(...radii) : 0
+      const counterbore = distinctRadii.size > 1
+        ? bore.filter((f) => f.type === 'cylinder' && f.radius !== undefined && Math.abs(f.radius - maxR) < 1e-4)
+        : []
+      const counterboreParams: Record<string, number> = counterbore.length > 0
+        ? { counterboreDiameter: round(2 * maxR, 3), counterboreDepth: round(axialSpan(counterbore, s.dir), 3) }
+        : {}
       features.push({
         key: `hole:${round(s.center.x)}:${round(s.center.y)}:${round(s.center.z)}:${round(s.dir.x)}:${round(s.dir.y)}:${round(s.dir.z)}:${round(minR, 3)}`,
         type,
@@ -785,8 +804,9 @@ export function recognizeFeatures(k: OcctKernel, shape: ShapeHandle, recs?: Face
         neighbourHashes: removals.map((r) => r.hostHash),
         effect: 'add',
         removable: true,
-        params: { axisX: round(s.dir.x), axisY: round(s.dir.y), axisZ: round(s.dir.z), diameter: round(2 * minR, 3), depth: round(depth, 3), openings, radiusCount: distinctRadii.size },
+        params: { axisX: round(s.dir.x), axisY: round(s.dir.y), axisZ: round(s.dir.z), diameter: round(2 * minR, 3), depth: round(depth, 3), openings, radiusCount: distinctRadii.size, ...counterboreParams },
         fingerprint: { cx: round(s.center.x), cy: round(s.center.y), cz: round(s.center.z), nx: round(s.dir.x), ny: round(s.dir.y), nz: round(s.dir.z), kind: type },
+        ...(counterbore.length > 0 ? { counterboreHashes: counterbore.map((f) => f.hash) } : {}),
       })
     }
 
@@ -804,7 +824,10 @@ export function recognizeFeatures(k: OcctKernel, shape: ShapeHandle, recs?: Face
         // far larger than the loop footprint).
         const fits = (f: FaceRec): boolean =>
           (f.bbox.xmax - f.bbox.xmin) <= lp.spanX * 1.5 + 2 && (f.bbox.ymax - f.bbox.ymin) <= lp.spanY * 1.5 + 2
-        const inside = faces.filter((f) => f.hash !== host.hash && !consumed.has(f.hash) &&
+        // WO-2766 (DF-7): a refused torus inside the opening is that boss's foot
+        // fillet (or that pocket's floor-fillet corner). Leaving it out left the
+        // removal open (heal not watertight); it goes with the boss or pocket.
+        const inside = faces.filter((f) => f.hash !== host.hash && (!consumed.has(f.hash) || refusedTori.has(f.hash)) &&
           xyInsideLoop(f.centroid, lp) && fits(f) && Math.abs(dot(sub(f.centroid, host.centroid), hn)) > 1e-4)
         if (inside.length === 0) continue
         const meanOff = inside.reduce((a, f) => a + dot(sub(f.centroid, host.centroid), hn), 0) / inside.length
@@ -958,6 +981,15 @@ export function recognizeFeatures(k: OcctKernel, shape: ShapeHandle, recs?: Face
       // other non-band face.
     }
 
+    // ---- 3b) WO-2766 BLEND CHAINS: the tangent chain of fillet or chamfer faces
+    //          the picked blend belongs to (a boss-foot torus, the fillet or
+    //          chamfer loop round a top edge, a pocket's floor fillets). Removed
+    //          whole by the kernel's own RemoveFeatures (GEO-9), which extends the
+    //          host faces back to their sharp edges. Only chains the passes above
+    //          left without a removable blend verdict are added, so every existing
+    //          fillet/chamfer route keeps its behaviour. ----
+    addBlendChains(k, shape, faces, byHash, frames, features, holeStackFaces)
+
     // ---- 4) SLIVER faces (tiny area) not otherwise claimed ----
     // GEO-21-R1: "not otherwise claimed" has to mean claimed by any feature's PLAN,
     // not merely consumed as some feature's own face — `consumed` only tracks the
@@ -1082,6 +1114,244 @@ function absorbedNativeFillet(f: FaceRec, host: RecognizedFeature, type: 'fillet
 }
 
 // ---------- GEO-6X5: the bounded analytic blend-ribbon recognizer ----------
+
+/** WO-2766: two fillet faces belong to one chain when their blend radii agree
+ *  this closely (mm). */
+const CHAIN_RADIUS_TOL = 1e-4
+/** WO-2766: a chamfer's two legs count as equal within this (mm). */
+const CHAIN_LEG_TOL = 1e-3
+
+/** WO-2766: the blend radius of a fillet face - a cylinder's radius or a
+ *  consistent torus's minor radius. */
+function chainBlendRadius(k: OcctKernel, f: FaceRec, frames: Map<number, AnalyticFrame | null>): number | undefined {
+  if (f.type === 'cylinder') {
+    if (!partialCylinder(f)) return undefined // a full cylinder is a boss or a bore, never a blend
+    const fr = frameOf(k, f, frames)
+    return fr?.kind === 'cylinder' && Number.isFinite(fr.radius) && fr.radius > 1e-6 ? fr.radius : undefined
+  }
+  if (f.type === 'torus') {
+    const fr = frameOf(k, f, frames)
+    return fr?.kind === 'torus' && fr.frameConsistent && Number.isFinite(fr.minorR) && fr.minorR > 1e-6 ? fr.minorR : undefined
+  }
+  return undefined
+}
+
+/**
+ * WO-2766: recognise fillet and chamfer CHAINS and add one removable feature per
+ * chain. A fillet chain is the tangent-connected set of cylinder/torus faces of
+ * one blend radius, each tangent to at least two host faces of another kind or
+ * radius. A chamfer chain is a tangent-connected set of thin planar strips and
+ * cones (the cones round the corners), at least one of each, that meets its
+ * hosts at an angle. The chain is removed by the kernel's RemoveFeatures
+ * (`nativeDefeatureHashes`); Change radius/distance removes it the same way and
+ * dresses the recovered sharp edges (geom-engine #editImportedBlend).
+ *
+ * A chain whose faces already carry a fillet/chamfer verdict of their own, or
+ * that touches a hole stack or another blend verdict, is left alone. The
+ * blanket `curved:` refusals the chain covers stay listed (they say why the
+ * single face cannot be rebuilt on its own); the Defeature list hides a refusal
+ * a removable chain covers.
+ */
+function addBlendChains(
+  k: OcctKernel,
+  shape: ShapeHandle,
+  faces: FaceRec[],
+  byHash: Map<number, FaceRec>,
+  frames: Map<number, AnalyticFrame | null>,
+  features: RecognizedFeature[],
+  holeStackFaces: Set<number>,
+): void {
+  const tangentMemo = new Map<string, boolean>()
+  const tangent = (a: FaceRec, b: FaceRec): boolean => {
+    const key = a.hash < b.hash ? `${a.hash}:${b.hash}` : `${b.hash}:${a.hash}`
+    let hit = tangentMemo.get(key)
+    if (hit === undefined) {
+      const dev = measureFaceTangency(k, a, b)
+      hit = dev !== null && dev <= FILLET_BAND_TANGENT_TOL
+      tangentMemo.set(key, hit)
+    }
+    return hit
+  }
+  const nbrsOf = (f: FaceRec): FaceRec[] => f.neighbours.map((h) => byHash.get(h)).filter((n): n is FaceRec => !!n)
+
+  // Faces another blend verdict already speaks for - removable, or refused by
+  // a band pass for its own named reason (an unmeasurable radius, parallel
+  // hosts). Only the blanket curved refusals (`curved:`) are left for a chain.
+  const covered = new Set<number>()
+  for (const ft of features) {
+    if (!(ft.type.startsWith('fillet') || ft.type === 'chamferPlanar') || ft.key.startsWith('curved:')) continue
+    for (const h of [...ft.dropHashes, ...(ft.nativeDefeatureHashes ?? [])]) covered.add(h)
+  }
+
+  const filletRadius = new Map<number, number | undefined>()
+  const filletMember = (f: FaceRec): number | undefined => {
+    if (filletRadius.has(f.hash)) return filletRadius.get(f.hash)
+    let out: number | undefined
+    const r = chainBlendRadius(k, f, frames)
+    if (r !== undefined) {
+      // hosts: tangent neighbours that are NOT the same blend continuing
+      const hosts = nbrsOf(f).filter((n) => {
+        const rn = chainBlendRadius(k, n, frames)
+        return (rn === undefined || Math.abs(rn - r) > CHAIN_RADIUS_TOL) && tangent(f, n)
+      })
+      if (hosts.length >= 2) out = r
+    }
+    filletRadius.set(f.hash, out)
+    return out
+  }
+  const chamferCandidate = (f: FaceRec): boolean =>
+    f.type === 'cone' || (f.type === 'plane' && f.innerLoops === 0 && isThinStrip(f))
+
+  // Phase 1: every candidate chain, with its blend size.
+  interface Chain { kind: 'fillet' | 'chamfer'; size: number; members: FaceRec[]; memberSet: Set<number>; legs: ReturnType<typeof chamferLegs> }
+  const chains: Chain[] = []
+  const chainOf = new Map<number, Chain>()
+  for (const seed of faces) {
+    if (chainOf.has(seed.hash) || holeStackFaces.has(seed.hash)) continue
+    let kind: 'fillet' | 'chamfer'
+    let r0 = 0
+    if (seed.type === 'cylinder' || seed.type === 'torus') {
+      const r = filletMember(seed)
+      if (r === undefined) continue
+      kind = 'fillet'
+      r0 = r
+    } else if (seed.type === 'cone') {
+      kind = 'chamfer'
+    } else continue // a chamfer chain is always seeded from one of its cones
+
+    const members: FaceRec[] = [seed]
+    const memberSet = new Set<number>([seed.hash])
+    for (let i = 0; i < members.length; i++) {
+      for (const n of nbrsOf(members[i])) {
+        if (memberSet.has(n.hash)) continue
+        let joins: boolean
+        if (kind === 'fillet') { const rn = filletMember(n); joins = rn !== undefined && Math.abs(rn - r0) <= CHAIN_RADIUS_TOL } else joins = chamferCandidate(n)
+        if (!joins || !tangent(members[i], n)) continue
+        memberSet.add(n.hash)
+        members.push(n)
+      }
+    }
+    const chain: Chain = { kind, size: r0, members, memberSet, legs: null }
+    for (const m of members) chainOf.set(m.hash, chain)
+    if (kind === 'chamfer') {
+      if (!members.some((m) => m.type === 'plane')) continue // a lone cone is a countersink or a taper
+      // A chamfer meets its hosts at an angle.
+      if (members.some((m) => nbrsOf(m).some((n) => !memberSet.has(n.hash) && tangent(m, n)))) continue
+      // each strip's two hosts meet in a line (a drafted wall between a
+      // parallel floor and deck does not)
+      chain.legs = chamferLegs(k, members, memberSet, nbrsOf)
+      if (chain.legs === null) continue
+      chain.size = Math.min(chain.legs.a, chain.legs.b)
+    }
+    chains.push(chain)
+  }
+
+  // Phase 2: one feature per chain the passes above left without a route.
+  const accepted = new Set(chains)
+  for (const chain of chains) {
+    const { kind, members, memberSet, legs } = chain
+    if (members.some((m) => holeStackFaces.has(m.hash) || covered.has(m.hash))) continue
+    // A chain that runs into another blend verdict's faces (a vendor b-spline
+    // blend, a planar band, an analytic ribbon) is not offered on its own:
+    // removing either one first changes the other.
+    if (members.some((m) => nbrsOf(m).some((n) => !memberSet.has(n.hash) && covered.has(n.hash)))) continue
+    // RemoveFeatures extends the hosts back to the sharp edge; that is only
+    // trusted where every host is a plane or a cylinder. A chain that runs into
+    // a cone, torus or freeform face (a rim chamfer's runout, a vendor blend)
+    // is left alone.
+    if (members.some((m) => nbrsOf(m).some((n) => !memberSet.has(n.hash) && n.type !== 'plane' && n.type !== 'cylinder'))) continue
+    const params: Record<string, number | string> = {}
+    let effect: 'add' | 'remove' = 'add'
+    // A blend that a SMALLER blend runs across (a vertical corner round under a
+    // top-edge fillet or chamfer) was made first; the kernel cannot take it out
+    // from under the smaller one, so it is not offered on its own.
+    const crossedBySmaller = members.some((m) => nbrsOf(m).some((n) => {
+      const other = memberSet.has(n.hash) ? undefined : chainOf.get(n.hash)
+      return other !== undefined && accepted.has(other) && other.size < chain.size - CHAIN_RADIUS_TOL
+    }))
+    if (crossedBySmaller) continue
+    const hosts = new Map<number, FaceRec>()
+    for (const m of members) for (const n of nbrsOf(m)) if (!memberSet.has(n.hash)) hosts.set(n.hash, n)
+
+    if (kind === 'chamfer' && legs !== null) {
+      if (Math.abs(legs.a - legs.b) <= CHAIN_LEG_TOL) params.distance = round((legs.a + legs.b) / 2, 4)
+      else { params.distanceA = round(legs.a, 4); params.distanceB = round(legs.b, 4) }
+      // the sharp corner the chamfer cut away: outside the body on an outside
+      // edge (removal adds material), inside it on an inside corner.
+      effect = safeBool(() => k.containsPoint(shape, legs.corner, 1e-7)) ? 'remove' : 'add'
+    } else {
+      params.radius = round(chain.size, 4)
+      // the blend's centre of curvature sits inside the material on a rounded
+      // outside edge (removal adds material) and in the open on a cove.
+      const centre = blendCentre(k, members[0], frameOf(k, members[0], frames))
+      if (centre !== null) effect = safeBool(() => k.containsPoint(shape, centre, 1e-7)) ? 'add' : 'remove'
+    }
+
+    let area = 0
+    const c = { x: 0, y: 0, z: 0 }
+    for (const m of members) { area += m.area; c.x += m.centroid.x * m.area; c.y += m.centroid.y * m.area; c.z += m.centroid.z * m.area }
+    const centroid = area > 0 ? scale(c, 1 / area) : members[0].centroid
+    const type: FeatureType = kind === 'fillet' ? 'filletChain' : 'chamferChain'
+    const size = chain.size
+    const hashes = members.map((m) => m.hash)
+    features.push({
+      key: `chain:${kind}:${round(size, 3)}:${round(centroid.x)}:${round(centroid.y)}:${round(centroid.z)}`,
+      type,
+      dropHashes: hashes, untrimHashes: [], hostRemovals: [], neighbourHashes: [...hosts.keys()],
+      effect, removable: true,
+      params: { ...params, chain: kind, faceCount: members.length, area: round(area, 3), centerX: round(centroid.x), centerY: round(centroid.y), centerZ: round(centroid.z) },
+      fingerprint: { cx: round(centroid.x), cy: round(centroid.y), cz: round(centroid.z), nx: 0, ny: 0, nz: 0, kind: `chain:${kind}` },
+      nativeDefeatureHashes: hashes,
+    })
+  }
+}
+
+/** WO-2766: the centre of curvature of a fillet face at a point ON it (its
+ *  UV middle - a full ring's centroid sits on its own axis) - on the cylinder
+ *  axis or the torus spine. */
+function blendCentre(k: OcctKernel, f: FaceRec, fr: AnalyticFrame | null): Vec3 | null {
+  if (fr === null) return null
+  const uv = safeUv(k, f.handle)
+  if (uv === null) return null
+  let p: Vec3
+  try { p = k.pointOnSurface(f.handle, (uv.uMin + uv.uMax) / 2, (uv.vMin + uv.vMax) / 2) } catch { return null }
+  if (fr.kind === 'cylinder') {
+    const v = sub(p, fr.axisPoint)
+    return add(fr.axisPoint, scale(fr.axisDir, dot(v, fr.axisDir)))
+  }
+  if (fr.kind === 'torus') return torusSpinePoint(fr, p)
+  return null
+}
+
+/** WO-2766: a chamfer chain's two legs, read off one straight strip: the strip
+ *  meets two planar hosts; their planes meet in the sharp edge the chamfer cut
+ *  away; each leg is the distance from that line to the strip's edge on that
+ *  host. Null when no strip has two non-parallel planar hosts. */
+function chamferLegs(
+  k: OcctKernel,
+  members: FaceRec[],
+  memberSet: Set<number>,
+  nbrsOf: (f: FaceRec) => FaceRec[],
+): { a: number; b: number; corner: Vec3 } | null {
+  for (const m of members) {
+    if (m.type !== 'plane') continue
+    const hosts = nbrsOf(m).filter((n) => !memberSet.has(n.hash))
+    if (hosts.length !== 2 || hosts.some((h) => h.type !== 'plane')) continue
+    const line = planePlaneLine(hosts[0], hosts[1])
+    if (line === null) continue
+    const legs: number[] = []
+    for (const h of hosts) {
+      const mid = sharedEdgeMidpoint(k, m, h)
+      if (mid === null) break
+      legs.push(perpDistPointToLine(mid, line.p0, line.dir))
+    }
+    if (legs.length !== 2 || !legs.every((l) => Number.isFinite(l) && l > 1e-6)) continue
+    const v = sub(m.centroid, line.p0)
+    const corner = add(line.p0, scale(line.dir, dot(v, line.dir)))
+    return { a: legs[0], b: legs[1], corner }
+  }
+  return null
+}
 
 const BLEND_RADIUS_TOL = 1e-6   // mm — ribbon radius match (r of every chained cylinder)
 const BLEND_GEOM_TOL = 1e-6     // mm — on-surface / tangency / concurrency gates
@@ -2296,6 +2566,19 @@ export function healRemoval(k: OcctKernel, shape: ShapeHandle, features: Recogni
       const vol = safeNum(() => k.getVolume(result))
       const volumeDelta = vol - originalVol
       const changed = Number.isFinite(volumeDelta) && Math.abs(volumeDelta) > Math.max(1e-7, Math.abs(originalVol) * 1e-12)
+      // WO-2766: a chain's removal fills (or cuts) at most a blend's own
+      // section along it - well under its face area x its size - and on the
+      // side its effect names. Anything else is the kernel removing more
+      // than the chain, never applied.
+      if (ft.key.startsWith('chain:') && changed) {
+        const size = Math.max(...['radius', 'distance', 'distanceA', 'distanceB'].map((key) => Number(ft.params[key])).filter(Number.isFinite))
+        const area = Number(ft.params.area)
+        const sideOk = ft.effect === 'add' ? volumeDelta > 0 : volumeDelta < 0
+        if (!sideOk || !(Math.abs(volumeDelta) <= area * size)) {
+          scratch.push(result)
+          return { ok: false, reason: `removing ${ft.key} changed the volume by ${round(volumeDelta, 3)}, more than a ${round(size, 3)} mm blend over ${round(area, 3)} mm^2 can hold or on the wrong side; the kernel took out more than the chain, so nothing was removed` }
+        }
+      }
       if (!valid || !solidClass || !Number.isFinite(vol) || !(vol > 1e-9) || !Number.isFinite(originalVol) || !changed) {
         scratch.push(result)
         return { ok: false, reason: `native imported-fillet removal did not reach a changed watertight solid with finite data (valid=${valid}, solid=${solidClass}, volume=${round(vol, 3)}, originalVolume=${round(originalVol, 3)}, volumeDelta=${round(volumeDelta, 3)})` }

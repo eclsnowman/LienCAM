@@ -332,7 +332,7 @@ function freshenBlockMembers(
     remapDimension(dimension, allocateId(), mappedEntityId))
   return {
     ...block,
-    members: { entities, constraints, dimensions },
+    members: { entities: remapOffsetConstraintIds(entities, new Map(block.members.constraints.map((c, i) => [c.id, constraints[i].id]))), constraints, dimensions },
   }
 }
 
@@ -406,8 +406,13 @@ export function instantiateSketchClipboard(
     remapConstraint(constraint, allocateId(), mappedEntityId))
 
   return {
-    entities,
+    entities: remapOffsetConstraintIds(entities, new Map(payload.constraints.map((c, i) => [c.id, constraints[i].id]))),
     constraints,
     selectedIds: entities.map((entity) => entity.id),
   }
+}
+
+function remapOffsetConstraintIds(entities: SketchEntity[], ids: Map<string, string>): SketchEntity[] {
+  return entities.map(e => e.offsetLink?.constraintIds ? { ...e, offsetLink: { ...e.offsetLink,
+    constraintIds: e.offsetLink.constraintIds.flatMap(id => ids.has(id) ? [ids.get(id)!] : []) } } : e)
 }

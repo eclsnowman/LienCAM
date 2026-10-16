@@ -86,7 +86,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         kind: 'steps',
         steps: [
           'Click Save in the header. The project is saved as a .camproject file named after the project, with spaces turned into underscores. In a browser it goes to your normal download folder; when LienCAM runs as a desktop program, a Save window asks where to put it.',
-          'Click Open in the header and pick a .camproject file. While it opens, the header and the status bar show "Opening" with what is being loaded.',
+          'Click Open in the header to open the project picker. Choose an example, a recent project in the desktop app, or Browse... to pick a .camproject file. While it opens, the header and the status bar show "Opening" with what is being loaded.',
           'Click New in the header to start a fresh project. Your machines, tool library, and settings stay as they are - only the project is replaced.',
         ],
       },
@@ -98,7 +98,15 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         kind: 'paragraph',
         text: 'Computed toolpaths are saved in the file too, so a saved project reopens with its operations ready. When a project uses tools your tool library does not have, opening it adds them to your library and the status bar says how many were added; tools you already have are never replaced. Settings and your machine library belong to this computer, not to the file.',
       },
+      {
+        kind: 'paragraph',
+        text: 'The desktop picker shows recent projects with their folder and last-opened time. Remove from list removes only the recent entry; a moved or missing file stays listed but cannot be opened from that entry. Examples show part previews and open with the sample hobby router. Help > Open an example project opens the Examples section again. Tick Always go straight to the file browser in the picker or Settings > Opening projects to make Open go straight to Browse instead.',
+      },
       { kind: 'image', slot: 'file-buttons' },
+      {
+        kind: 'paragraph',
+        text: 'When the project is empty, the picker offers Start with an empty project. Choose it to close the picker and begin drawing; it does not replace a project that already has work in it.',
+      },
     ],
     images: [
       {
@@ -125,7 +133,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         kind: 'steps',
         steps: [
-          'Click Settings in the header. The Units section is second from the top.',
+          'Click Settings in the header and find the Units section below STL Projection.',
           'Set Display units to mm or in. This changes the units shown and typed everywhere in the app, and the status bar shows the current choice. Values are kept in millimeters inside the app, so switching back and forth never changes your part.',
           'Set Export units to mm or in. This controls the posted G-code only: G21 for millimeters, G20 for inches.',
         ],
@@ -212,7 +220,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         kind: 'steps',
         steps: [
-          'Header (top): New, Open, and Save on the left; the tabs in the middle (Tool Library, Setup, Sketch, Model, Toolpath, Simulate, Post Process, Control); Undo, Redo, Settings, Help, and the machine status (Offline, Not homed, Ready, Running, or Alarm) on the right. In a narrow window the buttons show only their icons - hover over one to see its name.',
+          'Header (top): New, Open, and Save on the left; the tabs in the middle (Tool Library, Setup, Sketch, Model, Toolpath, Simulate, Post Process, Control); Undo, Redo, Settings, Help, About, and the machine status (Offline, Not homed, Ready, Running, or Alarm) on the right. In a narrow window the buttons show only their icons - hover over one to see its name.',
           'Design tree (left panel): everything in the project, in three sections - Stock, Geometry, and Setups. The buttons on each section header add new items, and right-clicking a row opens its menu.',
           '3D view (center): your parts, stock, and toolpaths. The badge in its top-left corner names the current view, the machine name in its top-right corner opens the Machine Library, the buttons at its top show or hide things, and the view cube sits in its bottom-left corner.',
           'Properties panel (right panel): the details of whatever is selected - a part, stock, setup, or operation - with most values editable in place.',

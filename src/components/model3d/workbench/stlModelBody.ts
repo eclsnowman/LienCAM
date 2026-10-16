@@ -20,6 +20,8 @@
 // way the panel's `displayedFacetsOf` did (an edited part is renumbered -
 // WO-1923's audit).
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import * as THREE from 'three'
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { resolveEditedStlMesh, type MeshEditRecord, type MeshEditReplayStop } from '../../../mesh/edit'
@@ -176,13 +178,13 @@ export function buildStlModelBodyModel(args: {
     candidates.push({ id: f.id, kind: f.kind, label: describeFeature(f), sourceFacetIds: f.sourceFacetIds, target: { family: 'round', feature: f } })
   }
   for (const p of round.pockets) {
-    candidates.push({ id: p.id, kind: p.kind, label: `rectangular pocket ${p.lengthMm.toFixed(2)} x ${p.widthMm.toFixed(2)} mm, ${p.depthMm.toFixed(2)} mm deep`, sourceFacetIds: p.sourceFacetIds, target: { family: 'pocket' } })
+    candidates.push({ id: p.id, kind: p.kind, label: workbenchText('stlModelBody.rectangularPocketXMmMmDeep', { value1: String(p.lengthMm.toFixed(2)), value2: String(p.widthMm.toFixed(2)), value3: String(p.depthMm.toFixed(2)) }), sourceFacetIds: p.sourceFacetIds, target: { family: 'pocket' } })
   }
   for (const s of round.slots) {
-    candidates.push({ id: s.id, kind: 'slot', label: `slot ${s.lengthMm.toFixed(2)} x ${s.widthMm.toFixed(2)} mm, ${s.depthMm.toFixed(2)} mm deep`, sourceFacetIds: s.sourceFacetIds, target: { family: 'pocket' } })
+    candidates.push({ id: s.id, kind: 'slot', label: workbenchText('stlModelBody.slotXMmMmDeep', { value1: String(s.lengthMm.toFixed(2)), value2: String(s.widthMm.toFixed(2)), value3: String(s.depthMm.toFixed(2)) }), sourceFacetIds: s.sourceFacetIds, target: { family: 'pocket' } })
   }
   for (const d of round.draftedPockets) {
-    candidates.push({ id: d.id, kind: d.kind, label: `drafted pocket ${d.lengthMm.toFixed(2)} x ${d.widthMm.toFixed(2)} mm, ${d.depthMm.toFixed(2)} mm deep`, sourceFacetIds: d.sourceFacetIds, target: { family: 'pocket' } })
+    candidates.push({ id: d.id, kind: d.kind, label: workbenchText('stlModelBody.draftedPocketXMmMmDeep', { value1: String(d.lengthMm.toFixed(2)), value2: String(d.widthMm.toFixed(2)), value3: String(d.depthMm.toFixed(2)) }), sourceFacetIds: d.sourceFacetIds, target: { family: 'pocket' } })
   }
   for (const b of recognizeEdgeBlends(mesh, sourceFacetIds).blends) {
     candidates.push({ id: b.id, kind: b.kind, label: describeEdgeBlend(b), sourceFacetIds: b.sourceFacetIds, target: { family: 'blend', blend: b } })
@@ -194,11 +196,15 @@ export function buildStlModelBodyModel(args: {
   const featureOfFacet = new Int32Array(facetCount).fill(-1)
   const features: StlModelFeature[] = []
   for (const c of candidates) {
-    const facets = displayedFacets(sourceFacetIds, c.sourceFacetIds).filter((f) => featureOfFacet[f] === -1)
-    if (facets.length === 0) continue
+    const allFacets = displayedFacets(sourceFacetIds, c.sourceFacetIds)
+    const facets = allFacets.filter((f) => featureOfFacet[f] === -1)
+    // WO-2803: retain planar tool targets even when a round feature owns
+    // their facets in the resting pick (counterbore / blind-hole floors).
+    // Resize Hole and Defeature retain their whole-feature priority.
+    if (facets.length === 0 && c.target.family !== 'flat') continue
     const index = features.length
     for (const f of facets) featureOfFacet[f] = index
-    features.push({ id: c.id, kind: c.kind, label: c.label, facets, sourceFacetIds: c.sourceFacetIds, target: c.target })
+    features.push({ id: c.id, kind: c.kind, label: c.label, facets: c.target.family === 'flat' ? allFacets : facets, sourceFacetIds: c.sourceFacetIds, target: c.target })
   }
 
   return {
@@ -236,7 +242,9 @@ export function stlFeatureCentroid(model: StlModelBodyModel, feature: StlModelFe
 
 /** What a pick resolved to: a whole recognised feature, or the body. */
 export type StlModelPick =
-  | { kind: 'feature'; featureIndex: number; distance: number }
+  /** WO-2762: `facet` = the displayed facet the ray hit, so a tool can tell
+   *  which step of a stepped hole was picked */
+  | { kind: 'feature'; featureIndex: number; distance: number; facet?: number }
   | { kind: 'body'; distance: number }
 
 export interface StlModelBodyPresentation {
@@ -446,7 +454,7 @@ export function createStlModelBodyPresentation(
       if (next !== null) {
         const previewGeometry = creasedSoupGeometry(triangleSoupPositions(next))
         const previewMesh = new THREE.Mesh(previewGeometry, material)
-        previewMesh.name = `${model.name} (preview)`
+        previewMesh.name = workbenchText('stlModelBody.preview', { name: String(model.name) })
         previewMesh.userData.stlModelBodyPreview = true
         const previewEdges = new THREE.LineSegments(
           new THREE.EdgesGeometry(previewGeometry, OUTLINE_EDGE_DEG),
@@ -473,7 +481,7 @@ export function createStlModelBodyPresentation(
       if (hit === undefined || hit.faceIndex === undefined || hit.faceIndex === null) return null
       const featureIndex = model.featureOfFacet[hit.faceIndex] ?? -1
       return featureIndex >= 0
-        ? { kind: 'feature', featureIndex, distance: hit.distance }
+        ? { kind: 'feature', featureIndex, distance: hit.distance, facet: hit.faceIndex }
         : { kind: 'body', distance: hit.distance }
     },
     dispose() {
@@ -495,7 +503,7 @@ export function createStlModelBodyPresentation(
 
 /** The console line a pick reports - plain words, the recogniser's own. */
 export function describeStlModelPick(model: StlModelBodyModel, pick: StlModelPick): string {
-  if (pick.kind === 'body') return `Selected "${model.name}" (the whole part).`
+  if (pick.kind === 'body') return workbenchText('stlModelBody.selectedTheWholePart', { name: String(model.name) })
   const feature = model.features[pick.featureIndex]
-  return `Selected ${feature.label} on "${model.name}" (${feature.facets.length} facets).`
+  return workbenchText('stlModelBody.selectedOnFacets', { label: String(feature.label), name: String(model.name), length: String(feature.facets.length) })
 }

@@ -151,9 +151,11 @@ describe('WO-2152 the picture after a top search finds nothing', () => {
 
       const stepNo = Number(screen.getByTestId('probe-picture').getAttribute('data-step'))
       expect(screen.getByTestId('probing-run-state').textContent).toBe(`Stopped at step ${stepNo}`)
-      // The stopped-step sentence, word for word the runner's.
-      expect(screen.getByTestId('probing-run-why').textContent).toBe(MISS)
-      expect(screen.getByTestId('probing-step-sentence').textContent).toContain('Touches the top')
+      // WO-2665: the card gives the brief cause in the sentence row; the runner's
+      // words, word for word, are in the console on the same screen.
+      expect(screen.getByTestId('probing-run-why').textContent).toBe('No probe contact.')
+      expect(screen.getByTestId('probing-step-sentence').contains(screen.getByTestId('probing-run-line'))).toBe(true)
+      expect(useMachineControl.getState().consoleLines.map((l) => l.text).some((t) => t.includes(MISS))).toBe(true)
       expect(screen.getByTestId('probe-picture').getAttribute('data-mode')).toBe('after')
 
       // Where the machine really went (WO-2113): 25 mm below the drawn start.

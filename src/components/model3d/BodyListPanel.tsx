@@ -9,6 +9,7 @@
 // tree-row styling (eye toggle, token colors) instead of the lab's raw
 // checkbox rows.
 
+import { useText } from '../../i18n'
 import { useState } from 'react'
 import { ExternalLink, Trash2 } from 'lucide-react'
 import type { RGB } from './appearance'
@@ -78,6 +79,7 @@ export interface BodyListPanelProps {
 }
 
 export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedBodyId, onSelect, onSetColor, onShowInCam, variant = 'panel' }: BodyListPanelProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   // NAV-BODY-ROW: local, render-only context-menu position state -- mirrors
   // FeatureTree.tsx's own `contextMenu` local state exactly (this component's
   // "presentational, props-in callbacks-out" contract covers the NAVIGATION
@@ -89,7 +91,7 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
     return (
       <div data-testid="lab3d-body-list">
         {bodies.length === 0 ? (
-          <div className="tree-empty">(none yet)</div>
+          <div className="tree-empty">{workbenchText('BodyListPanel.noneYet')}</div>
         ) : (
           bodies.map((body) => (
             <div
@@ -155,7 +157,7 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
                 checked={body.visible}
                 onChange={() => onToggleVisibility(body.bodyId)}
                 onClick={(event) => event.stopPropagation()}
-                aria-label={`Toggle visibility of ${body.name}`}
+                aria-label={workbenchText('BodyListPanel.toggleVisibilityOf', { name: String(body.name) })}
                 style={{ accentColor: 'var(--accent)', margin: 0 }}
               />
               {/* WO UI-25 (A3 entry-point fix): a per-body color swatch mirroring
@@ -175,7 +177,7 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
               {onSetColor !== undefined && (
                 <label
                   data-testid={`body-color-${body.bodyId}`}
-                  data-tooltip={`Change color of ${body.name}`}
+                  data-tooltip={workbenchText('BodyListPanel.changeColorOf', { name: String(body.name) })}
                   className="wb-row-action wb-color-swatch"
                   onClick={(event) => event.stopPropagation()}
                   style={{
@@ -207,7 +209,7 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
                     data-testid={`body-color-input-${body.bodyId}`}
                     value={toHex(body.color)}
                     onChange={(e) => onSetColor(body.bodyId, fromHex(e.target.value))}
-                    aria-label={`Change color of ${body.name}`}
+                    aria-label={workbenchText('BodyListPanel.changeColorOf', { name: String(body.name) })}
                     style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', border: 'none', padding: 0, margin: 0, cursor: 'pointer' }}
                   />
                 </label>
@@ -219,8 +221,7 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
                     data-testid={`body-volume-${body.bodyId}`}
                     style={{ display: 'block', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', fontFamily: 'var(--font-mono)' }}
                   >
-                    {body.volume.toFixed(2)} mm^3
-                  </span>
+                    {workbenchText('BodyListPanel.mm3', { value1: String((body.volume.toFixed(2)) ?? '') })}</span>
                 )}
               </span>
               {/* NAV-BODY-ROW path 2: inline icon, same idiom as the color
@@ -236,8 +237,8 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
                     event.stopPropagation()
                     onShowInCam(body.bodyId)
                   }}
-                  data-tooltip={`Show ${body.name} in CAM`}
-                  aria-label={`Show ${body.name} in CAM`}
+                  data-tooltip={workbenchText('BodyListPanel.showInCAM', { name: String(body.name) })}
+                  aria-label={workbenchText('BodyListPanel.showInCAM', { name: String(body.name) })}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
                 >
                   <ExternalLink size={13} />
@@ -251,8 +252,8 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
                   event.stopPropagation()
                   onDispose(body.bodyId)
                 }}
-                data-tooltip={`Dispose ${body.name}`}
-                aria-label={`Dispose ${body.name}`}
+                data-tooltip={workbenchText('BodyListPanel.dispose', { name: String(body.name) })}
+                aria-label={workbenchText('BodyListPanel.dispose', { name: String(body.name) })}
                 style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
               >
                 <Trash2 size={13} />
@@ -294,9 +295,9 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
         background: '#161b20',
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>Bodies</div>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>{workbenchText('BodyListPanel.bodies')}</div>
       {bodies.length === 0 ? (
-        <div style={{ opacity: 0.6 }}>(none yet)</div>
+        <div style={{ opacity: 0.6 }}>{workbenchText('BodyListPanel.noneYet')}</div>
       ) : (
         bodies.map((body) => (
           <div
@@ -308,24 +309,22 @@ export function BodyListPanel({ bodies, onToggleVisibility, onDispose, selectedB
               data-testid={`body-visible-${body.bodyId}`}
               checked={body.visible}
               onChange={() => onToggleVisibility(body.bodyId)}
-              aria-label={`Toggle visibility of ${body.name}`}
+              aria-label={workbenchText('BodyListPanel.toggleVisibilityOf', { name: String(body.name) })}
             />
             <span style={{ flex: 1 }}>
               {body.name}
               {body.volume !== undefined && (
                 <span data-testid={`body-volume-${body.bodyId}`} style={{ display: 'block', opacity: 0.65, fontSize: 11 }}>
-                  {body.volume.toFixed(2)} mm^3
-                </span>
+                  {workbenchText('BodyListPanel.mm3', { value1: String((body.volume.toFixed(2)) ?? '') })}</span>
               )}
             </span>
             <button
               type="button"
               data-testid={`body-dispose-${body.bodyId}`}
               onClick={() => onDispose(body.bodyId)}
-              data-tooltip={`Dispose ${body.name}`}
+              data-tooltip={workbenchText('BodyListPanel.dispose', { name: String(body.name) })}
             >
-              dispose
-            </button>
+              {workbenchText('BodyListPanel.dispose2')}</button>
           </div>
         ))
       )}

@@ -88,13 +88,15 @@ describe.skipIf(!existsSync(CSC))('a probe contact is answered only after the bo
     expect(row('i.probeStops')).toBe('0')
   })
 
-  it('a feed hold while the board is still in its probe cycle fails with a sentence that names the hold', () => {
-    expect(row('j.ended')).toBe('True')
-    expect(Number(row('j.msAfterContact'))).toBeLessThan(7000)
-    expect(row('j.ok')).toBe('reply-null')
-    expect(row('j.err')).toContain('feed hold')
-    expect(row('j.err')).toContain('Press Stop/Reset, then jog up.')
-    expect(row('j.retractSent')).toBe('False')
+  // WO-2764: WO-2103 (rehearsal 2026-09-27) made a feed hold PAUSE this wait - it used to
+  // fail the probe five seconds after the contact, leaving Cycle Start nothing to resume.
+  // The hold's own sentence at the probe deadline is pinned in probeFailureWording.wo2020.
+  it('a feed hold while the board is still in its probe cycle pauses the wait; released, the probe finishes', () => {
+    // Held for the harness's whole 9 s window: the probe is still waiting, not failed.
+    expect(row('j.ended')).toBe('False')
+    // Released (hold off, cycle over): it completes and its retract reaches a board out of the cycle.
+    expect(row('j.retractSent')).toBe('True')
+    expect(row('j.retractWhileProbing')).toBe('False')
     expect(row('j.probeStops')).toBe('0')
   })
 

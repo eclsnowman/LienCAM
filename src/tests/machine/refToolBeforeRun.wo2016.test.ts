@@ -325,7 +325,9 @@ describe('WO-2016 a program that needs a reference tool says so at Load', () => 
   for (const staged of [false, true]) {
     it(`a macro bound to M6 (${staged ? 'G53 retract' : 'plain retract'}): Load names the M6; measuring clears it; the change runs to M30`, async () => {
       configureMachine(true, [M6_PRELUDE])
-      const text = twoToolProgram(staged)
+      // WO-2764: WO-2478 runs the M6 macro at the same-tool T1 M6 too; preselect T1 so
+      // the change under test is the T2 M6.
+      const text = twoToolProgram(staged).replace('T1 M6', 'T1')
       const t2 = lineOf(text, 'T2 M6')
       render(createElement(ProgramPanel))
       act(() => { loadGcodeFile('m6-prelude.nc', text, null) })
@@ -349,7 +351,8 @@ describe('WO-2016 a program that needs a reference tool says so at Load', () => 
 
   it('a macro bound to M6, unmeasured: Cycle Start points to the M6; after the prelude the change is where it would fail', async () => {
     configureMachine(true, [M6_PRELUDE])
-    const text = twoToolProgram(true)
+    // WO-2764: as above, the T2 M6 is the change under test.
+    const text = twoToolProgram(true).replace('T1 M6', 'T1')
     const t2 = lineOf(text, 'T2 M6')
     render(createElement(ProgramPanel))
     act(() => { loadGcodeFile('m6-prelude.nc', text, null) })

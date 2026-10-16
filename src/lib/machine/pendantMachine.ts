@@ -18,6 +18,7 @@ import {
   getMachineController,
   gotoWorkXYZero,
   jogToSafeZ,
+  probeSensingFor,
   runFeatureProbeCycle,
   runMachineAction,
   runParkMove,
@@ -27,15 +28,20 @@ import {
   zeroWorkAxes,
 } from './machineSession'
 import { startHeldJog, type HeldJog } from './heldJog'
-import { planFeatureProbeCycle, type ProbeCycleTouchKey } from './probeFeatureCycle'
+import {
+  DEFAULT_TOP_SEARCH_MM,
+  planFeatureProbeCycle,
+  sideCompensationRadiusMm,
+  type ProbeCycleTouchKey,
+} from './probeFeatureCycle'
 import {
   calculateBoreCenter,
   calculateBossCenter,
-  calculateCorner,
   calculateEdge,
-  calculateYawAngle,
 } from './probeRoutines'
 import { resolveProbeConfig } from './toolTable'
+import { activeToolFromLibrary, faceAngleFromTouches, probingSessionValues } from './probingSession'
+import { probeCalibratedRadius } from '../tool/probeTool'
 import type {
   PendantCommand,
   PendantCommandContext,
@@ -49,6 +55,10 @@ interface StoredProbeResult {
 }
 
 const probeResults = new Map<string, StoredProbeResult>()
+/** WO-2809: the Probing screen's own "Start within" and "Probing depth"
+ *  defaults (ProbingPanel.tsx, WO-2063 design 4.4). */
+const SCREEN_START_WITHIN_MM = 10
+const SCREEN_PROBING_DEPTH_MM = 5
 const ESTOP_REFUSAL = 'Reset the desktop E-stop control before remote motion is allowed.'
 
 /** The pendant's held continuous jog, if one is running (WO-2468). */
@@ -197,6 +207,8 @@ function featureProbeResult(
   command: Extract<PendantCommand, { kind: 'probe-start' }>,
   touches: Partial<Record<ProbeCycleTouchKey, number>>,
   plan: ReturnType<typeof planFeatureProbeCycle> & { ok: true },
+  radii: { x: number; y: number },
+  cornerDirections: { x: '+' | '-'; y: '+' | '-' },
 ): StoredProbeResult {
   const { routineId, params } = command
   if (routineId === 'edge') {
@@ -204,7 +216,7 @@ function featureProbeResult(
       axis: params.edgeAxis,
       direction: params.edgeDirection,
       triggerPositionMm: touchValue(touches, 'edge'),
-      tipRadiusMm: params.tipRadius,
+      tipRadiusMm: radii[params.edgeAxis.toLowerCase() as 'x' | 'y'],
     })
     return {
       display: { axis: result.axis, edgeCoordinate: result.coordinateMm, compensation: result.compensation },
@@ -212,10 +224,9 @@ function featureProbeResult(
     }
   }
   if (routineId === 'corner') {
-    const result = calculateCorner({
-      x: { direction: '-', triggerPositionMm: touchValue(touches, 'cornerX'), tipRadiusMm: params.tipRadius },
-      y: { direction: '-', triggerPositionMm: touchValue(touches, 'cornerY'), tipRadiusMm: params.tipRadius },
-    })
+    const x = calculateEdge({ axis: 'X', direction: cornerDirections.x, triggerPositionMm: touchValue(touches, 'cornerX'), tipRadiusMm: radii.x })
+    const y = calculateEdge({ axis: 'Y', direction: cornerDirections.y, triggerPositionMm: touchValue(touches, 'cornerY'), tipRadiusMm: radii.y })
+    const result = { xMm: x.coordinateMm, yMm: y.coordinateMm, compensation: `${x.compensation} ${y.compensation}` }
     return {
       display: { centerX: result.xMm, centerY: result.yMm, compensation: result.compensation },
       offsets: { X: result.xMm, Y: result.yMm },
@@ -229,10 +240,10 @@ function featureProbeResult(
       throw new Error('Angle plan did not contain both touch points.')
     }
     const alongKey = nominalAxis.toLowerCase() as 'x' | 'y'
-    const result = calculateYawAngle({
+    const result = faceAngleFromTouches({
       nominalAxis,
       direction: params.edgeDirection,
-      tipRadiusMm: params.tipRadius,
+      tipRadiusMm: radii[params.edgeAxis === 'X' ? 'y' : 'x'],
       first: { alongMm: firstStep.expectedStart[alongKey], triggerPositionMm: touchValue(touches, 'angleFirst') },
       second: { alongMm: secondStep.expectedStart[alongKey], triggerPositionMm: touchValue(touches, 'angleSecond') },
     })
@@ -243,17 +254,17 @@ function featureProbeResult(
     xPositiveMm: touchValue(touches, 'xPositive'),
     yNegativeMm: touchValue(touches, 'yNegative'),
     yPositiveMm: touchValue(touches, 'yPositive'),
-    tipRadiusMm: params.tipRadius,
+    tipRadiusMm: radii.x,
   }
-  const result = routineId === 'bore' || routineId === 'rectPocket'
-    ? calculateBoreCenter(input)
-    : calculateBossCenter(input)
+  const calculate = routineId === 'bore' || routineId === 'rectPocket' ? calculateBoreCenter : calculateBossCenter
+  const result = calculate(input)
+  const yResult = calculate({ ...input, tipRadiusMm: radii.y })
   return {
     display: {
       centerX: result.centerXmm,
       centerY: result.centerYmm,
       diameterX: result.diameterXmm,
-      diameterY: result.diameterYmm,
+      diameterY: yResult.diameterYmm,
       compensation: result.compensation,
     },
     offsets: { X: result.centerXmm, Y: result.centerYmm },
@@ -266,28 +277,30 @@ async function runProbe(
 ): Promise<PendantCommandOutcome> {
   const ready = requireMotionReady()
   if (ready) return ready
-  if (!command.params.pathClearConfirmed) return fail('Confirm that the probe and positioning path are clear before running.')
   const machine = controlMachine(useCamStore.getState())
   if (!machine) return fail('Select a machine before probing.')
   const state = useMachineControl.getState()
   if (!state.mpos) return fail('Wait for a live machine position before probing.')
-  const base = resolveProbeConfig(machine.probing, useMachineToolTable.getState().probeConfigFor(machine.id))
-  const searchTravel = command.params.searchTravel
-  if (!Number.isFinite(searchTravel) || searchTravel <= base.retract) {
-    return fail(`Probe search travel must be greater than the ${base.retract} mm retract.`)
-  }
-  if (!Number.isFinite(command.params.probeFeed) || command.params.probeFeed <= 0) return fail('Probe feed must be greater than zero.')
-  const clearance = Math.min(base.surfaceClearance, searchTravel / 2)
-  const config = resolveProbeConfig(null, {
-    ...base,
-    slowFeed: command.params.probeFeed,
-    fastFeed: Math.max(base.fastFeed, command.params.probeFeed),
-    maxTravel: searchTravel,
-    surfaceClearance: clearance,
-    overtravel: searchTravel - clearance,
-  })
-  probeResults.delete(context.clientId)
   if (command.routineId === 'zSurface') {
+    if (!command.params.pathClearConfirmed) return fail('Confirm that the probe and positioning path are clear before running.')
+    const base = resolveProbeConfig(machine.probing, useMachineToolTable.getState().probeConfigFor(machine.id))
+    const searchTravel = command.params.searchTravel
+    if (!Number.isFinite(searchTravel) || searchTravel <= base.retract) {
+      return fail(`Probe search travel must be greater than the ${base.retract} mm retract.`)
+    }
+    if (!Number.isFinite(command.params.probeFeed) || command.params.probeFeed <= 0) return fail('Probe feed must be greater than zero.')
+    const clearance = Math.min(base.surfaceClearance, searchTravel / 2)
+    const config = resolveProbeConfig(null, {
+      ...base,
+      slowFeed: command.params.probeFeed,
+      fastFeed: Math.max(base.fastFeed, command.params.probeFeed),
+      maxTravel: searchTravel,
+      surfaceClearance: clearance,
+      overtravel: searchTravel - clearance,
+    })
+    // A request refused above never starts a cycle and keeps this phone's
+    // previous measurement for Apply zero; only a started cycle replaces it.
+    probeResults.delete(context.clientId)
     context.emit('probe_progress', { stepIndex: 0, totalSteps: 1, stepLabel: 'Probe Z surface', message: 'Probing Z surface...' })
     const cycle = await runZProbeCycle('measureTool', config)
     if (!cycle.ok || cycle.probedMachineZ === null) {
@@ -309,48 +322,81 @@ async function runProbe(
     })
     return { ok: true, data: stored.display }
   }
-  const envelope = currentResolvedMachineMotion().envelope
+  // WO-2809: screen session values are shared, including boss work Z0 and
+  // separate rectangular sizes. -1 on the existing numeric wire fields means
+  // the phone input is blank (inherit); an explicit phone input wins this run.
+  const probeCfg = resolveProbeConfig(machine.probing, useMachineToolTable.getState().byMachine[machine.id]?.probe)
   const kind = command.routineId === 'corner' ? 'insideCorner' : command.routineId
+  const values = probingSessionValues(machine.id)
+  const value = <T,>(key: string, fallback: T): T => key in values ? values[key] as T : fallback
+  const tableDia = state.activeTool === null ? null : useMachineToolTable.getState().byMachine[machine.id]?.table.tools.find((tool) => tool.tool === state.activeTool)?.dia ?? null
+  const tool = activeToolFromLibrary(state.activeTool, useCamStore.getState().toolLibrary, tableDia)
+  const diameter = tool && tool.diameter > 0 ? tool.diameter : tableDia !== null && tableDia > 0 ? tableDia : null
+  const phoneRadiusTyped = command.params.tipRadius !== -1
+  const typed = phoneRadiusTyped || value('tipRadiusTyped', false)
+  const ballRadius = phoneRadiusTyped ? command.params.tipRadius
+    : value('tipRadiusTyped', false) ? value('tipRadiusMm', 1.5)
+      : diameter !== null ? diameter / 2 : state.activeTool !== null ? 1.5 : value('tipRadiusMm', 1.5)
+  const sensing = probeSensingFor(machine.id, kind)
+  const senseRadiusXmm = sideCompensationRadiusMm(!typed && tool ? probeCalibratedRadius(tool, 'x') ?? ballRadius : ballRadius, sensing, probeCfg)
+  const senseRadiusYmm = sideCompensationRadiusMm(!typed && tool ? probeCalibratedRadius(tool, 'y') ?? ballRadius : ballRadius, sensing, probeCfg)
+  const senseRadiusMm = Math.max(senseRadiusXmm, senseRadiusYmm)
+  const circular = kind === 'bore' || kind === 'boss'
+  const ownSize = command.params.nominalSize !== -1
+  const sizeX = ownSize ? command.params.nominalSize : value(circular ? 'nominalDiameterMm' : 'rectSizeXmm', 25)
+  const sizeY = ownSize ? command.params.nominalSize : value(circular ? 'nominalDiameterMm' : 'nominalSizeYmm', 25)
+  const setup = {
+    startWithinMm: value('startDistanceMm', SCREEN_START_WITHIN_MM),
+    depthBelowTopMm: value('depthBelowTopMm', SCREEN_PROBING_DEPTH_MM),
+    topSearchMm: Math.min(value('topSearchMm', DEFAULT_TOP_SEARCH_MM), probeCfg.maxTravel),
+    clearanceMm: probeCfg.surfaceClearance,
+    topFromWorkZero: (kind === 'boss' || kind === 'rectBoss') && value<'touch' | 'workZero'>('bossTop', 'touch') === 'workZero',
+    nominalSizeXmm: sizeX,
+    nominalSizeYmm: sizeY,
+    angleSpacingMm: ownSize ? command.params.nominalSize : value('angleSpacingMm', 25),
+    cornerXDirection: value<'+' | '-'>('insideCornerXDirection', '-'),
+    cornerYDirection: value<'+' | '-'>('insideCornerYDirection', '-'),
+    angleAlongDirection: value<'+' | '-'>('angleAlongDirection', '+'),
+    tipRadiusXmm: senseRadiusXmm,
+    tipRadiusYmm: senseRadiusYmm,
+  }
+  // A non-confirmed request remains motionless. Return its resolved setup so
+  // the phone can draw the actual first step before the operator presses Run,
+  // without extending an unowned transport command/parser.
+  if (!command.params.pathClearConfirmed) return {
+    ok: false, error: 'Confirm that the probe and positioning path are clear before running.', data: setup,
+  }
+  const envelope = currentResolvedMachineMotion().envelope
   const planned = planFeatureProbeCycle({
     kind,
     start: state.mpos,
     envelope,
-    config,
-    tipRadiusMm: command.params.tipRadius,
-    nominalSizeXmm: command.params.nominalSize,
-    nominalSizeYmm: command.params.nominalSize,
+    config: probeCfg,
+    tipRadiusMm: senseRadiusMm,
+    nominalSizeXmm: sizeX,
+    nominalSizeYmm: sizeY,
     edgeAxis: command.params.edgeAxis,
     edgeDirection: command.params.edgeDirection,
-    cornerXDirection: '-',
-    cornerYDirection: '-',
+    cornerXDirection: setup.cornerXDirection,
+    cornerYDirection: setup.cornerYDirection,
     angleNominalAxis: command.params.edgeAxis,
     angleProbeDirection: command.params.edgeDirection,
-    angleAlongDirection: '+',
-    angleSpacingMm: command.params.nominalSize,
+    angleAlongDirection: setup.angleAlongDirection,
+    angleSpacingMm: setup.angleSpacingMm,
+    startDistanceMm: setup.startWithinMm,
+    depthBelowTopMm: setup.depthBelowTopMm,
+    topSearchMm: setup.topSearchMm,
+    topFromWorkZero: setup.topFromWorkZero,
     // WO-2035: a boss cross-over with the top unknown runs at the machine's
     // declared Safe Z.
     safeZMachineMm: machineSafeZValue(parkCarrierMachine(useCamStore.getState())),
-    // WO-2055: left unchanged here. The pendant's own screen and pictures
-    // (pendant/app/probe-diagrams.js) still tell the operator to start beside
-    // the face at probing depth; touching the "top" from there would find the
-    // table. Edge and Angle on the pendant keep touching from where it stands.
-    // WO-2056 (Outside corner from the top) does not reach the pendant: its
-    // only corner is 'corner', planned as an Inside corner above.
-    // WO-2057 (Inside corner, Bore, Rect pocket descend from work Z0 or a rim
-    // touch) does not reach it either: the pendant's screen still says start
-    // in the hole at probing depth, so its corner, bore and pocket keep
-    // touching from where the probe stands.
-    // WO-2058 (Boss and Rect boss start over the middle and cross at the
-    // touched top + clearance) does not reach it either: the pendant's screen
-    // still says start outside the X max face at probing depth, so its boss
-    // keeps the beside-the-face plan and WO-2035's cross-over at Safe Z above.
-    approachFromTop: false,
   })
   if (!planned.ok) return fail(planned.reason)
+  probeResults.delete(context.clientId)
   let touchIndex = 0
   const totalTouches = planned.plan.review.touchOrder.length
   context.emit('probe_progress', { stepIndex: 0, totalSteps: totalTouches, stepLabel: 'Preflight', message: planned.plan.summary })
-  const cycle = await runFeatureProbeCycle(planned.plan, config, true, (key, position) => {
+  const cycle = await runFeatureProbeCycle(planned.plan, probeCfg, true, (key, position) => {
     const spec = planned.plan.review.touchOrder[touchIndex]
     context.emit('probe_progress', {
       stepIndex: touchIndex,
@@ -370,7 +416,7 @@ async function runProbe(
     return fail(cycle.message)
   }
   try {
-    const stored = featureProbeResult(command, cycle.touches, planned)
+    const stored = featureProbeResult(command, cycle.touches, planned, { x: senseRadiusXmm, y: senseRadiusYmm }, { x: setup.cornerXDirection, y: setup.cornerYDirection })
     probeResults.set(context.clientId, stored)
     context.emit('probe_progress', {
       stepIndex: totalTouches - 1,

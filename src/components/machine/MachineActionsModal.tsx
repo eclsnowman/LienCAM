@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // MachineActionsModal - the ONE configuration surface for the machine action
 // abstraction (MACHINE-CONTROL stage 9; Q-58 boundary: settings-dense config
 // stays in a modal, the operating surface stays frictionless).
@@ -22,6 +26,7 @@ import { MacroEditor } from './MacroEditor'
 import { BuiltinCommandRows } from './definition/BuiltinCommandsSection'
 
 export function MachineActionsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useText('control-screens-not-probing')
   const machine = useCamStore(controlMachine)
   const machineId = machine?.id ?? 'default'
   const controllerResolution = resolveDeclaredController(machine)
@@ -67,30 +72,25 @@ export function MachineActionsModal({ open, onClose }: { open: boolean; onClose:
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <span className="modal-title">
-            Machine actions - {machine?.name ?? 'machine'} ({controller ? controllerDisplayName(controller) : 'undeclared'})
-          </span>
-          <button className="modal-close-btn" onClick={onClose} data-tooltip="Close" aria-label="Close">
+          <span className="modal-title">{catalogChildren(controlText('MachineActionsModal.text001', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: machine?.name ?? controlText('MachineActionsModal.machine'), value2: controller ? controllerDisplayName(controller) : controlText('MachineActionsModal.undeclared') })}</span>
+          <button className="modal-close-btn" onClick={onClose} data-tooltip={controlText('MachineActionsModal.text002')} aria-label={controlText('MachineActionsModal.text003')}>
             <X size={15} />
           </button>
         </div>
 
         <div className="control-actions-body">
-          <div className="control-actions-section-title">Built-in buttons</div>
+          <div className="control-actions-section-title">{controlText('MachineActionsModal.text004')}</div>
           {/* WO-2102: the same rows Definition > Built-in commands draws. */}
           <BuiltinCommandRows machineId={machineId} controller={controller} testIdPrefix="control-action" />
 
           {/* WO-1707: user buttons are macros now - "Custom buttons" opens
               the one macro editor instead of a second, inline one. */}
-          <div className="control-actions-section-title control-actions-custom-title">
-            Macros
-            <button
+          <div className="control-actions-section-title control-actions-custom-title">{controlText('MachineActionsModal.text005')}<button
               className="modal-btn modal-btn-ghost"
               data-testid="control-action-add"
               onClick={() => setMacroEditorOpen(true)}
             >
-              <Plus size={13} /> Add / edit macros
-            </button>
+              <Plus size={13} />{controlText('MachineActionsModal.text006')}</button>
           </div>
         </div>
       </div>

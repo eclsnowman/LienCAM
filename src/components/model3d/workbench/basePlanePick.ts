@@ -56,13 +56,13 @@ export function resolveBasePlanePick(
   bodyMeshes: readonly THREE.Mesh[],
 ): BasePlanePickResult {
   if (!finiteVec3(ray.origin) || !finiteVec3(ray.direction)) {
-    return { kind: 'miss', reason: 'non-finite-ray' }
+    return { kind: 'miss', reason: "non-finite-ray" }
   }
 
   const direction = new THREE.Vector3(ray.direction.x, ray.direction.y, ray.direction.z)
   const directionLengthSq = direction.lengthSq()
   if (!Number.isFinite(directionLengthSq) || directionLengthSq <= 0) {
-    return { kind: 'miss', reason: 'zero-direction' }
+    return { kind: 'miss', reason: "zero-direction" }
   }
 
   const raycaster = new THREE.Raycaster()
@@ -107,7 +107,7 @@ export function resolveBasePlanePick(
     }
   }
 
-  if (invalidHit) return { kind: 'miss', reason: 'invalid-hit' }
+  if (invalidHit) return { kind: 'miss', reason: "invalid-hit" }
 
   planes.sort((a, b) => a.distance - b.distance || a.nodeId.localeCompare(b.nodeId))
   const nearestPlane = planes[0]
@@ -117,7 +117,7 @@ export function resolveBasePlanePick(
   ) {
     return { kind: 'blocked', ...nearestBody }
   }
-  if (nearestPlane === undefined) return { kind: 'miss', reason: 'no-hit' }
+  if (nearestPlane === undefined) return { kind: 'miss', reason: "no-hit" }
 
   const tiedNodeIds = planes
     .filter((candidate) => Math.abs(candidate.distance - nearestPlane.distance) <= BASE_PLANE_PICK_TIE_EPSILON)

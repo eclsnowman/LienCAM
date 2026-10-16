@@ -21,7 +21,8 @@ If the Machine page cannot find UCCNC, use **Install folder > Browse**, then **B
 
 1. Set up your machine definition with its Controller set to UCCNC ([Set up your machine](Set-Up-Your-Machine)). A UCCNC `.pro` profile can be imported into the definition; a review shows every value before anything is written.
 2. Open the Control tab, stay on Main, choose the Machine bridge connection in the Machine panel, and press Connect.
-3. **Home the machine** before you jog or run anything.
+3. The first time you connect, and again after installing a new LienCAM version, the console says "The bridge holds no definition - nothing configured; apply one." and nothing moves. On the Machine page press **Apply to Machine**, check the values it reads back, then press **Restart bridge** and Connect again.
+4. **Home the machine** before you jog or run anything.
 
 To restart the connection, use Restart bridge on the Machine page. A restart loses the machine's position, so travel protection is not reliable until you home again: home immediately after every restart.
 

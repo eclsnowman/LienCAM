@@ -120,19 +120,47 @@ function findTopLevelFunctionDecl(sourceFile: ts.SourceFile, name: string, allFi
   return undefined
 }
 
-/** Assumes exactly one top-level `return <expr>` (true of every DagNodeInput-building helper this
- *  census resolves through) -- enough for constant-literal resolution, not a general CFG walk. */
+/** WO-2805 audit: prove one unconditional terminal return; never choose the first branch.
+ *  Multiple/bare/conditional returns stay unresolved rather than guessing at control flow. */
 function singleReturnExpr(fn: ts.FunctionLikeDeclaration): ts.Expression | undefined {
   if (!fn.body || !ts.isBlock(fn.body)) return undefined
-  let found: ts.Expression | undefined
+  const terminal = fn.body.statements[fn.body.statements.length - 1]
+  if (!terminal || !ts.isReturnStatement(terminal) || !terminal.expression) return undefined
+  let returnCount = 0
   const visit = (node: ts.Node): void => {
-    if (found) return
-    if (ts.isReturnStatement(node) && node.expression) { found = node.expression; return }
+    if (ts.isReturnStatement(node)) { returnCount++; return }
     if (ts.isFunctionLike(node) && node !== fn) return // don't descend into nested function bodies
     ts.forEachChild(node, visit)
   }
   visit(fn.body)
-  return found
+  return returnCount === 1 ? terminal.expression : undefined
+}
+
+/** WO-2805 follow-up (Rholand review 10-14): a variable whose value is changed after its declaration
+ *  (reassigned, a property written or deleted, or handed to Object.assign) is not proven by its
+ *  initializer - default-deny. */
+function isMutatedIn(scope: ts.Node, name: string): boolean {
+  let mutated = false
+  const rootIs = (n: ts.Expression): boolean => {
+    let cur: ts.Expression = n
+    while (ts.isPropertyAccessExpression(cur) || ts.isElementAccessExpression(cur)) cur = cur.expression
+    return ts.isIdentifier(cur) && cur.text === name
+  }
+  const visit = (node: ts.Node): void => {
+    if (mutated) return
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && rootIs(node.left)) mutated = true
+    else if (ts.isDeleteExpression(node) && rootIs(node.expression)) mutated = true
+    else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+        && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)
+        && rootIs(node.operand)) mutated = true
+    else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'Object'
+        && node.expression.name.text === 'assign' && node.arguments[0] && rootIs(node.arguments[0])) mutated = true
+    ts.forEachChild(node, visit)
+  }
+  visit(scope)
+  return mutated
 }
 
 type ValueResolution = { type: 'object'; node: ts.ObjectLiteralExpression }
@@ -179,6 +207,7 @@ function resolveValue(
       }
       visit(scope)
       if (foundInit !== undefined) {
+        if (isMutatedIn(scope, name)) return undefined
         const resolved = resolveValue(foundInit, enclosingFn, sourceFile, depth + 1, allFiles)
         if (!foundBindingName) return resolved
         if (resolved) {
@@ -300,11 +329,13 @@ function resolveKindLiteral(obj: ts.ObjectLiteralExpression, enclosingFn: ts.Fun
   return resolveStringLiteral(expr, enclosingFn, sourceFile, 0)
 }
 
-function payloadHasName(obj: ts.ObjectLiteralExpression): boolean {
+function payloadHasName(obj: ts.ObjectLiteralExpression, allFiles: readonly ts.SourceFile[]): boolean {
   const payloadProp = obj.properties.find((p) => ts.isPropertyAssignment(p) && propName(p) === 'payload')
   if (!payloadProp || !ts.isPropertyAssignment(payloadProp)) return false
-  const payload = unwrap(payloadProp.initializer)
-  if (!ts.isObjectLiteralExpression(payload)) return false
+  // WO-2796 shares the per-solid payload helper across both import routes.
+  // Resolve its returned object, retaining default-deny for unknown payloads.
+  const payload = resolveValue(payloadProp.initializer, findEnclosingFunction(obj), obj.getSourceFile(), 0, allFiles)?.node
+  if (!payload) return false
   return payload.properties.some((pp) => propName(pp) === 'name' || (ts.isShorthandPropertyAssignment(pp) && pp.name.text === 'name'))
 }
 
@@ -360,7 +391,7 @@ function censusFile(sf: ts.SourceFile, pathLabel: string, allFiles: readonly ts.
           if (kind === undefined) {
             unclassified.push({ file: pathLabel, line: line + 1, ctor, text: resolved.node.getText().slice(0, 150).replace(/\s+/g, ' ') })
           } else {
-            hits.push({ file: pathLabel, line: line + 1, ctor, kind, hasName: payloadHasName(resolved.node) })
+            hits.push({ file: pathLabel, line: line + 1, ctor, kind, hasName: payloadHasName(resolved.node, allFiles) })
           }
         }
       }
@@ -571,5 +602,67 @@ describe('WO CAM-13B-R1: census resolver mutation proofs (the exact false-negati
     expect(unclassified).toEqual([
       { file: 'synthetic.ts', line: 4, ctor: 'insertNode', text: 'this.input' },
     ])
+  })
+})
+
+// WO-2796 helper extraction must remain visible to the name-field census.
+describe('WO-2805 import payload helper tracing', () => {
+  it.each([
+    ['alternate unnamed return', 'if (body.named) return { name: body.name }; return { fileName: body.fileName }'],
+    ['conditional fallthrough', 'if (body.named) return { name: body.name }'],
+    ['bare alternate return', 'if (body.named) return { name: body.name }; return'],
+    ['multiple named returns', 'if (body.named) return { name: body.name }; return { name: "other" }'],
+    ['reassigned payload', 'let p = { name: body.name }; p = { fileName: body.fileName }; return p'],
+    ['deleted name', 'const p = { name: body.name, fileName: body.fileName }; delete p.name; return p'],
+    ['Object.assign over the payload', 'const p = { name: body.name }; Object.assign(p, { name: undefined }); return p'],
+  ])('default-denies an uncertain payload helper: %s', (_label, body) => {
+    const sf = ts.createSourceFile('synthetic.ts', `
+      function sharedPayload(body) { ${body} }
+      dag.insertNode({ id: 'IMP1', kind: 'import', payload: sharedPayload({ named: false, fileName: 'part.step' }) })
+    `, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const result = censusFile(sf, 'synthetic.ts', [sf])
+    expect(result.unclassified).toEqual([]) // node kind is known; its name proof is missing
+    expect(result.hits).toHaveLength(1)
+    expect(result.hits[0].hasName).toBe(false)
+  })
+
+  it('flags a helper with alternate node-input returns as unclassified', () => {
+    const sf = ts.createSourceFile('synthetic.ts', `
+      function sharedInput(named) {
+        if (named) return { id: 'IMP1', kind: 'import', payload: { name: 'part' } }
+        return { id: 'IMP2', kind: 'import', payload: {} }
+      }
+      dag.insertNode(sharedInput(false))
+    `, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const result = censusFile(sf, 'synthetic.ts', [sf])
+    expect(result.hits).toEqual([])
+    expect(result.unclassified).toEqual([
+      { file: 'synthetic.ts', line: 6, ctor: 'insertNode', text: 'sharedInput(false)' },
+    ])
+  })
+
+  it('ignores nested function returns when proving one unconditional payload return', () => {
+    const sf = ts.createSourceFile('synthetic.ts', `
+      function sharedPayload(body) {
+        function nested() { return {} }
+        return { name: body.name }
+      }
+      dag.insertNode({ id: 'IMP1', kind: 'import', payload: sharedPayload(body) })
+    `, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const result = censusFile(sf, 'synthetic.ts', [sf])
+    expect(result.unclassified).toEqual([])
+    expect(result.hits).toHaveLength(1)
+    expect(result.hits[0].hasName).toBe(true)
+  })
+
+  it.each([true, false])('detects name presence in a shared helper (hasName=%s)', (hasName) => {
+    const sf = ts.createSourceFile('synthetic.ts', `
+      function sharedPayload(body) { return { fileName: body.fileName${hasName ? ', name: body.name' : ''} } }
+      dag.insertNode({ id: 'IMP1', kind: 'import', payload: sharedPayload(body) })
+    `, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const result = censusFile(sf, 'synthetic.ts', [sf])
+    expect(result.unclassified).toEqual([])
+    expect(result.hits).toHaveLength(1)
+    expect(result.hits[0].hasName).toBe(hasName)
   })
 })

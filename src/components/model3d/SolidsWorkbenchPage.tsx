@@ -1,4 +1,9 @@
+import { readableInternalIds } from '../../lib/operatorLabels'
+import { MoveHoleEntry, parseHoleMove } from './dialogs/MoveHoleEntry'
+import { useText, textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { ReferenceImagePlacement } from './referenceImage/ReferenceImagePlacement'
+import { dressUpDeadClickLine, editableImportedChamfer, editableImportedFillet, importedChamferDistance } from './dressUpDeadClick'
 import type { ImagePlacement } from '../../referenceImage/place'
 import { ReferenceImageCalibration } from './referenceImage/ReferenceImageCalibration'
 import { fileDataUrl } from '../../referenceImage/imageData'
@@ -59,6 +64,7 @@ import {
   RecordingElementMap,
 } from '../../doc/documentHolder'
 import type { PendingDocumentSeedLease } from '../../doc/documentHolder'
+import { importedStepBodyPayload, importedStepSolidName } from '../../doc/promoteImportedStepModel'
 import type { DocumentSaveInput, LoadedDocument } from '../../doc/persist'
 import * as THREE from 'three'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
@@ -101,7 +107,7 @@ import type {
   SweepRequest,
   Vec3,
 } from '../../geom/geom-service'
-import type { HoleDepthEditRequest, ReliefEditRequest } from '../../geom/worker/geom-engine'
+import type { HoleDepthEditRequest, HoleStepDiameterEditRequest, ReliefEditRequest } from '../../geom/worker/geom-engine'
 import {
   DEFAULT_EDGE_HIGHLIGHT_COLORS,
   DEFAULT_HIGHLIGHT_COLORS,
@@ -167,6 +173,7 @@ import {
   isFolderSuppressed,
   isGenesisNodeId,
   paramNodeId,
+  paramNameFromNodeId,
   parseStableId,
   vertexId,
   DagCycleError,
@@ -245,7 +252,7 @@ import {
 } from '../../lib/sketch/projectLink'
 import { WorkbenchConfirmBar } from './workbench/WorkbenchConfirmBar'
 import { edgeIdCollisionMessage } from './measure/edgeIdCollisions'
-import { useCamStore } from '../../store'
+import { useCamStore, sameModelBodyShape } from '../../store'
 import { useModelSelectionBridge } from '../../store/modelSelectionBridge'
 import type { BodyResolution } from '../../lib/cam/modelReferenceResolution'
 import { referenceStableIds } from '../../lib/cam/modelReferenceResolution'
@@ -318,6 +325,7 @@ import { cacheStep, loadCachedStep, removeCachedStep } from '../../lib/stepCache
 // store's wrap action validated up front.
 import { loadCachedSTL } from '../../lib/stlCache'
 import { exportBinaryStl, importStl } from '../../mesh/stl'
+import { stepFromMesh } from '../../mesh/stepFromMesh'
 import { convertPrismaticMesh } from '../../mesh/prismatic'
 import { readStepDisplayAttributes } from '../../lib/import/stepAttributes'
 import { sketchSessionStore } from './workbench/sketchSessionStore'
@@ -348,6 +356,7 @@ import {
   type BooleanBodyPickRole,
   type BooleanBodySelection,
   type BooleanFeaturePayload,
+  type BooleanOp,
   type RequestBooleanBodyPick,
 } from './dialogs/BooleanDialog'
 import {
@@ -408,6 +417,7 @@ import {
   validateHoleDepth,
   formatMm,
   formatSignedMm,
+  sameHoleAxis,
   sameHoleLocation,
   type ResizeHoleFeaturePayload,
   type ResizeHoleListRow,
@@ -459,6 +469,8 @@ import {
   type StlModelFeature,
   type StlModelPick,
 } from './workbench/stlModelBody'
+import { ModelGeometryCache } from './workbench/modelGeometryCache'
+import { StlEditTree, stlEditRowId } from './tree/StlEditTree'
 import { useStlToolSession, type StlToolSession } from './workbench/useStlToolSession'
 import { describeFaceSnapshot, type BodyExtent } from './workbench/faceWords'
 // Form (SubD organic modeling) lives inside the Model screen (docs/design/FORM-ENVIRONMENT.md).
@@ -467,7 +479,7 @@ import { FormPanel } from './form/FormPanel'
 import { useFormStore } from '../../form/formStore'
 import { buildFormBody, isFormFeaturePayload } from '../../form/formBody'
 import { sketchPaths } from '../../form/pipe'
-import { FORM_FROM_BODY_TESS } from '../../form/fromMesh'
+import { FORM_FROM_BODY_TESS, meshTriFaces } from '../../form/fromMesh'
 import { Spline as FormIcon } from 'lucide-react'
 // Image relief (docs/design/IMAGE-RELIEF-PLAN.md) lives inside the Model screen too, the Form way.
 import { useReliefSession } from './relief/useReliefSession'
@@ -488,7 +500,7 @@ import {
   type StlHoleRequest,
   type StlSharpEdge,
 } from './workbench/stlFeatureEdits'
-import { primeBoringKernel, type BooleanBodyParameters } from '../../mesh/edit'
+import { describeMeshEdit, MOVE_HOLE_KIND, MOVE_FLAT_FACE_KIND, primeBoringKernel, type BooleanBodyParameters } from '../../mesh/edit'
 import { WorkbenchViewCube } from './workbench/WorkbenchViewCube'
 import {
   DEFAULT_SHADING_MODE,
@@ -568,7 +580,7 @@ const Z_AXIS = { origin: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: 1 } }
  *  compare by identity (`err === STALE_PREVIEW_PAINT`), never by message/
  *  stack -- correctness here never depends on that today (the catch decides
  *  purely by re-reading the generation). */
-const STALE_PREVIEW_PAINT = new Error('UI-5-R2: stale push/pull preview paint aborted')
+
 
 type MeshPair = BodyPresentationPair
 
@@ -631,7 +643,7 @@ function createAmbientGenesisGlyphMap(): AmbientGenesisGlyphMap {
 
 function basePlanePickReadout(nodeId: string): string {
   const kind = BASE_PLANE_BY_NODE_ID[nodeId]
-  return kind === undefined ? 'Unknown base plane' : `${BASE_PLANE_LABELS[kind]} plane`
+  return kind === undefined ? workbenchText('SolidsWorkbenchPage.unknownBasePlane') : workbenchText('SolidsWorkbenchPage.plane3', { value1: String(BASE_PLANE_LABELS[kind]) })
 }
 
 /** WO SKC-5: this page's sketch interaction state -- distinct from
@@ -1139,8 +1151,8 @@ interface ReplayWorld {
 /** WO UI-5: the toolbar "Push/Pull" toggle's own in-viewport interaction
  *  state, parallel to `SketchMode` above (a different in-viewport,
  *  click-to-pick + drag interaction, never a dialog):
- *   - 'arm'     : toolbar toggle is on, waiting for a planar-face click.
- *   - 'mounted' : a supported planar face was picked; the gizmo is attached
+ *   - 'arm'     : toolbar toggle is on, waiting for a supported face click.
+ *   - 'mounted' : a supported face was picked; the gizmo is attached
  *                 and a drag may be in progress. `baseHandle` is the body's
  *                 CURRENT COMMITTED kernel handle (pre-this-gesture) that
  *                 every preview call re-derives from -- never mutated by a
@@ -1204,7 +1216,7 @@ type PushPullMounted = Extract<PushPullMode, { kind: 'mounted' }>
  *  SolidsWorkbenchPage.pushPull.test.tsx. */
 function pushPullGestureFailureReason(err: unknown): string {
   const detail = err instanceof Error ? err.message : String(err)
-  return `Push/Pull could not finish: ${detail} -- the gesture was discarded.`
+  return workbenchText('SolidsWorkbenchPage.pushPullCouldNotFinishTheGestureWasDiscarded', { detail: String(detail) })
 }
 
 // WO UI-17 (criterion 2): the SKC-15B PACKAGE_SKETCH_TOOLS button strip
@@ -1315,6 +1327,7 @@ type DialogState =
   | { kind: 'defeature'; mode: 'edit'; ownerId: string; recognizeBodyId: string; verdicts: FeatureVerdict[]; featureId: string; initialFeatureKeys: string[] }
   | { kind: 'chamfer'; mode: 'create'; ownerId?: string; edgeIds: string[] }
   | { kind: 'chamfer'; mode: 'edit'; featureId: string; selectedEdgeIds: string[] }
+  | { kind: 'chamfer'; mode: 'imported-edit'; ownerId: string; featureKey: string; faceId: string; currentDistance: number }
   | { kind: 'shell'; mode: 'create'; ownerId?: string; faceIds: string[] }
   | { kind: 'shell'; mode: 'edit'; featureId: string; selectedFaceIds: string[] }
   | { kind: 'draft'; mode: 'create'; ownerId: string; faceIds: string[]; selectedFaceFrame?: DraftFaceFrame }
@@ -1357,21 +1370,21 @@ const STL_EDGE_PICK_FLOOR_MM = 0.25
 /** WO-2089: what the STL Hole's Apply guard answers once the STL edit is
  *  recorded - it stops HoleDialog committing a kernel feature too. The
  *  dialog is closing as it is returned, so it is never shown. */
-const STL_HOLE_RECORDED = 'The hole is drilled in the STL.'
+
 
 const DEFEATURE_PREVIEW_BODY_ID = '__defeature-preview__'
 const DEFEATURE_PREVIEW_SOURCE_BODY_ID = '__defeature-preview-source__'
-const STALE_DEFEATURE_PREVIEW_PAINT = Object.freeze(new Error('stale defeature preview paint'))
+
 const DRAFT_PREVIEW_BODY_ID = '__draft-preview__'
-const STALE_DRAFT_PREVIEW_PAINT = Object.freeze(new Error('stale draft preview paint'))
+
 const FILLET_PREVIEW_BODY_ID = '__fillet-preview__'
-const STALE_FILLET_PREVIEW_PAINT = Object.freeze(new Error('stale fillet preview paint'))
+
 const CHAMFER_PREVIEW_BODY_ID = '__chamfer-preview__'
-const STALE_CHAMFER_PREVIEW_PAINT = Object.freeze(new Error('stale chamfer preview paint'))
+
 const SHELL_PREVIEW_BODY_ID = '__shell-preview__'
-const STALE_SHELL_PREVIEW_PAINT = Object.freeze(new Error('stale shell preview paint'))
+
 const RESIZE_HOLE_PREVIEW_BODY_ID = '__resize-hole-preview__'
-const STALE_RESIZE_HOLE_PREVIEW_PAINT = Object.freeze(new Error('stale resize-hole preview paint'))
+
 
 interface DraftPreviewBaseline {
   readonly mode: 'create' | 'edit'
@@ -1465,6 +1478,51 @@ function importedFilletIntent(
   }
 }
 
+/** WO-2766: an imported chamfer chain re-driven at a new distance - the
+ * Chamfer counterpart of ImportedFilletFeaturePayload (remove the chain, then
+ * chamfer the recovered sharp edges). */
+interface ImportedChamferFeaturePayload extends ChamferFeaturePayload {
+  importedFeatureKey: string
+  importedOriginalDistance: number
+  importedFaceId: string
+}
+
+function importedChamferRequest(featureId: string, body: BodyHandle, payload: ImportedChamferFeaturePayload): ChamferRequest & { importedFeatureKey: string } {
+  return {
+    featureId,
+    body,
+    edges: [payload.importedFaceId],
+    distance: payload.distance,
+    propagateTangent: true,
+    importedFeatureKey: payload.importedFeatureKey,
+  }
+}
+
+function isImportedChamferPayload(payload: ChamferFeaturePayload): payload is ImportedChamferFeaturePayload {
+  const candidate = payload as Partial<ImportedChamferFeaturePayload>
+  return typeof candidate.importedFeatureKey === 'string' &&
+    candidate.importedFeatureKey.length > 0 &&
+    typeof candidate.importedOriginalDistance === 'number' &&
+    Number.isFinite(candidate.importedOriginalDistance) &&
+    typeof candidate.importedFaceId === 'string' &&
+    candidate.importedFaceId.length > 0
+}
+
+function importedChamferIntent(
+  intent: ChamferPreviewIntent,
+  edit: { featureKey: string; originalDistance: number; faceId: string },
+): ChamferPreviewIntent {
+  return {
+    ...intent,
+    payload: {
+      ...intent.payload,
+      importedFeatureKey: edit.featureKey,
+      importedOriginalDistance: edit.originalDistance,
+      importedFaceId: edit.faceId,
+    } as ImportedChamferFeaturePayload,
+  }
+}
+
 // ---- WO-035 (UI-107 slice 2): Extrude on the shared FeaturePreviewSession.
 // First PROFILE-CONSUMING adapter (sketch profile + newBody/add/cut target) --
 // the template revolve/sweep/loft will reuse. Evaluation is a real-kernel
@@ -1502,7 +1560,7 @@ interface ExtrudePreviewCandidate {
 }
 
 const EXTRUDE_PREVIEW_BODY_ID = '__extrude-preview__'
-const STALE_EXTRUDE_PREVIEW_PAINT = Object.freeze(new Error('stale extrude preview paint'))
+
 
 // ---- WO-039 (UI-107 slice 3): Revolve on the shared FeaturePreviewSession.
 // Extrude's profile-consuming adapter template (WO-035, above) minus the
@@ -1534,7 +1592,7 @@ interface RevolvePreviewCandidate {
 }
 
 const REVOLVE_PREVIEW_BODY_ID = '__revolve-preview__'
-const STALE_REVOLVE_PREVIEW_PAINT = Object.freeze(new Error('stale revolve preview paint'))
+
 /** World-Z axis-highlight half-length -- generously past any workbench body
  *  (same fixed-extent spirit as the base-plane glyphs). */
 const REVOLVE_AXIS_HIGHLIGHT_SPAN = 500
@@ -1574,7 +1632,7 @@ interface HolePreviewCandidate {
 }
 
 const HOLE_PREVIEW_BODY_ID = '__hole-preview__'
-const STALE_HOLE_PREVIEW_PAINT = Object.freeze(new Error('stale hole preview paint'))
+
 /** Seed-point marker half-length: small enough to read as a point marker,
  *  large enough to be visible over the ghost at workbench scale. */
 const HOLE_SEED_HIGHLIGHT_SPAN = 6
@@ -1854,7 +1912,7 @@ type DressUpPickMode =
  *  dress-up's own branch narrows by dressUpPickMode.ownerId. */
 type ResizeHolePickMode =
   | { kind: 'none' }
-  | { kind: 'arm'; field?: 'depth' }
+  | { kind: 'arm'; field?: 'depth' | 'move' }
   | {
       kind: 'armed'
       ownerId: string
@@ -1862,7 +1920,10 @@ type ResizeHolePickMode =
       faceIds: StableId[]
       currentDiameter: number
       /** WO-2091: 'depth' = the entry edits the hole's depth, not its diameter. */
-      field?: 'depth'
+      field?: 'depth' | 'move'
+      /** WO-2762: the counterbore wall was picked - the entry edits that step
+       *  alone; currentDiameter/currentDepth are the counterbore's. */
+      step?: 'counterbore'
       /** WO-2091: the recognized depth (mm, from the entry opening) and whether
        *  the hole is through -- carried so the Depth/Diameter switch is instant. */
       currentDepth?: number
@@ -1881,6 +1942,7 @@ type ResizeHolePickMode =
        *  prefills the anchored entry's draft with what was last typed,
        *  instead of the live currentDiameter (which requires a different
        *  value to be valid, per validateResizeDiameter). */
+      editInitialMove?: string
       editInitialDiameter?: number
     }
 
@@ -1910,6 +1972,7 @@ interface HoleEditValues {
   newDiameter: number
   delta: number
   depth?: HoleDepthPayloadFields
+  move?: { holeEdit: 'move'; translation: [number,number,number] }
 }
 
 function holeDepthFields(payload: ResizeHoleFeaturePayload): HoleDepthPayloadFields | undefined {
@@ -1922,11 +1985,18 @@ function holeDepthFields(payload: ResizeHoleFeaturePayload): HoleDepthPayloadFie
 /** The one kernel request for a resizeHole node: a diameter delta, or (WO-2091)
  *  a depth change from the owner's recognized depth / a cut through. */
 function resizeHoleKernelRequest(featureId: string, body: BodyHandle, payload: ResizeHoleFeaturePayload): FaceEditRequest {
+  if (payload.holeEdit === 'move') return { featureId, body, featureKey: payload.featureKey, delta: 0, kind: 'holeMove', translation: payload.translation as [number,number,number] }
   const depth = holeDepthFields(payload)
-  if (depth === undefined) return { featureId, body, featureKey: payload.featureKey, delta: payload.delta, kind: 'holeDiameter' }
+  // WO-2762: a counterbore-step node edits that step alone.
+  const step = payload.holeStep === 'counterbore' ? { step: 'counterbore' as const } : {}
+  if (depth === undefined) {
+    if (step.step === undefined) return { featureId, body, featureKey: payload.featureKey, delta: payload.delta, kind: 'holeDiameter' }
+    const stepReq: HoleStepDiameterEditRequest = { featureId, body, featureKey: payload.featureKey, delta: payload.delta, kind: 'holeDiameter', step: step.step }
+    return stepReq as unknown as FaceEditRequest
+  }
   const req: HoleDepthEditRequest = depth.newDepth === 'through'
-    ? { featureId, body, featureKey: payload.featureKey, delta: 0, kind: 'holeDepth', through: true }
-    : { featureId, body, featureKey: payload.featureKey, delta: depth.newDepth - depth.currentDepth, kind: 'holeDepth' }
+    ? { featureId, body, featureKey: payload.featureKey, delta: 0, kind: 'holeDepth', through: true, ...step }
+    : { featureId, body, featureKey: payload.featureKey, delta: depth.newDepth - depth.currentDepth, kind: 'holeDepth', ...step }
   // The engine's editFeature takes HoleDepthEditRequest beside the service's FaceEditRequest.
   return req as unknown as FaceEditRequest
 }
@@ -1947,22 +2017,62 @@ function reliefKernelRequest(featureId: string, body: BodyHandle, faceId: string
   return req as unknown as FaceEditRequest
 }
 
+/** WO-2762: what the kernel's re-cut did beyond the step it names (a
+ *  counterbore that became the whole bore, a countersink a bore took in),
+ *  as the tail of the applied line; '' when nothing more happened. */
+function resizeHoleKernelNote(result: OpResult): string {
+  const notes = result.diagnostics.find((d) => d.code === 'OK' && d.params !== undefined)?.params ?? {}
+  const parts: string[] = []
+  if (notes.oneBoreDiameter !== undefined) {
+    parts.push(notes.oneBoreDepth === 'through'
+      ? workbenchText('SolidsWorkbenchPage.holeNowOneBoreThrough', { diameter: String(notes.oneBoreDiameter) })
+      : workbenchText('SolidsWorkbenchPage.holeNowOneBoreDeep', { diameter: String(notes.oneBoreDiameter), depth: String(notes.oneBoreDepth) }))
+  }
+  if (notes.narrowerThanPilot !== undefined) parts.push(workbenchText('SolidsWorkbenchPage.counterboreNarrowerThanPilot', { pilot: String(notes.narrowerThanPilot) }))
+  if (notes.countersinkTakenIn !== undefined) parts.push(workbenchText('SolidsWorkbenchPage.boreTakesInCountersink', { top: String(notes.countersinkTakenIn) }))
+  return parts.map((part) => `; ${part}`).join('')
+}
+
 function resizeHoleAppliedText(payload: ResizeHoleFeaturePayload): string {
+  if (payload.holeEdit === 'move') return workbenchText('MoveHoleEntry.applied', { translation: (payload.translation as number[]).join(', ') })
   const depth = holeDepthFields(payload)
-  if (depth === undefined) return `${payload.currentDiameter} mm -> ${payload.newDiameter} mm`
-  const was = depth.currentThrough ? 'through' : `${depth.currentDepth} mm deep`
-  return `${was} -> ${depth.newDepth === 'through' ? 'through' : `${depth.newDepth} mm deep`}`
+  if (depth === undefined && payload.holeStep === 'counterbore') return workbenchText('SolidsWorkbenchPage.counterboreMmMm', { currentDiameter: String(payload.currentDiameter), newDiameter: String(payload.newDiameter) })
+  if (depth === undefined) return workbenchText('SolidsWorkbenchPage.mmMm', { currentDiameter: String(payload.currentDiameter), newDiameter: String(payload.newDiameter) })
+  const was = depth.currentThrough ? 'through' : workbenchText('SolidsWorkbenchPage.mmDeep', { currentDepth: String(depth.currentDepth) })
+  return `${was} -> ${depth.newDepth === 'through' ? 'through' : workbenchText('SolidsWorkbenchPage.mmDeep2', { newDepth: String(depth.newDepth) })}`
+}
+
+/** WO-2865: the Hole feature that cut the picked hole, read from its face ids
+ *  (`<featureId>:HOL:i<point>:<role>`, sweep-lineage.ts) - the owner is only
+ *  the body's latest feature, which named "Hole F5" when Hole F2 changed. A
+ *  hole made any other way (an import, an extrude cut) has no Hole feature, so
+ *  the line names the body as before. */
+export function resizedHoleLabel(dag: FeatureDag, faceIds: readonly StableId[]): string | undefined {
+  for (const faceId of faceIds) {
+    for (const match of faceId.matchAll(/(?:^|[(:∧,\s])([^\s:()∧,]+):HOL:i(\d+):/g)) {
+      const node = dag.getNode(match[1])
+      if (node?.kind !== 'feature' || node.payload.opType !== 'hole') continue
+      const points = Array.isArray(node.payload.points) ? node.payload.points.length : 1
+      const label = featureLabel(dag, match[1])
+      return points > 1
+        ? workbenchText('SolidsWorkbenchPage.holeOfPattern', { label, index: String(Number(match[2]) + 1), total: String(points) })
+        : label
+    }
+  }
+  return undefined
 }
 
 /** The preview lifecycle's short value: "8 mm" (diameter, as before), "8 mm depth", "through". */
 function holeEditShortText(payload: ResizeHoleFeaturePayload): string {
-  return holeDepthFields(payload) === undefined ? `${payload.newDiameter} mm` : holeEditValueText(payload)
+  if (payload.holeEdit === 'move') return resizeHoleAppliedText(payload)
+  return holeDepthFields(payload) === undefined ? workbenchText('SolidsWorkbenchPage.mm', { value1: String(payload.newDiameter) }) : holeEditValueText(payload)
 }
 
 function holeEditValueText(payload: ResizeHoleFeaturePayload): string {
+  if (payload.holeEdit === 'move') return resizeHoleAppliedText(payload)
   const depth = holeDepthFields(payload)
-  if (depth === undefined) return `${payload.newDiameter} mm diameter`
-  return depth.newDepth === 'through' ? 'through' : `${depth.newDepth} mm depth`
+  if (depth === undefined) return workbenchText('SolidsWorkbenchPage.mmDiameter', { newDiameter: String(payload.newDiameter) })
+  return depth.newDepth === 'through' ? 'through' : workbenchText('SolidsWorkbenchPage.mmDepth', { newDepth: String(depth.newDepth) })
 }
 
 /** The armed entry's draft, read for whichever field it edits. */
@@ -1970,6 +2080,10 @@ function validateArmedHoleDraft(
   armed: Extract<ResizeHolePickMode, { kind: 'armed' }>,
   draft: string,
 ): { ok: true; values: HoleEditValues } | { ok: false; reason: string } {
+  if (armed.field === 'move') {
+    const v = parseHoleMove(draft)
+    return v.ok ? { ok: true, values: { newDiameter: armed.currentDiameter, delta: 0, move: { holeEdit: 'move', translation: v.translation } } } : v
+  }
   if (armed.field === 'depth' && armed.currentDepth !== undefined) {
     const currentThrough = armed.currentThrough === true
     const v = validateHoleDepth(draft, armed.currentDepth, currentThrough)
@@ -1980,11 +2094,21 @@ function validateArmedHoleDraft(
   return v.ok ? { ok: true, values: { newDiameter: v.newDiameter, delta: v.delta } } : v
 }
 
-/** A picked hole's depth facts for the armed entry. */
-function holeDepthSelection(verdict: FeatureVerdict, field: 'depth' | undefined): { field?: 'depth'; currentDepth?: number; currentThrough?: boolean } {
-  const depth = verdict.params.depth
-  if (typeof depth !== 'number' || !Number.isFinite(depth) || depth <= 0) return {}
-  return { ...(field === 'depth' ? { field } : {}), currentDepth: depth, currentThrough: Number(verdict.params.openings) >= 2 }
+/** A picked hole's depth facts for the armed entry. WO-2762: on the
+ *  counterbore step, the counterbore's own depth (it never runs through). */
+function holeDepthSelection(verdict: FeatureVerdict, field: 'depth' | 'move' | undefined, step?: 'counterbore'): { field?: 'depth' | 'move'; currentDepth?: number; currentThrough?: boolean } {
+  const depth = step === 'counterbore' ? verdict.params.counterboreDepth : verdict.params.depth
+  if (typeof depth !== 'number' || !Number.isFinite(depth) || depth <= 0) return field === 'move' ? { field } : {}
+  return { ...(field !== undefined ? { field } : {}), currentDepth: depth, currentThrough: step !== 'counterbore' && Number(verdict.params.openings) >= 2 }
+}
+
+/** WO-2762: the hole step a face pick lands on - the counterbore when the
+ *  picked face is its wall - and that step's diameter. Undefined step = the
+ *  hole's pilot (`params.diameter`), as every pick read before. */
+function pickedHoleStep(verdict: FeatureVerdict, faceId: StableId): { step?: 'counterbore'; diameter: unknown } {
+  const counterbore = verdict.params.counterboreDiameter
+  if (verdict.counterboreFaceIds?.includes(faceId) === true && typeof counterbore === 'number') return { step: 'counterbore', diameter: counterbore }
+  return { diameter: verdict.params.diameter }
 }
 
 interface ResizeHolePreviewBaseline {
@@ -2014,24 +2138,35 @@ function dressUpEntityKind(feature: DressUpFeature): 'edge' | 'face' {
 }
 
 const TOOL_IN_USE_LABEL: Record<Exclude<DialogState['kind'], 'none'>, string> = {
-  'reference-image': 'Reference image',
-  'offset-plane': 'Offset plane', axis: 'Axis', 'picked-plane': 'Plane', 'point-datum': 'Point', extrude: 'Extrude', revolve: 'Revolve', boolean: 'Boolean',
-  fillet: 'Fillet', defeature: 'Defeature', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft',
-  sweep: 'Sweep', loft: 'Loft', hole: 'Hole', 'resize-hole': 'Resize hole',
-  'stl-hole': 'Hole', 'stl-chamfer': 'Chamfer', 'stl-shell': 'Shell', 'stl-draft': 'Draft',
+  get 'reference-image'() { return workbenchText('SolidsWorkbenchPage.referenceImage') },
+  get 'offset-plane'() { return workbenchText('SolidsWorkbenchPage.offsetPlane') }, get axis() { return workbenchText('SolidsWorkbenchPage.axis') }, get 'picked-plane'() { return workbenchText('SolidsWorkbenchPage.plane') }, get 'point-datum'() { return workbenchText('SolidsWorkbenchPage.point') }, get extrude() { return workbenchText('SolidsWorkbenchPage.extrude') }, get revolve() { return workbenchText('SolidsWorkbenchPage.revolve') }, get boolean() { return workbenchText('SolidsWorkbenchPage.boolean') },
+  get fillet() { return workbenchText('SolidsWorkbenchPage.fillet') }, get defeature() { return workbenchText('SolidsWorkbenchPage.defeature') }, get chamfer() { return workbenchText('SolidsWorkbenchPage.chamfer') }, get shell() { return workbenchText('SolidsWorkbenchPage.shell') }, get draft() { return workbenchText('SolidsWorkbenchPage.draft') },
+  get sweep() { return workbenchText('SolidsWorkbenchPage.sweep') }, get loft() { return workbenchText('SolidsWorkbenchPage.loft') }, get hole() { return workbenchText('SolidsWorkbenchPage.hole') }, get 'resize-hole'() { return workbenchText('SolidsWorkbenchPage.resizeHole') },
+  get 'stl-hole'() { return workbenchText('SolidsWorkbenchPage.hole') }, get 'stl-chamfer'() { return workbenchText('SolidsWorkbenchPage.chamfer') }, get 'stl-shell'() { return workbenchText('SolidsWorkbenchPage.shell') }, get 'stl-draft'() { return workbenchText('SolidsWorkbenchPage.draft') },
 }
 
 const DRESS_UP_PICK_LINE: Record<DressUpFeature, string> = {
-  fillet: 'Fillet: select edges in the viewport.',
-  chamfer: 'Chamfer: select edges in the viewport.',
-  shell: 'Shell: select faces to open in the viewport.',
-  draft: 'Draft: click a neutral face in the viewport to define the draft direction.',
-  hole: 'Hole: click a face on the body to place the hole.',
+  get fillet() { return workbenchText('SolidsWorkbenchPage.filletSelectEdgesInTheViewport') },
+  get chamfer() { return workbenchText('SolidsWorkbenchPage.chamferSelectEdgesInTheViewport') },
+  get shell() { return workbenchText('SolidsWorkbenchPage.shellSelectFacesToOpenInTheViewport') },
+  get draft() { return workbenchText('SolidsWorkbenchPage.draftClickANeutralFaceInTheViewportTo') },
+  get hole() { return workbenchText('SolidsWorkbenchPage.holeClickAFaceOnTheBodyToPlace') },
 }
 
 /** WO-2090: an STL Shell or Draft shape, or null when a picked face is no
  *  longer on the part (it was rebuilt under the open dialog) - that previews
  *  nothing until the face is picked again. */
+/** WO-2823: STL bytes (or a mesh) as the STEP file of the solid it bounds;
+ *  throws the converter's own sentence when the mesh bounds none. */
+function stlBytesAsStep(bytes: ArrayBuffer, name: string): ArrayBuffer {
+  return meshAsStep(importStl(bytes).mesh, name)
+}
+function meshAsStep(mesh: Parameters<typeof stepFromMesh>[0], name: string): ArrayBuffer {
+  const converted = stepFromMesh(mesh, name)
+  if (!converted.ok) throw new Error(converted.message)
+  return new TextEncoder().encode(converted.step).buffer as ArrayBuffer
+}
+
 function stlShapeOrNull(make: () => BooleanBodyParameters): BooleanBodyParameters | null {
   try {
     return make()
@@ -2061,20 +2196,21 @@ function toolInUseLine(
     case 'none': break
     // useStlToolSession.start writes these tools' own lines ("Pick features
     // to remove on ...", "Selected ... on ...").
-    case 'defeature': case 'resize-hole': case 'push-pull': case 'fillet': return { key: stlToolKind, line: null }
+    case 'move-hole': case 'defeature': case 'resize-hole': case 'push-pull': case 'fillet': case 'chamfer': return { key: stlToolKind, line: null }
     // WO-2089: STL Hole and Chamfer preview through the Boolean session; the
     // tool in use is still Hole or Chamfer (their dialog branch below).
     // WO-2090: so do STL Shell and Draft.
     case 'boolean':
       if (dialog.kind === 'stl-hole' || dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-shell' || dialog.kind === 'stl-draft') break
-      return { key: 'boolean', line: 'Boolean: set it in the panel, then Apply.' }
+      return { key: 'boolean', line: workbenchText('SolidsWorkbenchPage.booleanSetItInThePanelThenApply') }
   }
   if (resizeHolePickMode.kind !== 'none') {
+    if (resizeHolePickMode.field === 'move') return { key: 'move-hole', line: workbenchText('MoveHoleEntry.pick') }
     return resizeHolePickMode.field === 'depth'
-      ? { key: 'hole-depth', line: 'Hole depth: click a hole in the viewport to change its depth.' }
-      : { key: 'resize-hole', line: 'Resize hole: click a hole in the viewport to resize it.' }
+      ? { key: 'hole-depth', line: workbenchText('SolidsWorkbenchPage.holeDepthClickAHoleInTheViewportTo') }
+      : { key: 'resize-hole', line: workbenchText('SolidsWorkbenchPage.resizeHoleClickAHoleInTheViewportTo') }
   }
-  if (pushPullMode.kind !== 'none') return { key: 'push-pull', line: 'Push/Pull: click a planar face to push or pull it.' }
+  if (pushPullMode.kind !== 'none') return { key: 'push-pull', line: workbenchText('SolidsWorkbenchPage.pushPullClickAPlanarFaceToPushOr') }
   if (dressUpPickMode.kind !== 'none') return { key: dressUpPickMode.feature, line: DRESS_UP_PICK_LINE[dressUpPickMode.feature] }
   if (dialog.kind === 'none') return null
   // Reference image values commit immediately; this palette has no Apply action.
@@ -2087,16 +2223,19 @@ function toolInUseLine(
   if (dialog.kind === 'stl-shell') return { key: 'shell', line: null }
   if (dialog.kind === 'stl-draft') return { key: 'draft', line: null }
   const label = dialog.kind === 'offset-plane' && dialog.planeType !== undefined && dialog.planeType !== 'offset'
-    ? (dialog.planeType === 'midplane' ? 'Midplane' : 'Plane at angle')
+    ? (dialog.planeType === 'midplane' ? workbenchText('SolidsWorkbenchPage.midplane') : workbenchText('SolidsWorkbenchPage.planeAtAngle'))
     : TOOL_IN_USE_LABEL[dialog.kind]
-  if (dialog.kind === 'resize-hole') return { key: 'resize-hole', line: 'Resize hole: pick a hole from the list.' }
+  if (dialog.kind === 'resize-hole') return { key: 'resize-hole', line: workbenchText('SolidsWorkbenchPage.resizeHolePickAHoleFromTheList') }
   if ('mode' in dialog && dialog.mode === 'edit' && 'featureId' in dialog) {
-    return { key: `${dialog.kind}:edit:${dialog.featureId ?? ''}`, line: `Edit ${label.toLowerCase()}: change it in the panel, then Apply.` }
+    return { key: `${dialog.kind}:edit:${dialog.featureId ?? ''}`, line: workbenchText('SolidsWorkbenchPage.editChangeItInThePanelThenApply', { value1: String(label.toLowerCase()) }) }
   }
   if (dialog.kind === 'fillet' && dialog.mode === 'imported-edit') {
-    return { key: `fillet:imported-edit:${dialog.featureKey}`, line: 'Fillet: type the new radius.' }
+    return { key: `fillet:imported-edit:${dialog.featureKey}`, line: workbenchText('SolidsWorkbenchPage.filletTypeTheNewRadius') }
   }
-  return { key: dialog.kind === 'offset-plane' && dialog.mode === 'create' ? `offset-plane:${dialog.planeType ?? 'offset'}` : dialog.kind, line: `${label}: set it in the panel, then Apply.` }
+  if (dialog.kind === 'chamfer' && dialog.mode === 'imported-edit') {
+    return { key: `chamfer:imported-edit:${dialog.featureKey}`, line: workbenchText('SolidsWorkbenchPage.chamferTypeTheNewDistance') }
+  }
+  return { key: dialog.kind === 'offset-plane' && dialog.mode === 'create' ? `offset-plane:${dialog.planeType ?? 'offset'}` : dialog.kind, line: workbenchText('SolidsWorkbenchPage.setItInThePanelThenApply', { label: String(label) }) }
 }
 
 /** GEO-23-R1 C1: the render-matrix DEV probe shape. This is NOT a production
@@ -2419,8 +2558,7 @@ const GEOMETRY_STATUS_TICK_AFTER_MS = 5_000
  *  happened and what actually helps -- a reload re-fetches index.html and with
  *  it a fresh set of asset hashes, which is what cures the documented
  *  stale-hash class. Deliberately NOT a Retry button: see the ruling above. */
-const GEOMETRY_INIT_EXHAUSTED_STATUS =
-  `The 3D geometry engine did not load after ${GEOMETRY_INIT_MAX_ATTEMPTS} attempts. Reloading the page usually fixes this.`
+
 
 /** WO-2121: how long a geometry call must have been running before the status
  *  strip offers Cancel. Display only -- nothing is ever timed out; the
@@ -2440,6 +2578,10 @@ export type AbandonableGeomClient = GeomClient & {
   abandon(reason: string): void
 }
 
+// Only terminate() rejects with this cancellation identity. Ordinary abandon errors
+// and kernel rejections (even with identical text) remain failure diagnostics.
+const geomClientCloseErrors = new WeakMap<GeomClient, Error>()
+
 /** Wrap `inner` so its waiting calls can be abandoned. With `gateUntilInit`,
  *  calls other than `init` wait for the first successful `init` (a restarted
  *  worker gets its replay queued before its kernel has loaded). Terminate
@@ -2458,6 +2600,16 @@ export function abandonableGeomClient(
   let initFailure: Error | null = null
   const ready = opts.gateUntilInit === true ? new Promise<void>((r) => { markReady = r }) : null
   const terminateOnce = (): Promise<void> => (terminated ??= Promise.resolve().then(() => inner.terminate()))
+  const closeError = new Error(workbenchText('SolidsWorkbenchPage.geometryClientClosed'))
+  const abandonWith = (error: Error): void => {
+    abandoned ??= error
+    const pending = [...waiting.values()]
+    waiting.clear()
+    for (const w of pending) w.reject(abandoned)
+    // Release suspended readiness continuations as well as their callers.
+    if (ready !== null) markReady()
+    void terminateOnce().catch(() => undefined)
+  }
   const own: Record<string, unknown> = {
     busySince: (): number | null => {
       let since: number | null = null
@@ -2465,20 +2617,14 @@ export function abandonableGeomClient(
       return since
     },
     abandon: (reason: string): void => {
-      abandoned ??= new Error(reason)
-      const pending = [...waiting.values()]
-      waiting.clear()
-      for (const w of pending) w.reject(abandoned)
-      // Release suspended readiness continuations as well as their callers.
-      if (ready !== null) markReady()
-      void terminateOnce().catch(() => undefined)
+      abandonWith(new Error(reason))
     },
     terminate: (): Promise<void> => {
-      if (ready !== null) (own.abandon as (reason: string) => void)('The geometry client was closed.')
+      if (ready !== null) abandonWith(closeError)
       return terminateOnce()
     },
   }
-  return new Proxy(inner, {
+  const proxy = new Proxy(inner, {
     get(target, prop, receiver) {
       if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(own, prop)) return own[prop]
       const value: unknown = Reflect.get(target, prop, receiver)
@@ -2502,7 +2648,7 @@ export function abandonableGeomClient(
             (e: unknown) => {
               if (isInit && ready !== null && abandoned === null) {
                 const reason = e instanceof Error ? e.message : String(e)
-                initFailure = new Error(`The 3D geometry engine did not load: ${reason}. Reload the page to try again.`, { cause: e })
+                initFailure = new Error(workbenchText('SolidsWorkbenchPage.geometryEngineDidNotLoad', { reason }), { cause: e })
                 markReady()
               }
               if (waiting.delete(id)) reject(e)
@@ -2512,6 +2658,8 @@ export function abandonableGeomClient(
       }
     },
   }) as AbandonableGeomClient
+  geomClientCloseErrors.set(proxy, closeError)
+  return proxy
 }
 
 /** WO-2121: Cancel for the geometry operation that is running, on the status
@@ -2519,6 +2667,7 @@ export function abandonableGeomClient(
  *  KERNEL_CANCEL_OFFER_AFTER_MS, so an ordinary 2-6 s operation barely shows
  *  it. Polls rather than re-rendering the page on every kernel call. */
 function KernelCancelControl({ busySince, onCancel }: { busySince: () => number | null; onCancel: () => void }): React.ReactElement | null {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [offered, setOffered] = useState(false)
   useEffect(() => {
     const tick = setInterval(() => {
@@ -2533,11 +2682,10 @@ function KernelCancelControl({ busySince, onCancel }: { busySince: () => number 
       type="button"
       className="btn-ghost-sm"
       data-testid="workbench-kernel-cancel"
-      title="Stop the geometry operation that is running and put the model back as it was"
+      title={workbenchText('SolidsWorkbenchPage.stopTheGeometryOperationThatIsRunningAndPut')}
       onClick={() => { setOffered(false); onCancel() }}
     >
-      Cancel operation
-    </button>
+      {workbenchText('SolidsWorkbenchPage.cancelOperation')}</button>
   )
 }
 
@@ -2638,13 +2786,13 @@ function formatPushPullDraftNumber(v: number): string {
  * accept mask. Reject malformed keys/measurements by name; in particular,
  * non-finite values must not sail through comparisons or labels silently. */
 function invalidDefeatureVerdictReason(verdict: FeatureVerdict): string | undefined {
-  if (verdict.featureKey.trim().length === 0) return 'a recognized feature has an empty featureKey'
+  if (verdict.featureKey.trim().length === 0) return workbenchText('SolidsWorkbenchPage.aRecognizedFeatureHasAnEmptyFeatureKey')
   for (const [name, value] of Object.entries(verdict.params)) {
     if (typeof value === 'number' && !Number.isFinite(value)) {
-      return `feature '${verdict.featureKey}' has a non-finite '${name}' measurement`
+      return workbenchText('SolidsWorkbenchPage.featureHasANonFiniteMeasurement', { featureKey: String(verdict.featureKey), name: String(name) })
     }
     if (typeof value !== 'number' && typeof value !== 'string') {
-      return `feature '${verdict.featureKey}' has an unreadable '${name}' measurement`
+      return workbenchText('SolidsWorkbenchPage.featureHasAnUnreadableMeasurement', { featureKey: String(verdict.featureKey), name: String(name) })
     }
   }
   return undefined
@@ -2654,17 +2802,16 @@ function invalidDefeatureVerdictReason(verdict: FeatureVerdict): string | undefi
  *  face/edge + owning body" (the WO's own wording) -- shared by the three armed-pick-path hint bars
  *  below (push-pull/dress-up/sketch-on-face) since it is the exact same shape (kind + owning body
  *  label) regardless of which mode is armed. */
-function pickHoverReadoutText(info: { kind: 'face' | 'edge'; id: StableId; ownerId: string } | null, dag: FeatureDag): string | null {
-  if (info === null) return null
-  return `${info.kind === 'face' ? 'Face' : 'Edge'} ${info.id} on ${featureLabel(dag, info.ownerId)}`
+function faceDisplayWords(snapshot: ElementGeometrySnapshot | undefined): string {
+  return snapshot === undefined ? workbenchText('SolidsWorkbenchPage.pickedFace') : describeFaceSnapshot(snapshot)
 }
 
-/** WO-2120: an imported face's id is the file's own face number
- *  ("IMP1:step:face#0") and means nothing to the operator. */
-const IMPORTED_FACE_ID = /:(?:step|stl|iges):face#\d+$/
+function pickHoverReadoutText(info: { kind: 'face' | 'edge'; id: StableId; ownerId: string } | null, dag: FeatureDag): string | null {
+  if (info === null) return null
+  return workbenchText('SolidsWorkbenchPage.on2', { value1: String(info.kind === 'face' ? workbenchText('SolidsWorkbenchPage.face2') : workbenchText('SolidsWorkbenchPage.edge')), value3: String(featureLabel(dag, info.ownerId)) })
+}
 
-/** WO-2120: the command cards' hover readout. An imported face is named in
- *  words ("Top face on Part 1"); every other pick reads as before. */
+/** Command-card faces use measured surface words; edges use their owning body. */
 function pickHoverCardText(
   info: { kind: 'face' | 'edge'; id: StableId; ownerId: string } | null,
   dag: FeatureDag,
@@ -2672,10 +2819,10 @@ function pickHoverCardText(
   extentOf: (ownerId: string) => BodyExtent | undefined,
 ): string | undefined {
   if (info === null) return undefined
-  if (info.kind === 'face' && IMPORTED_FACE_ID.test(info.id)) {
+  if (info.kind === 'face') {
     const snapshot = snapshotOf(info.id)
-    const words = snapshot === undefined ? 'picked face' : describeFaceSnapshot(snapshot, extentOf(info.ownerId))
-    return `${upperFirst(words)} on ${featureLabel(dag, info.ownerId)}`
+    const words = snapshot === undefined ? workbenchText('SolidsWorkbenchPage.pickedFace') : describeFaceSnapshot(snapshot, extentOf(info.ownerId))
+    return workbenchText('SolidsWorkbenchPage.on', { value1: String(upperFirst(words)), value2: String(featureLabel(dag, info.ownerId)) })
   }
   return pickHoverReadoutText(info, dag) ?? undefined
 }
@@ -2794,7 +2941,7 @@ function constructionPlaneOf(value: OffsetPlaneDialogValue): { definition: Const
   }
 }
 
-const CONSTRUCTION_PLANE_WORD: Record<ConstructionPlaneType, string> = { offset: 'Offset Plane', midplane: 'Midplane', angle: 'Plane at angle' }
+const CONSTRUCTION_PLANE_WORD: Record<ConstructionPlaneType, string> = { get offset() { return workbenchText('SolidsWorkbenchPage.offsetPlane2') }, get midplane() { return workbenchText('SolidsWorkbenchPage.midplane') }, get angle() { return workbenchText('SolidsWorkbenchPage.planeAtAngle') } }
 
 /** WO-2222: a construction plane's consumes split into its parent planes and the axis it turns about
  *  (a FeatureDag keeps consumes sorted, so the axis is found by kind, never by position). */
@@ -2858,7 +3005,7 @@ function nextPointDatumId(dag: FeatureDag): string {
  *  planes and every construction plane), or a clicked flat face when `planeId` is ''. */
 function pointMeetingPlane(dag: FeatureDag, line: PickedLine, planeId: string | undefined, planeFace: PointPlaneFace | undefined): Outcome<PointPick> {
   if (planeId === undefined || planeId === '') {
-    if (planeFace === undefined) return { ok: false, message: 'Point: choose the plane the edge meets, or click a flat face.' }
+    if (planeFace === undefined) return { ok: false, message: workbenchText('SolidsWorkbenchPage.pointChooseThePlaneTheEdgeMeetsOrClick') }
     return pointWhereLineMeets(line, { kind: 'face', ...planeFace })
   }
   const base = basePlaneFrame(planeId)
@@ -2866,7 +3013,7 @@ function pointMeetingPlane(dag: FeatureDag, line: PickedLine, planeId: string | 
   const frame = isFinitePlaneFrame(base)
     ? base
     : node !== undefined && isOffsetPlaneDatumPayload(node.payload) && isFinitePlaneFrame(node.payload.lastGoodFrame) ? node.payload.lastGoodFrame : undefined
-  if (frame === undefined) return { ok: false, message: 'Point: that plane has not been built yet - choose another.' }
+  if (frame === undefined) return { ok: false, message: workbenchText('SolidsWorkbenchPage.pointThatPlaneHasNotBeenBuiltYetChoose') }
   return pointWhereLineMeets(line, { kind: 'datum', id: planeId, frame, label: featureLabel(dag, planeId) })
 }
 
@@ -2890,40 +3037,42 @@ function diagnosticsReason(diagnostics: Diag[]): string {
 /** WO-2093: what each code means in plain words, for a diagnostic whose params
  *  carry no plain reason of their own. */
 const PLAIN_DIAGNOSTIC_FALLBACK: Record<string, string> = {
-  KERNEL_OP_FAILED: 'the geometry engine could not build this shape',
-  INVALID_RESULT: 'the result would not be a valid solid',
-  FILLET_RADIUS_TOO_LARGE: 'the fillet does not fit on the picked edges',
-  CHAMFER_FAILED: 'the chamfer does not fit on the picked edges',
-  SHELL_FAILED: 'the shell could not be built on this body',
-  DRAFT_FAILED: 'the draft could not be built on the picked faces',
-  SEW_FAILED: 'the faces could not be joined into a closed solid',
-  SWEEP_FAILED: 'the sweep could not be built along this path',
-  LOFT_FAILED: 'the loft could not be built between these profiles',
-  HOLE_FAILED: 'the hole could not be cut there',
-  PATTERN_FAILED: 'the pattern could not be built',
-  SELF_INTERSECTION: 'the result would run into itself',
-  OPEN_PROFILE: 'the sketch profile is not closed',
-  REFERENCE_UNRESOLVED: 'the picked edge or face is no longer on the model - pick it again',
-  REFERENCE_FALLBACK: 'the picked edge or face moved, so the nearest match was used',
-  DOMAIN_MISMATCH: 'this tool does not work on this kind of body',
-  DEFEATURE_UNSUPPORTED: 'this feature cannot be removed',
-  CANCELLED: 'the change was cancelled',
-  UPSTREAM_FAILED: 'an earlier step in the model failed',
-  UPSTREAM_REMOVED: 'an earlier step this one uses was removed',
+  get KERNEL_OP_FAILED() { return workbenchText('SolidsWorkbenchPage.theGeometryEngineCouldNotBuildThisShape') },
+  get INVALID_RESULT() { return workbenchText('SolidsWorkbenchPage.theResultWouldNotBeAValidSolid') },
+  get FILLET_RADIUS_TOO_LARGE() { return workbenchText('SolidsWorkbenchPage.theFilletDoesNotFitOnThePickedEdges') },
+  get CHAMFER_FAILED() { return workbenchText('SolidsWorkbenchPage.theChamferDoesNotFitOnThePickedEdges') },
+  get SHELL_FAILED() { return workbenchText('SolidsWorkbenchPage.theShellCouldNotBeBuiltOnThisBody') },
+  get DRAFT_FAILED() { return workbenchText('SolidsWorkbenchPage.theDraftCouldNotBeBuiltOnThePicked') },
+  get SEW_FAILED() { return workbenchText('SolidsWorkbenchPage.theFacesCouldNotBeJoinedIntoAClosed') },
+  get SWEEP_FAILED() { return workbenchText('SolidsWorkbenchPage.theSweepCouldNotBeBuiltAlongThisPath') },
+  get LOFT_FAILED() { return workbenchText('SolidsWorkbenchPage.theLoftCouldNotBeBuiltBetweenTheseProfiles') },
+  get HOLE_FAILED() { return workbenchText('SolidsWorkbenchPage.theHoleCouldNotBeCutThere') },
+  get PATTERN_FAILED() { return workbenchText('SolidsWorkbenchPage.thePatternCouldNotBeBuilt') },
+  get SELF_INTERSECTION() { return workbenchText('SolidsWorkbenchPage.theResultWouldRunIntoItself') },
+  get OPEN_PROFILE() { return workbenchText('SolidsWorkbenchPage.theSketchProfileIsNotClosed') },
+  get REFERENCE_UNRESOLVED() { return workbenchText('SolidsWorkbenchPage.thePickedEdgeOrFaceIsNoLongerOn') },
+  get REFERENCE_FALLBACK() { return workbenchText('SolidsWorkbenchPage.thePickedEdgeOrFaceMovedSoTheNearest') },
+  get DOMAIN_MISMATCH() { return workbenchText('SolidsWorkbenchPage.thisToolDoesNotWorkOnThisKindOf') },
+  get DEFEATURE_UNSUPPORTED() { return workbenchText('SolidsWorkbenchPage.thisFeatureCannotBeRemoved') },
+  get CANCELLED() { return workbenchText('SolidsWorkbenchPage.theChangeWasCancelled') },
+  get UPSTREAM_FAILED() { return workbenchText('SolidsWorkbenchPage.anEarlierStepInTheModelFailed') },
+  get UPSTREAM_REMOVED() { return workbenchText('SolidsWorkbenchPage.anEarlierStepThisOneUsesWasRemoved') },
 }
 
 /** WO-2093: internal element ids ("IMP1:step:face#0", "(A∧B)" edge pairs,
  *  "F12:XTR:cap1") mean nothing to the operator -- each becomes "the picked
  *  edge" / "the picked face", and runs of them collapse. */
 function withoutInternalIds(text: string): string {
+  // WO-2882: WO-2093's own picked-edge/face wording first; readableInternalIds
+  // then names whatever it left, so its collapse rules still see the ids.
   let out = text.replace(/[^\s,;]*[A-Za-z][A-Za-z0-9_.-]*:[A-Za-z][^\s,;]*/g, (token) => {
     const core = token.replace(/[.)]+$/, '')
     const tail = token.slice(core.length).replace(/\)/g, '')
-    return (core.includes('∧') || core.includes('^') ? 'the picked edge' : 'the picked face') + tail
+    return (core.includes('∧') || core.includes('^') ? workbenchText('SolidsWorkbenchPage.thePickedEdge') : workbenchText('SolidsWorkbenchPage.thePickedFace')) + tail
   })
-  out = out.replace(/\bthe picked (edge|face)(?:, the picked \1)+/g, 'the picked $1s')
+  out = out.replace(/\bthe picked (edge|face)(?:, the picked \1)+/g, workbenchText('SolidsWorkbenchPage.thePicked1s'))
   out = out.replace(/\b(?:edges?|faces?|ids?) (the picked (?:edge|face)s?)/g, '$1')
-  return out
+  return readableInternalIds(out)
 }
 
 /** WO-2093: the one operator-facing sentence for a refusal -- what could not
@@ -2933,26 +3082,26 @@ function withoutInternalIds(text: string): string {
  *  console. */
 export function plainDiagnosticText(diagnostics: readonly { code: string; severity: string; params?: Record<string, string | number> }[]): string {
   const diag = diagnostics.find((d) => d.severity === 'error') ?? diagnostics.find((d) => d.severity === 'warning') ?? diagnostics[0]
-  if (diag === undefined) return 'the geometry engine did not say why'
+  if (diag === undefined) return workbenchText('SolidsWorkbenchPage.theGeometryEngineDidNotSayWhy')
   const params = diag.params ?? {}
   const edgeCount = typeof params.edges === 'string' && params.edges !== '' ? params.edges.split(', ').length : 1
-  const where = edgeCount === 1 ? 'the picked edge' : `the ${edgeCount} picked edges`
+  const where = edgeCount === 1 ? workbenchText('SolidsWorkbenchPage.thePickedEdge') : workbenchText('SolidsWorkbenchPage.thePickedEdges', { edgeCount: String(edgeCount) })
   // The answer leads: a narrow tool strip may cut the end of the sentence off.
   if (typeof params.largestRadius === 'number' && typeof params.radius === 'number') {
     return params.largestRadius > 0
-      ? `largest radius that fits: ${params.largestRadius} mm (${params.radius} mm is too big for ${where})`
-      : `no radius fits on ${where}, not even a small one`
+      ? workbenchText('SolidsWorkbenchPage.largestRadiusThatFitsMmMmIsTooBig', { largestRadius: String(params.largestRadius), radius: String(params.radius), where: String(where) })
+      : workbenchText('SolidsWorkbenchPage.noRadiusFitsOnNotEvenASmallOne', { where: String(where) })
   }
   if (typeof params.largestDistance === 'number' && typeof params.distance === 'number') {
     return params.largestDistance > 0
-      ? `largest chamfer that fits: ${params.largestDistance} mm (${params.distance} mm is too big for ${where})`
-      : `no chamfer fits on ${where}, not even a small one`
+      ? workbenchText('SolidsWorkbenchPage.largestChamferThatFitsMmMmIsTooBig', { largestDistance: String(params.largestDistance), distance: String(params.distance), where: String(where) })
+      : workbenchText('SolidsWorkbenchPage.noChamferFitsOnNotEvenASmallOne', { where: String(where) })
   }
   const reason = params.reason
   if (diag.code !== 'REFERENCE_UNRESOLVED' && typeof reason === 'string' && reason.trim() !== '') {
     return withoutInternalIds(reason.trim())
   }
-  return PLAIN_DIAGNOSTIC_FALLBACK[diag.code] ?? 'the geometry engine could not make this change'
+  return PLAIN_DIAGNOSTIC_FALLBACK[diag.code] ?? workbenchText('SolidsWorkbenchPage.theGeometryEngineCouldNotMakeThisChange')
 }
 
 /** WO-1716 audit fix (rule 11): an impossible resize-hole refusal must read
@@ -2965,7 +3114,7 @@ export function plainDiagnosticText(diagnostics: readonly { code: string; severi
  *  only kept out of the operator-facing message. */
 function resizeHoleRefusalReason(diagnostics: Diag[]): string {
   const diag = diagnostics.find((d) => d.severity === 'error') ?? diagnostics.find((d) => d.severity === 'warning') ?? diagnostics[0]
-  if (diag === undefined) return 'the geometry engine refused this resize without naming a reason'
+  if (diag === undefined) return workbenchText('SolidsWorkbenchPage.theGeometryEngineRefusedThisResizeWithoutNamingA')
   return plainDiagnosticText([diag])
 }
 
@@ -2979,6 +3128,38 @@ function upperFirst(text: string): string {
 
 function regenDiagnosticsReason(diagnostics: { code: string; severity: string; params?: Record<string, string | number> }[]): string {
   return plainDiagnosticText(diagnostics)
+}
+
+/** WO-2868 (sweep H2): a tree row's tooltip reads the same plain sentence the
+ *  console does, never the bare code. */
+function treeDiagnosticText(diagnostics: { code: string; severity: string; params?: Record<string, string | number> }[]): string {
+  return upperFirst(regenDiagnosticsReason(diagnostics))
+}
+
+/** WO-2868: a row that only failed because an earlier one did. Its reason is
+ *  the earlier row's, so rolling forward names that one, not every row after. */
+function failedOnlyUpstream(diagnostics: readonly { code: string }[]): boolean {
+  return diagnostics.length > 0 && diagnostics.every((d) => d.code === 'UPSTREAM_FAILED' || d.code === 'UPSTREAM_REMOVED')
+}
+
+/** WO-2865: a Shell refusal in shop words with what to try. The kernel's own
+ *  sentences ("shell kernel stopped while constructing inward offsets for 5
+ *  retained face(s)...") ran past the strip with no next step. Each kernel
+ *  case below is one of geom-engine.ts's SHELL_FAILED reasons; anything else
+ *  keeps the shared plain text. */
+export function shellRefusalReason(diagnostics: { code: string; severity: string; params?: Record<string, string | number> }[]): string {
+  const diag = diagnostics.find((d) => d.code === 'SHELL_FAILED')
+  const reason = typeof diag?.params?.reason === 'string' ? diag.params.reason : ''
+  const thickness = diag?.params?.thickness
+  if (diag === undefined || typeof thickness !== 'number') return regenDiagnosticsReason(diagnostics)
+  const mm = String(+thickness.toFixed(3))
+  if (reason.startsWith('shell kernel stopped')) {
+    const formOrder = reason.includes('Shell the form before that cut') ? workbenchText('SolidsWorkbenchPage.shellFormBeforeCut') : ''
+    return workbenchText('SolidsWorkbenchPage.shellWallsCouldNotOffset', { mm }) + formOrder
+  }
+  if (reason.includes('no meaningful hollow')) return workbenchText('SolidsWorkbenchPage.shellNoHollow', { mm })
+  if (reason.includes('could not trace')) return workbenchText('SolidsWorkbenchPage.shellUntraceableFaces', { mm })
+  return regenDiagnosticsReason(diagnostics)
 }
 
 function directConsumersOf(dag: FeatureDag, id: string): string[] {
@@ -3038,6 +3219,7 @@ function directConsumersOf(dag: FeatureDag, id: string): string[] {
  * re-render of this thin wrapper doesn't churn the holder's listener set.
  */
 export function SolidsWorkbenchPage(props: SolidsWorkbenchPageProps) {
+  useText('sketch-and-model-workbench')
   const modelItemId = props.modelItemId ?? LEGACY_MODEL_ITEM_ID
   const subscribe = useCallback(
     (listener: () => void) => subscribeDocumentGeneration(listener, modelItemId),
@@ -3058,6 +3240,20 @@ function SolidsWorkbenchPageDocument({
   embedded = false,
   modelItemId = LEGACY_MODEL_ITEM_ID,
 }: SolidsWorkbenchPageProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
+  const GEOMETRY_INIT_EXHAUSTED_STATUS =
+  workbenchText('SolidsWorkbenchPage.the3DGeometryEngineDidNotLoadAfterAttempts', { GEOMETRY_INIT_MAX_ATTEMPTS: String(GEOMETRY_INIT_MAX_ATTEMPTS) })
+  const STALE_HOLE_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleHolePreviewPaint')))
+  const STALE_REVOLVE_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleRevolvePreviewPaint')))
+  const STALE_EXTRUDE_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleExtrudePreviewPaint')))
+  const STALE_RESIZE_HOLE_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleResizeHolePreviewPaint')))
+  const STALE_SHELL_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleShellPreviewPaint')))
+  const STALE_CHAMFER_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleChamferPreviewPaint')))
+  const STALE_FILLET_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleFilletPreviewPaint')))
+  const STALE_DRAFT_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleDraftPreviewPaint')))
+  const STALE_DEFEATURE_PREVIEW_PAINT = Object.freeze(new Error(workbenchText('SolidsWorkbenchPage.staleDefeaturePreviewPaint')))
+  const STL_HOLE_RECORDED = workbenchText('SolidsWorkbenchPage.theHoleIsDrilledInTheSTL')
+  const STALE_PREVIEW_PAINT = new Error(workbenchText('SolidsWorkbenchPage.ui5R2StalePushPullPreviewPaintAborted'))
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   /**
@@ -3093,7 +3289,7 @@ function SolidsWorkbenchPageDocument({
     try {
       addConsoleEventRef.current?.({ severity, source: 'workbench', message })
     } catch (err) {
-      console.error(`SolidsWorkbenchPage: the console sink threw for a ${severity} notice ("${message}")`, err)
+      console.error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageTheConsoleSinkThrewForANotice', { severity: String(severity), message: String(message) }), err)
     }
   }, [])
 
@@ -3102,8 +3298,13 @@ function SolidsWorkbenchPageDocument({
    *  place of the running one (see handleKernelCancel). Null for a client that
    *  cannot be abandoned (a same-thread test client) and after unmount. */
   const kernelRestartRef = useRef<((reason: string) => { abandonOld: () => void; booted: Promise<boolean> } | null) | null>(null)
+  /** WO-2796: bumped by every kernel Cancel (handleKernelCancel) before it
+   *  rejects the waiting calls, so a step that awaits the kernel BEFORE it
+   *  changes the model (Import's solid-count probe) can tell the operator's
+   *  Cancel apart from a genuine kernel failure. */
+  const kernelCancelEpochRef = useRef(0)
   const importStepInputRef = useRef<HTMLInputElement>(null)
-  const cacheRef = useRef(new GeometryCache())
+  const cacheRef = useRef(new ModelGeometryCache())
   const meshesRef = useRef<Map<string, MeshPair>>(new Map())
   const bodyInteractionPresentationsRef = useRef<Map<string, BodyInteractionPresentation>>(new Map())
   const selectedBodyMaterialStatesRef = useRef(
@@ -3350,7 +3551,7 @@ function SolidsWorkbenchPageDocument({
   useEffect(() => {
     useModelSelectionBridge.getState().setModelSelection(selectedBodyRowId ?? selectedId, modelItemId)
   }, [selectedBodyRowId, selectedId, modelItemId])
-  const [status, setStatus] = useState('booting...')
+  const [status, setStatus] = useState<string>(workbenchText('SolidsWorkbenchPage.booting'))
   /** WO-091: true only once AUTOMATIC recovery is exhausted. Drives the status
    *  strip's danger colour; there is deliberately no control next to it. */
   const [geometryInitFailed, setGeometryInitFailed] = useState(false)
@@ -3676,7 +3877,7 @@ function SolidsWorkbenchPageDocument({
       const glyph = buildGenesisGlyph(id, 'ambient')
       // ADR-0003 / UI-81: a visible tree datum without its scene object is a
       // corrupt ownership state, never an acceptable best-effort omission.
-      if (glyph === null) throw new Error(`Visible datum '${id}' could not create its ambient scene glyph.`)
+      if (glyph === null) throw new Error(workbenchText('SolidsWorkbenchPage.visibleDatumCouldNotCreateItsAmbientSceneGlyph', { id: String(id) }))
       runtime.addObject(glyph)
       glyphs.push(glyph)
       if (isBasePlane) ambientGenesisGlyphsRef.current.set(id, glyph)
@@ -3723,8 +3924,11 @@ function SolidsWorkbenchPageDocument({
    *  verdict cache for the CURRENT dagVersion before it can auto-select the
    *  stored hole into 'armed' -- see handleEditResizeHole's own doc comment. */
   const [resizeHoleEditRequest, setResizeHoleEditRequest] = useState<
-    { featureId: string; ownerId: string; featureKey: string; initialDiameter: number; baseDiameter: number; depth?: HoleDepthPayloadFields } | null
+    { featureId: string; ownerId: string; featureKey: string; initialDiameter: number; baseDiameter: number; move?: string; depth?: HoleDepthPayloadFields; step?: 'counterbore' } | null
   >(null)
+  /** WO-2795: bumped by every resize-hole arm/disarm/selection so an Edit
+   *  resolving against its owner body (an await) never arms a stale request. */
+  const resizeHoleEditResolveRef = useRef(0)
   const [booleanBodyPickRole, setBooleanBodyPickRole] = useState<BooleanBodyPickRole | null>(null)
   const [booleanBodySelection, setBooleanBodySelection] = useState<BooleanBodySelection | null>(null)
   const [booleanBodyHoverId, setBooleanBodyHoverId] = useState<string | null>(null)
@@ -3775,7 +3979,7 @@ function SolidsWorkbenchPageDocument({
     setExtrudeTargetPickArmed(true)
     useCamStore.getState().addConsoleEvent({
       severity: 'info', source: 'workbench',
-      message: 'Pick a body for the extrude to combine into - click a body in the viewport.',
+      message: workbenchText('SolidsWorkbenchPage.pickABodyForTheExtrudeToCombineInto'),
     })
   }, [])
 
@@ -3805,10 +4009,10 @@ function SolidsWorkbenchPageDocument({
     useCamStore.getState().addConsoleEvent({
       severity: 'info', source: 'workbench',
       message: kind === 'face'
-        ? 'Pick an eligible planar face in the viewport or a plane in the model tree.'
+        ? workbenchText('SolidsWorkbenchPage.pickAnEligiblePlanarFaceInTheViewportOr')
         : kind === 'part'
-          ? 'Pick a live body in the viewport or model tree.'
-          : 'Pick a stable vertex in the viewport.',
+          ? workbenchText('SolidsWorkbenchPage.pickALiveBodyInTheViewportOrModel')
+          : workbenchText('SolidsWorkbenchPage.pickAStableVertexInTheViewport'),
     })
     bumpUi4Repaint()
   }, [bumpUi4Repaint, cancelExtrudeTargetPick])
@@ -3827,7 +4031,7 @@ function SolidsWorkbenchPageDocument({
   const [defeatureHoverKey, setDefeatureHoverKey] = useState<string | null>(null)
   const [defeaturePreviewFeedback, setDefeaturePreviewFeedback] = useState<DefeaturePreviewFeedback>({
     kind: 'idle',
-    message: 'Select a face to preview its healed removal.',
+    message: workbenchText('SolidsWorkbenchPage.selectAFaceToPreviewItsHealedRemoval'),
   })
   // Mirror of the mask for the synchronous pointer/console paths (a hover line
   // must name include-vs-exclude without waiting for a re-render).
@@ -4090,7 +4294,7 @@ function SolidsWorkbenchPageDocument({
         const included = defeatureSelectedKeysRef.current.has(featureKey)
         useCamStore.getState().addConsoleEvent({
           severity: 'info', source: 'workbench',
-          message: `${defeatureVerdictLabel(verdict)} - click to ${included ? 'exclude from' : 'include in'} removal.`,
+          message: workbenchText('SolidsWorkbenchPage.clickToRemoval', { value1: String(defeatureVerdictLabel(verdict)), value2: String(included ? workbenchText('SolidsWorkbenchPage.excludeFrom') : workbenchText('SolidsWorkbenchPage.includeIn')) }),
         })
       }
     }
@@ -4117,12 +4321,12 @@ function SolidsWorkbenchPageDocument({
     defeatureSelectedKeysRef.current = next
     setDefeatureSelectedKeys(next)
     setDefeaturePreviewFeedback(next.size === 0
-      ? { kind: 'idle', message: 'Select a face to preview its healed removal.' }
-      : { kind: 'building', message: `Building healed preview for ${next.size} selected face group(s)...` })
+      ? { kind: 'idle', message: workbenchText('SolidsWorkbenchPage.selectAFaceToPreviewItsHealedRemoval') }
+      : { kind: 'building', message: workbenchText('SolidsWorkbenchPage.buildingHealedPreviewForSelectedFaceGroupS', { size: String(next.size) }) })
     if (verdict !== undefined) {
       useCamStore.getState().addConsoleEvent({
         severity: 'info', source: 'workbench',
-        message: `${nowIncluded ? 'Included' : 'Excluded'} ${defeatureVerdictLabel(verdict)} ${nowIncluded ? 'in' : 'from'} the removal (${next.size} selected).`,
+        message: workbenchText('SolidsWorkbenchPage.theRemovalSelected', { value1: String(nowIncluded ? workbenchText('SolidsWorkbenchPage.included') : workbenchText('SolidsWorkbenchPage.excluded')), value2: String(defeatureVerdictLabel(verdict)), value3: String(nowIncluded ? 'in' : 'from'), size: String(next.size) }),
       })
     }
   }, [])
@@ -4229,7 +4433,7 @@ function SolidsWorkbenchPageDocument({
     useCamStore.getState().addConsoleEvent({
       severity: 'info',
       source: 'workbench',
-      message: 'Pick a plane or a flat face for the new sketch - click XY/XZ/YZ, a visible construction plane, or a flat face in the viewport.',
+      message: workbenchText('SolidsWorkbenchPage.pickAPlaneOrAFlatFaceForThe'),
     })
   }, [])
 
@@ -5024,7 +5228,7 @@ function SolidsWorkbenchPageDocument({
   const paintDraftPreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Draft preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.draftPreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5054,7 +5258,7 @@ function SolidsWorkbenchPageDocument({
   const paintFilletPreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Fillet preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.filletPreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5084,7 +5288,7 @@ function SolidsWorkbenchPageDocument({
   const paintChamferPreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Chamfer preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.chamferPreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5114,7 +5318,7 @@ function SolidsWorkbenchPageDocument({
   const paintShellPreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Shell preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.shellPreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5144,7 +5348,7 @@ function SolidsWorkbenchPageDocument({
   const paintResizeHolePreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Resize hole preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.resizeHolePreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5176,7 +5380,7 @@ function SolidsWorkbenchPageDocument({
   const paintExtrudePreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Extrude preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.extrudePreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5208,7 +5412,7 @@ function SolidsWorkbenchPageDocument({
   const paintRevolvePreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Revolve preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.revolvePreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5240,7 +5444,7 @@ function SolidsWorkbenchPageDocument({
   const paintHolePreviewGuarded = useCallback(
     async (handle: BodyHandle, isCurrent: () => boolean): Promise<void> => {
       const client = clientRef.current
-      if (client === null) throw new Error('Hole preview refused: geometry service is unavailable.')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.holePreviewRefusedGeometryServiceIsUnavailable'))
       const guardedClient: TessellatingClient = {
         tessellate: async (candidate, quality) => {
           const buffers = await client.tessellate(candidate, quality)
@@ -5305,7 +5509,7 @@ function SolidsWorkbenchPageDocument({
           ok: false,
           diagnostics: [{
             code: 'KERNEL_OP_FAILED', severity: 'error',
-            params: { reason: `node '${node.id}' carries a legacy faceOffset faceEdit '${strayFaceOffset.featureKey}' that was not promoted to a pushPull node (UI-80 migration gap)`, id: node.id },
+            params: { reason: workbenchText('SolidsWorkbenchPage.nodeCarriesALegacyFaceOffsetFaceEditThatWasNot', { id: String(node.id), featureKey: String(strayFaceOffset.featureKey) }), id: node.id },
           }],
         }
       }
@@ -6155,7 +6359,7 @@ function SolidsWorkbenchPageDocument({
       const frame = frameOf(payload.planeNodeId)
       if (!isFinitePlaneFrame(frame)) {
         dropProfile()
-        return [{ code: 'REFERENCE_UNRESOLVED', severity: 'warning', params: { sketch: nodeId, reason: 'the sketch plane has no resolved frame' } }]
+        return [{ code: 'REFERENCE_UNRESOLVED', severity: 'warning', params: { sketch: nodeId, reason: workbenchText('SolidsWorkbenchPage.theSketchPlaneHasNoResolvedFrame') } }]
       }
 
       // WO SKC-15C-R1 (M3): the test seam that lets a committed interleave open the stale window below.
@@ -6185,7 +6389,7 @@ function SolidsWorkbenchPageDocument({
         // REFUSE BY NAME (charter bar 2). `CANCELLED` is the existing DiagCode for "this computation
         // was superseded" (src/geom's DiagCode union is frozen; this is the member that fits). The
         // fresh recompute that the new session/regen pass will run owns the profile.
-        return [{ code: 'CANCELLED', severity: 'info', params: { sketch: nodeId, reason: 'sketch-or-plane-changed-under-extract' } }]
+        return [{ code: 'CANCELLED', severity: 'info', params: { sketch: nodeId, reason: "sketch-or-plane-changed-under-extract" } }]
       }
       if (!result.ok) {
         dropProfile()
@@ -6406,8 +6610,8 @@ function SolidsWorkbenchPageDocument({
         !Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(offset)
       ) {
         console.error(
-          `SolidsWorkbenchPage.drawSketchOutline: sketch node '${node.id}' has no renderable payload ` +
-            `(no 'sketch', no 'document', and no valid rectangle fields). Nothing drawn.`,
+          workbenchText('SolidsWorkbenchPage.solidsworkbenchpageDrawSketchOutlineSketchNodeHasNoRenderablePayload', { id: String(node.id) }) +
+            workbenchText('SolidsWorkbenchPage.noSketchNoDocumentAndNoValidRectangleFields'),
         )
         return
       }
@@ -6604,7 +6808,7 @@ function SolidsWorkbenchPageDocument({
           useCamStore.getState().addConsoleEvent({
             severity: 'warning',
             source: 'model',
-            message: `Mass Properties refused for ${featureLabel(dag, massBodyId)}: the body is not a closed solid (open shell) -- mass, volume and center of mass are unavailable.`,
+            message: workbenchText('SolidsWorkbenchPage.massPropertiesRefusedForTheBodyIsNotA', { value1: String(featureLabel(dag, massBodyId)) }),
           })
         }
         setMassBusy(false)
@@ -6705,7 +6909,7 @@ function SolidsWorkbenchPageDocument({
         if (hoveredId !== null) {
           useCamStore.getState().addConsoleEvent({
             severity: 'info', source: 'workbench',
-            message: `Pick a body for the extrude to combine into - hovering: ${featureLabel(dag, hoveredId)}.`,
+            message: workbenchText('SolidsWorkbenchPage.pickABodyForTheExtrudeToCombineInto2', { value1: String(featureLabel(dag, hoveredId)) }),
           })
         }
       }
@@ -6733,7 +6937,7 @@ function SolidsWorkbenchPageDocument({
       extrudeTargetHoverAnnouncedRef.current = null
       useCamStore.getState().addConsoleEvent({
         severity: 'success', source: 'workbench',
-        message: `Extrude target set to ${featureLabel(dag, hit.bodyId)}.`,
+        message: workbenchText('SolidsWorkbenchPage.extrudeTargetSetTo', { value1: String(featureLabel(dag, hit.bodyId)) }),
       })
       request.onPicked(hit.bodyId)
     },
@@ -6753,13 +6957,13 @@ function SolidsWorkbenchPageDocument({
       if (node?.degraded === true || isUnresolvedPlaneStatus(scheduler.statusOf(nodeId))) {
         return {
           eligible: false,
-          reason: `${featureLabel(dag, nodeId)} is unresolved and cannot be used as an extrude end target.`,
+          reason: workbenchText('SolidsWorkbenchPage.isUnresolvedAndCannotBeUsedAsAnExtrude', { value1: String(featureLabel(dag, nodeId)) }),
         }
       }
       if (extrudePlaneDef(dag, nodeId, scheduler.statusOf(nodeId)) === undefined) {
         return {
           eligible: false,
-          reason: `${featureLabel(dag, nodeId)} has no live plane definition and cannot be used as an extrude end target.`,
+          reason: workbenchText('SolidsWorkbenchPage.hasNoLivePlaneDefinitionAndCannotBeUsed', { value1: String(featureLabel(dag, nodeId)) }),
         }
       }
     } else if (!bodyHandlesRef.current.has(nodeId)) {
@@ -6772,7 +6976,7 @@ function SolidsWorkbenchPageDocument({
     )) {
       return {
         eligible: false,
-        reason: `${featureLabel(dag, nodeId)} is not upstream of ${featureLabel(dag, dialog.featureId ?? '')} and cannot be used as an extrude end target.`,
+        reason: workbenchText('SolidsWorkbenchPage.isNotUpstreamOfAndCannotBeUsedAs', { value1: String(featureLabel(dag, nodeId)), value2: String(featureLabel(dag, dialog.featureId ?? '')) }),
       }
     }
     return { eligible: true }
@@ -6791,7 +6995,7 @@ function SolidsWorkbenchPageDocument({
     if (request.kind === 'face' && hit.kind === 'face' && map.snapshotOf(hit.id)?.surfaceType === 'plane') {
       return {
         identity: { modelItemId, bodyFeatureId: hit.bodyId, subshape: { kind: 'face', stableId: hit.id } },
-        label: `${featureLabel(dag, hit.bodyId)} / face ${hit.id}`,
+        label: workbenchText('SolidsWorkbenchPage.on', { value1: upperFirst(faceDisplayWords(map.snapshotOf(hit.id))), value2: featureLabel(dag, hit.bodyId) }),
       }
     }
     if (request.kind === 'vertex' && hit.kind === 'vertex') {
@@ -6799,7 +7003,7 @@ function SolidsWorkbenchPageDocument({
       if (stableId === undefined) return null
       return {
         identity: { modelItemId, bodyFeatureId: hit.bodyId, subshape: { kind: 'vertex', stableId } },
-        label: `${featureLabel(dag, hit.bodyId)} / vertex ${stableId}`,
+        label: workbenchText('SolidsWorkbenchPage.vertex', { value1: String(featureLabel(dag, hit.bodyId)) }),
       }
     }
     return null
@@ -6844,7 +7048,7 @@ function SolidsWorkbenchPageDocument({
       const selection = extrudeEndSelectionFromHit(hit)
       if (selection === null) return
       request.onPicked(selection)
-      useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `Extrude end target set to ${selection.label}.` })
+      useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.extrudeEndTargetSetTo', { label: String(selection.label) }) })
       cancelExtrudeEndTargetPick()
     },
     [cancelExtrudeEndTargetPick, computeUi4Ray, dag, extrudeEndSelectionFromHit, extrudeEndTargetEligibility],
@@ -6868,14 +7072,14 @@ function SolidsWorkbenchPageDocument({
     if (request.kind === 'face' && eligibility.eligible) {
       selection = {
         identity: { modelItemId, planeFeatureId: nodeId },
-        label: `${featureLabel(dag, nodeId)} plane`,
+        label: workbenchText('SolidsWorkbenchPage.plane3', { value1: String(featureLabel(dag, nodeId)) }),
       }
     } else if (request.kind === 'part' && eligibility.eligible) {
       selection = { identity: { modelItemId, bodyFeatureId: nodeId }, label: featureLabel(dag, nodeId) }
     }
     if (selection === null) return false
     request.onPicked(selection)
-    useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `Extrude end target set to ${selection.label}.` })
+    useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.extrudeEndTargetSetTo', { label: String(selection.label) }) })
     cancelExtrudeEndTargetPick()
     return true
   }, [cancelExtrudeEndTargetPick, dag, extrudeEndTargetEligibility, modelItemId])
@@ -7180,7 +7384,7 @@ function SolidsWorkbenchPageDocument({
         useCamStore.getState().addConsoleEvent({
           severity: 'info',
           source: 'workbench',
-          message: `Armed for selection: ${readout} - click to start the sketch on it.`,
+          message: workbenchText('SolidsWorkbenchPage.armedForSelectionClickToStartTheSketchOn', { readout: String(readout) }),
         })
       }
       return
@@ -7196,14 +7400,14 @@ function SolidsWorkbenchPageDocument({
         setBasePlanePickFaceHover(true)
         pickHighlightSelectionRef.current.setHover(face.faceId)
         setPickHoverInfo({ kind: 'face', id: face.faceId, ownerId: face.ownerId })
-        setPlanePickStatus(`Face ${face.faceId} on ${ownerLabel} - click to sketch on it`)
+        setPlanePickStatus(workbenchText('SolidsWorkbenchPage.faceOnClickToSketchOnIt', { faceLabel: faceDisplayWords(map.snapshotOf(face.faceId)), ownerLabel: String(ownerLabel) }))
         const key = `face:${face.faceId}`
         if (lastHoverPlaneConsoleRef.current !== key) {
           lastHoverPlaneConsoleRef.current = key
           useCamStore.getState().addConsoleEvent({
             severity: 'info',
             source: 'workbench',
-            message: `Armed for selection: Face ${face.faceId} on ${ownerLabel} - click to sketch on it.`,
+            message: workbenchText('SolidsWorkbenchPage.armedForSelectionFaceOnClickToSketchOn', { faceLabel: faceDisplayWords(map.snapshotOf(face.faceId)), ownerLabel: String(ownerLabel) }),
           })
         }
         return
@@ -7216,12 +7420,12 @@ function SolidsWorkbenchPageDocument({
     setHoveredBasePlaneNodeId(null)
     setPlanePickStatus(
       result.kind === 'ambiguous'
-        ? 'Multiple planes under cursor - orbit for a clear pick.'
+        ? workbenchText('SolidsWorkbenchPage.multiplePlanesUnderCursorOrbitForAClearPick')
         : result.kind === 'blocked'
-          ? 'A body blocks that plane - orbit for a clear pick.'
+          ? workbenchText('SolidsWorkbenchPage.aBodyBlocksThatPlaneOrbitForAClear')
           : result.reason === 'no-hit'
             ? null
-            : 'Cannot pick a plane from the current view ray.',
+            : workbenchText('SolidsWorkbenchPage.cannotPickAPlaneFromTheCurrentViewRay'),
     )
   }, [resolveSketchPlanePickAt, resolveWorkbenchFaceHitAt, dag])
 
@@ -7612,7 +7816,7 @@ function SolidsWorkbenchPageDocument({
       return async (node: DagNodeSnapshot): Promise<OpResult> => {
       const client = clientRef.current
       if (client === null) {
-        return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: 'client not ready' } }] }
+        return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.clientNotReady') } }] }
       }
       // WO SKC-5: 'datum' (face-plane frame resolution) and 'sketch' (which
       // now covers BOTH the pre-existing rectangle-profile sketches -- whose
@@ -7641,7 +7845,7 @@ function SolidsWorkbenchPageDocument({
       if (node.kind === 'sketch' && typeof node.payload.document === 'object' && node.payload.document !== null) {
         const solveService = solveServiceRef.current
         if (solveService === null) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: 'sketch solver not ready' } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.sketchSolverNotReady') } }] }
         }
         return makeSketch3dExecutor(world.dag, solveService, world.scheduler, world.map)(node)
       }
@@ -7690,7 +7894,7 @@ function SolidsWorkbenchPageDocument({
             ok: false,
             diagnostics: [{
               code: 'KERNEL_OP_FAILED', severity: 'error',
-              params: { reason: `cached STEP bytes for "${fileName}" are missing from IndexedDB. Re-import the file.` },
+              params: { reason: workbenchText('SolidsWorkbenchPage.cachedSTEPBytesForAreMissingFromIndexedDBRe', { fileName: String(fileName) }) },
             }],
           }
         }
@@ -7704,7 +7908,7 @@ function SolidsWorkbenchPageDocument({
         if (imported.bodies.length === 0) {
           return {
             ok: false,
-            diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `"${fileName}" contains no solid bodies` } }],
+            diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.containsNoSolidBodies', { fileName: String(fileName) }) } }],
           }
         }
         // INT-IMPORT-EDIT stage 3: a multi-body STEP wrap mints ONE import node
@@ -7714,18 +7918,19 @@ function SolidsWorkbenchPageDocument({
         const bodyIndex = typeof node.payload.bodyIndex === 'number' ? node.payload.bodyIndex : undefined
         if (bodyIndex === undefined) {
           if (imported.bodies.length > 1) {
-            // WO INT-6A (disclosed scope limit): the workbench's DAG models one
-            // body per node (unlike Lab3DView's importStepFile, which mints a
-            // fresh bodyId per body in the file) -- a multi-body STEP with NO
-            // bodyIndex refuses BY NAME rather than silently keeping only
-            // bodies[0] and dropping the rest. Every minted handle is disposed
-            // here (none is adopted into bodyHandlesRef), so nothing leaks.
+            // WO INT-6A: the workbench's DAG models one body per node -- a
+            // multi-body STEP with NO bodyIndex refuses BY NAME rather than
+            // silently keeping only bodies[0] and dropping the rest. WO-2796:
+            // the Model screen's Import counts solids first and mints one
+            // indexed node per solid, so only a node minted without a count
+            // reaches here. Every minted handle is disposed here (none is
+            // adopted into bodyHandlesRef), so nothing leaks.
             await Promise.all(imported.bodies.map((b) => world.disposeHandle(b.handle)))
             return {
               ok: false,
               diagnostics: [{
                 code: 'KERNEL_OP_FAILED', severity: 'error',
-                params: { reason: `"${fileName}" contains ${imported.bodies.length} bodies -- the workbench imports one body per action; import each separately` },
+                params: { reason: workbenchText('SolidsWorkbenchPage.containsBodiesTheWorkbenchImportsOneBodyPerAction', { fileName: String(fileName), length: String(imported.bodies.length) }) },
               }],
             }
           }
@@ -7741,7 +7946,7 @@ function SolidsWorkbenchPageDocument({
             ok: false,
             diagnostics: [{
               code: 'KERNEL_OP_FAILED', severity: 'error',
-              params: { reason: `"${fileName}" solid ${bodyIndex + 1} is missing -- the file now contains ${imported.bodies.length} solid(s). Re-import the file.` },
+              params: { reason: workbenchText('SolidsWorkbenchPage.solidIsMissingTheFileNowContainsSolidS', { fileName: String(fileName), value2: String(bodyIndex + 1), length: String(imported.bodies.length) }) },
             }],
           }
         }
@@ -7774,7 +7979,7 @@ function SolidsWorkbenchPageDocument({
             ok: false,
             diagnostics: [{
               code: 'KERNEL_OP_FAILED', severity: 'error',
-              params: { reason: `cached STL bytes for "${fileName}" are missing from IndexedDB. Re-import the file.` },
+              params: { reason: workbenchText('SolidsWorkbenchPage.cachedSTLBytesForAreMissingFromIndexedDBRe', { fileName: String(fileName) }) },
             }],
           }
         }
@@ -7793,7 +7998,7 @@ function SolidsWorkbenchPageDocument({
             ok: false,
             diagnostics: built.diagnostics.length > 0
               ? built.diagnostics
-              : [{ code: 'SEW_FAILED', severity: 'error', params: { reason: `"${fileName}" could not be sewn into a closed solid.` } }],
+              : [{ code: 'SEW_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.couldNotBeSewnIntoAClosedSolid', { fileName: String(fileName) }) } }],
           }
         }
         // Owned BEFORE the fatal-diagnostic check so no failure path leaks the
@@ -7811,7 +8016,7 @@ function SolidsWorkbenchPageDocument({
       const opType = payload.opType
 
       if (!isWorkbenchBodyOpType(opType)) {
-        return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `unknown opType '${String(opType)}'` } }] }
+        return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.unknownOpType', { value1: String(String(opType)) }) } }] }
       }
 
       // WO UI-51A-R2 (audit MAJOR, CLASS CLOSURE): every branch below that
@@ -7892,7 +8097,7 @@ function SolidsWorkbenchPageDocument({
               severity: 'error',
               params: {
                 op: 'extrude',
-                reason: `profile selector ${profileSelection.code} for '${p.sketchId}': ${profileSelection.message}`,
+                reason: workbenchText('SolidsWorkbenchPage.profileSelectorFor', { code: String(profileSelection.code), sketchId: String(p.sketchId), message: String(profileSelection.message) }),
               },
             }],
           }
@@ -7982,7 +8187,7 @@ function SolidsWorkbenchPageDocument({
               severity: 'error',
               params: {
                 op: 'revolve',
-                reason: `profile selector ${profileSelection.code} for '${p.sketchId}': ${profileSelection.message}`,
+                reason: workbenchText('SolidsWorkbenchPage.profileSelectorFor', { code: String(profileSelection.code), sketchId: String(p.sketchId), message: String(profileSelection.message) }),
               },
             }],
           }
@@ -7995,7 +8200,7 @@ function SolidsWorkbenchPageDocument({
         if (p.axisDatumId !== undefined) {
           const line = axisLineOfNode(world.dag, p.axisDatumId)
           if (line === undefined) {
-            return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { op: 'revolve', reason: `axis '${p.axisDatumId}' has no resolved line` } }] }
+            return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { op: 'revolve', reason: workbenchText('SolidsWorkbenchPage.axisHasNoResolvedLine', { axisDatumId: String(p.axisDatumId) }) } }] }
           }
           axis = { origin: line.origin, dir: line.dir }
         }
@@ -8022,8 +8227,8 @@ function SolidsWorkbenchPageDocument({
         const target = lookupLiveBody(p.targetFeatureId)
         const tool = lookupLiveBody(p.toolFeatureId)
         if (target === undefined || tool === undefined) {
-          const missing = target === undefined ? `target '${p.targetFeatureId}'` : `tool '${p.toolFeatureId}'`
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `boolean ${p.boolOp} ${missing} has no live body (missing or already consumed)` } }] }
+          const missing = target === undefined ? workbenchText('SolidsWorkbenchPage.target', { targetFeatureId: String(p.targetFeatureId) }) : workbenchText('SolidsWorkbenchPage.tool', { toolFeatureId: String(p.toolFeatureId) })
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.booleanHasNoLiveBodyMissingOrAlreadyConsumed', { boolOp: String(p.boolOp), missing: String(missing) }) } }] }
         }
         const req: BooleanRequest = { featureId: node.id, op: p.boolOp, target, tools: [tool] }
         const booleanResult = await client.applyBoolean(req)
@@ -8045,7 +8250,7 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `fillet owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.filletOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(p.ownerId) }) } }] }
         }
         // Edge ids are persisted in the Fillet payload for document/edit
         // identity. The current ElementMap contract publishes face lineage
@@ -8074,15 +8279,15 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `defeature owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.defeatureOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(p.ownerId) }) } }] }
         }
         const result = await client.defeatureBatch({ featureId: node.id, body, featureKeys: p.featureKeys })
         const rejected = result.report?.items.filter((item) => !item.healed) ?? []
         const notFound = result.report?.notFound ?? []
         if (result.ok && result.body !== undefined && (rejected.length > 0 || notFound.length > 0)) {
           const reasons = [
-            ...rejected.map((item) => `${item.featureClass} '${item.featureKey}': ${item.reason ?? 'engine gave no refusal reason'}`),
-            ...notFound.map((key) => `feature '${key}' was not found during replay`),
+            ...rejected.map((item) => `${item.featureClass} '${item.featureKey}': ${item.reason ?? workbenchText('SolidsWorkbenchPage.engineGaveNoRefusalReason')}`),
+            ...notFound.map((key) => workbenchText('SolidsWorkbenchPage.featureWasNotFoundDuringReplay', { key: String(key) })),
           ]
           world.ownHandle(result.body)
           await world.disposeHandle(result.body)
@@ -8090,7 +8295,7 @@ function SolidsWorkbenchPageDocument({
             ok: false,
             diagnostics: [
               ...result.diagnostics,
-              { code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `defeature refused: ${reasons.join('; ')}` } },
+              { code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.defeatureRefused', { value1: String(reasons.join('; ')) }) } },
             ],
           }
         }
@@ -8110,9 +8315,11 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `chamfer owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.chamferOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(p.ownerId) }) } }] }
         }
-        const req: ChamferRequest = { featureId: node.id, body, edges: p.edges, distance: p.distance, propagateTangent: true }
+        const req: ChamferRequest = isImportedChamferPayload(p)
+          ? importedChamferRequest(node.id, body, p)
+          : { featureId: node.id, body, edges: p.edges, distance: p.distance, propagateTangent: true }
         const result = await client.applyChamfer(req)
         if (result.ok && result.body !== undefined) world.setFeatureVisible(p.ownerId, false)
         return finalizeBody(node, result)
@@ -8125,7 +8332,7 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `shell owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.shellOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(p.ownerId) }) } }] }
         }
         const req: ShellRequest = { featureId: node.id, body, removeFaces: p.removeFaces, thickness: p.thickness }
         const result = await client.applyShell(req)
@@ -8140,7 +8347,7 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `draft owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.draftOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(p.ownerId) }) } }] }
         }
         // New Draft nodes persist face refs; legacy nodes carry only raw
         // payload ids. Resolve the former through ElementMap and retain the
@@ -8150,7 +8357,7 @@ function SolidsWorkbenchPageDocument({
           if (stableRef === undefined) return { ok: true, id: rawId }
           const resolution = world.map.resolve(stableRef.id, stableRef.kind)
           if (resolution.status === 'lost' || resolution.boundTo.length === 0) {
-            return { ok: false, reason: `draft face '${rawId}' was lost after an upstream change` }
+            return { ok: false, reason: workbenchText('SolidsWorkbenchPage.draftFaceWasLostAfterAnUpstreamChange', { rawId: String(rawId) }) }
           }
           return { ok: true, id: resolution.boundTo[0] }
         }
@@ -8177,7 +8384,7 @@ function SolidsWorkbenchPageDocument({
               diagnostics: [{
                 code: 'KERNEL_OP_FAILED',
                 severity: 'error',
-                params: { reason: `draft neutral face '${p.faceFrameSourceId}' cannot also be a drafted face` },
+                params: { reason: workbenchText('SolidsWorkbenchPage.draftNeutralFaceCannotAlsoBeADraftedFace', { faceFrameSourceId: String(p.faceFrameSourceId) }) },
               }],
             }
           }
@@ -8188,7 +8395,7 @@ function SolidsWorkbenchPageDocument({
               diagnostics: [{
                 code: 'KERNEL_OP_FAILED',
                 severity: 'error',
-                params: { reason: `draft selected-face plane refused: ${resolved.reason}` },
+                params: { reason: workbenchText('SolidsWorkbenchPage.draftSelectedFacePlaneRefused', { reason: String(resolved.reason) }) },
               }],
             }
           }
@@ -8222,7 +8429,7 @@ function SolidsWorkbenchPageDocument({
               severity: 'error',
               params: {
                 op: 'sweep',
-                reason: `profile selector ${profileSelection.code} for '${p.sketchId}': ${profileSelection.message}`,
+                reason: workbenchText('SolidsWorkbenchPage.profileSelectorFor', { code: String(profileSelection.code), sketchId: String(p.sketchId), message: String(profileSelection.message) }),
               },
             }],
           }
@@ -8262,7 +8469,7 @@ function SolidsWorkbenchPageDocument({
                 severity: 'error',
                 params: {
                   op: 'loft',
-                  reason: `profile selector ${profileSelection.code} for '${p.sectionIds[i]}': ${profileSelection.message}`,
+                  reason: workbenchText('SolidsWorkbenchPage.profileSelectorFor2', { code: String(profileSelection.code), value2: String(p.sectionIds[i]), message: String(profileSelection.message) }),
                 },
               }],
             }
@@ -8295,7 +8502,7 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `hole owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.holeOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(p.ownerId) }) } }] }
         }
         const req: HoleRequest = { featureId: node.id, body, face: p.faceId, points: p.points, style: p.style, depth: p.depth }
         const result = await client.makeHole(req)
@@ -8322,11 +8529,11 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `push/pull owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.pushPullOwnerHasNoLiveBodyMissingOr', { ownerId: String(p.ownerId) }) } }] }
         }
         const ref = node.refs.find((r) => r.kind === 'single-face')
         if (ref === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `push/pull '${node.id}' has no single-face target ref` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.pushPullHasNoSingleFaceTargetRef', { id: String(node.id) }) } }] }
         }
         // AM1: resolve the stored face id to its current survivor. `lost` (the
         // face was deleted/merged-away by an upstream change with no lineage or
@@ -8336,10 +8543,10 @@ function SolidsWorkbenchPageDocument({
         // is refused explicitly.
         const res = world.map.resolve(ref.id, ref.kind)
         if (res.status === 'lost' || res.boundTo.length === 0) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `push/pull target face '${ref.id}' was lost after an upstream change (no lineage or geometric survivor) -- edit or delete this feature`, id: node.id } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.pushPullTargetFaceWasLostAfterAnUpstream', { id: String(ref.id) }), id: node.id } }] }
         }
         if (!Number.isFinite(p.delta)) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `push/pull '${node.id}' has a non-finite delta` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.pushPullHasANonFiniteDelta', { id: String(node.id) }) } }] }
         }
         const liveFaceId = res.boundTo[0]
         const result = await client.editFeature({ featureId: node.id, body, featureKey: liveFaceId, delta: p.delta, kind: 'faceOffset' })
@@ -8357,15 +8564,15 @@ function SolidsWorkbenchPageDocument({
         await world.disposePriorReplayHandle(node.id)
         const body = lookupLiveBody(p.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `resize-hole owner '${p.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.resizeHoleOwnerHasNoLiveBodyMissingOr', { ownerId: String(p.ownerId) }) } }] }
         }
         // WO-2091: a depth node keeps its diameter (delta 0); its depth is the edit.
         const depthEdit = holeDepthFields(p)
         if (
           typeof p.featureKey !== 'string' || p.featureKey.length === 0 ||
-          (depthEdit === undefined ? !Number.isFinite(p.delta) || Math.abs(p.delta) <= 1e-9 : !Number.isFinite(depthEdit.currentDepth))
+          (p.holeEdit === 'move' ? !Array.isArray(p.translation) || p.translation.length !== 3 || p.translation.some(v => typeof v !== 'number' || !Number.isFinite(v)) : depthEdit === undefined ? !Number.isFinite(p.delta) || Math.abs(p.delta) <= 1e-9 : !Number.isFinite(depthEdit.currentDepth))
         ) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `resize-hole '${node.id}' has an invalid feature key or diameter delta` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.resizeHoleHasAnInvalidFeatureKeyOrDiameter', { id: String(node.id) }) } }] }
         }
         const result = await client.editFeature(resizeHoleKernelRequest(node.id, body, p))
         if (result.ok && result.body !== undefined) world.setFeatureVisible(p.ownerId, false)
@@ -8377,7 +8584,7 @@ function SolidsWorkbenchPageDocument({
         // limit surface (the faceted one when that cannot be built).
         await world.disposePriorReplayHandle(node.id)
         if (!isFormFeaturePayload(payload)) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `form '${node.id}' has no cage in its payload` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.formHasNoCageInItsPayload', { id: String(node.id) }) } }] }
         }
         const built = await buildFormBody(client, payload, node.id)
         if (built.ok && built.body !== undefined) world.ownHandle(built.body)
@@ -8391,29 +8598,29 @@ function SolidsWorkbenchPageDocument({
         // owner's face (editFeature kind 'relief').
         await world.disposePriorReplayHandle(node.id)
         if (!isReliefFeaturePayload(payload)) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `relief '${node.id}' has no picture or settings in its payload` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.reliefHasNoPictureOrSettingsInItsPayload', { id: String(node.id) }) } }] }
         }
         const body = lookupLiveBody(payload.ownerId)
         if (body === undefined) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `relief owner '${payload.ownerId}' has no live body (missing or already consumed)` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.reliefOwnerHasNoLiveBodyMissingOrAlready', { ownerId: String(payload.ownerId) }) } }] }
         }
         const ref = node.refs.find((r) => r.kind === 'single-face')
         const res = ref === undefined ? undefined : world.map.resolve(ref.id, ref.kind)
         if (res === undefined || res.status === 'lost' || res.boundTo.length === 0) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `relief '${node.id}': its face was lost after an upstream change -- edit or delete this feature`, id: node.id } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.reliefItsFaceWasLostAfterAnUpstreamChange', { id: String(node.id) }), id: node.id } }] }
         }
         let fields: ReliefKernelFields
         try {
           fields = reliefKernelFields(await pictureOf(payload.image), payload)
         } catch (e) {
-          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `relief '${node.id}': its picture could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 120)})` } }] }
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.reliefItsPictureCouldNotBeRead', { id: String(node.id), value2: String((e instanceof Error ? e.message : String(e)).slice(0, 120)) }) } }] }
         }
         const result = await client.editFeature(reliefKernelRequest(node.id, body, res.boundTo[0], fields))
         if (result.ok && result.body !== undefined) world.setFeatureVisible(payload.ownerId, false)
         return finalizeBody(node, result)
       }
       const unhandledOpType: never = opType
-      return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: `unhandled opType '${String(unhandledOpType)}'` } }] }
+      return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.unhandledOpType', { value1: String(String(unhandledOpType)) }) } }] }
       }
     },
     [makeReplayFinalizer, modelItemId],
@@ -8529,12 +8736,12 @@ function SolidsWorkbenchPageDocument({
         if (
           dag.serialize() !== captured.snapshot.dag ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Fillet preview refused: the source model changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.filletPreviewRefusedTheSourceModelChanged'))
         return client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta)
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Fillet preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.filletPreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -8597,7 +8804,7 @@ function SolidsWorkbenchPageDocument({
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           // WO-2093: the strip already reads "Fillet ..."; the plain reason alone fits it.
           const reason = pass.cancelled
-            ? 'Fillet preview was superseded.'
+            ? workbenchText('SolidsWorkbenchPage.filletPreviewWasSuperseded')
             : upperFirst(regenDiagnosticsReason(candidateScheduler.diagnosticsOf(intent.featureId)))
           return { ok: false, reason }
         }
@@ -8651,7 +8858,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createFilletPreviewSession(intent)
       if (session === null) {
-        setFilletPreviewState({ status: 'refused', message: 'Fillet preview refused: the source body is unavailable.' })
+        setFilletPreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.filletPreviewRefusedTheSourceBodyIsUnavailable') })
         return
       }
       filletPreviewSessionRef.current = session
@@ -8784,12 +8991,12 @@ function SolidsWorkbenchPageDocument({
         if (
           dag.serialize() !== captured.snapshot.dag ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Chamfer preview refused: the source model changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.chamferPreviewRefusedTheSourceModelChanged'))
         return client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta)
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Chamfer preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.chamferPreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -8852,7 +9059,7 @@ function SolidsWorkbenchPageDocument({
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           // WO-2093: the strip already reads "Chamfer ..."; the plain reason alone fits it.
           const reason = pass.cancelled
-            ? 'Chamfer preview was superseded.'
+            ? workbenchText('SolidsWorkbenchPage.chamferPreviewWasSuperseded')
             : upperFirst(regenDiagnosticsReason(candidateScheduler.diagnosticsOf(intent.featureId)))
           return { ok: false, reason }
         }
@@ -8910,7 +9117,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createChamferPreviewSession(intent)
       if (session === null) {
-        setChamferPreviewState({ status: 'refused', message: 'Chamfer preview refused: the source body is unavailable.' })
+        setChamferPreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.chamferPreviewRefusedTheSourceBodyIsUnavailable') })
         return
       }
       chamferPreviewSessionRef.current = session
@@ -9033,12 +9240,12 @@ function SolidsWorkbenchPageDocument({
         if (
           dag.serialize() !== captured.snapshot.dag ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Shell preview refused: the source model changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.shellPreviewRefusedTheSourceModelChanged'))
         return client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta)
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Shell preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.shellPreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -9102,9 +9309,9 @@ function SolidsWorkbenchPageDocument({
         ) {
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           const reason = pass.cancelled
-            ? 'Shell preview was superseded.'
-            : regenDiagnosticsReason(candidateScheduler.diagnosticsOf(intent.featureId))
-          return { ok: false, reason: `Shell preview refused: ${reason}` }
+            ? workbenchText('SolidsWorkbenchPage.shellPreviewWasSuperseded')
+            : shellRefusalReason(candidateScheduler.diagnosticsOf(intent.featureId))
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.shellPreviewRefused', { reason: String(reason) }) }
         }
         const candidateBody = result.body
         owned.delete(candidateBody)
@@ -9158,7 +9365,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createShellPreviewSession(intent)
       if (session === null) {
-        setShellPreviewState({ status: 'refused', message: 'Shell preview refused: the source body is unavailable.' })
+        setShellPreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.shellPreviewRefusedTheSourceBodyIsUnavailable') })
         return
       }
       shellPreviewSessionRef.current = session
@@ -9191,7 +9398,7 @@ function SolidsWorkbenchPageDocument({
     baseline: Readonly<DefeaturePreviewBaseline>,
   ): Promise<DefeaturePreviewPreFeature> => {
     const client = clientRef.current
-    if (client === null) throw new Error('Defeature preview refused: geometry service is unavailable.')
+    if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.defeaturePreviewRefusedGeometryServiceIsUnavailable'))
     const candidateDag = FeatureDag.restore(baseline.dag)
     candidateDag.restoreRollbackState({
       featureOrder: baseline.featureOrder,
@@ -9235,9 +9442,9 @@ function SolidsWorkbenchPageDocument({
     ) {
       await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
       const reason = pass.cancelled
-        ? 'reconstruction was superseded'
+        ? workbenchText('SolidsWorkbenchPage.reconstructionWasSuperseded')
         : regenDiagnosticsReason(candidateScheduler.diagnosticsOf(baseline.ownerId))
-      throw new Error(`Defeature preview refused: the pre-feature body could not be reconstructed (${reason}).`)
+      throw new Error(workbenchText('SolidsWorkbenchPage.defeaturePreviewRefusedThePreFeatureBodyCouldNot', { reason: String(reason) }))
     }
     owned.delete(body)
     await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
@@ -9255,7 +9462,7 @@ function SolidsWorkbenchPageDocument({
     restoreResizeHolePreviewPresentation(retiringSourceBodyId)
     if (resetState) {
       setResizeHolePickMode((current) => current.kind === 'armed'
-        ? { ...current, preview: { status: 'idle', message: 'Preview idle: enter a different diameter.' } }
+        ? { ...current, preview: { status: 'idle', message: workbenchText('SolidsWorkbenchPage.previewIdleEnterADifferentDiameter') } }
         : current)
     }
     if (session !== null) await session.cancel()
@@ -9313,20 +9520,20 @@ function SolidsWorkbenchPageDocument({
       captureBaseline: () => ({ snapshot: baseline, fingerprint }),
       materializePreFeature: async (captured) => {
         if (dag.serialize() !== captured.snapshot.dag) {
-          throw new Error('Resize hole preview refused: the source model changed.')
+          throw new Error(workbenchText('SolidsWorkbenchPage.resizeHolePreviewRefusedTheSourceModelChanged'))
         }
         if (captured.snapshot.mode === 'edit') {
           try {
             return await materializeDefeaturePreFeature(captured.snapshot)
           } catch (error) {
             const reason = error instanceof Error ? error.message : String(error)
-            throw new Error(`Resize hole preview refused: the true pre-feature body could not be reconstructed (${reason}).`)
+            throw new Error(workbenchText('SolidsWorkbenchPage.resizeHolePreviewRefusedTheTruePreFeatureBody', { reason: String(reason) }))
           }
         }
         if (
           stableSourceHandle === undefined ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Resize hole preview refused: the selected live owner changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.resizeHolePreviewRefusedTheSelectedLiveOwnerChanged'))
         return {
           body: await client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta),
           elementMapDeltas: captured.snapshot.elementMapDeltas,
@@ -9334,12 +9541,12 @@ function SolidsWorkbenchPageDocument({
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Resize hole preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.resizeHolePreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const result = await client.editFeature(resizeHoleKernelRequest(intent.featureId, preFeature.body, intent.payload))
         if (!result.ok || result.body === undefined) {
-          console.error('SolidsWorkbenchPage: resize hole preview refused', result.diagnostics)
-          return { ok: false, reason: `Can't resize this hole: ${resizeHoleRefusalReason(result.diagnostics)}.` }
+          console.error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageResizeHolePreviewRefused'), result.diagnostics)
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.canTResizeThisHole', { value1: String(resizeHoleRefusalReason(result.diagnostics)) }) }
         }
         let recoveryOwnerBody: BodyHandle | undefined
         if (snapshot.mode === 'edit') {
@@ -9404,13 +9611,15 @@ function SolidsWorkbenchPageDocument({
       current.kind !== 'armed' ||
       current.ownerId !== intent.payload.ownerId ||
       current.featureKey !== intent.payload.featureKey ||
+      (current.step === 'counterbore') !== (intent.payload.holeStep === 'counterbore') ||
       (current.editFeatureId ?? intent.featureId) !== intent.featureId
     ) return false
     const validation = validateArmedHoleDraft(current, current.draft)
     return validation.ok &&
       validation.values.newDiameter === intent.payload.newDiameter &&
       validation.values.delta === intent.payload.delta &&
-      JSON.stringify(validation.values.depth) === JSON.stringify(holeDepthFields(intent.payload))
+      JSON.stringify(validation.values.depth) === JSON.stringify(holeDepthFields(intent.payload)) &&
+      JSON.stringify(validation.values.move?.translation) === JSON.stringify(intent.payload.holeEdit === 'move' ? intent.payload.translation : undefined)
   }, [])
 
   const handleResizeHolePreviewIntent = useCallback((intent: ResizeHolePreviewIntent): void => {
@@ -9428,7 +9637,7 @@ function SolidsWorkbenchPageDocument({
       session = createResizeHolePreviewSession(intent)
       if (session === null) {
         setResizeHolePickMode((current) => resizeHoleModeMatchesIntent(current, intent)
-          ? { ...current, preview: { status: 'refused', message: 'Resize hole preview refused: the source body is unavailable.' } }
+          ? { ...current, preview: { status: 'refused', message: workbenchText('SolidsWorkbenchPage.resizeHolePreviewRefusedTheSourceBodyIsUnavailable') } }
           : current)
         return
       }
@@ -9442,7 +9651,7 @@ function SolidsWorkbenchPageDocument({
       if (resizeHolePreviewSessionRef.current !== activeSession) return
       if (result.status === 'ready') {
         setResizeHolePickMode((current) => resizeHoleModeMatchesIntent(current, intent)
-          ? { ...current, preview: { status: 'ready', message: `Preview ready: ${holeEditValueText(intent.payload)}.` } }
+          ? { ...current, preview: { status: 'ready', message: workbenchText('SolidsWorkbenchPage.previewReady', { value1: String(holeEditValueText(intent.payload)) }) } }
           : current)
       } else if (result.status === 'refused' || result.status === 'error') {
         if (result.status === 'error') {
@@ -9463,7 +9672,7 @@ function SolidsWorkbenchPageDocument({
     values: HoleEditValues,
   ): ResizeHolePreviewIntent => {
     const featureId = armed.editFeatureId ?? nextId(dag, 'F')
-    const { newDiameter, delta, depth } = values
+    const { newDiameter, delta, depth, move } = values
     return {
       featureId,
       payload: {
@@ -9474,9 +9683,15 @@ function SolidsWorkbenchPageDocument({
         newDiameter,
         delta,
         ...(depth ?? {}),
-        name: depth === undefined
-          ? `Resize hole to ${newDiameter} mm`
-          : depth.newDepth === 'through' ? 'Hole depth: through' : `Hole depth ${depth.newDepth} mm`,
+        ...(move ?? {}),
+        ...(armed.step === 'counterbore' ? { holeStep: 'counterbore' as const } : {}),
+        name: move !== undefined ? workbenchText('MoveHoleEntry.applied', { translation: move.translation.join(', ') }) : armed.step === 'counterbore'
+          ? depth === undefined
+            ? workbenchText('SolidsWorkbenchPage.resizeCounterboreToMm', { newDiameter: String(newDiameter) })
+            : workbenchText('SolidsWorkbenchPage.counterboreDepthMm', { newDepth: String(depth.newDepth) })
+          : depth === undefined
+            ? workbenchText('SolidsWorkbenchPage.resizeHoleToMm', { newDiameter: String(newDiameter) })
+            : depth.newDepth === 'through' ? workbenchText('SolidsWorkbenchPage.holeDepthThrough') : workbenchText('SolidsWorkbenchPage.holeDepthMm', { newDepth: String(depth.newDepth) }),
       },
     }
   }, [dag])
@@ -9490,7 +9705,8 @@ function SolidsWorkbenchPageDocument({
     bumpUi4Repaint()
   }, [bumpUi4Repaint])
 
-  const beginResizeHoleInteraction = useCallback((field?: 'depth'): void => {
+  const beginResizeHoleInteraction = useCallback((field?: 'depth' | 'move'): void => {
+    resizeHoleEditResolveRef.current++
     if (resizeHoleSelectionRestoreRef.current === null) {
       resizeHoleSelectionRestoreRef.current = {
         selected: [...pickHighlightSelectionRef.current.selection],
@@ -9500,11 +9716,12 @@ function SolidsWorkbenchPageDocument({
     pickHighlightSelectionRef.current.clearSelection()
     pickHighlightSelectionRef.current.setHover(null)
     bumpUi4Repaint()
-    setResizeHolePickMode(field === 'depth' ? { kind: 'arm', field } : { kind: 'arm' })
+    setResizeHolePickMode({ kind: 'arm', field })
   }, [bumpUi4Repaint])
 
   const finishResizeHoleInteraction = useCallback((): void => {
     if (resizeHoleAdoptionPendingRef.current) return
+    resizeHoleEditResolveRef.current++
     void cancelResizeHolePreviewSession(false)
     setResizeHoleEditRequest(null)
     skipNextDressUpSelectionClearRef.current = true
@@ -9526,13 +9743,14 @@ function SolidsWorkbenchPageDocument({
     if (resizeHoleAdoptionPendingRef.current) return
     void cancelResizeHolePreviewSession(false)
     restoreResizeHoleSelection(false)
-    setResizeHolePickMode((current) => current.kind !== 'none' && current.field === 'depth' ? { kind: 'arm', field: 'depth' } : { kind: 'arm' })
+    setResizeHolePickMode((current) => ({ kind: 'arm', field: current.kind === 'none' ? undefined : current.field }))
   }, [cancelResizeHolePreviewSession, restoreResizeHoleSelection])
 
   const beginResizeHoleSelection = useCallback((selection: Omit<Extract<ResizeHolePickMode, { kind: 'armed' }>, 'kind' | 'draft' | 'preview'>): void => {
     if (resizeHoleAdoptionPendingRef.current) return
+    resizeHoleEditResolveRef.current++
     void cancelResizeHolePreviewSession(false)
-    const draft = selection.field === 'depth' && selection.currentDepth !== undefined
+    const draft = selection.field === 'move' ? selection.editInitialMove ?? '0,0,0' : selection.field === 'depth' && selection.currentDepth !== undefined
       ? selection.editInitialDepth ?? (selection.currentThrough === true ? 'through' : String(selection.currentDepth))
       : String(selection.editInitialDiameter ?? selection.currentDiameter)
     const seeded: Extract<ResizeHolePickMode, { kind: 'armed' }> = {
@@ -9546,8 +9764,8 @@ function SolidsWorkbenchPageDocument({
     const armed: Extract<ResizeHolePickMode, { kind: 'armed' }> = {
       ...seeded,
       preview: intent !== undefined
-        ? { status: 'pending', message: `Building ${holeEditShortText(intent.payload)} preview...` }
-        : { status: 'idle', message: `Preview idle: ${validation.ok ? '' : validation.reason}` },
+        ? { status: 'pending', message: workbenchText('SolidsWorkbenchPage.buildingPreview', { value1: String(holeEditShortText(intent.payload)) }) }
+        : { status: 'idle', message: workbenchText('SolidsWorkbenchPage.previewIdle', { value1: String(validation.ok ? '' : validation.reason) }) },
     }
     setResizeHolePickMode(armed)
     if (intent !== undefined) handleResizeHolePreviewIntent(intent)
@@ -9561,14 +9779,14 @@ function SolidsWorkbenchPageDocument({
       void cancelResizeHolePreviewSession(false)
       setResizeHolePickMode({
         ...armed,
-        preview: { status: 'refused', message: `Resize hole preview unavailable: ${validation.reason}` },
+        preview: { status: 'refused', message: workbenchText('SolidsWorkbenchPage.resizeHolePreviewUnavailable', { reason: String(validation.reason) }) },
       })
       return
     }
     const intent = buildResizeHolePreviewIntent(armed, validation.values)
     setResizeHolePickMode({
       ...armed,
-      preview: { status: 'pending', message: `Building ${holeEditShortText(intent.payload)} preview...` },
+      preview: { status: 'pending', message: workbenchText('SolidsWorkbenchPage.buildingPreview', { value1: String(holeEditShortText(intent.payload)) }) },
     })
     handleResizeHolePreviewIntent(intent)
   }, [buildResizeHolePreviewIntent, cancelResizeHolePreviewSession, handleResizeHolePreviewIntent, resizeHolePickMode])
@@ -9581,13 +9799,14 @@ function SolidsWorkbenchPageDocument({
     if (current.kind === 'none') return
     const field = current.field === 'depth' ? undefined : 'depth' as const
     if (current.kind === 'arm') {
-      setResizeHolePickMode(field === 'depth' ? { kind: 'arm', field } : { kind: 'arm' })
+      setResizeHolePickMode({ kind: 'arm', field })
       return
     }
-    const { ownerId, featureKey, faceIds, currentDiameter, anchorPoint, currentDepth, currentThrough, editFeatureId } = current
+    const { ownerId, featureKey, faceIds, currentDiameter, anchorPoint, currentDepth, currentThrough, editFeatureId, step } = current
     beginResizeHoleSelection({
       ownerId, featureKey, faceIds, currentDiameter, anchorPoint,
       ...(currentDepth !== undefined ? { currentDepth, currentThrough } : {}),
+      ...(step !== undefined ? { step } : {}),
       ...(field === 'depth' ? { field } : {}),
       ...(editFeatureId !== undefined ? { editFeatureId } : {}),
     })
@@ -9613,7 +9832,7 @@ function SolidsWorkbenchPageDocument({
     defeaturePreviewSourceBodyIdRef.current = null
     defeaturePreviewSelectionSourceBodyIdRef.current = null
     restoreDefeaturePreviewPresentation(retiringSourceBodyId)
-    if (resetState) setDefeaturePreviewFeedback({ kind: 'idle', message: 'Select a face to preview its healed removal.' })
+    if (resetState) setDefeaturePreviewFeedback({ kind: 'idle', message: workbenchText('SolidsWorkbenchPage.selectAFaceToPreviewItsHealedRemoval') })
     if (session !== null) await session.cancel()
   }, [restoreDefeaturePreviewPresentation])
 
@@ -9669,7 +9888,7 @@ function SolidsWorkbenchPageDocument({
       captureBaseline: () => ({ snapshot: baseline, fingerprint }),
       materializePreFeature: async (captured) => {
         if (dag.serialize() !== captured.snapshot.dag) {
-          throw new Error('Defeature preview refused: the source model changed.')
+          throw new Error(workbenchText('SolidsWorkbenchPage.defeaturePreviewRefusedTheSourceModelChanged'))
         }
         if (captured.snapshot.mode === 'edit') {
           return materializeDefeaturePreFeature(captured.snapshot)
@@ -9677,13 +9896,13 @@ function SolidsWorkbenchPageDocument({
         if (
           stableSourceHandle === undefined ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Defeature preview refused: the source body changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.defeaturePreviewRefusedTheSourceBodyChanged'))
         const body = await client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta)
         return { body, elementMapDeltas: captured.snapshot.elementMapDeltas }
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Defeature preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.defeaturePreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -9754,11 +9973,11 @@ function SolidsWorkbenchPageDocument({
           const itemFailure = report?.items.find((item) => !item.healed)?.reason
           const notFound = report?.notFound?.[0]
           const reason = pass.cancelled
-            ? 'preview was superseded'
+            ? workbenchText('SolidsWorkbenchPage.previewWasSuperseded')
             : itemFailure
-              ?? (notFound === undefined ? undefined : `recognized feature '${notFound}' no longer exists`)
+              ?? (notFound === undefined ? undefined : workbenchText('SolidsWorkbenchPage.recognizedFeatureNoLongerExists', { notFound: String(notFound) }))
               ?? regenDiagnosticsReason(candidateScheduler.diagnosticsOf(intent.featureId))
-          return { ok: false, reason: `Defeature preview refused: ${reason}` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.defeaturePreviewRefused', { reason: String(reason) }) }
         }
         const candidateBody = result.body
         owned.delete(candidateBody)
@@ -9820,7 +10039,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createDefeaturePreviewSession(intent)
       if (session === null) {
-        setDefeaturePreviewFeedback({ kind: 'failed', message: 'Preview unavailable: the source body is no longer live.' })
+        setDefeaturePreviewFeedback({ kind: 'failed', message: workbenchText('SolidsWorkbenchPage.previewUnavailableTheSourceBodyIsNoLongerLive') })
         return
       }
       defeaturePreviewSessionRef.current = session
@@ -9828,7 +10047,7 @@ function SolidsWorkbenchPageDocument({
     defeaturePreviewIntentRef.current = intent
     setDefeaturePreviewFeedback({
       kind: 'building',
-      message: `Building healed preview for ${intent.payload.featureKeys.length} selected face group(s)...`,
+      message: workbenchText('SolidsWorkbenchPage.buildingHealedPreviewForSelectedFaceGroupS2', { length: String(intent.payload.featureKeys.length) }),
     })
     const activeSession = session
     void activeSession.request(intent).then((result) => {
@@ -9836,7 +10055,7 @@ function SolidsWorkbenchPageDocument({
       if (result.status === 'ready') {
         setDefeaturePreviewFeedback({
           kind: 'ready',
-          message: `Healed preview ready for ${intent.payload.featureKeys.length} feature(s).`,
+          message: workbenchText('SolidsWorkbenchPage.healedPreviewReadyForFeatureS', { length: String(intent.payload.featureKeys.length) }),
         })
       } else if (result.status === 'refused' || result.status === 'error') {
         setDefeaturePreviewFeedback({ kind: 'failed', message: result.reason })
@@ -9951,12 +10170,12 @@ function SolidsWorkbenchPageDocument({
         if (
           dag.serialize() !== captured.snapshot.dag ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Draft preview refused: the source model changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.draftPreviewRefusedTheSourceModelChanged'))
         return client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta)
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Draft preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.draftPreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -10027,9 +10246,9 @@ function SolidsWorkbenchPageDocument({
         ) {
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           const reason = pass.cancelled
-            ? 'Draft preview was superseded.'
+            ? workbenchText('SolidsWorkbenchPage.draftPreviewWasSuperseded')
             : regenDiagnosticsReason(candidateScheduler.diagnosticsOf(intent.featureId))
-          return { ok: false, reason: `Draft preview refused: ${reason}` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.draftPreviewRefused', { reason: String(reason) }) }
         }
         const candidateBody = result.body
         owned.delete(candidateBody)
@@ -10081,7 +10300,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createDraftPreviewSession(intent)
       if (session === null) {
-        setDraftPreviewState({ status: 'refused', message: 'Draft preview refused: the source body is unavailable.' })
+        setDraftPreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.draftPreviewRefusedTheSourceBodyIsUnavailable') })
         return
       }
       draftPreviewSessionRef.current = session
@@ -10213,7 +10432,7 @@ function SolidsWorkbenchPageDocument({
           if (ids === undefined) { ids = new Set<string>(); idsByBody.set(ref.bodyId, ids) }
           // STABLEIDS-GUARD-RERESOLVE: refuse a malformed reference BY NAME
           // instead of the bare for-of's cryptic "not iterable" red banner (ADR-0003).
-          for (const id of referenceStableIds(ref, `op "${op.id}"`)) ids.add(id)
+          for (const id of referenceStableIds(ref, workbenchText('SolidsWorkbenchPage.op', { id: String(op.id) }))) ids.add(id)
         }
       }
     if (idsByBody.size === 0) return // no CAM op depends on model geometry
@@ -10252,11 +10471,21 @@ function SolidsWorkbenchPageDocument({
         bodies.push({ bodyId, changed: true, resolutions: stableIds.map((id) => ({ id, status: 'lost' })) })
         continue
       }
+      // WO-2866: a body the pass re-executed but rebuilt exactly as its CAM row
+      // already holds it (opening the model replays every feature) did not change.
+      const cached = executed.has(bodyId) ? cacheRef.current.get(bodyId) : undefined
+      const changed = executed.has(bodyId) && !(cached !== undefined && sameModelBodyShape(
+        findModelBodyGeometryRow(useCamStore.getState().project.geometry, bodyId, modelItemId)?.modelBody,
+        {
+          ref: { bodyId, stableIds: [...cached.faceIds, ...cached.edgeIds], version: cached.version },
+          display: modelBodyDisplayFromCached(cached),
+        },
+      ))
       const resolved = await client.resolve(handle, stableIds)
       if (!ownsDocument()) return
       bodies.push({
         bodyId,
-        changed: executed.has(bodyId),
+        changed,
         resolutions: resolved.map((r) => ({ id: r.id, status: r.status, localIndex: r.localIndex, type: r.type })),
       })
     }
@@ -10266,7 +10495,7 @@ function SolidsWorkbenchPageDocument({
       if (changed.length > 0) {
         useCamStore.getState().addConsoleEvent({
           severity: 'info', source: 'workbench',
-          message: `Model changed: ${changed.length} operation${changed.length === 1 ? '' : 's'} re-flagged (stale/degraded).`,
+          message: workbenchText('SolidsWorkbenchPage.modelChangedOperationReFlaggedStaleDegraded', { length: String(changed.length), value2: String(changed.length === 1 ? '' : 's') }),
         })
       }
     } catch (err) {
@@ -10275,10 +10504,10 @@ function SolidsWorkbenchPageDocument({
       // than silently leaving ops mis-flagged.
       useCamStore.getState().addConsoleEvent({
         severity: 'error', source: 'workbench',
-        message: `Model-reference re-resolution refused: ${err instanceof Error ? err.message : String(err)}`,
+        message: workbenchText('SolidsWorkbenchPage.modelReferenceReResolutionRefused', { value1: String(err instanceof Error ? err.message : String(err)) }),
       })
     }
-  }, [dag])
+  }, [dag, modelItemId])
 
   // WO-1864: projected sketch geometry that stays tied to the model. After a regen pass settles,
   // every package sketch whose Project/Use pieces carry a live link re-resolves each source
@@ -10563,7 +10792,7 @@ function SolidsWorkbenchPageDocument({
     const client = clientRef.current
     const runtime = runtimeRef.current
     if (session === null || activeIntent === null || client === null || runtime === null) {
-      return 'Fillet Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.filletApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     const intentStillMatches = (): boolean => {
       const current = filletPreviewIntentRef.current
@@ -10574,7 +10803,7 @@ function SolidsWorkbenchPageDocument({
         JSON.stringify(current.payload) === JSON.stringify(intent.payload)
     }
     if (!intentStillMatches() || filletPreviewState.status !== 'ready') {
-      return 'Fillet Apply refused: the preview does not match the current Fillet settings.'
+      return workbenchText('SolidsWorkbenchPage.filletApplyRefusedThePreviewDoesNotMatchThe')
     }
 
     const baseline = session.baseline
@@ -10587,14 +10816,14 @@ function SolidsWorkbenchPageDocument({
     })
     if (!fingerprintStillMatches()) {
       await cancelFilletPreviewSession()
-      return 'Fillet Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.filletApplyRefusedTheModelChangedAfterThePreview')
     }
 
     let candidate: FilletPreviewCandidate
     try {
       candidate = await session.takeCandidate()
     } catch (error) {
-      return `Fillet Apply refused: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.filletApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
 
     let prepared: PreparedCachedBody | null = null
@@ -10626,7 +10855,7 @@ function SolidsWorkbenchPageDocument({
 
     try {
       const buffers = await client.tessellate(candidate.body, DISPLAY_TESS_QUALITY)
-      if (!fingerprintStillMatches()) throw new Error('the model changed while preparing the accepted preview')
+      if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedWhilePreparingTheAcceptedPreview'))
       prepared = cacheRef.current.prepare(candidate.featureId, buffers)
       attachHighlightAttributes(prepared, themeColorsRef.current.body, themeColorsRef.current.edge)
       prepared.geometry.computeBoundingBox()
@@ -10646,15 +10875,15 @@ function SolidsWorkbenchPageDocument({
         () => candidate.result,
         {
           publish: () => {
-            if (!fingerprintStillMatches()) throw new Error('the model changed before Fillet adoption')
-            if (!intentStillMatches()) throw new Error('the Fillet settings changed before adoption')
+            if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeFilletAdoption'))
+            if (!intentStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theFilletSettingsChangedBeforeAdoption'))
             if (editing ? !dag.has(candidate.featureId) : dag.has(candidate.featureId)) {
               throw new Error(editing
-                ? `feature '${candidate.featureId}' no longer exists`
-                : `feature '${candidate.featureId}' already exists`)
+                ? workbenchText('SolidsWorkbenchPage.featureNoLongerExists', { featureId: String(candidate.featureId) })
+                : workbenchText('SolidsWorkbenchPage.featureAlreadyExists', { featureId: String(candidate.featureId) }))
             }
             if (prepared === null || command === null || (priorPair === undefined && stagedPair === null)) {
-              throw new Error('the prepared Fillet presentation is incomplete')
+              throw new Error(workbenchText('SolidsWorkbenchPage.thePreparedFilletPresentationIsIncomplete'))
             }
             history.execute(command)
             commandPublished = true
@@ -10764,7 +10993,7 @@ function SolidsWorkbenchPageDocument({
         }
       }
       try {
-        useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `${featureLabel(dag, candidate.featureId)} applied` })
+        useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.applied3', { value1: String(featureLabel(dag, candidate.featureId)) }) })
       } catch {
         /* best-effort logging only */
       }
@@ -10815,7 +11044,7 @@ function SolidsWorkbenchPageDocument({
       const retryIntent = filletPreviewIntentRef.current ?? intent
       restorePresentation()
       handleFilletPreviewIntent(retryIntent)
-      return `Fillet Apply refused: ${error instanceof Error ? error.message : String(error)}. No changes were applied.`
+      return workbenchText('SolidsWorkbenchPage.filletApplyRefusedNoChangesWereApplied', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
   }, [
     cancelFilletPreviewSession,
@@ -10868,6 +11097,30 @@ function SolidsWorkbenchPageDocument({
     return handleFilletPreviewApply(decorateFilletDialogIntent(intent))
   }, [decorateFilletDialogIntent, handleFilletPreviewApply])
 
+  // WO-2766: the Chamfer dialog's imported-chain edit, exactly as Fillet's.
+  const decorateChamferDialogIntent = useCallback((intent: ChamferPreviewIntent): ChamferPreviewIntent => {
+    if (dialog.kind !== 'chamfer') return intent
+    if (dialog.mode === 'imported-edit') {
+      return importedChamferIntent(intent, {
+        featureKey: dialog.featureKey,
+        originalDistance: dialog.currentDistance,
+        faceId: dialog.faceId,
+      })
+    }
+    if (dialog.mode === 'edit') {
+      const node = dag.getNode(dialog.featureId)
+      const saved = node?.payload as unknown as ChamferFeaturePayload | undefined
+      if (saved !== undefined && isImportedChamferPayload(saved)) {
+        return importedChamferIntent(intent, {
+          featureKey: saved.importedFeatureKey,
+          originalDistance: saved.importedOriginalDistance,
+          faceId: saved.importedFaceId,
+        })
+      }
+    }
+    return intent
+  }, [dag, dialog])
+
   /** Publish the exact Chamfer body already accepted by scratch preview. */
   const handleChamferPreviewApply = useCallback(async (intent: ChamferPreviewIntent): Promise<string | undefined> => {
     const session = chamferPreviewSessionRef.current
@@ -10875,7 +11128,7 @@ function SolidsWorkbenchPageDocument({
     const client = clientRef.current
     const runtime = runtimeRef.current
     if (session === null || activeIntent === null || client === null || runtime === null) {
-      return 'Chamfer Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     const intentStillMatches = (): boolean => {
       const current = chamferPreviewIntentRef.current
@@ -10886,7 +11139,7 @@ function SolidsWorkbenchPageDocument({
         JSON.stringify(current.payload) === JSON.stringify(intent.payload)
     }
     if (!intentStillMatches() || chamferPreviewState.status !== 'ready') {
-      return 'Chamfer Apply refused: the preview does not match the current Chamfer settings.'
+      return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedThePreviewDoesNotMatchThe')
     }
 
     const baseline = session.baseline
@@ -10899,11 +11152,11 @@ function SolidsWorkbenchPageDocument({
     })
     if (!fingerprintStillMatches()) {
       await cancelChamferPreviewSession()
-      return 'Chamfer Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedTheModelChangedAfterThePreview')
     }
 
     if (chamferAdoptionPendingRef.current) {
-      return 'Chamfer Apply refused: an accepted Chamfer is already being applied.'
+      return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedAnAcceptedChamferIsAlreadyBeing')
     }
     chamferAdoptionPendingRef.current = true
     setChamferAdoptionPending(true)
@@ -10913,7 +11166,7 @@ function SolidsWorkbenchPageDocument({
         candidate = await session.takeCandidate()
       } catch (error) {
         await cancelChamferPreviewSession()
-        return `Chamfer Apply refused: ${error instanceof Error ? error.message : String(error)}`
+        return workbenchText('SolidsWorkbenchPage.chamferApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
 
       let prepared: PreparedCachedBody | null = null
@@ -10952,7 +11205,7 @@ function SolidsWorkbenchPageDocument({
 
       try {
       const buffers = await client.tessellate(candidate.body, DISPLAY_TESS_QUALITY)
-      if (!fingerprintStillMatches()) throw new Error('the model changed while preparing the accepted preview')
+      if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedWhilePreparingTheAcceptedPreview'))
       prepared = cacheRef.current.prepare(candidate.featureId, buffers)
       attachHighlightAttributes(prepared, themeColorsRef.current.body, themeColorsRef.current.edge)
       prepared.geometry.computeBoundingBox()
@@ -10972,15 +11225,15 @@ function SolidsWorkbenchPageDocument({
         () => candidate.result,
         {
           publish: () => {
-            if (!fingerprintStillMatches()) throw new Error('the model changed before Chamfer adoption')
-            if (!intentStillMatches()) throw new Error('the Chamfer settings changed before adoption')
+            if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeChamferAdoption'))
+            if (!intentStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theChamferSettingsChangedBeforeAdoption'))
             if (editing ? !dag.has(candidate.featureId) : dag.has(candidate.featureId)) {
               throw new Error(editing
-                ? `feature '${candidate.featureId}' no longer exists`
-                : `feature '${candidate.featureId}' already exists`)
+                ? workbenchText('SolidsWorkbenchPage.featureNoLongerExists', { featureId: String(candidate.featureId) })
+                : workbenchText('SolidsWorkbenchPage.featureAlreadyExists', { featureId: String(candidate.featureId) }))
             }
             if (prepared === null || command === null || (priorPair === undefined && stagedPair === null)) {
-              throw new Error('the prepared Chamfer presentation is incomplete')
+              throw new Error(workbenchText('SolidsWorkbenchPage.thePreparedChamferPresentationIsIncomplete'))
             }
             command.do(dag)
             commandApplied = true
@@ -11097,7 +11350,7 @@ function SolidsWorkbenchPageDocument({
       // command is deliberately absent from CommandHistory.
       publishCompletedHistory()
       try {
-        useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `${featureLabel(dag, candidate.featureId)} applied` })
+        useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.applied3', { value1: String(featureLabel(dag, candidate.featureId)) }) })
       } catch {
         /* best-effort logging only */
       }
@@ -11131,13 +11384,13 @@ function SolidsWorkbenchPageDocument({
           chamferAdoptionPendingRef.current = false
           setChamferAdoptionPending(false)
           handleChamferPreviewIntent(retryIntent)
-          return `Chamfer Apply refused: downstream replay failed (${error instanceof Error ? error.message : String(error)}). No changes were applied.`
+          return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedDownstreamReplayFailedNoChangesWere', { value1: String(error instanceof Error ? error.message : String(error)) })
         } catch (recoveryError) {
           restorePresentation()
           refreshBodiesList()
           setDagVersion((version) => version + 1)
           runtime.requestRender()
-          return `Chamfer Apply refused: downstream replay failed (${error instanceof Error ? error.message : String(error)}) and model recovery also failed (${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}). No history action was recorded.`
+          return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedDownstreamReplayFailedAndModelRecovery', { value1: String(error instanceof Error ? error.message : String(error)), value2: String(recoveryError instanceof Error ? recoveryError.message : String(recoveryError)) })
         }
       }
       if (inheritedAppearance) appearanceStoreRef.current.clearBodyColor(candidate.featureId)
@@ -11168,7 +11421,7 @@ function SolidsWorkbenchPageDocument({
       chamferAdoptionPendingRef.current = false
       setChamferAdoptionPending(false)
       handleChamferPreviewIntent(retryIntent)
-      return `Chamfer Apply refused: ${error instanceof Error ? error.message : String(error)}. No changes were applied.`
+      return workbenchText('SolidsWorkbenchPage.chamferApplyRefusedNoChangesWereApplied', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
     } finally {
       chamferAdoptionPendingRef.current = false
@@ -11194,6 +11447,14 @@ function SolidsWorkbenchPageDocument({
     restoreChamferPreviewPresentation,
   ])
 
+  const handleChamferDialogPreviewIntent = useCallback((intent: ChamferPreviewIntent | null): void => {
+    handleChamferPreviewIntent(intent === null ? null : decorateChamferDialogIntent(intent))
+  }, [decorateChamferDialogIntent, handleChamferPreviewIntent])
+
+  const handleChamferDialogPreviewApply = useCallback(async (intent: ChamferPreviewIntent): Promise<string | undefined> => {
+    return handleChamferPreviewApply(decorateChamferDialogIntent(intent))
+  }, [decorateChamferDialogIntent, handleChamferPreviewApply])
+
   /** Publish the exact Shell body already accepted by scratch preview. */
   const handleShellPreviewApply = useCallback(async (intent: ShellPreviewIntent): Promise<string | undefined> => {
     const session = shellPreviewSessionRef.current
@@ -11201,7 +11462,7 @@ function SolidsWorkbenchPageDocument({
     const client = clientRef.current
     const runtime = runtimeRef.current
     if (session === null || activeIntent === null || client === null || runtime === null) {
-      return 'Shell Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.shellApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     const intentStillMatches = (): boolean => {
       const current = shellPreviewIntentRef.current
@@ -11212,7 +11473,7 @@ function SolidsWorkbenchPageDocument({
         JSON.stringify(current.payload) === JSON.stringify(intent.payload)
     }
     if (!intentStillMatches() || shellPreviewState.status !== 'ready') {
-      return 'Shell Apply refused: the preview does not match the current Shell settings.'
+      return workbenchText('SolidsWorkbenchPage.shellApplyRefusedThePreviewDoesNotMatchThe')
     }
 
     const baseline = session.baseline
@@ -11225,11 +11486,11 @@ function SolidsWorkbenchPageDocument({
     })
     if (!fingerprintStillMatches()) {
       await cancelShellPreviewSession()
-      return 'Shell Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.shellApplyRefusedTheModelChangedAfterThePreview')
     }
 
     if (shellAdoptionPendingRef.current) {
-      return 'Shell Apply refused: an accepted Shell is already being applied.'
+      return workbenchText('SolidsWorkbenchPage.shellApplyRefusedAnAcceptedShellIsAlreadyBeing')
     }
     shellAdoptionPendingRef.current = true
     setShellAdoptionPending(true)
@@ -11240,7 +11501,7 @@ function SolidsWorkbenchPageDocument({
         candidate = await session.takeCandidate()
       } catch (error) {
         await cancelShellPreviewSession()
-        return `Shell Apply refused: ${error instanceof Error ? error.message : String(error)}`
+        return workbenchText('SolidsWorkbenchPage.shellApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
 
       let prepared: PreparedCachedBody | null = null
@@ -11295,7 +11556,7 @@ function SolidsWorkbenchPageDocument({
 
       try {
         const buffers = await client.tessellate(candidate.body, DISPLAY_TESS_QUALITY)
-        if (!fingerprintStillMatches()) throw new Error('the model changed while preparing the accepted preview')
+        if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedWhilePreparingTheAcceptedPreview'))
         prepared = cacheRef.current.prepare(candidate.featureId, buffers)
         attachHighlightAttributes(prepared, themeColorsRef.current.body, themeColorsRef.current.edge)
         prepared.geometry.computeBoundingBox()
@@ -11317,15 +11578,15 @@ function SolidsWorkbenchPageDocument({
           () => candidate.result,
           {
             publish: () => {
-              if (!fingerprintStillMatches()) throw new Error('the model changed before Shell adoption')
-              if (!intentStillMatches()) throw new Error('the Shell settings changed before adoption')
+              if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeShellAdoption'))
+              if (!intentStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theShellSettingsChangedBeforeAdoption'))
               if (editing ? !dag.has(candidate.featureId) : dag.has(candidate.featureId)) {
                 throw new Error(editing
-                  ? `feature '${candidate.featureId}' no longer exists`
-                  : `feature '${candidate.featureId}' already exists`)
+                  ? workbenchText('SolidsWorkbenchPage.featureNoLongerExists', { featureId: String(candidate.featureId) })
+                  : workbenchText('SolidsWorkbenchPage.featureAlreadyExists', { featureId: String(candidate.featureId) }))
               }
               if (prepared === null || command === null || (priorPair === undefined && stagedPair === null)) {
-                throw new Error('the prepared Shell presentation is incomplete')
+                throw new Error(workbenchText('SolidsWorkbenchPage.thePreparedShellPresentationIsIncomplete'))
               }
               command.do(dag)
               commandApplied = true
@@ -11430,7 +11691,13 @@ function SolidsWorkbenchPageDocument({
         publishCompletedHistory()
         retireAcceptedPresentation()
         try {
-          useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `${featureLabel(dag, candidate.featureId)} applied` })
+          for (const diagnostic of candidate.result.diagnostics) {
+            const reason = diagnostic.params?.reason
+            if (diagnostic.severity === 'info' && typeof reason === 'string' && reason !== '') {
+              useCamStore.getState().addConsoleEvent({ severity: 'info', source: 'workbench', message: reason })
+            }
+          }
+          useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.applied3', { value1: String(featureLabel(dag, candidate.featureId)) }) })
         } catch {
           /* best-effort logging only */
         }
@@ -11455,13 +11722,13 @@ function SolidsWorkbenchPageDocument({
             shellAdoptionPendingRef.current = false
             setShellAdoptionPending(false)
             handleShellPreviewIntent(retryIntent)
-            return `Shell Apply refused: downstream replay failed (${error instanceof Error ? error.message : String(error)}). No changes were applied.`
+            return workbenchText('SolidsWorkbenchPage.shellApplyRefusedDownstreamReplayFailedNoChangesWere', { value1: String(error instanceof Error ? error.message : String(error)) })
           } catch (recoveryError) {
             restorePresentation()
             refreshBodiesList()
             setDagVersion((version) => version + 1)
             runtime.requestRender()
-            return `Shell Apply refused: downstream replay failed (${error instanceof Error ? error.message : String(error)}) and model recovery also failed (${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}). No history action was recorded.`
+            return workbenchText('SolidsWorkbenchPage.shellApplyRefusedDownstreamReplayFailedAndModelRecovery', { value1: String(error instanceof Error ? error.message : String(error)), value2: String(recoveryError instanceof Error ? recoveryError.message : String(recoveryError)) })
           }
         }
         if (inheritedAppearance) appearanceStoreRef.current.clearBodyColor(candidate.featureId)
@@ -11489,7 +11756,7 @@ function SolidsWorkbenchPageDocument({
         shellAdoptionPendingRef.current = false
         setShellAdoptionPending(false)
         handleShellPreviewIntent(retryIntent)
-        return `Shell Apply refused: ${error instanceof Error ? error.message : String(error)}. No changes were applied.`
+        return workbenchText('SolidsWorkbenchPage.shellApplyRefusedNoChangesWereApplied', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
     } finally {
       shellAdoptionPendingRef.current = false
@@ -11524,7 +11791,7 @@ function SolidsWorkbenchPageDocument({
     const client = clientRef.current
     const runtime = runtimeRef.current
     if (session === null || activeIntent === null || client === null || runtime === null) {
-      return 'Defeature Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.defeatureApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     const intentStillMatches = (): boolean => {
       const current = defeaturePreviewIntentRef.current
@@ -11535,7 +11802,7 @@ function SolidsWorkbenchPageDocument({
         JSON.stringify(current.payload) === JSON.stringify(intent.payload)
     }
     if (!intentStillMatches() || defeaturePreviewFeedback.kind !== 'ready') {
-      return 'Defeature Apply refused: the preview does not match the current face selection.'
+      return workbenchText('SolidsWorkbenchPage.defeatureApplyRefusedThePreviewDoesNotMatchThe')
     }
 
     const baseline = session.baseline
@@ -11548,7 +11815,7 @@ function SolidsWorkbenchPageDocument({
     })
     if (!fingerprintStillMatches()) {
       await cancelDefeaturePreviewSession()
-      return 'Defeature Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.defeatureApplyRefusedTheModelChangedAfterThePreview')
     }
 
     defeatureAdoptionPendingRef.current = true
@@ -11557,7 +11824,7 @@ function SolidsWorkbenchPageDocument({
       try {
         candidate = await session.takeCandidate()
       } catch (error) {
-        return `Defeature Apply refused: ${error instanceof Error ? error.message : String(error)}`
+        return workbenchText('SolidsWorkbenchPage.defeatureApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
 
       let prepared: PreparedCachedBody | null = null
@@ -11586,12 +11853,12 @@ function SolidsWorkbenchPageDocument({
         defeaturePreviewSelectionSourceBodyIdRef.current = null
         defeaturePreviewPageGenerationRef.current += 1
         restoreDefeaturePreviewPresentation(baseline.snapshot.presentationSourceId)
-        setDefeaturePreviewFeedback({ kind: 'idle', message: 'Select a face to preview its healed removal.' })
+        setDefeaturePreviewFeedback({ kind: 'idle', message: workbenchText('SolidsWorkbenchPage.selectAFaceToPreviewItsHealedRemoval') })
       }
 
       try {
         const buffers = await client.tessellate(candidate.body, DISPLAY_TESS_QUALITY)
-        if (!fingerprintStillMatches()) throw new Error('the model changed while preparing the accepted preview')
+        if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedWhilePreparingTheAcceptedPreview'))
         prepared = cacheRef.current.prepare(candidate.featureId, buffers)
         attachHighlightAttributes(prepared, themeColorsRef.current.body, themeColorsRef.current.edge)
         prepared.geometry.computeBoundingBox()
@@ -11611,18 +11878,18 @@ function SolidsWorkbenchPageDocument({
           () => candidate.result,
           {
             publish: () => {
-              if (!fingerprintStillMatches()) throw new Error('the model changed before Defeature adoption')
-              if (!intentStillMatches()) throw new Error('the Defeature face selection changed before adoption')
+              if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeDefeatureAdoption'))
+              if (!intentStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theDefeatureFaceSelectionChangedBeforeAdoption'))
               if (editing ? !dag.has(candidate.featureId) : dag.has(candidate.featureId)) {
                 throw new Error(editing
-                  ? `feature '${candidate.featureId}' no longer exists`
-                  : `feature '${candidate.featureId}' already exists`)
+                  ? workbenchText('SolidsWorkbenchPage.featureNoLongerExists', { featureId: String(candidate.featureId) })
+                  : workbenchText('SolidsWorkbenchPage.featureAlreadyExists', { featureId: String(candidate.featureId) }))
               }
               if (!editing && (priorOwnerHandle === undefined || bodyHandlesRef.current.get(candidate.payload.ownerId) !== priorOwnerHandle)) {
-                throw new Error(`owner '${candidate.payload.ownerId}' is no longer the live source body`)
+                throw new Error(workbenchText('SolidsWorkbenchPage.ownerIsNoLongerTheLiveSourceBody', { ownerId: String(candidate.payload.ownerId) }))
               }
               if (prepared === null || command === null || (priorPair === undefined && stagedPair === null)) {
-                throw new Error('the prepared Defeature presentation is incomplete')
+                throw new Error(workbenchText('SolidsWorkbenchPage.thePreparedDefeaturePresentationIsIncomplete'))
               }
               history.execute(command)
               commandPublished = true
@@ -11733,7 +12000,7 @@ function SolidsWorkbenchPageDocument({
           }
         }
         try {
-          useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `${featureLabel(dag, candidate.featureId)} applied` })
+          useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.applied3', { value1: String(featureLabel(dag, candidate.featureId)) }) })
         } catch {
           /* best-effort logging only */
         }
@@ -11779,7 +12046,7 @@ function SolidsWorkbenchPageDocument({
         const retryIntent = defeaturePreviewIntentRef.current ?? intent
         restorePresentation()
         handleDefeaturePreviewIntent(retryIntent)
-        return `Defeature Apply refused: ${error instanceof Error ? error.message : String(error)}. No changes were applied.`
+        return workbenchText('SolidsWorkbenchPage.defeatureApplyRefusedNoChangesWereApplied', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
     } finally {
       defeatureAdoptionPendingRef.current = false
@@ -11815,7 +12082,7 @@ function SolidsWorkbenchPageDocument({
     const client = clientRef.current
     const runtime = runtimeRef.current
     if (session === null || activeIntent === null || client === null || runtime === null) {
-      return 'Draft Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.draftApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     const intentStillMatches = (): boolean => {
       const current = draftPreviewIntentRef.current
@@ -11826,7 +12093,7 @@ function SolidsWorkbenchPageDocument({
         JSON.stringify(current.payload) === JSON.stringify(intent.payload)
     }
     if (!intentStillMatches() || draftPreviewState.status !== 'ready') {
-      return 'Draft Apply refused: the preview does not match the current Draft settings.'
+      return workbenchText('SolidsWorkbenchPage.draftApplyRefusedThePreviewDoesNotMatchThe')
     }
 
     const baseline = session.baseline
@@ -11839,14 +12106,14 @@ function SolidsWorkbenchPageDocument({
     })
     if (!fingerprintStillMatches()) {
       await cancelDraftPreviewSession()
-      return 'Draft Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.draftApplyRefusedTheModelChangedAfterThePreview')
     }
 
     let candidate: DraftPreviewCandidate
     try {
       candidate = await session.takeCandidate()
     } catch (error) {
-      return `Draft Apply refused: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.draftApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
 
     let prepared: PreparedCachedBody | null = null
@@ -11879,7 +12146,7 @@ function SolidsWorkbenchPageDocument({
     try {
       const buffers = await client.tessellate(candidate.body, DISPLAY_TESS_QUALITY)
       if (!fingerprintStillMatches()) {
-        throw new Error('the model changed while preparing the accepted preview')
+        throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedWhilePreparingTheAcceptedPreview'))
       }
       prepared = cacheRef.current.prepare(candidate.featureId, buffers)
       attachHighlightAttributes(prepared, themeColorsRef.current.body, themeColorsRef.current.edge)
@@ -11905,15 +12172,15 @@ function SolidsWorkbenchPageDocument({
         () => candidate.result,
         {
           publish: () => {
-            if (!fingerprintStillMatches()) throw new Error('the model changed before Draft adoption')
-            if (!intentStillMatches()) throw new Error('the Draft settings changed before adoption')
+            if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeDraftAdoption'))
+            if (!intentStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theDraftSettingsChangedBeforeAdoption'))
             if (editing ? !dag.has(candidate.featureId) : dag.has(candidate.featureId)) {
               throw new Error(editing
-                ? `feature '${candidate.featureId}' no longer exists`
-                : `feature '${candidate.featureId}' already exists`)
+                ? workbenchText('SolidsWorkbenchPage.featureNoLongerExists', { featureId: String(candidate.featureId) })
+                : workbenchText('SolidsWorkbenchPage.featureAlreadyExists', { featureId: String(candidate.featureId) }))
             }
             if (prepared === null || command === null || (priorPair === undefined && stagedPair === null)) {
-              throw new Error('the prepared Draft presentation is incomplete')
+              throw new Error(workbenchText('SolidsWorkbenchPage.thePreparedDraftPresentationIsIncomplete'))
             }
             history.execute(command)
             commandPublished = true
@@ -12028,7 +12295,7 @@ function SolidsWorkbenchPageDocument({
         }
       }
       try {
-        useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: `${featureLabel(dag, candidate.featureId)} applied` })
+        useCamStore.getState().addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.applied3', { value1: String(featureLabel(dag, candidate.featureId)) }) })
       } catch {
         /* best-effort logging only */
       }
@@ -12060,7 +12327,7 @@ function SolidsWorkbenchPageDocument({
           useCamStore.getState().addConsoleEvent({
             severity: 'warning',
             source: 'workbench',
-            message: `Draft applied; a follow-up presentation update needs reconciliation (${error instanceof Error ? error.message : String(error)}).`,
+            message: workbenchText('SolidsWorkbenchPage.draftAppliedAFollowUpPresentationUpdateNeedsReconciliation', { value1: String(error instanceof Error ? error.message : String(error)) }),
           })
         } catch {
           /* best-effort logging only */
@@ -12099,7 +12366,7 @@ function SolidsWorkbenchPageDocument({
       // so a transient preparation/adoption failure leaves a visible,
       // retryable preview instead of a dead or stale card.
       handleDraftPreviewIntent(retryIntent)
-      return `Draft Apply refused: ${error instanceof Error ? error.message : String(error)}. No changes were applied.`
+      return workbenchText('SolidsWorkbenchPage.draftApplyRefusedNoChangesWereApplied', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
   }, [
     cancelDraftPreviewSession,
@@ -12213,8 +12480,8 @@ function SolidsWorkbenchPageDocument({
         if (runtime === null || canvas === null || picker === null) {
           return {
             ok: false,
-            reason: 'workbench-project-runtime-unavailable',
-            message: 'Project: the workbench viewport is not ready',
+            reason: "workbench-project-runtime-unavailable",
+            message: workbenchText('SolidsWorkbenchPage.projectTheWorkbenchViewportIsNotReady'),
           }
         }
         const rect = canvas.getBoundingClientRect()
@@ -12234,8 +12501,8 @@ function SolidsWorkbenchPageDocument({
         ) {
           return {
             ok: false,
-            reason: 'workbench-project-pointer-invalid',
-            message: 'Project: the pointer or viewport bounds are invalid',
+            reason: "workbench-project-pointer-invalid",
+            message: workbenchText('SolidsWorkbenchPage.projectThePointerOrViewportBoundsAreInvalid'),
           }
         }
         const ndcX = ((context.clientX - rect.left) / rect.width) * 2 - 1
@@ -12352,7 +12619,7 @@ function SolidsWorkbenchPageDocument({
             planeNodeId: entry.planeNodeId,
             externalRefs: entry.externalRefs ?? [],
             dimensionDiagnostics: [],
-            ...(basePlaneKind !== undefined ? { name: `Sketch on ${BASE_PLANE_LABELS[basePlaneKind]}` } : {}),
+            ...(basePlaneKind !== undefined ? { name: workbenchText('SolidsWorkbenchPage.sketchOn', { value1: String(BASE_PLANE_LABELS[basePlaneKind]) }) } : {}),
           },
         }
         // See `PackageSketchEntry.undoable` for why these two entries differ.
@@ -12570,7 +12837,7 @@ function SolidsWorkbenchPageDocument({
     // refusal as a warning DIAGNOSTIC on the node; the console line here is the one the user reads
     // at the moment they pressed Finish.
     for (const diag of await recomputeSketchProfile(nodeId)) {
-      notify('warning', `Sketch saved without a profile (${diag.params?.refusal ?? diag.code}): ${diag.params?.message ?? diag.params?.reason ?? ''}`)
+      notify('warning', workbenchText('SolidsWorkbenchPage.sketchSavedWithoutAProfile', { value1: String(diag.params?.refusal ?? diag.code), value2: String(diag.params?.message ?? diag.params?.reason ?? '') }))
     }
 
     // NO camera restore here. `sketcher.exit()` above already restored the pose, through the ONE
@@ -12872,7 +13139,7 @@ function SolidsWorkbenchPageDocument({
           : undefined
       if (!isFinitePlaneFrame(frame)) {
         const label = offsetPlanePayload?.name ?? featureLabel(dag, planeNodeId)
-        const message = `${label} is unresolved and cannot host a new sketch.`
+        const message = workbenchText('SolidsWorkbenchPage.isUnresolvedAndCannotHostANewSketch', { label: String(label) })
         setPlanePickStatus(message)
         notify('warning', message)
         return
@@ -12923,7 +13190,7 @@ function SolidsWorkbenchPageDocument({
           undoable: true, datumInput: built.input,
         })
         if (!opened) {
-          notify('warning', 'Could not open a sketch on that face (a sketch session is already open, or the face plane is degenerate).')
+          notify('warning', workbenchText('SolidsWorkbenchPage.couldNotOpenASketchOnThatFaceA'))
           setDagVersion((v) => v + 1)
           return 'busy'
         }
@@ -12967,14 +13234,14 @@ function SolidsWorkbenchPageDocument({
             useCamStore.getState().addConsoleEvent({
               severity: 'success',
               source: 'workbench',
-              message: `New sketch started on Face ${face.faceId} of ${ownerLabel}.`,
+              message: workbenchText('SolidsWorkbenchPage.newSketchStartedOnFaceOf', { faceLabel: faceDisplayWords(map.snapshotOf(face.faceId)), ownerLabel: String(ownerLabel) }),
             })
           } else if (outcome === 'non-planar') {
             // ADR-0003 named refusal, in plain words. Stay armed so the operator can pick a flat face
             // or a base plane next -- never a silent no-op that looks like the click did nothing.
             setHoveredBasePlaneNodeId(null)
-            setPlanePickStatus(`That face is not flat - pick a flat face or a base plane.`)
-            notify('warning', `Face ${face.faceId} of ${ownerLabel} is not flat, so a sketch cannot start on it. Pick a flat face or a base plane.`)
+            setPlanePickStatus(workbenchText('SolidsWorkbenchPage.thatFaceIsNotFlatPickAFlatFace'))
+            notify('warning', workbenchText('SolidsWorkbenchPage.faceOfIsNotFlatSoASketchCannot', { faceLabel: faceDisplayWords(map.snapshotOf(face.faceId)), ownerLabel: String(ownerLabel) }))
           }
           // 'busy' was already surfaced by openPackageSketchOnFace's own notify.
         })()
@@ -12983,17 +13250,17 @@ function SolidsWorkbenchPageDocument({
       // The resolver said a body is nearest but the pick engine could not resolve a face under the
       // point (a genuinely occluded plane / unresolvable body) -- the honest "orbit for a clear pick".
       setHoveredBasePlaneNodeId(null)
-      setPlanePickStatus('A body blocks that plane - orbit for a clear pick.')
+      setPlanePickStatus(workbenchText('SolidsWorkbenchPage.aBodyBlocksThatPlaneOrbitForAClear'))
       return
     }
     if (result.kind !== 'plane') {
       setHoveredBasePlaneNodeId(null)
       setPlanePickStatus(
         result.kind === 'ambiguous'
-          ? 'Multiple planes under cursor - orbit for a clear pick.'
+          ? workbenchText('SolidsWorkbenchPage.multiplePlanesUnderCursorOrbitForAClearPick')
           : result.reason === 'no-hit'
             ? null
-            : 'Cannot pick a plane from the current view ray.',
+            : workbenchText('SolidsWorkbenchPage.cannotPickAPlaneFromTheCurrentViewRay'),
       )
       return
     }
@@ -13016,8 +13283,8 @@ function SolidsWorkbenchPageDocument({
       severity: 'success',
       source: 'workbench',
       message: offsetPlanePayload !== undefined
-        ? `New sketch started on ${offsetPlanePayload.name}.`
-        : `New sketch started on the ${basePlanePickReadout(nodeId)}.`,
+        ? workbenchText('SolidsWorkbenchPage.newSketchStartedOn', { name: String(offsetPlanePayload.name) })
+        : workbenchText('SolidsWorkbenchPage.newSketchStartedOnThe', { value1: String(basePlanePickReadout(nodeId)) }),
     })
   }, [resolveSketchPlanePickAt, cancelBasePlanePick, beginPickedPlaneSketch, resolveWorkbenchFaceHitAt, openPackageSketchOnFace, dag, notify, scheduler])
 
@@ -13036,7 +13303,7 @@ function SolidsWorkbenchPageDocument({
       current.ownerId !== selectedFace.ownerId ||
       current.faceId !== selectedFace.faceId
     ) {
-      notify('warning', 'The selected face changed before New Sketch started. Pick the face again.')
+      notify('warning', workbenchText('SolidsWorkbenchPage.theSelectedFaceChangedBeforeNewSketchStartedPick'))
       return
     }
     handleBasePlanePickClick({
@@ -13066,7 +13333,7 @@ function SolidsWorkbenchPageDocument({
       const projected = projectFaceBoundaryToSketch(frame, loop, { sketchId: rawSketchId, sourceFaceId: faceId })
       const converted = projectedBoundaryToCamSeed(projected.entities, projected.constraints)
       if (!converted.ok) {
-        notify('warning', `Face boundary not projected (${converted.refusal.code}): ${converted.refusal.message}`)
+        notify('warning', workbenchText('SolidsWorkbenchPage.faceBoundaryNotProjected', { code: String(converted.refusal.code), message: String(converted.refusal.message) }))
         return { seed: undefined, externalRefs: [] }
       }
       return { seed: converted.seed, externalRefs: [projected.externalRef] }
@@ -13094,6 +13361,18 @@ function SolidsWorkbenchPageDocument({
   const stlRedrawAfterApplyRef = useRef<{ geoId: string; done: boolean } | null>(null)
   const [stlBody, setStlBody] = useState<{ geoId: string; bodyId: string; name: string } | null>(null)
   const [stlBodyVisible, setStlBodyVisible] = useState(true)
+  /** WO-2820: the body Form - From body started from; the open STL hides while it is that source, as a body does */
+  const formSourceBodyId = useFormStore((st) => st.active ? st.sourceBodyId : null)
+  // WO-2823: the STL went into the model as a Boolean's input (an import node
+  // made from its mesh records the row it came from). Like a consumed tool
+  // body it is then not drawn, listed, picked or offered; Undo of that
+  // Boolean brings it back. Only an ACTIVE import counts: featureOrder() is
+  // the whole timeline, and a rolled-back or suppressed import has no body
+  // (fullResync disposed it), so the STL is usable again until the marker
+  // moves back past it.
+  const stlInModel = stlBody !== null && dag.featureOrder().some((id) =>
+    dag.getNode(id)?.payload.stlGeoId === stlBody.geoId && !dag.isEffectivelySuppressed(id) && !dag.isRolledBack(id))
+  const stlShown = stlBodyVisible && !stlInModel && formSourceBodyId !== stlBody?.bodyId
   const [stlSelection, setStlSelection] = useState<StlModelPick | null>(null)
   const stlHoverKeyRef = useRef<string | null>(null)
   const stlColorRef = useRef(modelStlColor)
@@ -13112,7 +13391,7 @@ function SolidsWorkbenchPageDocument({
       const bytes = await loadCachedSTL(geoId)
       if (!live) return
       if (bytes === null) {
-        notify('error', `Cannot show "${name}" in the Model screen: its STL bytes are missing - re-import the file.`)
+        notify('error', workbenchText('SolidsWorkbenchPage.cannotShowInTheModelScreenItsSTLBytes', { name: String(name) }))
         return
       }
       // WO-1936: a journal holding a bore replays through the boring kernel,
@@ -13160,13 +13439,13 @@ function SolidsWorkbenchPageDocument({
       if (!redrawAfterApply) {
         notify(
           'info',
-          `"${name}" is open as a mesh (kept as an STL): ${model.features.length} feature(s) recognised ` +
-          `across ${model.facetCount} facets in ${Math.round(performance.now() - started)} ms. ` +
-          'Click a feature to select it whole.',
+          workbenchText('SolidsWorkbenchPage.isOpenAsAMeshKeptAsAnSTL', { name: String(name), length: String(model.features.length) }) +
+          workbenchText('SolidsWorkbenchPage.acrossFacetsInMs', { facetCount: String(model.facetCount), value2: String(Math.round(performance.now() - started)) }) +
+          workbenchText('SolidsWorkbenchPage.clickAFeatureToSelectItWhole'),
         )
       }
       if (model.stopped !== undefined) {
-        notify('warning', `"${name}": its edit list stopped early - the shape shown is the last edit that applied.`)
+        notify('warning', workbenchText('SolidsWorkbenchPage.itsEditListStoppedEarlyTheShapeShownIs', { name: String(name) }))
       }
       runtime.requestRender()
     })()
@@ -13212,6 +13491,9 @@ function SolidsWorkbenchPageDocument({
   // value); stable, because the dialog re-runs that effect on identity change.
   const handleStlFilletPreviewIntent = useCallback((intent: { payload: { radius: number } } | null): void => {
     stlToolsSetFilletRadius(intent === null ? null : intent.payload.radius)
+  }, [stlToolsSetFilletRadius])
+  const handleStlChamferSizePreviewIntent = useCallback((intent: { payload: { distance: number } } | null): void => {
+    stlToolsSetFilletRadius(intent === null ? null : intent.payload.distance)
   }, [stlToolsSetFilletRadius])
   // WO-2089: Hole and Chamfer on the STL. Their dialogs report their fields
   // through onPreviewIntent; each becomes the boolean-body shape the STL
@@ -13273,22 +13555,22 @@ function SolidsWorkbenchPageDocument({
     // WO-2147: the Zebra stripes toggle reaches the STL body too.
     for (const m of [presentation.mesh.material].flat()) setZebra(m, zebra)
     setMeshCurvature(presentation.mesh, curvature)
-    presentation.setVisible(stlBodyVisible)
+    presentation.setVisible(stlShown)
     // A Model tool open on the STL paints ITS picks; otherwise the plain
     // selection shows.
-    if (stlFaceMarks.length > 0) presentation.setMarkedFeatures(stlBodyVisible ? stlFaceMarks : [])
-    else if (stlTools.session.kind !== 'none') presentation.setMarkedFeatures(stlBodyVisible ? stlTools.markedFeatureIndexes : [])
-    else presentation.setSelection(stlBodyVisible ? stlSelection : null)
+    if (stlFaceMarks.length > 0) presentation.setMarkedFeatures(stlShown ? stlFaceMarks : [])
+    else if (stlTools.session.kind !== 'none') presentation.setMarkedFeatures(stlShown ? stlTools.markedFeatureIndexes : [])
+    else presentation.setSelection(stlShown ? stlSelection : null)
     if (modelStlColor !== undefined) presentation.setColor(modelStlColor)
     runtimeRef.current?.requestRender()
   // stlToolMarksKey / stlFaceMarksKey stand for markedFeatureIndexes /
   // stlFaceMarks (fresh arrays per render).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stlBody, displayMode, zebra, curvature, stlBodyVisible, stlSelection, modelStlColor, stlTools.session.kind, stlToolMarksKey, stlFaceMarksKey])
+  }, [stlBody, displayMode, zebra, curvature, stlShown, stlSelection, modelStlColor, stlTools.session.kind, stlToolMarksKey, stlFaceMarksKey])
 
   /** WO-1936: the selected STL feature, when it is one `tool` edits - so a
    *  tool pressed with a feature already selected starts on it. */
-  const selectedStlFeatureFor = (tool: 'defeature' | 'resize-hole' | 'push-pull' | 'fillet') =>
+  const selectedStlFeatureFor = (tool: 'defeature' | 'resize-hole' | 'move-hole' | 'push-pull' | 'fillet' | 'chamfer') =>
     stlTools.acceptedFeature(tool, stlSelection)
 
   /** The STL body's pick under a canvas point: a whole recognised feature, the
@@ -13327,10 +13609,11 @@ function SolidsWorkbenchPageDocument({
   }, [pickStlBodyAt])
 
   /** WO-1961: Boolean's target pick takes the STL body too - the whole part,
-   *  never one of its features. True when the click picked it. */
+   *  never one of its features. True when the click picked it. WO-2823: and
+   *  its tool pick, when a modelled body is the target. */
   const handleBooleanStlTargetPick = useCallback((clientX: number, clientY: number): boolean => {
     const request = booleanBodyPickRequestRef.current
-    if (request === null || request.role !== 'target' || stlBody === null || request.excludedIds.includes(stlBody.bodyId)) return false
+    if (request === null || stlBody === null || request.excludedIds.includes(stlBody.bodyId)) return false
     if (pickStlBodyAt(clientX, clientY) === null) return false
     stlBodyRef.current?.setHover(null)
     booleanBodyPickRequestRef.current = null
@@ -13343,13 +13626,14 @@ function SolidsWorkbenchPageDocument({
   const handleBooleanStlTargetHover = useCallback((clientX: number, clientY: number): void => {
     const presentation = stlBodyRef.current
     if (presentation === null) return
-    const pick = booleanBodyPickRequestRef.current?.role === 'target' ? pickStlBodyAt(clientX, clientY) : null
+    const request = booleanBodyPickRequestRef.current
+    const pick = request !== null && !request.excludedIds.includes(stlBody?.bodyId ?? '') ? pickStlBodyAt(clientX, clientY) : null
     const key = pick === null ? null : 'body'
     if (key === stlHoverKeyRef.current) return
     stlHoverKeyRef.current = key
     presentation.setHover(pick === null ? null : { kind: 'body', distance: pick.distance })
     runtimeRef.current?.requestRender()
-  }, [pickStlBodyAt])
+  }, [stlBody, pickStlBodyAt])
 
   /** WO-1961: the Boolean dialog's STL target, while an STL is open. Its tool
    *  shape starts where Setup's "Add or cut a shape" started it. */
@@ -13563,7 +13847,7 @@ function SolidsWorkbenchPageDocument({
     }
     if (hit.kind === 'edge') {
       const line = await lineFromEdgePick(body, ownerId, hit.id, lookup)
-      if (!line.ok) return void notify('warning', `Plane: ${line.message}`)
+      if (!line.ok) return void notify('warning', workbenchText('SolidsWorkbenchPage.plane2', { message: String(line.message) }))
       // a finished pair starts over
       const first = dialog.pick === undefined ? dialog.lines?.[0] : undefined
       if (first === undefined) return update({ lines: [line.pick], pick: undefined })
@@ -13614,7 +13898,7 @@ function SolidsWorkbenchPageDocument({
     // where an edge meets a plane: an edge click sets the edge, a flat-face click the plane
     if (hit.kind === 'edge') {
       const line = await lineFromEdgePick(body, ownerId, hit.id, lookup)
-      if (!line.ok) return void notify('warning', `Point: ${line.message}`)
+      if (!line.ok) return void notify('warning', workbenchText('SolidsWorkbenchPage.point2', { message: String(line.message) }))
       const made = pointMeetingPlane(dag, line.pick, dialog.planeId, dialog.planeFace)
       if (!made.ok && (dialog.planeId !== '' || dialog.planeFace !== undefined)) notify('warning', made.message)
       update({ line: line.pick, pick: made.ok ? made.pick : undefined })
@@ -13623,7 +13907,7 @@ function SolidsWorkbenchPageDocument({
     if (hit.kind !== 'face') return
     const geometry = await lookup(hit.id)
     if (geometry === undefined || geometry.surfaceType !== 'plane' || geometry.normal === undefined) {
-      return void notify('warning', 'Point: that face is not flat - click a flat face, or choose a plane in the list.')
+      return void notify('warning', workbenchText('SolidsWorkbenchPage.pointThatFaceIsNotFlatClickAFlat'))
     }
     const planeFace: PointPlaneFace = { faceId: hit.id, ownerId, frame: { origin: geometry.centroid, normal: geometry.normal } }
     const made = dialog.line === undefined ? undefined : pointMeetingPlane(dag, dialog.line, '', planeFace)
@@ -13681,7 +13965,7 @@ function SolidsWorkbenchPageDocument({
           return
         }
         if (planePick.kind === 'ambiguous') {
-          notify('warning', `Multiple construction planes overlap here (${planePick.nodeIds.map((id) => featureLabel(dag, id)).join(', ')}). Orbit for a clear pick.`)
+          notify('warning', workbenchText('SolidsWorkbenchPage.multipleConstructionPlanesOverlapHereOrbitForAClear', { value1: String(planePick.nodeIds.map((id) => featureLabel(dag, id)).join(', ')) }))
           return
         }
         if (dialog.kind === 'offset-plane' && dialog.mode === 'create') {
@@ -13696,7 +13980,7 @@ function SolidsWorkbenchPageDocument({
             return
           }
           if (basePlanePick.kind === 'ambiguous') {
-            notify('warning', `Multiple base planes overlap here (${basePlanePick.nodeIds.map((id) => featureLabel(dag, id)).join(', ')}). Orbit for a clear pick.`)
+            notify('warning', workbenchText('SolidsWorkbenchPage.multipleBasePlanesOverlapHereOrbitForAClear', { value1: String(basePlanePick.nodeIds.map((id) => featureLabel(dag, id)).join(', ')) }))
             return
           }
         }
@@ -13756,7 +14040,7 @@ function SolidsWorkbenchPageDocument({
       // the prior reference, diagnostics and repair context all stay exactly as they were.
       const pickedSnap = map.snapshotOf(faceId)
       if (pickedSnap === undefined || pickedSnap.surfaceType !== 'plane') {
-        notify('warning', 'That face is not planar. Pick a flat face to reattach the plane.')
+        notify('warning', workbenchText('SolidsWorkbenchPage.thatFaceIsNotPlanarPickAFlatFace'))
         return
       }
       // WO UI-16 (Q-14): the reattach path builds/regens its datum in place (no fresh insert), then
@@ -13772,9 +14056,9 @@ function SolidsWorkbenchPageDocument({
         // nothing is pushed onto CommandHistory, repair context stays armed, and the operator gets a
         // named reason instead of an uncaught exception.
         if (err instanceof DagCycleError) {
-          notify('warning', `${featureLabel(dag, ownerId)} already depends on this plane -- picking it would create a loop. Pick an independent face.`)
+          notify('warning', workbenchText('SolidsWorkbenchPage.alreadyDependsOnThisPlanePickingItWouldCreate', { value1: String(featureLabel(dag, ownerId)) }))
         } else {
-          notify('warning', `Reattach refused: ${err instanceof Error ? err.message : String(err)}`)
+          notify('warning', workbenchText('SolidsWorkbenchPage.reattachRefused', { value1: String(err instanceof Error ? err.message : String(err)) }))
         }
         return
       }
@@ -13787,7 +14071,7 @@ function SolidsWorkbenchPageDocument({
         // pick mode active so the user can try a different face rather than silently stranding them.
         history.undo()
         await fullResync([])
-        notify('warning', 'That face is not planar. Pick a flat face to reattach the plane.')
+        notify('warning', workbenchText('SolidsWorkbenchPage.thatFaceIsNotPlanarPickAFlatFace'))
         return
       }
       const followUpCommands: Command[] = [
@@ -13915,8 +14199,8 @@ function SolidsWorkbenchPageDocument({
   /** WO UI-5 (mission #1/#4): the "Push/Pull" toolbar toggle's canvas click
    *  handler -- picks a face, classifies it (client.classifyFace, a cheap
    *  dedicated call, distinct from the drag-preview's editFeature calls
-   *  below), and mounts the gizmo ONLY for a planar hit. A miss or a
-   *  non-planar hit shows the refusal reason and leaves pushPullMode 'arm'
+   *  below), and mounts the gizmo for a plane, cylinder or cone. A miss or an
+   *  unsupported hit shows the refusal reason and leaves pushPullMode 'arm'
    *  so the user can simply try another face -- same "never a silent no-op,
    *  never strand the user" contract handleCanvasClick's own sketch-pick
    *  miss/non-planar branch already follows. The gizmo's face-normal frame
@@ -13954,8 +14238,8 @@ function SolidsWorkbenchPageDocument({
       const generation = pushPullGenerationRef.current
       const surfaceType = await client.classifyFace(handle, faceId)
       if (pushPullGenerationRef.current !== generation) return
-      if (surfaceType !== 'plane') {
-        setPushPullRefusal(`Push/Pull supports planar faces only -- picked a ${surfaceType} face. Try another face.`)
+      if (surfaceType !== 'plane' && surfaceType !== 'cylinder' && surfaceType !== 'cone') {
+        setPushPullRefusal(`Push/Pull cannot offset a ${surfaceType} face yet. Nothing was changed.`)
         return
       }
 
@@ -13975,9 +14259,16 @@ function SolidsWorkbenchPageDocument({
         }
       }
 
+      // WO-2813: positive hole-face distance grows the opening. Its solid
+      // normal points into the hole, so the drag arrow points the other way.
+      // This frame is also persisted for tree Edit.
+      if (surfaceType === 'cylinder' || surfaceType === 'cone') {
+        normal = { x: -normal.x, y: -normal.y, z: -normal.z }
+      }
+
       const presentation = cacheRef.current.retain(ownerId)
       if (presentation === undefined) {
-        setPushPullRefusal(`Push/Pull refused: '${ownerId}' has no committed viewport presentation.`)
+        setPushPullRefusal(workbenchText('SolidsWorkbenchPage.pushPullRefusedHasNoCommittedViewportPresentation', { ownerId: String(ownerId) }))
         return
       }
 
@@ -14056,7 +14347,9 @@ function SolidsWorkbenchPageDocument({
         // WO-2078 audit fix: ordinary authored fillets keep the established
         // synchronous edge-pick path above. Only an edge miss probes whether
         // the click landed on a recognized imported fillet FACE.
-        if (feature !== 'fillet' || dressUpPickMode.kind !== 'arm') return
+        // WO-2761: a Fillet or Chamfer face click that opens nothing says why
+        // on the console (one line) instead of doing nothing silently.
+        if ((feature !== 'fillet' && feature !== 'chamfer') || dressUpPickMode.kind !== 'arm') return
         const faceHit = pickAcrossBodies(
           cacheRef.current,
           pickEngine,
@@ -14077,17 +14370,34 @@ function SolidsWorkbenchPageDocument({
           }
         }
         if (faceHit !== null && faceHit.kind === 'face' && client !== null && body !== undefined) {
-          void client.recognizeFeatures(body).then((verdicts) => {
-            const importedFillet = verdicts.find((verdict) =>
-              verdict.removable &&
-              verdict.featureKey.startsWith('absorbed:') &&
-              verdict.featureClass.startsWith('fillet') &&
-              verdict.faceIds.includes(faceHit.id) &&
-              typeof verdict.params.radius === 'number' &&
-              Number.isFinite(verdict.params.radius) &&
-              verdict.params.radius > 0,
-            )
-            if (importedFillet === undefined) return
+          const pickedBody = body
+          // A recognition failure still answers the click: with no verdicts the
+          // line names the face and the next step.
+          void client.recognizeFeatures(pickedBody).catch((): FeatureVerdict[] => []).then(async (verdicts) => {
+            const importedFillet = feature === 'fillet' ? editableImportedFillet(verdicts, faceHit.id) : undefined
+            // WO-2766: Chamfer changes an imported chamfer chain the same way.
+            const importedChamfer = feature === 'chamfer' ? editableImportedChamfer(verdicts, faceHit.id) : undefined
+            if (importedChamfer !== undefined) {
+              skipNextDressUpSelectionClearRef.current = true
+              pickHighlightSelectionRef.current.selectMany(importedChamfer.faceIds)
+              pickHighlightSelectionRef.current.setHover(null)
+              bumpUi4Repaint()
+              setDressUpPickMode({ kind: 'none' })
+              setDialog({
+                kind: 'chamfer',
+                mode: 'imported-edit',
+                ownerId: faceHit.bodyId,
+                featureKey: importedChamfer.featureKey,
+                faceId: faceHit.id,
+                currentDistance: importedChamferDistance(importedChamfer) ?? Number(importedChamfer.params.distance),
+              })
+              return
+            }
+            if (importedFillet === undefined) {
+              const surface = await client.classifyFace(pickedBody, faceHit.id).catch(() => null)
+              notify('warning', dressUpDeadClickLine(feature, surface, verdicts, faceHit.id))
+              return
+            }
             skipNextDressUpSelectionClearRef.current = true
             pickHighlightSelectionRef.current.selectMany(importedFillet.faceIds)
             pickHighlightSelectionRef.current.setHover(null)
@@ -14196,7 +14506,7 @@ function SolidsWorkbenchPageDocument({
         ...(Object.keys(draftFaceFrames).length === 0 ? {} : { draftFaceFrames }),
       })
     },
-    [bumpUi4Repaint, dressUpPickMode, dag, workbenchPickThresholds, renderedPickBodies],
+    [bumpUi4Repaint, dressUpPickMode, dag, workbenchPickThresholds, renderedPickBodies, notify],
   )
 
   /** WO UI-58: resize-hole's canvas click. Per P5 (no owner lock), candidates
@@ -14235,7 +14545,8 @@ function SolidsWorkbenchPageDocument({
       const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), hit.bodyId)) ?? []
       const matched = eligibleResizeHoleVerdicts(verdicts).find((v) => v.faceIds.includes(hit.id))
       if (matched === undefined) return
-      const diameter = matched.params.diameter
+      // WO-2762: a pick on the counterbore wall edits that step, not the pilot.
+      const { step, diameter } = resizeHoleField === 'move' ? { step: undefined, diameter: matched.params.diameter } : pickedHoleStep(matched, hit.id)
       if (typeof diameter !== 'number' || !Number.isFinite(diameter) || diameter <= 0) return
       pickHighlightSelectionRef.current.selectMany(matched.faceIds)
       beginResizeHoleSelection({
@@ -14244,7 +14555,8 @@ function SolidsWorkbenchPageDocument({
         faceIds: matched.faceIds,
         currentDiameter: diameter,
         anchorPoint: hit.point,
-        ...holeDepthSelection(matched, resizeHoleField),
+        ...holeDepthSelection(matched, resizeHoleField, step),
+        ...(step !== undefined ? { step } : {}),
       })
     },
     [resizeHolePickMode.kind, resizeHoleField, dag, dagVersion, beginResizeHoleSelection],
@@ -14711,7 +15023,7 @@ function SolidsWorkbenchPageDocument({
       const client = clientRef.current
       const liveNode = dag.getNode(featureId)
       if (client === null || liveNode === undefined || liveNode.payload.opType !== 'pushPull') {
-        return 'Push/Pull Apply refused: the edited feature is no longer available. No changes were applied.'
+        return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedTheEditedFeatureIsNo')
       }
 
       const runtimeScene: THREE.Object3D[] = []
@@ -14842,7 +15154,7 @@ function SolidsWorkbenchPageDocument({
           const lastDelta = [...recorded].reverse().find((entry) => entry.featureId === id)
           if (lastDelta === undefined) {
             await cleanupCandidate()
-            return `Push/Pull Apply refused: candidate boundary '${id}' has no recorded ElementMap delta. No changes were applied.`
+            return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedCandidateBoundaryHasNoRecorded', { id: String(id) })
           }
           const clone = await client.restoreBody(await client.serializeBody(liveHandle), lastDelta)
           candidateHandles.set(id, clone)
@@ -14882,7 +15194,7 @@ function SolidsWorkbenchPageDocument({
         })
         if (candidatePass.cancelled) {
           await cleanupCandidate()
-          return 'Push/Pull Apply refused: candidate replay was cancelled. No changes were applied.'
+          return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedCandidateReplayWasCancelledNo')
         }
         const failedId = closureOrder.find((id) => candidateScheduler.statusOf(id) === 'failed')
         if (failedId !== undefined) {
@@ -14892,7 +15204,7 @@ function SolidsWorkbenchPageDocument({
             ? `: ${diagnostic.params.reason}`
             : ''
           const detail = diagnostic === undefined ? 'KERNEL_OP_FAILED' : `${diagnostic.code}${reason}`
-          const message = `Push/Pull Apply refused by downstream feature '${failedId}' (${featureLabel(candidateDag, failedId)}): ${detail}. No changes were applied.`
+          const message = workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedByDownstreamFeatureNoChanges', { failedId: String(failedId), value2: String(featureLabel(candidateDag, failedId)), detail: String(detail) })
           await cleanupCandidate()
           return message
         }
@@ -14969,7 +15281,7 @@ function SolidsWorkbenchPageDocument({
             for (const ref of op.modelReferences) {
               const ids = idsByBody.get(ref.bodyId) ?? new Set<string>()
               // STABLEIDS-GUARD-RERESOLVE: named refusal, not a raw "not iterable" (ADR-0003).
-              for (const id of referenceStableIds(ref, `op "${op.id}"`)) ids.add(id)
+              for (const id of referenceStableIds(ref, workbenchText('SolidsWorkbenchPage.op', { id: String(op.id) }))) ids.add(id)
               idsByBody.set(ref.bodyId, ids)
             }
           }
@@ -14992,26 +15304,26 @@ function SolidsWorkbenchPageDocument({
 
         if (!fingerprintStillMatches()) {
           await cleanupCandidate()
-          return 'Push/Pull Apply refused: the model changed while the candidate replay was running. No changes were applied.'
+          return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedTheModelChangedWhileThe')
         }
         for (const id of candidatePass.executed) {
           const result = candidateResults.get(id)
           if (result === undefined) {
             await cleanupCandidate()
-            return `Push/Pull Apply refused: candidate result '${id}' is missing. No changes were applied.`
+            return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedCandidateResultIsMissingNo', { id: String(id) })
           }
           if (result.body !== undefined && prepared.get(id) === undefined) {
             await cleanupCandidate()
-            return `Push/Pull Apply refused: candidate display '${id}' is missing. No changes were applied.`
+            return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedCandidateDisplayIsMissingNo', { id: String(id) })
           }
         }
         if (stagedMeshPairs.size > 0 && runtimeRef.current === null) {
           await cleanupCandidate()
-          return 'Push/Pull Apply refused: the viewport is no longer available. No changes were applied.'
+          return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedTheViewportIsNoLonger')
         }
         if (!cacheRef.current.isRetained(presentation)) {
           await cleanupCandidate()
-          return 'Push/Pull Apply refused: the committed presentation changed before candidate adoption. No changes were applied.'
+          return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedTheCommittedPresentationChangedBefore')
         }
 
         const priorHandles = new Map(candidatePass.executed.map((id) => [id, bodyHandlesRef.current.get(id)] as const))
@@ -15031,9 +15343,9 @@ function SolidsWorkbenchPageDocument({
           candidatePass.executed,
           (id) => candidateResults.get(id) as OpResult,
           () => {
-            if (!fingerprintStillMatches()) throw new Error('the model changed before candidate adoption')
+            if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeCandidateAdoption'))
             if (!cacheRef.current.isRetained(presentation)) {
-              throw new Error('the committed presentation changed before candidate adoption')
+              throw new Error(workbenchText('SolidsWorkbenchPage.theCommittedPresentationChangedBeforeCandidateAdoption'))
             }
             pushPullAdoptionProbeRef.current?.()
 
@@ -15041,7 +15353,7 @@ function SolidsWorkbenchPageDocument({
               const result = candidateResults.get(id) as OpResult
               if (!result.ok || result.body === undefined) return []
               const staged = prepared.get(id)
-              if (staged === undefined) throw new Error(`candidate display '${id}' is missing`)
+              if (staged === undefined) throw new Error(workbenchText('SolidsWorkbenchPage.candidateDisplayIsMissing', { id: String(id) }))
               return [staged]
             })
             const cacheTransaction = cacheRef.current.beginPreparedAdoption(preparedSet)
@@ -15052,7 +15364,7 @@ function SolidsWorkbenchPageDocument({
                 if (!result.ok || result.body === undefined) continue
                 const staged = prepared.get(id) as PreparedCachedBody
                 const pristine = preparedPristine.get(id)
-                if (pristine === undefined) throw new Error(`candidate pristine display '${id}' is missing`)
+                if (pristine === undefined) throw new Error(workbenchText('SolidsWorkbenchPage.candidatePristineDisplayIsMissing', { id: String(id) }))
 
                 bodyHandlesRef.current.set(id, result.body)
                 const existing = meshesRef.current.get(id)
@@ -15060,7 +15372,7 @@ function SolidsWorkbenchPageDocument({
                   const stagedPair = stagedMeshPairs.get(id)
                   const runtime = runtimeRef.current
                   if (stagedPair === undefined || runtime === null) {
-                    throw new Error(`candidate scene presentation '${id}' is missing`)
+                    throw new Error(workbenchText('SolidsWorkbenchPage.candidateScenePresentationIsMissing', { id: String(id) }))
                   }
                   meshesRef.current.set(id, stagedPair)
                   publishedNewIds.push(id)
@@ -15153,7 +15465,7 @@ function SolidsWorkbenchPageDocument({
           useCamStore.getState().addConsoleEvent({
             severity: 'info',
             source: 'workbench',
-            message: `Model changed: ${changed.length} operation${changed.length === 1 ? '' : 's'} re-flagged (stale/degraded).`,
+            message: workbenchText('SolidsWorkbenchPage.modelChangedOperationReFlaggedStaleDegraded', { length: String(changed.length), value2: String(changed.length === 1 ? '' : 's') }),
           })
         }
         // WO INT-17C Stage C1 CLOSURE (gap 2): same item-scoping as the other
@@ -15177,7 +15489,7 @@ function SolidsWorkbenchPageDocument({
       } catch (err) {
         await cleanupCandidate()
         if (liveDocumentCommitted) throw err
-        return `Push/Pull Apply refused: ${err instanceof Error ? err.message : String(err)}. No changes were applied.`
+        return workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedNoChangesWereApplied', { value1: String(err instanceof Error ? err.message : String(err)) })
       }
     },
     [dag, history, map, scheduler, makeReplayExecutor, recomputeSketchProfileInDag, createBodyMeshPair, setFeatureVisible, followLinkedProjections],
@@ -15241,9 +15553,19 @@ function SolidsWorkbenchPageDocument({
           await restorePushPullBase(mode, null)
           return
         }
+        // WO-2856: a refused Apply used to set its reason and then call
+        // restorePushPullBase, which cleared it -- the panel closed and nothing
+        // changed without a word. The resting state stays idle (UI-5 #4); the
+        // reason now lands on the console as one line (WO-2761's dead-click
+        // precedent) and survives the restore, so re-arming shows it too.
+        const refuse = async (reason: string): Promise<void> => {
+          await restorePushPullBase(mode, null)
+          setPushPullRefusal(reason)
+          notify('warning', reason)
+        }
         const node = dag.getNode(mounted.ownerId)
         if (node === undefined) {
-          await restorePushPullBase(mode, null)
+          await refuse(workbenchText('SolidsWorkbenchPage.pushPullApplyRefusedTheEditedFeatureIsNo'))
           return
         }
 
@@ -15262,8 +15584,7 @@ function SolidsWorkbenchPageDocument({
 
         const check = await client.editFeature({ featureId: 'pushpull-commit-check', body: mounted.baseHandle, featureKey: mounted.faceId, delta, kind: 'faceOffset' })
         if (!check.ok || check.body === undefined) {
-          setPushPullRefusal(diagnosticsReason(check.diagnostics))
-          await restorePushPullBase(mode, null)
+          await refuse(diagnosticsReason(check.diagnostics))
           return
         }
         await client.dispose(check.body).catch(() => undefined)
@@ -15283,7 +15604,7 @@ function SolidsWorkbenchPageDocument({
           ownerId: mounted.ownerId,
           delta,
           normal: mounted.frame.normal,
-          name: `Push/Pull ${id}`,
+          name: workbenchText('SolidsWorkbenchPage.pushPull', { id: String(id) }),
         }
         history.execute(
           createDirectEditFeatureCommand(dag, {
@@ -15329,6 +15650,9 @@ function SolidsWorkbenchPageDocument({
         if (!committed) await restorePushPullBase(mode, null).catch(() => undefined)
         setPushPullMode({ kind: 'none' })
         setPushPullRefusal(pushPullGestureFailureReason(err))
+        // WO-2856: idle hides the hint bar until the tool is re-armed; the
+        // console carries the line now.
+        notify('warning', pushPullGestureFailureReason(err))
       } finally {
         // WO UI-14A-R2: released on EVERY exit (including a throwing
         // editFeature) -- a wedged lock would make push/pull permanently inert.
@@ -15344,7 +15668,7 @@ function SolidsWorkbenchPageDocument({
         pushPullEndingRef.current = false
       }
     },
-    [pushPullMode, dag, history, fullResync, beginPushPullGestureEnd, restorePushPullBase, restorePushPullRefusal, transactExistingPushPull],
+    [pushPullMode, dag, history, fullResync, beginPushPullGestureEnd, restorePushPullBase, restorePushPullRefusal, transactExistingPushPull, notify],
   )
 
   useEffect(() => {
@@ -15375,7 +15699,7 @@ function SolidsWorkbenchPageDocument({
   // input (all-hidden/no-body reaching here with the button enabled) also
   // refuses by name.
   const resolveExportBodyHandles = useCallback((featureIds: string[]): BodyHandle[] => {
-    if (featureIds.length === 0) throw new Error('SolidsWorkbenchPage: no body to export')
+    if (featureIds.length === 0) throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageNoBodyToExport'))
     const handles: BodyHandle[] = []
     const missing: string[] = []
     for (const id of featureIds) {
@@ -15384,7 +15708,7 @@ function SolidsWorkbenchPageDocument({
       else handles.push(bodyHandle)
     }
     if (missing.length > 0) {
-      throw new Error(`SolidsWorkbenchPage: missing body handle(s) for export: ${missing.join(', ')}`)
+      throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageMissingBodyHandleSForExport', { value1: String(missing.join(', ')) }))
     }
     return handles
   }, [])
@@ -15392,7 +15716,7 @@ function SolidsWorkbenchPageDocument({
   const exportStep = useCallback(
     async (featureIds: string[]): Promise<ArrayBuffer> => {
       const client = clientRef.current
-      if (client === null) throw new Error('SolidsWorkbenchPage: kernel not ready')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageKernelNotReady'))
       const handles = resolveExportBodyHandles(featureIds)
       return client.exportStep(handles)
     },
@@ -15409,11 +15733,11 @@ function SolidsWorkbenchPageDocument({
     async (featureIds: string[]): Promise<ArrayBuffer> => {
       const presentation = stlBodyRef.current
       if (featureIds.length === 1 && featureIds[0] === stlModelBodyId(presentation?.model.geoId ?? '')) {
-        if (presentation === null) throw new Error(`SolidsWorkbenchPage: missing mesh for export: ${featureIds[0]}`)
+        if (presentation === null) throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageMissingMeshForExport', { value1: String(featureIds[0]) }))
         return exportBinaryStl(presentation.model.mesh).bytes
       }
       const client = clientRef.current
-      if (client === null) throw new Error('SolidsWorkbenchPage: kernel not ready')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageKernelNotReady'))
       const handles = resolveExportBodyHandles(featureIds)
       const inputs: StlBodyInput[] = []
       for (let i = 0; i < featureIds.length; i++) {
@@ -15428,7 +15752,7 @@ function SolidsWorkbenchPageDocument({
   const export3mf = useCallback(
     async (featureIds: string[]): Promise<ArrayBuffer> => {
       const client = clientRef.current
-      if (client === null) throw new Error('SolidsWorkbenchPage: kernel not ready')
+      if (client === null) throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageKernelNotReady'))
       const handles = resolveExportBodyHandles(featureIds)
       const inputs: StlBodyInput[] = []
       for (let i = 0; i < featureIds.length; i++) {
@@ -15446,7 +15770,7 @@ function SolidsWorkbenchPageDocument({
   getExportBodiesRef.current = () => [
     ...bodies.map((body) => ({ id: body.bodyId, name: body.name, mesh: false,
       visible: dag.getNode(body.bodyId)?.hidden !== true && visibleRef.current.get(body.bodyId) !== false })),
-    ...(stlBody === null ? [] : [{ id: stlBody.bodyId, name: stlBody.name, mesh: true, visible: stlBodyVisible }]),
+    ...(stlBody === null || stlInModel ? [] : [{ id: stlBody.bodyId, name: stlBody.name, mesh: true, visible: stlBodyVisible }]),
   ]
 
   const handleExportStepClick = useCallback(async (): Promise<void> => {
@@ -15480,13 +15804,13 @@ function SolidsWorkbenchPageDocument({
    */
   const buildDebugSceneExport = useCallback((): DebugSceneExport => {
     const runtime = runtimeRef.current
-    if (runtime === null) throw new Error('SolidsWorkbenchPage: scene runtime not ready')
+    if (runtime === null) throw new Error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageSceneRuntimeNotReady'))
     const skipped: string[] = []
     if (sketchMode.kind !== 'none') {
       skipped.push('active in-progress sketch session (not yet committed to the feature tree by Finish)')
     }
     if (dialog.kind !== 'none') {
-      skipped.push(`open '${dialog.kind}' dialog's unsaved draft field values`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.openDialogSUnsavedDraftFieldValues', { kind: String(dialog.kind) }))
     }
     // WO UI-24-R1 (audit finding 2): a THIRD uncapturable live state -- an in-flight push/pull
     // gesture changes what the user sees (the gizmo's own preview body swap, see
@@ -15503,7 +15827,7 @@ function SolidsWorkbenchPageDocument({
     // sketch-on-face both drive the SAME kind of live hover/selection highlight sketchMode's own
     // check above does not cover once sketchMode itself is 'none'.
     if (dressUpPickMode.kind !== 'none') {
-      skipped.push(`armed '${dressUpPickMode.kind === 'arm' ? dressUpPickMode.feature : dressUpPickMode.feature + ' (picked, not yet applied)'}' dress-up pick mode's hover/selection highlight`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.armedDressUpPickModeSHoverSelectionHighlight', { value1: String(dressUpPickMode.kind === 'arm' ? dressUpPickMode.feature : dressUpPickMode.feature + ' (picked, not yet applied)') }))
     }
     // WO UI-58: the FOURTH armed pick path (resize-hole) -- same "live hover/selection highlight,
     // no dag effect until Apply" shape as dress-up above, plus (while armed with a selected hole)
@@ -15513,8 +15837,8 @@ function SolidsWorkbenchPageDocument({
     if (resizeHolePickMode.kind !== 'none') {
       skipped.push(
         resizeHolePickMode.kind === 'armed'
-          ? `armed resize-hole pick mode: hole '${resizeHolePickMode.featureKey}' selected, anchored value entry open (uncommitted draft diameter)`
-          : `armed resize-hole pick mode (hover highlight only, no hole selected yet${resizeHoleRecognizing ? ', recognizing features' : ''})`,
+          ? workbenchText('SolidsWorkbenchPage.armedResizeHolePickModeHoleSelectedAnchoredValue', { featureKey: String(resizeHolePickMode.featureKey) })
+          : workbenchText('SolidsWorkbenchPage.armedResizeHolePickModeHoverHighlightOnlyNo', { value1: String(resizeHoleRecognizing ? ', recognizing features' : '') }),
       )
     }
     // WO UI-24-R2 (census-derived, debugSceneCensus.ts's own selectedId/hoveredTreeId entries,
@@ -15526,17 +15850,17 @@ function SolidsWorkbenchPageDocument({
     // a real object added to the live three.js scene (the emphasis glyph), which is genuinely
     // uncaptured live-only visual state.
     if (glyphNodeId !== null && isGenesisNodeId(glyphNodeId)) {
-      skipped.push(`genesis emphasis glyph active ('${glyphNodeId}', via ${hoveredTreeId === glyphNodeId ? 'row hover' : 'tree selection'})`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.genesisEmphasisGlyphActiveVia', { glyphNodeId: String(glyphNodeId), value2: String(hoveredTreeId === glyphNodeId ? 'row hover' : 'tree selection') }))
     }
     // WO UI-24-R2 (census-derived, activeUi4Tool/measure/appearance entries -- audit R1 finding 3's
     // own "measure/appearance hover+selection state" gap): repaintUi4Overlays reads activeUi4Tool,
     // measure.state, and appearance.state DIRECTLY to paint body-highlight tints and face/edge
     // overlays whenever no pick-mode is armed -- none of it is dag-derived or has a field here.
     if (activeUi4Tool !== 'none') {
-      skipped.push(`UI-4 '${activeUi4Tool}' tool armed (toolbar pressed-state + canvas pick routing)`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.ui4ToolArmedToolbarPressedStateCanvasPick', { activeUi4Tool: String(activeUi4Tool) }))
     }
     if (selectedBodyRowId !== null) {
-      skipped.push(`selected body-row presentation active ('${selectedBodyRowId}', whole-body tint + topology outline)`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.selectedBodyRowPresentationActiveWholeBodyTintTopology', { selectedBodyRowId: String(selectedBodyRowId) }))
     }
     const measureIsLive =
       measure.state.mode !== 'single' ||
@@ -15573,12 +15897,12 @@ function SolidsWorkbenchPageDocument({
     // active"), so a clean scene still reports skipped:[] (see the round-trip test's own assertion).
     const appearanceSnapshot = appearanceStoreRef.current.snapshot()
     if (appearanceSnapshot.faceColors.size > 0 || appearanceSnapshot.bodyColors.size > 0) {
-      skipped.push(`${appearanceSnapshot.faceColors.size} face + ${appearanceSnapshot.bodyColors.size} body appearance color override(s)`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.faceBodyAppearanceColorOverrideS', { size: String(appearanceSnapshot.faceColors.size), size2: String(appearanceSnapshot.bodyColors.size) }))
     }
     const visibilitySnapshot = visibilityStoreRef.current.snapshot()
     if (visibilitySnapshot.hiddenBodyIds.size > 0 || visibilitySnapshot.hiddenFaceIds.size > 0 || visibilitySnapshot.isolate !== null) {
       skipped.push(
-        `visibility overrides (${visibilitySnapshot.hiddenBodyIds.size} hidden bod${visibilitySnapshot.hiddenBodyIds.size === 1 ? 'y' : 'ies'}, ${visibilitySnapshot.hiddenFaceIds.size} hidden face(s)${visibilitySnapshot.isolate !== null ? ', isolate active' : ''})`,
+        workbenchText('SolidsWorkbenchPage.visibilityOverridesHiddenBodHiddenFaceS', { size: String(visibilitySnapshot.hiddenBodyIds.size), value2: String(visibilitySnapshot.hiddenBodyIds.size === 1 ? 'y' : 'ies'), size3: String(visibilitySnapshot.hiddenFaceIds.size), value4: String(visibilitySnapshot.isolate !== null ? ', isolate active' : '') }),
       )
     }
     // WO UI-56: the eye-icon toggle's hidden state is no longer session-only
@@ -15591,7 +15915,7 @@ function SolidsWorkbenchPageDocument({
     // is deleted rather than left as a check that can never fire (WORKER
     // CHARTER item 1: a probe that cannot fail is not a gate).
     if (section.state.enabled) {
-      skipped.push(`active section/clip-plane view (axis ${section.state.axis}, pos ${section.state.pos})`)
+      skipped.push(workbenchText('SolidsWorkbenchPage.activeSectionClipPlaneViewAxisPos', { axis: String(section.state.axis), pos: String(section.state.pos) }))
     }
     const cam = runtime.getDebugCameraState()
     return {
@@ -16153,103 +16477,132 @@ function SolidsWorkbenchPageDocument({
      * than an honest failure: the user will act on the claim.
      */
     async function bootGeometryKernel(): Promise<boolean> {
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if (!ownsBoot()) return false
-        const label = attempt === 1
-          ? 'initializing geometry kernel...'
-          // The user sees that the app noticed, and how far along the effort
-          // is. They are not asked to do anything.
-          : `geometry kernel did not load - retrying (attempt ${attempt} of ${maxAttempts})...`
-        setStatus(label)
-        if (attempt > 1) {
-          await sleep(backoffMs[Math.min(attempt - 2, backoffMs.length - 1)] ?? 0)
-          if (!ownsBoot()) return false
-          replaceClient()
-        }
-        const attemptClient = client
-        const startedAt = Date.now()
-        let lastProgress = 0
-        let lastPhase = 'starting'
-        // WO-091: NEVER A FROZEN STRING. The real-browser capture showed the
-        // status sitting unchanged for the full 30s deadline when the payload
-        // fetch hangs (an aborted wasm request wedges the worker rather than
-        // rejecting it), which is indistinguishable from the hang this WO
-        // exists to kill -- the user cannot tell "still working" from "dead".
-        // A ticking elapsed count makes the difference visible. It starts only
-        // after a boot has already outrun every honest one measured here, so a
-        // normal cold start never shows a timer at all.
-        const tick = setInterval(() => {
-          if (!ownsBoot()) return
-          const elapsedMs = Date.now() - startedAt
-          if (elapsedMs >= statusTickAfterMs) setStatus(`${label} (${Math.round(elapsedMs / 1000)}s)`)
-          // ...and correct the SPLASH, which is what the user is actually
-          // looking at while this runs. FINDING (WO-091, from the real-browser
-          // capture): index.html's splash fills its bar on a 3-SECOND WALL
-          // CLOCK and hardcodes the label 'Ready' at t=3000ms, with no
-          // knowledge of whether anything loaded -- so a boot that is hanging
-          // shows a full-screen "Ready 100%". That is the false Ready this WO
-          // forbids, and its root cause is in index.html, which WO-091 does
-          // not own (see the worker result). What IS in reach is the
-          // setProgress hook index.html publishes for exactly this purpose:
-          // the splash's own timers stop at 3s, so from then on these honest
-          // values are the ones left standing.
-          window.LienSplash?.setProgress(lastProgress, label)
-        }, statusTickEveryMs)
-        try {
-          await withDeadline(
-            attemptClient.init((pct, phase) => {
-              lastProgress = pct
-              lastPhase = phase
-              // WO-091: an ABANDONED attempt's worker is still alive until its
-              // terminate() lands, and it keeps reporting progress. Without the
-              // identity check a dead attempt would drive the splash backwards
-              // over a live one. ownsBoot() alone cannot catch this -- it tracks
-              // the effect's ownership, and both attempts belong to this effect.
-              if (ownsBoot() && clientRef.current === attemptClient) {
-                window.LienSplash?.setProgress(pct, phase)
-              }
-            }),
-            timeoutMs,
-            `geometry engine initialization timed out after ${timeoutMs}ms`,
-          )
-          if (!ownsBoot()) return false
-          return true
-        } catch (err) {
-          // WO-091 item 5: LOG FIRST, gate only the setState calls.
-          // This used to sit behind `if (!ownsBoot()) return`, so the diagnostic
-          // was thrown away in exactly the case it was written for: a user who
-          // gives up on a hung Model tab and navigates away unmounts the page,
-          // `cancelled` flips, and the phase/percentage/elapsed line -- the only
-          // evidence a recurrence leaves -- was never written. Operator has hit that
-          // twice. The console is not page state; it costs nothing to write.
-          console.error(
-            `SolidsWorkbenchPage: 3D geometry engine initialization failed (attempt ${attempt} of ${maxAttempts}); phase=${lastPhase}; progress=${lastProgress}%; elapsed=${Date.now() - startedAt}ms`,
-            err,
-          )
-          if (!ownsBoot()) return false
-          if (abandonable) {
-            const reason = err instanceof Error ? err.message : String(err)
-            ;(attemptClient as AbandonableGeomClient).abandon(
-              `The 3D geometry engine did not load: ${reason}. Reload the page to try again.`,
-            )
-          }
-        } finally {
-          clearInterval(tick)
-        }
+      // WO-2865: a failed attempt that a retry then RECOVERS is not an error
+      // (sweep 3: Full Suite open showed "attempt 1 of 3" as an error though
+      // attempt 2 loaded). Its numbered line waits for the retry's outcome and
+      // is written as info if the kernel came up, as error otherwise. Every
+      // exit writes it (finally), so WO-091's evidence is never lost.
+      const retriedFailures: unknown[][] = []
+      let recovered = false
+      const writeRetriedFailures = (log: (...args: unknown[]) => void) => {
+        for (const line of retriedFailures.splice(0)) log(...line)
       }
-      // WO-108 BLOCKER 2. The budget is spent, so there is no attempt 4 and
-      // replaceClient() will never run again -- which is exactly why the LAST
-      // failed worker used to be left running for the life of the tab, still
-      // spinning on a wasm compile that is never going to finish. It gets the
-      // same treatment every earlier attempt got. Unconditional, and BEFORE the
-      // ownership gate below: a page the user has already navigated away from
-      // is the case where a leaked thread matters most, and killing a worker
-      // costs nothing whether or not anyone is still watching.
-      terminateClient(client)
-      if (!ownsBoot()) return false
-      setStatus(GEOMETRY_INIT_EXHAUSTED_STATUS)
-      setGeometryInitFailed(true)
-      return false
+      try {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          if (!ownsBoot()) return false
+          const label = attempt === 1
+            ? workbenchText('SolidsWorkbenchPage.initializingGeometryKernel')
+            // The user sees that the app noticed, and how far along the effort
+            // is. They are not asked to do anything.
+            : workbenchText('SolidsWorkbenchPage.geometryKernelDidNotLoadRetryingAttemptOf', { attempt: String(attempt), maxAttempts: String(maxAttempts) })
+          setStatus(label)
+          if (attempt > 1) {
+            await sleep(backoffMs[Math.min(attempt - 2, backoffMs.length - 1)] ?? 0)
+            if (!ownsBoot()) return false
+            replaceClient()
+          }
+          const attemptClient = client
+          const startedAt = Date.now()
+          let lastProgress = 0
+          let lastPhase = 'starting'
+          // WO-091: NEVER A FROZEN STRING. The real-browser capture showed the
+          // status sitting unchanged for the full 30s deadline when the payload
+          // fetch hangs (an aborted wasm request wedges the worker rather than
+          // rejecting it), which is indistinguishable from the hang this WO
+          // exists to kill -- the user cannot tell "still working" from "dead".
+          // A ticking elapsed count makes the difference visible. It starts only
+          // after a boot has already outrun every honest one measured here, so a
+          // normal cold start never shows a timer at all.
+          const tick = setInterval(() => {
+            if (!ownsBoot()) return
+            const elapsedMs = Date.now() - startedAt
+            if (elapsedMs >= statusTickAfterMs) setStatus(`${label} (${Math.round(elapsedMs / 1000)}s)`)
+            // ...and correct the SPLASH, which is what the user is actually
+            // looking at while this runs. FINDING (WO-091, from the real-browser
+            // capture): index.html's splash fills its bar on a 3-SECOND WALL
+            // CLOCK and hardcodes the label 'Ready' at t=3000ms, with no
+            // knowledge of whether anything loaded -- so a boot that is hanging
+            // shows a full-screen "Ready 100%". That is the false Ready this WO
+            // forbids, and its root cause is in index.html, which WO-091 does
+            // not own (see the worker result). What IS in reach is the
+            // setProgress hook index.html publishes for exactly this purpose:
+            // the splash's own timers stop at 3s, so from then on these honest
+            // values are the ones left standing.
+            window.LienSplash?.setProgress(lastProgress, label)
+          }, statusTickEveryMs)
+          try {
+            await withDeadline(
+              attemptClient.init((pct, phase) => {
+                lastProgress = pct
+                lastPhase = phase
+                // WO-091: an ABANDONED attempt's worker is still alive until its
+                // terminate() lands, and it keeps reporting progress. Without the
+                // identity check a dead attempt would drive the splash backwards
+                // over a live one. ownsBoot() alone cannot catch this -- it tracks
+                // the effect's ownership, and both attempts belong to this effect.
+                if (ownsBoot() && clientRef.current === attemptClient) {
+                  window.LienSplash?.setProgress(pct, phase)
+                }
+              }),
+              timeoutMs,
+              workbenchText('SolidsWorkbenchPage.geometryEngineInitializationTimedOutAfterMs', { timeoutMs: String(timeoutMs) }),
+            )
+            if (!ownsBoot()) return false
+            recovered = true
+            return true
+          } catch (err) {
+            // StrictMode replays setup on the SAME document instance after cleanup.
+            // Cleanup increments the epoch once; only another setup advances it
+            // again. A keyed document replacement has a separate ref and cannot
+            // satisfy this guard. This is our exact deliberate close, not a kernel
+            // failure; never classify by message or suppress all stale boot errors.
+            if (err instanceof Error && cancelled && bootOwnershipEpochRef.current > ownershipEpoch + 1 &&
+                geomClientCloseErrors.get(attemptClient) === err) return false
+            // WO-091 item 5: LOG FIRST, gate only the setState calls.
+            // This used to sit behind `if (!ownsBoot()) return`, so the diagnostic
+            // was thrown away in exactly the case it was written for: a user who
+            // gives up on a hung Model tab and navigates away unmounts the page,
+            // `cancelled` flips, and the phase/percentage/elapsed line -- the only
+            // evidence a recurrence leaves -- was never written. Operator has hit that
+            // twice. The console is not page state; it costs nothing to write.
+            // WO-2865: when a retry will run, the line waits for its outcome
+            // (above); with no retry coming it is an error at once.
+            const failureLine: unknown[] = [
+              workbenchText('SolidsWorkbenchPage.solidsworkbenchpage3DGeometryEngineInitializationFailedAttemptOfPhase', { attempt: String(attempt), maxAttempts: String(maxAttempts), lastPhase: String(lastPhase), lastProgress: String(lastProgress), value5: String(Date.now() - startedAt) }),
+              err,
+            ]
+            if (attempt < maxAttempts && ownsBoot()) retriedFailures.push(failureLine)
+            else {
+              writeRetriedFailures(console.error)
+              console.error(...failureLine)
+            }
+            if (!ownsBoot()) return false
+            if (abandonable) {
+              const reason = err instanceof Error ? err.message : String(err)
+              ;(attemptClient as AbandonableGeomClient).abandon(
+                workbenchText('SolidsWorkbenchPage.geometryEngineDidNotLoad', { reason }),
+              )
+            }
+          } finally {
+            clearInterval(tick)
+          }
+        }
+        // WO-108 BLOCKER 2. The budget is spent, so there is no attempt 4 and
+        // replaceClient() will never run again -- which is exactly why the LAST
+        // failed worker used to be left running for the life of the tab, still
+        // spinning on a wasm compile that is never going to finish. It gets the
+        // same treatment every earlier attempt got. Unconditional, and BEFORE the
+        // ownership gate below: a page the user has already navigated away from
+        // is the case where a leaked thread matters most, and killing a worker
+        // costs nothing whether or not anyone is still watching.
+        terminateClient(client)
+        if (!ownsBoot()) return false
+        setStatus(GEOMETRY_INIT_EXHAUSTED_STATUS)
+        setGeometryInitFailed(true)
+        return false
+      } finally {
+        writeRetriedFailures(recovered ? console.info : console.error)
+      }
     }
 
     /**
@@ -16284,8 +16637,8 @@ function SolidsWorkbenchPageDocument({
       const booted = (async (): Promise<boolean> => {
         const ok = await bootGeometryKernel()
         if (!ownsBoot()) return false
-        if (ok) setStatus('Ready')
-        else (client as AbandonableGeomClient).abandon('the geometry kernel did not load')
+        if (ok) setStatus(workbenchText('SolidsWorkbenchPage.ready'))
+        else (client as AbandonableGeomClient).abandon(workbenchText('SolidsWorkbenchPage.theGeometryKernelDidNotLoad'))
         return ok
       })()
       return { abandonOld: () => dead.abandon(reason), booted }
@@ -16304,7 +16657,7 @@ function SolidsWorkbenchPageDocument({
         }
         solveServiceRef.current = solveService
       } catch (err) {
-        console.error('SolidsWorkbenchPage: the sketch3d solve service failed to load', err)
+        console.error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageTheSketch3dSolveServiceFailedToLoad'), err)
         // Do NOT pay the deadline a second time. Both calls resolve through the
         // SAME memoized planegcs module; if it just failed, createGcsWrapper()
         // would only start another attempt and make the user wait for it.
@@ -16322,7 +16675,7 @@ function SolidsWorkbenchPageDocument({
         // WO-091 item 5 again: log BEFORE the ownership gate, same reason.
         // The constraint solver failed to load. Sketching still works (geometry is placed exactly
         // as drawn); only the solve is unavailable, and every commit says so. Named, never silent.
-        console.error('SolidsWorkbenchPage: the sketch constraint solver failed to load', err)
+        console.error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageTheSketchConstraintSolverFailedToLoad'), err)
         return false
       }
       return true
@@ -16411,14 +16764,14 @@ function SolidsWorkbenchPageDocument({
       // unhandled -- hence the explicit catch; every failure it cares about is
       // already handled at its own await, so this is a backstop, not a path.
       void bootConstraintSolverWithRecovery().catch((err: unknown) => {
-        console.error('SolidsWorkbenchPage: the constraint solver boot rejected unexpectedly', err)
+        console.error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageTheConstraintSolverBootRejectedUnexpectedly'), err)
       })
       if (!await bootGeometryKernel()) return
       if (!ownsBoot()) return
       window.LienSplash?.ready()
       // BK-117(1): CAM's status strip reads 'Ready' (App.tsx:90); this page
       // read lowercase 'ready' -- capitalization parity, same string family.
-      setStatus('Ready')
+      setStatus(workbenchText('SolidsWorkbenchPage.ready'))
 
       // WO UI-24 (REPLAY half): the dag/rollback/display-mode were already seeded from
       // initialDebugScene at construction (lazy-ref-init above) -- everything left is state that
@@ -16444,10 +16797,10 @@ function SolidsWorkbenchPageDocument({
           const pass = await fullResync(dag.nodeIds(), ownsBoot)
           if (!ownsBoot()) return
           const failedIds = pass.executed.filter((id) => scheduler.statusOf(id) === 'failed')
-          setDebugSceneLoadStatus(failedIds.length > 0 ? `loaded with refusals: ${failedIds.join(', ')}` : 'ok')
+          setDebugSceneLoadStatus(failedIds.length > 0 ? workbenchText('SolidsWorkbenchPage.loadedWithRefusals', { value1: String(failedIds.join(', ')) }) : 'ok')
         } catch (err) {
           if (!ownsBoot()) return
-          setDebugSceneLoadStatus(`failed: ${err instanceof Error ? err.message : String(err)}`)
+          setDebugSceneLoadStatus(workbenchText('SolidsWorkbenchPage.failed2', { value1: String(err instanceof Error ? err.message : String(err)) }))
         }
       } else if (documentSeedRef.current !== null) {
         // WO INT-14: a document restored from an opened .camproject needs the
@@ -16467,14 +16820,14 @@ function SolidsWorkbenchPageDocument({
           if (!ownsBoot()) return
           const failedIds = pass.executed.filter((id) => scheduler.statusOf(id) === 'failed')
           if (failedIds.length > 0) {
-            notify('error', `Opened project: ${failedIds.length} feature(s) could not be rebuilt: ${failedIds.join(', ')}`)
+            notify('error', workbenchText('SolidsWorkbenchPage.openedProjectFeatureSCouldNotBeRebuilt', { length: String(failedIds.length), value2: String(failedIds.join(', ')) }))
           }
-          setDocumentLoadStatus(failedIds.length > 0 ? `loaded with refusals: ${failedIds.join(', ')}` : 'ok')
+          setDocumentLoadStatus(failedIds.length > 0 ? workbenchText('SolidsWorkbenchPage.loadedWithRefusals', { value1: String(failedIds.join(', ')) }) : 'ok')
         } catch (err) {
           if (!ownsBoot()) return
           const message = err instanceof Error ? err.message : String(err)
-          notify('error', `Opened project: the 3D model could not be rebuilt: ${message}`)
-          setDocumentLoadStatus(`failed: ${message}`)
+          notify('error', workbenchText('SolidsWorkbenchPage.openedProjectThe3DModelCouldNotBeRebuilt', { message: String(message) }))
+          setDocumentLoadStatus(workbenchText('SolidsWorkbenchPage.failed2', { value1: String(message) }))
         }
       }
     }
@@ -16506,7 +16859,7 @@ function SolidsWorkbenchPageDocument({
     // reintroducing the exact defect this WO closes -- an unhandled rejection
     // out of boot() is invisible, and its symptom is a frozen status string.
     void boot().catch((err: unknown) => {
-      console.error('SolidsWorkbenchPage: boot() rejected unexpectedly', err)
+      console.error(workbenchText('SolidsWorkbenchPage.solidsworkbenchpageBootRejectedUnexpectedly'), err)
     })
 
     return () => {
@@ -16620,7 +16973,7 @@ function SolidsWorkbenchPageDocument({
     const client = clientRef.current
     const runtime = runtimeRef.current
     if (session === null || activeIntent === null || pending === null || client === null || runtime === null) {
-      return 'Resize hole Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedTheAcceptedPreviewIsNo')
     }
     const intentStillMatches = (): boolean => {
       const current = resizeHolePreviewIntentRef.current
@@ -16633,20 +16986,21 @@ function SolidsWorkbenchPageDocument({
       !intentStillMatches() ||
       resizeHolePickMode.kind !== 'armed' ||
       !resizeHoleModeMatchesIntent(resizeHolePickMode, intent)
-    ) return 'Resize hole Apply refused: the preview does not match the current diameter.'
+    ) return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedThePreviewDoesNotMatch')
+    const changedHole = resizedHoleLabel(dag, resizeHolePickMode.faceIds)
 
     // Apply during evaluation waits for the exact current request, matching
     // the shared preview contract used by Extrude and Revolve. The prior
     // ready-only button gate silently discarded a quick Apply click.
     const settled = await pending
     if (!intentStillMatches() || resizeHolePreviewIntentRef.current !== activeIntent) {
-      return 'Resize hole Apply refused: the preview changed while applying.'
+      return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedThePreviewChangedWhileApplying')
     }
     if (settled.status !== 'ready') {
       const reason = settled.status === 'refused' || settled.status === 'error'
         ? settled.reason
-        : 'the preview is no longer current.'
-      return `Resize hole Apply refused: ${reason}`
+        : workbenchText('SolidsWorkbenchPage.thePreviewIsNoLongerCurrent')
+      return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefused', { reason: String(reason) })
     }
 
     const baseline = session.baseline
@@ -16659,19 +17013,19 @@ function SolidsWorkbenchPageDocument({
     })
     if (!fingerprintStillMatches()) {
       await cancelResizeHolePreviewSession()
-      return 'Resize hole Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedTheModelChangedAfterThe')
     }
 
     resizeHoleAdoptionPendingRef.current = true
     setResizeHolePickMode((current) => resizeHoleModeMatchesIntent(current, intent)
-      ? { ...current, preview: { status: 'applying', message: `Applying the accepted ${holeEditShortText(intent.payload)} preview...` } }
+      ? { ...current, preview: { status: 'applying', message: workbenchText('SolidsWorkbenchPage.applyingTheAcceptedPreview', { value1: String(holeEditShortText(intent.payload)) }) } }
       : current)
     try {
       let candidate: ResizeHolePreviewCandidate
       try {
         candidate = await session.takeCandidate()
       } catch (error) {
-        return `Resize hole Apply refused: ${error instanceof Error ? error.message : String(error)}`
+        return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefused2', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
 
       let prepared: PreparedCachedBody | null = null
@@ -16725,19 +17079,19 @@ function SolidsWorkbenchPageDocument({
         roots: readonly string[],
         label: string,
       ): void => {
-        if (pass.cancelled) throw new Error(`${label} was cancelled`)
+        if (pass.cancelled) throw new Error(workbenchText('SolidsWorkbenchPage.wasCancelled', { label: String(label) }))
         const failed = [...new Set([...roots, ...pass.executed])]
           .filter((id) => dag.has(id) && scheduler.statusOf(id) === 'failed')
         if (failed.length === 0) return
         const details = failed
           .map((id) => `${featureLabel(dag, id)} (${regenDiagnosticsReason(scheduler.diagnosticsOf(id))})`)
           .join(', ')
-        throw new Error(`${label} failed: ${details}`)
+        throw new Error(workbenchText('SolidsWorkbenchPage.failed', { value1: String(label), value2: String(details) }))
       }
 
       try {
         const buffers = await client.tessellate(candidate.body, DISPLAY_TESS_QUALITY)
-        if (!fingerprintStillMatches()) throw new Error('the model changed while preparing the accepted preview')
+        if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedWhilePreparingTheAcceptedPreview'))
         prepared = cacheRef.current.prepare(candidate.featureId, buffers)
         attachHighlightAttributes(prepared, themeColorsRef.current.body, themeColorsRef.current.edge)
         prepared.geometry.computeBoundingBox()
@@ -16757,18 +17111,18 @@ function SolidsWorkbenchPageDocument({
           () => candidate.result,
           {
             publish: () => {
-              if (!fingerprintStillMatches()) throw new Error('the model changed before Resize hole adoption')
-              if (!intentStillMatches()) throw new Error('the Resize hole diameter changed before adoption')
+              if (!fingerprintStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theModelChangedBeforeResizeHoleAdoption'))
+              if (!intentStillMatches()) throw new Error(workbenchText('SolidsWorkbenchPage.theResizeHoleDiameterChangedBeforeAdoption'))
               if (editing ? !dag.has(candidate.featureId) : dag.has(candidate.featureId)) {
                 throw new Error(editing
-                  ? `feature '${candidate.featureId}' no longer exists`
-                  : `feature '${candidate.featureId}' already exists`)
+                  ? workbenchText('SolidsWorkbenchPage.featureNoLongerExists', { featureId: String(candidate.featureId) })
+                  : workbenchText('SolidsWorkbenchPage.featureAlreadyExists', { featureId: String(candidate.featureId) }))
               }
               if (!editing && (priorOwnerHandle === undefined || bodyHandlesRef.current.get(candidate.payload.ownerId) !== priorOwnerHandle)) {
-                throw new Error(`owner '${candidate.payload.ownerId}' is no longer the selected live source body`)
+                throw new Error(workbenchText('SolidsWorkbenchPage.ownerIsNoLongerTheSelectedLiveSourceBody', { ownerId: String(candidate.payload.ownerId) }))
               }
               if (prepared === null || command === null || (priorPair === undefined && stagedPair === null)) {
-                throw new Error('the prepared Resize hole presentation is incomplete')
+                throw new Error(workbenchText('SolidsWorkbenchPage.thePreparedResizeHolePresentationIsIncomplete'))
               }
               command.do(dag)
               commandApplied = true
@@ -16841,7 +17195,7 @@ function SolidsWorkbenchPageDocument({
           resizeHoleDownstreamReplayProbeRef.current = null
           replayProbe?.()
           const replayPass = await fullResync(baseline.snapshot.directDownstreamIds)
-          requireSuccessfulReplay(replayPass, baseline.snapshot.directDownstreamIds, 'Resize hole downstream replay')
+          requireSuccessfulReplay(replayPass, baseline.snapshot.directDownstreamIds, workbenchText('SolidsWorkbenchPage.resizeHoleDownstreamReplay'))
         } else {
           setFeatureVisible(candidate.payload.ownerId, false)
           setFeatureVisible(candidate.featureId, true)
@@ -16889,7 +17243,7 @@ function SolidsWorkbenchPageDocument({
         runtime.requestRender()
         notify(
           'success',
-          `${featureLabel(dag, candidate.featureId)} applied on ${featureLabel(dag, candidate.payload.ownerId)}: ${resizeHoleAppliedText(candidate.payload)}.`,
+          workbenchText('SolidsWorkbenchPage.appliedOn', { value1: String(featureLabel(dag, candidate.featureId)), value2: String(changedHole ?? featureLabel(dag, candidate.payload.ownerId)), value3: String(resizeHoleAppliedText(candidate.payload) + resizeHoleKernelNote(candidate.result)) }),
         )
         return undefined
       } catch (error) {
@@ -16907,7 +17261,7 @@ function SolidsWorkbenchPageDocument({
             }
             const recoveryRoots = editing ? [candidate.featureId] : [candidate.payload.ownerId]
             const recoveryPass = await fullResync(recoveryRoots)
-            requireSuccessfulReplay(recoveryPass, recoveryRoots, 'Resize hole original-model recovery')
+            requireSuccessfulReplay(recoveryPass, recoveryRoots, workbenchText('SolidsWorkbenchPage.resizeHoleOriginalModelRecovery'))
             if (
               candidate.recoveryOwnerBody !== undefined &&
               bodyHandlesRef.current.get(candidate.payload.ownerId) === candidate.recoveryOwnerBody
@@ -16924,11 +17278,11 @@ function SolidsWorkbenchPageDocument({
             setDagVersion((version) => version + 1)
             runtime.requestRender()
             setResizeHolePickMode((current) => resizeHoleModeMatchesIntent(current, retryIntent)
-              ? { ...current, preview: { status: 'pending', message: `Resize hole Apply refused: ${failureReason}. Rebuilding the accepted preview...` } }
+              ? { ...current, preview: { status: 'pending', message: workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedRebuildingTheAcceptedPreview', { failureReason: String(failureReason) }) } }
               : current)
             resizeHoleAdoptionPendingRef.current = false
             handleResizeHolePreviewIntent(retryIntent)
-            return `Resize hole Apply refused: ${failureReason}. The original model was restored and no history action was recorded.`
+            return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedTheOriginalModelWasRestored', { failureReason: String(failureReason) })
           } catch (recoveryError) {
             restorePresentation()
             refreshBodiesList()
@@ -16936,9 +17290,9 @@ function SolidsWorkbenchPageDocument({
             runtime.requestRender()
             const recoveryReason = recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
             setResizeHolePickMode((current) => resizeHoleModeMatchesIntent(current, retryIntent)
-              ? { ...current, preview: { status: 'refused', message: `Resize hole Apply refused: ${failureReason}; model recovery also failed: ${recoveryReason}.` } }
+              ? { ...current, preview: { status: 'refused', message: workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedModelRecoveryAlsoFailed', { failureReason: String(failureReason), recoveryReason: String(recoveryReason) }) } }
               : current)
-            return `Resize hole Apply refused: ${failureReason}; model recovery also failed: ${recoveryReason}. No history action was recorded.`
+            return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedModelRecoveryAlsoFailedNo', { failureReason: String(failureReason), recoveryReason: String(recoveryReason) })
           }
         }
         if (inheritedAppearance) appearanceStoreRef.current.clearBodyColor(candidate.featureId)
@@ -16969,10 +17323,10 @@ function SolidsWorkbenchPageDocument({
         const retryIntent = resizeHolePreviewIntentRef.current ?? intent
         restorePresentation()
         setResizeHolePickMode((current) => resizeHoleModeMatchesIntent(current, retryIntent)
-          ? { ...current, preview: { status: 'pending', message: `Rebuilding ${holeEditShortText(retryIntent.payload)} preview...` } }
+          ? { ...current, preview: { status: 'pending', message: workbenchText('SolidsWorkbenchPage.rebuildingPreview', { value1: String(holeEditShortText(retryIntent.payload)) }) } }
           : current)
         handleResizeHolePreviewIntent(retryIntent)
-        return `Resize hole Apply refused: ${error instanceof Error ? error.message : String(error)}. No changes were applied.`
+        return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedNoChangesWereApplied', { value1: String(error instanceof Error ? error.message : String(error)) })
       }
     } finally {
       resizeHoleAdoptionPendingRef.current = false
@@ -16998,14 +17352,14 @@ function SolidsWorkbenchPageDocument({
   ])
 
   const handleResizeHoleEntryApply = useCallback(async (draft: string): Promise<string | undefined> => {
-    if (resizeHolePickMode.kind !== 'armed') return 'Resize hole Apply refused: no hole is selected.'
+    if (resizeHolePickMode.kind !== 'armed') return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefusedNoHoleIsSelected')
     const validation = validateArmedHoleDraft(resizeHolePickMode, draft)
-    if (!validation.ok) return `Resize hole Apply refused: ${validation.reason}`
+    if (!validation.ok) return workbenchText('SolidsWorkbenchPage.resizeHoleApplyRefused', { reason: String(validation.reason) })
     const intent = buildResizeHolePreviewIntent(resizeHolePickMode, validation.values)
     const refusal = await handleResizeHolePreviewApply(intent)
     if (refusal === undefined) {
       restoreResizeHoleSelection(false)
-      setResizeHolePickMode(resizeHolePickMode.field === 'depth' ? { kind: 'arm', field: 'depth' } : { kind: 'arm' })
+      setResizeHolePickMode({ kind: 'arm', field: resizeHolePickMode.field })
     }
     return refusal
   }, [buildResizeHolePreviewIntent, handleResizeHolePreviewApply, resizeHolePickMode, restoreResizeHoleSelection])
@@ -17019,79 +17373,126 @@ function SolidsWorkbenchPageDocument({
    *  resizeHole feature supersedes its owner -- still resolves to the
    *  CURRENT live representative's cached verdicts via lineageIdOf), then
    *  auto-selects it into 'armed' exactly like a viewport click would,
-   *  carrying `editFeatureId` so Apply rewrites the SAME node. A miss (the
-   *  hole is no longer recognized on the live body) refuses by name and fully
-   *  disarms, rather than leaving a silently-empty armed hint. */
+   *  carrying `editFeatureId` so Apply rewrites the SAME node.
+   *
+   *  WO-2795 (ED-2): a live miss is not yet a refusal. The kernel may rebuild
+   *  a resized hole's wall from its other end (an imported d6 at (20,20)
+   *  keyed `hole:20:20:10:0:0:1:3` comes back as `hole:20:20:0:0:0:-1:4`),
+   *  so the live key can share neither origin nor direction with the stored
+   *  one. The node replays on its OWNER's body (the regen executor's
+   *  `lookupLiveBody(p.ownerId)`), and that body still carries the stored
+   *  key, so the edit is resolved there - the same input Apply will rebuild
+   *  from. Only a hole the owner body no longer has (deleted upstream)
+   *  refuses, by name, and fully disarms. */
   useEffect(() => {
     if (resizeHoleEditRequest === null) return
     if (resizeHolePickMode.kind !== 'arm') return
     if (resizeHoleVerdictsDagVersionRef.current !== dagVersion) return
-    const { featureId, ownerId, featureKey, initialDiameter, baseDiameter, depth } = resizeHoleEditRequest
+    const { featureId, ownerId, featureKey, initialDiameter, baseDiameter, depth, step, move } = resizeHoleEditRequest
     setResizeHoleEditRequest(null)
     const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), ownerId)) ?? []
+    const armEditedHole = (faceIds: StableId[], ownerFaces: boolean): void => {
+      pickHighlightSelectionRef.current.selectMany(faceIds)
+      // WO UI-58-R1's own anchor derivation (handleResizeHoleListSelect): the
+      // edited node's OWN mesh cache is tried first (it is the current live
+      // representative in the common case of nothing built on top of it since),
+      // falling back to the stored ownerId's cache (may be stale/gone once
+      // superseded), falling back to the world origin -- never throws. Faces
+      // read off the owner body (WO-2795) anchor on the owner's mesh first.
+      const cached = ownerFaces
+        ? cacheRef.current.get(ownerId) ?? cacheRef.current.get(featureId)
+        : cacheRef.current.get(featureId) ?? cacheRef.current.get(ownerId)
+      let anchorPoint: Vec3 = { x: 0, y: 0, z: 0 }
+      const featureAnchor = cached !== undefined ? featureAnchorFromMesh(cached, faceIds) : undefined
+      if (featureAnchor !== undefined) {
+        anchorPoint = featureAnchor
+      } else if (cached !== undefined) {
+        cached.geometry.computeBoundingBox()
+        const bb = cached.geometry.boundingBox
+        if (bb !== null) anchorPoint = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2, z: bb.max.z }
+      }
+      beginResizeHoleSelection({
+        ownerId,
+        // BK-174: the STORED featureKey (not matched.featureKey) -- the key's
+        // trailing segment is the hole's RADIUS (sameHoleLocation's own doc
+        // comment, ResizeHoleDialog.tsx), so a freshly re-recognized key
+        // describes the CURRENT (already-resized) diameter, not the diameter
+        // the OWNER will regenerate at on replay. Persisting the fresh key
+        // would make every future regen refuse with "feature ... not found on
+        // this body" the instant the owner recomputes from scratch. matched
+        // still supplies faceIds for the visual highlight/anchor -- only the
+        // PERSISTED identity stays the original.
+        featureKey,
+        faceIds,
+        // BK-174: the STORED base diameter (payload.currentDiameter from
+        // BEFORE any resize), not a live re-measurement. handleResizeHoleApply
+        // always applies `delta` to the OWNER's OWN fresh regeneration (F2, in
+        // this file's own header comment shorthand) -- never to whatever
+        // diameter this SAME resizeHole feature last produced -- so a SECOND
+        // (edit) delta must be computed against that SAME base every time, or
+        // every edit after the first would silently under/over-shoot by the
+        // PRIOR delta (proven: an 8->11 edit on a 6mm-base hole regenerated 9mm,
+        // not 11mm, until this fix -- delta must be 11-6=5, not 11-8=3). The
+        // anchored entry's "Current diameter" reads this SAME value, so it
+        // will show the ORIGINAL base (e.g. 6mm) rather than the live rendered
+        // diameter (e.g. 8mm) while editing -- a named, deliberate tradeoff:
+        // correctness of the regenerated geometry over a live-matching label.
+        currentDiameter: baseDiameter,
+        anchorPoint,
+        editFeatureId: featureId,
+        editInitialDiameter: initialDiameter,
+        ...(move !== undefined ? { field: 'move' as const, editInitialMove: move } : {}),
+        // WO-2762: a counterbore-step node reopens on the counterbore.
+        ...(step !== undefined ? { step } : {}),
+        // WO-2091: a depth node reopens on its depth, against the owner's stored depth.
+        ...(depth !== undefined
+          ? { field: 'depth' as const, currentDepth: depth.currentDepth, currentThrough: depth.currentThrough, editInitialDepth: String(depth.newDepth) }
+          : {}),
+      })
+    }
+    const refuse = (): void => {
+      addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.resizeHoleEditRefusedSHoleIsNoLonger', { value1: String(featureLabel(dag, featureId)) }) })
+      finishResizeHoleInteraction()
+    }
     // BK-174: sameHoleLocation, not exact featureKey equality -- see its own
     // doc comment (ResizeHoleDialog.tsx). The stored featureKey was minted
     // against the diameter BEFORE whatever resize(s) already applied; a
     // diameter change rewrites the key's trailing radius segment, so only
     // the position+axis prefix can still identify "the same hole".
     const matched = eligibleResizeHoleVerdicts(verdicts).find((v) => sameHoleLocation(v.featureKey, featureKey))
-    if (matched === undefined) {
-      addConsoleEvent({ severity: 'error', source: 'workbench', message: `Resize hole edit refused: ${featureLabel(dag, featureId)}'s hole is no longer recognized on the live body.` })
-      finishResizeHoleInteraction()
+    if (matched !== undefined) {
+      armEditedHole(matched.faceIds, false)
       return
     }
-    pickHighlightSelectionRef.current.selectMany(matched.faceIds)
-    // WO UI-58-R1's own anchor derivation (handleResizeHoleListSelect): the
-    // edited node's OWN mesh cache is tried first (it is the current live
-    // representative in the common case of nothing built on top of it since),
-    // falling back to the stored ownerId's cache (may be stale/gone once
-    // superseded), falling back to the world origin -- never throws.
-    const cached = cacheRef.current.get(featureId) ?? cacheRef.current.get(ownerId)
-    let anchorPoint: Vec3 = { x: 0, y: 0, z: 0 }
-    const featureAnchor = cached !== undefined ? featureAnchorFromMesh(cached, matched.faceIds) : undefined
-    if (featureAnchor !== undefined) {
-      anchorPoint = featureAnchor
-    } else if (cached !== undefined) {
-      cached.geometry.computeBoundingBox()
-      const bb = cached.geometry.boundingBox
-      if (bb !== null) anchorPoint = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2, z: bb.max.z }
+    const ownerHandle = bodyHandlesRef.current.get(ownerId)
+    const client = clientRef.current
+    if (ownerHandle === undefined || client === null) {
+      refuse()
+      return
     }
-    beginResizeHoleSelection({
-      ownerId,
-      // BK-174: the STORED featureKey (not matched.featureKey) -- the key's
-      // trailing segment is the hole's RADIUS (sameHoleLocation's own doc
-      // comment, ResizeHoleDialog.tsx), so a freshly re-recognized key
-      // describes the CURRENT (already-resized) diameter, not the diameter
-      // the OWNER will regenerate at on replay. Persisting the fresh key
-      // would make every future regen refuse with "feature ... not found on
-      // this body" the instant the owner recomputes from scratch. matched
-      // still supplies faceIds for the visual highlight/anchor -- only the
-      // PERSISTED identity stays the original.
-      featureKey,
-      faceIds: matched.faceIds,
-      // BK-174: the STORED base diameter (payload.currentDiameter from
-      // BEFORE any resize), not a live re-measurement. handleResizeHoleApply
-      // always applies `delta` to the OWNER's OWN fresh regeneration (F2, in
-      // this file's own header comment shorthand) -- never to whatever
-      // diameter this SAME resizeHole feature last produced -- so a SECOND
-      // (edit) delta must be computed against that SAME base every time, or
-      // every edit after the first would silently under/over-shoot by the
-      // PRIOR delta (proven: an 8->11 edit on a 6mm-base hole regenerated 9mm,
-      // not 11mm, until this fix -- delta must be 11-6=5, not 11-8=3). The
-      // anchored entry's "Current diameter" reads this SAME value, so it
-      // will show the ORIGINAL base (e.g. 6mm) rather than the live rendered
-      // diameter (e.g. 8mm) while editing -- a named, deliberate tradeoff:
-      // correctness of the regenerated geometry over a live-matching label.
-      currentDiameter: baseDiameter,
-      anchorPoint,
-      editFeatureId: featureId,
-      editInitialDiameter: initialDiameter,
-      // WO-2091: a depth node reopens on its depth, against the owner's stored depth.
-      ...(depth !== undefined
-        ? { field: 'depth' as const, currentDepth: depth.currentDepth, currentThrough: depth.currentThrough, editInitialDepth: String(depth.newDepth) }
-        : {}),
-    })
-  }, [resizeHoleEditRequest, resizeHolePickMode.kind, dagVersion, dag, addConsoleEvent, beginResizeHoleSelection, finishResizeHoleInteraction])
+    const token = ++resizeHoleEditResolveRef.current
+    void (async () => {
+      let inputMatch: FeatureVerdict | undefined
+      try {
+        inputMatch = eligibleResizeHoleVerdicts(await client.recognizeFeatures(ownerHandle)).find((v) => sameHoleLocation(v.featureKey, featureKey))
+      } catch {
+        inputMatch = undefined
+      }
+      // Disarmed, re-picked or re-requested while the owner was recognized.
+      if (token !== resizeHoleEditResolveRef.current) return
+      if (inputMatch === undefined) {
+        refuse()
+        return
+      }
+      // Highlight the live hole on the same axis line; the owner's own faces
+      // (on its hidden body) when the live body no longer shows one there.
+      const live = eligibleResizeHoleVerdicts(verdicts).find((v) => sameHoleAxis(v.featureKey, inputMatch.featureKey))
+      armEditedHole(live?.faceIds ?? inputMatch.faceIds, live === undefined)
+    })()
+    // resizeHoleVerdictsTick: an Edit that arrives while the verdict cache is
+    // refreshing (the dag moved while the tool was off - a Suppress, another
+    // edit) resolves the moment the refresh lands, instead of never.
+  }, [resizeHoleEditRequest, resizeHolePickMode.kind, dagVersion, resizeHoleVerdictsTick, dag, addConsoleEvent, beginResizeHoleSelection, finishResizeHoleInteraction])
 
   /** BK-174: FeatureTree Edit on a resizeHole feature -- reopens the SAME
    *  in-viewport surface it was created with (armed pick mode + anchored
@@ -17104,7 +17505,7 @@ function SolidsWorkbenchPageDocument({
   const handleEditResizeHole = useCallback((nodeId: string): void => {
     const node = dag.getNode(nodeId)
     if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'resizeHole') {
-      addConsoleEvent({ severity: 'error', source: 'workbench', message: `Resize hole edit refused: '${nodeId}' is not a live resizeHole feature` })
+      addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.resizeHoleEditRefusedIsNotALiveResizeHole', { nodeId: String(nodeId) }) })
       return
     }
     const payload = node.payload as unknown as ResizeHoleFeaturePayload
@@ -17113,7 +17514,7 @@ function SolidsWorkbenchPageDocument({
       typeof payload.featureKey !== 'string' || payload.featureKey.length === 0 ||
       !Number.isFinite(payload.currentDiameter) || payload.currentDiameter <= 0
     ) {
-      addConsoleEvent({ severity: 'error', source: 'workbench', message: `Resize hole edit refused: '${nodeId}' has an invalid owner, feature key, or base diameter` })
+      addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.resizeHoleEditRefusedHasAnInvalidOwnerFeature', { nodeId: String(nodeId) }) })
       return
     }
     setResizeHoleEditRequest({
@@ -17126,20 +17527,24 @@ function SolidsWorkbenchPageDocument({
       // why every edit must compute its delta against THIS, never a
       // live re-measurement.
       baseDiameter: payload.currentDiameter,
+      ...(payload.holeEdit === 'move' ? { move: (payload.translation as number[]).join(',') } : {}),
       ...(holeDepthFields(payload) !== undefined ? { depth: holeDepthFields(payload) } : {}),
+      ...(payload.holeStep === 'counterbore' ? { step: 'counterbore' as const } : {}),
     })
-    beginResizeHoleInteraction(holeDepthFields(payload) !== undefined ? 'depth' : undefined)
+    beginResizeHoleInteraction(payload.holeEdit === 'move' ? 'move' : holeDepthFields(payload) !== undefined ? 'depth' : undefined)
   }, [dag, addConsoleEvent, beginResizeHoleInteraction])
 
   const handleDialogApplied = useCallback(
-    (id: string, hideConsumedSketchesOnSuccess = false) => {
+    // WO-2823: `alsoInserted` - other new nodes the same step landed (the STL a
+    // Boolean took in), regenerated and touched with it.
+    (id: string, hideConsumedSketchesOnSuccess = false, alsoInserted: readonly string[] = []) => {
       const appliedCommand: Command | undefined = hideConsumedSketchesOnSuccess
         ? history.lastAppliedCommand()
         : undefined
       setSelectedId(id)
       // execute() clears CommandHistory's own redo tail -- keep the parallel
       // touched-id stack in lockstep (same contract as ParameterTable.setExpression).
-      touchedPastRef.current.push([id])
+      touchedPastRef.current.push([...alsoInserted, id])
       touchedFutureRef.current = []
       // WO UI-13B (Scope item 3, acceptance #3a/#3b): a successful Apply
       // appends a success message; a kernel-refused Apply (the applied
@@ -17151,7 +17556,7 @@ function SolidsWorkbenchPageDocument({
       // (src/store/index.ts) -- none of which name a 3D FeatureDag node id,
       // so click-to-jump (acceptance #3c) cannot be expressed for a workbench
       // feature message; see this WO's report for the rationale in full.
-      void fullResync([id]).then(() => {
+      void fullResync([...alsoInserted, id]).then(() => {
         const label = featureLabel(dag, id)
         const status = scheduler.statusOf(id)
         if (
@@ -17186,9 +17591,9 @@ function SolidsWorkbenchPageDocument({
         // than left to propagate.
         try {
           if (status === 'failed' || status === 'degraded') {
-            addConsoleEvent({ severity: 'error', source: 'workbench', message: `${label} refused: ${regenDiagnosticsReason(scheduler.diagnosticsOf(id))}` })
+            addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.refused', { value1: String(label), value2: String(regenDiagnosticsReason(scheduler.diagnosticsOf(id))) }) })
           } else {
-            addConsoleEvent({ severity: 'success', source: 'workbench', message: `${label} applied` })
+            addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.applied3', { value1: String(label) }) })
           }
         } catch {
           /* best-effort logging only -- never let it break the Apply flow */
@@ -17210,11 +17615,22 @@ function SolidsWorkbenchPageDocument({
     selectedBodyMesh: async () => {
       const live = liveBodyFeatureIds(dag, (id) => bodyHandlesRef.current.has(id))
       const picked = selectedBodyRowId ?? selectedId
+      // WO-2820: the STL open in the Model screen is a body too - picked (its row or a spot on it), or the only
+      // body - and From body takes its triangles, split into faces the way the solid it was written from was
+      const stl = stlBody === null ? null : stlBodyRef.current?.model ?? null
+      if (stlBody !== null && stl !== null && (stlSelection !== null || live.length === 0)) {
+        const flatOf = new Int32Array(stl.facetCount).fill(-1)
+        stl.features.forEach((f, i) => { if (f.target.family === 'flat') for (const t of f.facets) flatOf[t] = i })
+        return { featureId: stlBody.bodyId, mesh: { position: stl.mesh.positions, index: stl.mesh.indices, triFace: meshTriFaces(stl.mesh.positions, stl.mesh.indices, [stl.featureOfFacet, flatOf]) } }
+      }
       const id = picked !== null && live.includes(picked) ? picked : live.length === 1 ? live[0] : null
       const handle = id === null ? undefined : bodyHandlesRef.current.get(id)
       return id === null || handle === undefined || clientRef.current === null ? null : { featureId: id, mesh: await clientRef.current.tessellate(handle, FORM_FROM_BODY_TESS) }
     },
-    hideBody: (id) => { if (dag.getNode(id)?.hidden !== true) handleToggleBodyVisible(id) },
+    hideBody: (id) => {
+      if (isStlModelBodyId(id)) setStlBodyVisible(false)
+      else if (dag.getNode(id)?.hidden !== true) handleToggleBodyVisible(id)
+    },
     zebra,
     curvature,
     selectedSketchPath: () => {
@@ -17251,7 +17667,7 @@ function SolidsWorkbenchPageDocument({
         const owner = featureLabel(dag, currentBodyOwnerForRenderedHit(dag, pick.bodyId, live) ?? pick.bodyId)
         if (!owners.includes(owner)) owners.push(owner)
       }
-      return polylines.length === 0 ? null : { name: `${polylines.length} edge${polylines.length === 1 ? '' : 's'} of ${owners.join(' + ')}`, polylines }
+      return polylines.length === 0 ? null : { name: workbenchText('SolidsWorkbenchPage.edgeOf', { length: String(polylines.length), value2: String(polylines.length === 1 ? '' : 's'), value3: String(owners.join(' + ')) }), polylines }
     },
     showBodyEdgePicks: (picks) => {
       const selection = bridgeSessionRef.current?.selection
@@ -17392,7 +17808,7 @@ function SolidsWorkbenchPageDocument({
     tryRelief: async (ownerId, faceId, fields) => {
       const client = clientRef.current
       const reliefTryHandle = bodyHandlesRef.current.get(ownerId)
-      if (client === null || reliefTryHandle === undefined) return `the body '${ownerId}' is not built`
+      if (client === null || reliefTryHandle === undefined) return workbenchText('SolidsWorkbenchPage.theBodyIsNotBuilt', { ownerId: String(ownerId) })
       const check = await client.editFeature(reliefKernelRequest('relief-apply-check', reliefTryHandle, faceId, fields))
       if (check.ok && check.body !== undefined) {
         await client.dispose(check.body).catch(() => undefined)
@@ -17411,10 +17827,11 @@ function SolidsWorkbenchPageDocument({
    * executor's own branch above), a proper feature-tree citizen from the
    * moment it lands: same insert -> fullResync -> status-check pipeline every
    * create-mode dialog's Apply button drives (handleDialogApplied above), so
-   * a kernel-level refusal (bad/empty/multi-body STEP) reports through the
+   * a kernel-level refusal (bad/empty STEP) reports through the
    * SAME console-strip channel those dialogs already use -- no second error
    * surface. Unlike them this has no dialog: a single file-pick IS the
-   * action, the same one-click shape Export STEP already has.
+   * action, the same one-click shape Export STEP already has. WO-2796: a
+   * multi-solid STEP lands as one import node per solid (bodyIndex fan-out).
    *
    * Every early-return here (extension check, unreadable file, cache-write
    * failure) is BEFORE any DAG mutation -- a refused pick leaves no node
@@ -17427,18 +17844,48 @@ function SolidsWorkbenchPageDocument({
       e.target.value = '' // allow re-picking the identical filename later
       if (file === undefined) return
       const ext = file.name.split('.').pop()?.toLowerCase()
-      if (ext !== 'step' && ext !== 'stp') {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Import refused: "${file.name}" is not a .step/.stp file` })
+      if (ext !== 'step' && ext !== 'stp' && ext !== 'stl') {
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.importRefusedIsNotAStepStpFile', { name: String(file.name) }) })
         return
       }
       let bytes: ArrayBuffer
       try {
         bytes = await file.arrayBuffer()
+        // WO-2823: an STL comes in as the solid its closed mesh bounds - its
+        // flat regions as faces, its curved facets as faces of their own
+        // (stepFromMesh) - and from here on lands exactly as a STEP does: a
+        // body every kernel tool, Boolean first, takes.
+        if (ext === 'stl') bytes = stlBytesAsStep(bytes, file.name.replace(/\.[^.]+$/, '') || file.name)
       } catch (err) {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Import refused: could not read "${file.name}" (${err instanceof Error ? err.message : String(err)})` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.importRefusedCouldNotRead', { name: String(file.name), value2: String(err instanceof Error ? err.message : String(err)) }) })
         return
       }
       const id = nextId(dag, 'IMP')
+      // WO-2796 (audit BO-1): count the file's solids on the kernel BEFORE any
+      // DAG mutation, so a multi-solid STEP lands as one import node PER solid
+      // (the same per-solid node the CAM side's "Edit as model" fan-out mints,
+      // promoteImportedStepModel.ts) instead of a single node the executor
+      // refuses. The probe's handles are disposed at once; each node re-imports
+      // and keeps only its own bodyIndex. A probe that cannot count (no client
+      // yet, a fatal diagnostic, a throw, zero bodies) keeps today's single
+      // node, so the executor's own by-name refusal still names the real cause.
+      let solidCount = 1
+      const probeClient = clientRef.current
+      const cancelEpoch = kernelCancelEpochRef.current
+      if (probeClient !== null) {
+        try {
+          const probe = await probeClient.importStep(bytes.slice(0), id)
+          await Promise.all(probe.bodies.map((b) => probeClient.dispose(b.handle).catch(() => undefined)))
+          if (!probe.diagnostics.some((d) => d.severity === 'error')) solidCount = Math.max(probe.bodies.length, 1)
+        } catch {
+          solidCount = 1
+        }
+      }
+      // WO-2796 fix round 1 (audit): Cancel while the probe waited rejected it.
+      // That is the operator stopping this import, not a count failure -- it
+      // unwinds here, before any cache write or DAG change, and Cancel's own
+      // console line is the only report.
+      if (kernelCancelEpochRef.current !== cancelEpoch) return
       // WO INT-6A-R1 (audit major, INT-6A.audit.json findings[1]): the
       // IndexedDB key is a GLOBALLY-UNIQUE id (the same crypto.randomUUID()
       // scheme store/index.ts's importBrepGeometry already uses for the SAME
@@ -17449,14 +17896,21 @@ function SolidsWorkbenchPageDocument({
       // would let a second document's/second import's IMP1 silently clobber
       // an unrelated document's cached bytes. Stored on the node payload
       // (executor's loadCachedStep call reads it back) so replay never has
-      // to re-derive it.
-      const cacheKey = crypto.randomUUID()
+      // to re-derive it. WO-2796: one key PER solid -- each node owns its own
+      // copy (deleting one solid's node purges only its own bytes), exactly
+      // the Edit-as-model fan-out's independent cache lifetimes.
+      const cacheKeys: string[] = []
       try {
-        await cacheStep(cacheKey, bytes)
+        for (let i = 0; i < solidCount; i++) {
+          const key = crypto.randomUUID()
+          await cacheStep(key, bytes)
+          cacheKeys.push(key)
+        }
       } catch (err) {
+        await Promise.all(cacheKeys.map((key) => removeCachedStep(key).catch(() => undefined)))
         addConsoleEvent({
           severity: 'error', source: 'workbench',
-          message: `Import refused: "${file.name}" could not be cached for re-tessellation (${err instanceof Error ? err.message : String(err)})`,
+          message: workbenchText('SolidsWorkbenchPage.importRefusedCouldNotBeCachedForReTessellation', { name: String(file.name), value2: String(err instanceof Error ? err.message : String(err)) }),
         })
         return
       }
@@ -17483,8 +17937,8 @@ function SolidsWorkbenchPageDocument({
           addConsoleEvent({
             severity: 'warning', source: 'workbench',
             message: display.warning
-              ? `"${file.name}" imported, but its embedded part name could not be read (${display.warning}) - using the filename.`
-              : `"${file.name}" imported. It carries no embedded part name - using the filename.`,
+              ? workbenchText('SolidsWorkbenchPage.importedButItsEmbeddedPartNameCouldNotBe', { name: String(file.name), warning: String(display.warning) })
+              : workbenchText('SolidsWorkbenchPage.importedItCarriesNoEmbeddedPartNameUsingThe', { name: String(file.name) }),
           })
         } catch {
           // Same "console-log side effect must never become an unhandled rejection" guard as
@@ -17500,15 +17954,94 @@ function SolidsWorkbenchPageDocument({
       // filename instead.
       const filenameFallback = strippedName.length > 0 ? strippedName : file.name
       const displayName = display.name ?? filenameFallback
-      history.execute(createFeatureCommand(dag, { id, kind: 'import', payload: { fileName: file.name, cacheKey, name: displayName } }))
-      handleDialogApplied(id)
+      if (cacheKeys.length === 1) {
+        history.execute(createFeatureCommand(dag, { id, kind: 'import', payload: { fileName: file.name, cacheKey: cacheKeys[0], name: displayName } }))
+        handleDialogApplied(id)
+        return
+      }
+      // WO-2796: every solid lands in ONE undo step, ids IMP<n> in nextId's own
+      // scan order, then the same fullResync -> status-check handleDialogApplied
+      // drives -- reported as ONE line saying how many bodies came in, or each
+      // refused solid by name.
+      const ids: string[] = []
+      for (let n = 1; ids.length < cacheKeys.length; n++) if (!dag.has(`IMP${n}`)) ids.push(`IMP${n}`)
+      history.execute(new CompositeCommand(
+        ids.map((bodyId, i) => createFeatureCommand(dag, {
+          id: bodyId,
+          kind: 'import',
+          payload: importedStepBodyPayload({ fileName: file.name, cacheKey: cacheKeys[i], name: importedStepSolidName(displayName, i), bodyIndex: i }),
+        })),
+        'importStep',
+      ))
+      setSelectedId(ids[0])
+      touchedPastRef.current.push(ids)
+      touchedFutureRef.current = []
+      void fullResync(ids).then(() => {
+        try {
+          const refused = ids.filter((bodyId) => scheduler.statusOf(bodyId) === 'failed' || scheduler.statusOf(bodyId) === 'degraded')
+          for (const bodyId of refused) {
+            addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.refused', { value1: String(featureLabel(dag, bodyId)), value2: String(regenDiagnosticsReason(scheduler.diagnosticsOf(bodyId))) }) })
+          }
+          if (refused.length === 0) {
+            addConsoleEvent({ severity: 'success', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.importedEverySolidAsItsOwnBody', { fileName: String(file.name), solids: String(ids.length) }) })
+          }
+        } catch {
+          /* best-effort logging only -- same guard as handleDialogApplied */
+        }
+      })
     },
-    [dag, history, handleDialogApplied, addConsoleEvent],
+    [dag, history, handleDialogApplied, addConsoleEvent, fullResync, scheduler],
   )
 
   const handleImportStepClick = useCallback((): void => {
     importStepInputRef.current?.click()
   }, [])
+
+  /** WO-2823: a Boolean between the open STL and a modelled body, either way
+   *  round. The STL goes in as the solid its mesh bounds as it stands now
+   *  (its edit journal applied; the same faces Import gives an STL file), as
+   *  an import node, and the Boolean consumes it like any other body - one
+   *  undo step for both. The import node names the STL row it came from, and
+   *  while it stands the STL's own mesh is put away (stlInModel): it is the
+   *  Boolean's input now, as a tool body is. The refusal sentence, or
+   *  undefined when it landed. */
+  const applyStlBodyBoolean = async (pair: { targetFeatureId: string; toolFeatureId: string; boolOp: BooleanOp }): Promise<string | undefined> => {
+    const body = stlBody
+    const mesh = stlBodyRef.current?.model.mesh
+    if (body === null || mesh === undefined) {
+      return workbenchText('BooleanDialog.targetBodyIsUnavailable', { targetFeatureId: String(pair.targetFeatureId) })
+    }
+    const name = body.name.replace(/\.[^.]+$/, '') || body.name
+    let cacheKey: string
+    try {
+      const bytes = meshAsStep(mesh, name)
+      cacheKey = crypto.randomUUID()
+      await cacheStep(cacheKey, bytes)
+    } catch (err) {
+      return workbenchText('SolidsWorkbenchPage.importRefusedCouldNotRead', { name: String(body.name), value2: String(err instanceof Error ? err.message : String(err)) })
+    }
+    const importId = nextId(dag, 'IMP')
+    const featureId = nextId(dag, 'F')
+    const side = (id: string) => (id === body.bodyId ? importId : id)
+    const targetFeatureId = side(pair.targetFeatureId)
+    const toolFeatureId = side(pair.toolFeatureId)
+    try {
+      history.execute(new CompositeCommand([
+        createFeatureCommand(dag, { id: importId, kind: 'import', payload: { fileName: body.name, cacheKey, name, stlGeoId: body.geoId } }),
+        createFeatureCommand(dag, {
+          id: featureId,
+          kind: 'feature',
+          consumes: [targetFeatureId, toolFeatureId],
+          payload: { opType: 'boolean', targetFeatureId, toolFeatureId, boolOp: pair.boolOp, name: workbenchText('BooleanDialog.boolean', { id: featureId }) },
+        }),
+      ], 'boolean'))
+    } catch (err) {
+      await removeCachedStep(cacheKey).catch(() => undefined)
+      return err instanceof Error ? err.message : String(err)
+    }
+    handleDialogApplied(featureId, false, [importId])
+    return undefined
+  }
 
   /** WO UI-13B (Scope item 1, params table delete): a parameter can only be
    *  removed while nothing directly consumes it -- mirrors handleDelete's own
@@ -17526,7 +18059,7 @@ function SolidsWorkbenchPageDocument({
       const id = paramNodeId(name)
       const consumers = directConsumersOf(dag, id)
       if (consumers.length > 0) {
-        return `cannot delete: referenced by ${consumers.join(', ')}`
+        return workbenchText('SolidsWorkbenchPage.cannotDeleteReferencedBy', { value1: String(consumers.join(', ')) })
       }
       history.execute(new RemoveNodeCommand(id))
       return undefined
@@ -17546,6 +18079,84 @@ function SolidsWorkbenchPageDocument({
     refreshBodiesList()
   }, [refreshBodiesList])
 
+  /** WO-2879 (fix round 1): the operator's name for the history entry being undone/redone, read
+   *  from that COMMAND's own type and target -- never from the parallel touched-id stack, which is
+   *  not pushed for every command (a parameter delete pushes none, so its top entry belongs to an
+   *  earlier step). Call it while the command's target is in the document when it can be: before
+   *  undo() for Undo, after redo() for Redo; a removed node is named from the command's own
+   *  snapshot. undefined when the entry is not one this can name truthfully. */
+  const describeHistoryStep = useCallback((cmd: Command | undefined): string | undefined => {
+    const nameOf = (id: string, snapshotPayload?: unknown): string => {
+      if (dag.has(id)) return featureLabel(dag, id)
+      const name = (snapshotPayload as { name?: unknown } | undefined)?.name
+      return typeof name === 'string' && name.length > 0 ? name : id
+    }
+    const describe = (step: unknown): string | undefined => {
+      if (typeof step !== 'object' || step === null) return undefined
+      const s = step as { type?: unknown; id?: unknown; input?: { id?: unknown; payload?: unknown }; removed?: { payload?: unknown }; suppressed?: unknown; hidden?: unknown; commands?: unknown }
+      const id = typeof s.id === 'string' ? s.id : undefined
+      switch (s.type) {
+        case 'insertNode':
+        case 'insertAtMarker': {
+          const insertedId = typeof s.input?.id === 'string' ? s.input.id : undefined
+          if (insertedId === undefined) return undefined
+          const param = paramNameFromNodeId(insertedId)
+          return param === undefined ? nameOf(insertedId, s.input?.payload) : workbenchText('SolidsWorkbenchPage.stepAddParameter', { value1: param })
+        }
+        case 'removeNode': {
+          if (id === undefined) return undefined
+          const param = paramNameFromNodeId(id)
+          return param === undefined
+            ? workbenchText('SolidsWorkbenchPage.stepDelete', { value1: nameOf(id, s.removed?.payload) })
+            : workbenchText('SolidsWorkbenchPage.stepDeleteParameter', { value1: param })
+        }
+        case 'editFeaturePayload':
+        case 'setConsumes':
+        case 'editSketchStep':
+          return id === undefined ? undefined : workbenchText('SolidsWorkbenchPage.stepEdit', { value1: nameOf(id) })
+        case 'setSuppressed':
+          return id === undefined ? undefined : workbenchText(s.suppressed === true ? 'SolidsWorkbenchPage.stepSuppress' : 'SolidsWorkbenchPage.stepUnsuppress', { value1: nameOf(id) })
+        case 'setHidden':
+          return id === undefined ? undefined : workbenchText(s.hidden === true ? 'SolidsWorkbenchPage.stepHide' : 'SolidsWorkbenchPage.stepShow', { value1: nameOf(id) })
+        case 'reorderNode':
+          return id === undefined ? undefined : workbenchText('SolidsWorkbenchPage.stepReorder', { value1: nameOf(id) })
+        case 'setRollbackMarker':
+          return workbenchText('SolidsWorkbenchPage.stepMoveMarker')
+        case 'composite': {
+          // A feature Apply folds its follow-ups into one entry: the inserted feature names it.
+          // Otherwise the members must all say the same thing (one target), or it stays generic.
+          const members = Array.isArray(s.commands) ? s.commands : []
+          const inserted = members.find((m) => (m as { type?: unknown } | null)?.type === 'insertNode' || (m as { type?: unknown } | null)?.type === 'insertAtMarker')
+          if (inserted !== undefined) return describe(inserted)
+          const said = new Set(members.map(describe))
+          return said.size === 1 ? [...said][0] : undefined
+        }
+        default:
+          return undefined
+      }
+    }
+    if (cmd === undefined) return undefined
+    try {
+      return describe(cmd.serialize())
+    } catch {
+      return undefined
+    }
+  }, [dag])
+
+  /** WO-2879 (fix round 2): the Undo/Redo console line is an observer of a FINISHED history step,
+   *  never part of it. Called after the resync; skipped when the page no longer owns the document
+   *  the step ran on (a project loaded or the page unmounted meanwhile); and best-effort -- the
+   *  persist middleware can throw synchronously out of set() (see handleDialogApplied), and a
+   *  failed write must never block, revert or reject the Undo/Redo it describes. */
+  const reportHistoryStep = useCallback((epoch: number, message: string): void => {
+    if (bootOwnershipEpochRef.current !== epoch) return
+    try {
+      addConsoleEvent({ severity: 'info', source: 'workbench', message })
+    } catch (err) {
+      console.warn('WO-2879: Undo/Redo console line not written', err)
+    }
+  }, [addConsoleEvent])
+
   const handleUndo = useCallback(async (): Promise<void> => {
     if (useFormStore.getState().active) return void useFormStore.getState().undo()
     if (chamferAdoptionPendingRef.current || shellAdoptionPendingRef.current || resizeHoleAdoptionPendingRef.current) return
@@ -17556,9 +18167,12 @@ function SolidsWorkbenchPageDocument({
     // genesis-undo comment exactly). WO UI-7: generalized from one id to a
     // set (a rollback-marker move touches many at once, see handleMoveMarker).
     const priorConsumers = new Map((ids ?? []).map((id) => [id, directConsumersOf(dag, id)] as const))
+    // WO-2879: name the entry BEFORE undo() -- a genesis undo removes its feature.
+    const undoneLabel = describeHistoryStep(history.lastAppliedCommand())
     const undone = history.undo()
     if (!undone) return
     if (ids !== undefined) touchedFutureRef.current.push(ids)
+    const epoch = bootOwnershipEpochRef.current
     // WO SKC-15C-R1 (B2): ALWAYS resync after a successful undo -- never only when a parallel entry
     // existed. `fullResync` bumps `dagVersion`, which the active-session effect below keys on to pull
     // the reverted `payload.sketch` back into `sketchSessionStore` and the live Sketcher (a package
@@ -17566,8 +18180,15 @@ function SolidsWorkbenchPageDocument({
     // roots; anything else still gets a resync pass (roots=[]) so no undo can leave the viewport, the
     // session store, or the next gesture reading a stale document.
     const roots = (ids ?? []).flatMap((id) => (dag.has(id) ? [id] : (priorConsumers.get(id) ?? [])))
-    await fullResync(roots)
-  }, [dag, history, fullResync])
+    // WO-2879: the console's latest line says what was undone, so it never keeps reading
+    // "Shell F4 applied" after that Shell is gone. Fix round 2: written only AFTER the resync
+    // (finally: the undo happened even if the rebuild rejects), never inside the transition.
+    try {
+      await fullResync(roots)
+    } finally {
+      reportHistoryStep(epoch, undoneLabel === undefined ? workbenchText('SolidsWorkbenchPage.undidAChange') : workbenchText('SolidsWorkbenchPage.undidFeature', { value1: undoneLabel }))
+    }
+  }, [dag, history, fullResync, describeHistoryStep, reportHistoryStep])
 
   const handleRedo = useCallback(async (): Promise<void> => {
     if (useFormStore.getState().active) return void useFormStore.getState().redo()
@@ -17576,10 +18197,18 @@ function SolidsWorkbenchPageDocument({
     const redone = history.redo()
     if (!redone) return
     if (ids !== undefined) touchedPastRef.current.push(ids)
+    const epoch = bootOwnershipEpochRef.current
+    // WO-2879: same latest-line contract as handleUndo; named AFTER redo() re-inserts the feature
+    // (the redone entry is now the undo tail), before the resync can change the document again.
+    const redoneLabel = describeHistoryStep(history.lastAppliedCommand())
     // WO SKC-15C-R1 (B2): same always-resync contract as handleUndo -- a redone package step must pull
     // its re-applied document back into the live session, not just re-run the DAG command.
-    await fullResync(ids ?? [])
-  }, [history, fullResync])
+    try {
+      await fullResync(ids ?? [])
+    } finally {
+      reportHistoryStep(epoch, redoneLabel === undefined ? workbenchText('SolidsWorkbenchPage.redidAChange') : workbenchText('SolidsWorkbenchPage.redidFeature', { value1: redoneLabel }))
+    }
+  }, [history, fullResync, describeHistoryStep, reportHistoryStep])
 
   /** WO-2121: true while the rebuild after a Cancel runs -- a second Cancel
    *  then suppresses whatever is stuck instead of undoing another change. */
@@ -17605,7 +18234,7 @@ function SolidsWorkbenchPageDocument({
         const ids = touchedPastRef.current.pop()
         if (history.undo()) {
           if (ids !== undefined) touchedFutureRef.current.push(ids)
-          change = ', undid the last change'
+          change = workbenchText('SolidsWorkbenchPage.undidTheLastChange')
         }
       } else {
         history.execute(running.length === 1
@@ -17613,11 +18242,12 @@ function SolidsWorkbenchPageDocument({
           : new CompositeCommand(running.map((id) => new SetSuppressedCommand(id, true)), 'suppress'))
         touchedPastRef.current.push(running)
         touchedFutureRef.current = []
-        change = `, suppressed ${names}`
+        change = workbenchText('SolidsWorkbenchPage.suppressed', { names: String(names) })
       }
     }
-    const swap = restart('the operation was cancelled')
+    const swap = restart(workbenchText('SolidsWorkbenchPage.theOperationWasCancelled'))
     if (swap === null) return
+    kernelCancelEpochRef.current++
     kernelRestartingRef.current = true
     try {
       // Every body handle lives in the worker being killed; the rebuild makes
@@ -17636,7 +18266,7 @@ function SolidsWorkbenchPageDocument({
       if (booted) {
         useCamStore.getState().addConsoleEvent({
           severity: 'info', source: 'workbench',
-          message: `Cancelled ${names === '' ? 'the running geometry operation' : names}: restarted the geometry kernel${change} and rebuilt the model.`,
+          message: workbenchText('SolidsWorkbenchPage.cancelledRestartedTheGeometryKernelAndRebuiltTheModel', { value1: String(names === '' ? workbenchText('SolidsWorkbenchPage.theRunningGeometryOperation') : names), change: String(change) }),
         })
       }
     } finally {
@@ -17853,9 +18483,27 @@ function SolidsWorkbenchPageDocument({
       const affected = dag.nodeIds().filter((id) => before.has(id) !== after.has(id))
       touchedPastRef.current.push(affected)
       touchedFutureRef.current = []
-      void fullResync(affected)
+      // WO-2868 (sweep H2): rolling forward onto a feature that cannot rebuild
+      // used to log nothing - the only trace was a code in a tooltip. Each
+      // restored row that fails for its own reason gets one refused line, the
+      // same words handleDialogApplied writes; rows failing only because of it
+      // carry its reason and are not repeated.
+      const restored = affected.filter((id) => before.has(id))
+      void fullResync(affected).then(() => {
+        try {
+          for (const id of restored) {
+            if (!dag.has(id)) continue
+            const status = scheduler.statusOf(id)
+            const diagnostics = scheduler.diagnosticsOf(id)
+            if ((status !== 'failed' && status !== 'degraded') || failedOnlyUpstream(diagnostics)) continue
+            addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.refused', { value1: String(featureLabel(dag, id)), value2: String(regenDiagnosticsReason(diagnostics)) }) })
+          }
+        } catch {
+          /* best-effort logging only -- never let it break the marker move */
+        }
+      })
     },
-    [dag, history, fullResync],
+    [dag, history, fullResync, scheduler, addConsoleEvent],
   )
 
   /**
@@ -17981,9 +18629,9 @@ function SolidsWorkbenchPageDocument({
       if (!plan.ok) {
         notify(
           'error',
-          `Cannot delete ${featureLabel(dag, id)}: its reference plane is still used by ${plan.retainedConsumerIds
+          workbenchText('SolidsWorkbenchPage.cannotDeleteItsReferencePlaneIsStillUsedBy', { value1: String(featureLabel(dag, id)), value2: String(plan.retainedConsumerIds
             .map((consumerId) => featureLabel(dag, consumerId))
-            .join(', ')}.`,
+            .join(', ')) }),
         )
         return
       }
@@ -18034,8 +18682,8 @@ function SolidsWorkbenchPageDocument({
   // Unified New Sketch temporarily reveals every base plane, without mutating persisted eye prefs,
   // so its target instructions never need a hidden-plane dead-state branch.
   const basePlanePickHintMessage = availableBodies.length > 0
-    ? 'Click a base plane, visible construction plane, or flat face to start the sketch'
-    : 'Click a base plane (XY, XZ, or YZ) or visible construction plane to start the sketch'
+    ? workbenchText('SolidsWorkbenchPage.clickABasePlaneVisibleConstructionPlaneOrFlat')
+    : workbenchText('SolidsWorkbenchPage.clickABasePlaneXYXZOrYZOr')
   // WO UI-51A-R1 (audit MAJOR 1): the extrude target picker must offer only
   // LIVE bodies -- bodyFeatureIds(dag)/availableBodies above is the raw
   // superset that deliberately still contains superseded ancestors with
@@ -18144,12 +18792,12 @@ function SolidsWorkbenchPageDocument({
     ? selectedId
     : (currentLiveBodyIds.length === 1 ? currentLiveBodyIds[0] : undefined)
   const defeatureDisabledReason = currentLiveBodyIds.length === 0
-    ? 'Defeature - create or import a live body first'
-    : (defeatureOwnerId === undefined ? 'Defeature - select one live body first' : undefined)
+    ? workbenchText('SolidsWorkbenchPage.defeatureCreateOrImportALiveBodyFirst')
+    : (defeatureOwnerId === undefined ? workbenchText('SolidsWorkbenchPage.defeatureSelectOneLiveBodyFirst') : undefined)
 
   const handleDefeatureClick = useCallback((): void => {
     if (defeatureOwnerId === undefined) {
-      addConsoleEvent({ severity: 'error', source: 'workbench', message: defeatureDisabledReason ?? 'Defeature refused: no live body is available' })
+      addConsoleEvent({ severity: 'error', source: 'workbench', message: defeatureDisabledReason ?? workbenchText('SolidsWorkbenchPage.defeatureRefusedNoLiveBodyIsAvailable') })
       return
     }
     runAfterResizeHoleToolSwitch(() => {
@@ -18157,30 +18805,30 @@ function SolidsWorkbenchPageDocument({
       const client = clientRef.current
       const body = bodyHandlesRef.current.get(defeatureOwnerId)
       if (client === null || body === undefined) {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: 'Defeature refused: the selected body has no live kernel handle' })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureRefusedTheSelectedBodyHasNoLiveKernel') })
         return
       }
-      addConsoleEvent({ severity: 'info', source: 'workbench', message: `Recognizing removable face groups on ${featureLabel(dag, defeatureOwnerId)}...` })
+      addConsoleEvent({ severity: 'info', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.recognizingRemovableFaceGroupsOn', { value1: String(featureLabel(dag, defeatureOwnerId)) }) })
       try {
         const recognized = await client.recognizeFeatures(body)
         if (window.__solidsWorkbenchHooks === undefined) return
         if (bodyHandlesRef.current.get(defeatureOwnerId) !== body || dag.getNode(defeatureOwnerId) === undefined) {
-          addConsoleEvent({ severity: 'error', source: 'workbench', message: 'Defeature refused: the selected body changed while recognition was running; try again' })
+          addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureRefusedTheSelectedBodyChangedWhileRecognitionWas') })
           return
         }
         const verdicts = recognized.map(disposeDefeatureVerdict)
         const duplicate = verdicts.find((verdict, index) => verdicts.findIndex((candidate) => candidate.featureKey === verdict.featureKey) !== index)
         const invalidReason = duplicate !== undefined
-          ? `duplicate featureKey '${duplicate.featureKey}'`
+          ? workbenchText('SolidsWorkbenchPage.duplicateFeatureKey', { featureKey: String(duplicate.featureKey) })
           : verdicts.map(invalidDefeatureVerdictReason).find((reason) => reason !== undefined)
         if (invalidReason !== undefined) {
-          addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature recognition refused: ${invalidReason}` })
+          addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureRecognitionRefused', { invalidReason: String(invalidReason) }) })
           return
         }
         addConsoleEvent({
           severity: 'info',
           source: 'workbench',
-          message: `Recognized ${verdicts.length} feature(s); Defeature accepts ${verdicts.filter((verdict) => verdict.removable).length} across ${DEFEATURE_CLASSES.join(', ')}`,
+          message: workbenchText('SolidsWorkbenchPage.recognizedFeatureSDefeatureAcceptsAcross', { length: String(verdicts.length), value2: String(verdicts.filter((verdict) => verdict.removable).length), value3: String(DEFEATURE_CLASSES.join(', ')) }),
         })
         // Direct workflow: creation starts with an empty accept mask. The
         // user's first action is a face pick in the viewport; the recognized
@@ -18198,14 +18846,14 @@ function SolidsWorkbenchPageDocument({
         defeatureVerdictsRef.current = verdicts
         defeatureRecognizeBodyIdRef.current = defeatureOwnerId
         setDefeatureSelectedKeys(selected)
-        setDefeaturePreviewFeedback({ kind: 'idle', message: 'Select a face to preview its healed removal.' })
+        setDefeaturePreviewFeedback({ kind: 'idle', message: workbenchText('SolidsWorkbenchPage.selectAFaceToPreviewItsHealedRemoval') })
         setDefeatureHoverKey(null)
         defeatureHoverAnnouncedRef.current = null
         setDialog({ kind: 'defeature', mode: 'create', ownerId: defeatureOwnerId, recognizeBodyId: defeatureOwnerId, verdicts })
-        addConsoleEvent({ severity: 'info', source: 'workbench', message: `Pick faces to delete on ${featureLabel(dag, defeatureOwnerId)} - clicking any face in a recognized feature selects its whole coherent group; the list is optional.` })
+        addConsoleEvent({ severity: 'info', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.pickFacesToDeleteOnClickingAnyFaceIn', { value1: String(featureLabel(dag, defeatureOwnerId)) }) })
       } catch (err) {
         if (window.__solidsWorkbenchHooks === undefined) return
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature recognition failed: ${err instanceof Error ? err.message : String(err)}` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureRecognitionFailed', { value1: String(err instanceof Error ? err.message : String(err)) }) })
       }
     })()
     })
@@ -18219,13 +18867,13 @@ function SolidsWorkbenchPageDocument({
     void (async () => {
       const node = dag.getNode(nodeId)
       if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'defeature') {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature edit refused: '${nodeId}' is not a live defeature feature` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedIsNotALiveDefeatureFeature', { nodeId: String(nodeId) }) })
         return
       }
       const ownerId = node.payload.ownerId as string | undefined
       const storedFeatureKeys = (node.payload.featureKeys as string[] | undefined) ?? []
       if (ownerId === undefined) {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature edit refused: '${nodeId}' has no stored owner body` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedHasNoStoredOwnerBody', { nodeId: String(nodeId) }) })
         return
       }
       let recognizeTargetId: string
@@ -18233,7 +18881,7 @@ function SolidsWorkbenchPageDocument({
         const bodyIds = bodyFeatureIds(dag)
         const editedProjection = projectBodyLineages(dag, bodyIds, [nodeId])
         if (editedProjection.length !== 1) {
-          addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature edit refused: '${nodeId}' does not resolve to exactly one body lineage` })
+          addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedDoesNotResolveToExactlyOne', { nodeId: String(nodeId) }) })
           return
         }
         const liveProjections = projectBodyLineages(
@@ -18246,21 +18894,21 @@ function SolidsWorkbenchPageDocument({
           (projection) => projection.lineageId === editedProjection[0].lineageId,
         )
         if (presentationTargets.length !== 1) {
-          addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature edit refused: '${nodeId}' does not have exactly one live body in its replayed lineage` })
+          addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedDoesNotHaveExactlyOneLive', { nodeId: String(nodeId) }) })
           return
         }
         recognizeTargetId = presentationTargets[0].bodyId
       } catch (err) {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature edit refused: '${nodeId}' live body lineage could not be resolved: ${err instanceof Error ? err.message : String(err)}` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedLiveBodyLineageCouldNotBe', { nodeId: String(nodeId), value2: String(err instanceof Error ? err.message : String(err)) }) })
         return
       }
       const client = clientRef.current
       const body = bodyHandlesRef.current.get(recognizeTargetId)
       if (client === null || body === undefined) {
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature edit refused: ${featureLabel(dag, nodeId)} has no live kernel handle` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedHasNoLiveKernelHandle', { value1: String(featureLabel(dag, nodeId)) }) })
         return
       }
-      addConsoleEvent({ severity: 'info', source: 'workbench', message: `Recognizing removable face groups on ${featureLabel(dag, nodeId)}...` })
+      addConsoleEvent({ severity: 'info', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.recognizingRemovableFaceGroupsOn', { value1: String(featureLabel(dag, nodeId)) }) })
       const recordedDeltas = map.deltaHistory()
       const recognitionBaseline: DefeaturePreviewBaseline = {
         mode: 'edit',
@@ -18301,16 +18949,16 @@ function SolidsWorkbenchPageDocument({
           dag.getNode(nodeId) === undefined ||
           currentFingerprint !== recognitionFingerprint
         ) {
-          addConsoleEvent({ severity: 'error', source: 'workbench', message: 'Defeature edit refused: the model changed while the pre-feature body was being reconstructed; try again' })
+          addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureEditRefusedTheModelChangedWhileThePre') })
           return
         }
         const verdicts = recognized.map(disposeDefeatureVerdict)
         const duplicate = verdicts.find((verdict, index) => verdicts.findIndex((candidate) => candidate.featureKey === verdict.featureKey) !== index)
         const invalidReason = duplicate !== undefined
-          ? `duplicate featureKey '${duplicate.featureKey}'`
+          ? workbenchText('SolidsWorkbenchPage.duplicateFeatureKey', { featureKey: String(duplicate.featureKey) })
           : verdicts.map(invalidDefeatureVerdictReason).find((reason) => reason !== undefined)
         if (invalidReason !== undefined) {
-          addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature recognition refused: ${invalidReason}` })
+          addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureRecognitionRefused', { invalidReason: String(invalidReason) }) })
           return
         }
         const removableEdit = verdicts.filter((verdict) => verdict.removable)
@@ -18322,15 +18970,15 @@ function SolidsWorkbenchPageDocument({
         defeatureRecognizeBodyIdRef.current = recognizeTargetId
         setDefeatureSelectedKeys(selected)
         setDefeaturePreviewFeedback(selected.size === 0
-          ? { kind: 'idle', message: 'Select a face to preview its healed removal.' }
-          : { kind: 'building', message: `Building healed preview for ${selected.size} selected face group(s)...` })
+          ? { kind: 'idle', message: workbenchText('SolidsWorkbenchPage.selectAFaceToPreviewItsHealedRemoval') }
+          : { kind: 'building', message: workbenchText('SolidsWorkbenchPage.buildingHealedPreviewForSelectedFaceGroupS', { size: String(selected.size) }) })
         setDefeatureHoverKey(null)
         defeatureHoverAnnouncedRef.current = null
         setDialog({ kind: 'defeature', mode: 'edit', ownerId, recognizeBodyId: recognizeTargetId, verdicts, featureId: nodeId, initialFeatureKeys: storedFeatureKeys })
-        addConsoleEvent({ severity: 'info', source: 'workbench', message: `Pick faces to delete on ${featureLabel(dag, nodeId)} - clicking any face in a recognized feature selects its whole coherent group; the list is optional.` })
+        addConsoleEvent({ severity: 'info', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.pickFacesToDeleteOnClickingAnyFaceIn', { value1: String(featureLabel(dag, nodeId)) }) })
       } catch (err) {
         if (window.__solidsWorkbenchHooks === undefined) return
-        addConsoleEvent({ severity: 'error', source: 'workbench', message: `Defeature recognition failed: ${err instanceof Error ? err.message : String(err)}` })
+        addConsoleEvent({ severity: 'error', source: 'workbench', message: workbenchText('SolidsWorkbenchPage.defeatureRecognitionFailed', { value1: String(err instanceof Error ? err.message : String(err)) }) })
       }
     })()
   }, [addConsoleEvent, dag, history, map, materializeDefeaturePreFeature, scheduler])
@@ -18375,7 +19023,7 @@ function SolidsWorkbenchPageDocument({
     }
     const node = dag.getNode(nodeId)
     if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'pushPull') {
-      refuse(`Push/Pull edit refused: '${nodeId}' is not a live push/pull feature`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedIsNotALivePush', { nodeId: String(nodeId) }))
       return
     }
 
@@ -18387,18 +19035,18 @@ function SolidsWorkbenchPageDocument({
       !Number.isFinite(normal.x) || !Number.isFinite(normal.y) || !Number.isFinite(normal.z) ||
       Math.hypot(normal.x, normal.y, normal.z) <= 1e-9
     ) {
-      refuse(`Push/Pull edit refused: '${nodeId}' has an invalid owner, delta, or face normal`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedHasAnInvalidOwnerDelta', { nodeId: String(nodeId) }))
       return
     }
 
     const ref = node.refs.find((candidate) => candidate.kind === 'single-face')
     if (ref === undefined) {
-      refuse(`Push/Pull edit refused: '${nodeId}' has no single-face target reference`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedHasNoSingleFaceTarget', { nodeId: String(nodeId) }))
       return
     }
     const resolved = map.resolve(ref.id, ref.kind)
     if (resolved.status === 'lost' || resolved.boundTo.length === 0) {
-      refuse(`Push/Pull edit refused: target face '${ref.id}' is no longer available`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedTargetFaceIsNoLonger', { id: String(ref.id) }))
       return
     }
 
@@ -18408,7 +19056,7 @@ function SolidsWorkbenchPageDocument({
       const bodyIds = bodyFeatureIds(dag)
       const editedProjection = projectBodyLineages(dag, bodyIds, [nodeId])
       if (editedProjection.length !== 1) {
-        refuse(`Push/Pull edit refused: '${nodeId}' does not resolve to exactly one body lineage`)
+        refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedDoesNotResolveToExactly', { nodeId: String(nodeId) }))
         return
       }
       const liveProjections = projectBodyLineages(
@@ -18421,12 +19069,12 @@ function SolidsWorkbenchPageDocument({
         (projection) => projection.lineageId === editedProjection[0].lineageId,
       )
       if (presentationTargets.length !== 1) {
-        refuse(`Push/Pull edit refused: '${nodeId}' does not have exactly one live body in its replayed lineage`)
+        refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedDoesNotHaveExactlyOne', { nodeId: String(nodeId) }))
         return
       }
       previewFeatureId = presentationTargets[0].bodyId
     } catch (err) {
-      refuse(`Push/Pull edit refused: '${nodeId}' live body lineage could not be resolved: ${err instanceof Error ? err.message : String(err)}`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedLiveBodyLineageCouldNot', { nodeId: String(nodeId), value2: String(err instanceof Error ? err.message : String(err)) }))
       return
     }
     const restoreHandle = bodyHandlesRef.current.get(previewFeatureId)
@@ -18434,12 +19082,12 @@ function SolidsWorkbenchPageDocument({
     const liveFaceId = resolved.boundTo[0]
     const anchor = cached !== undefined ? featureAnchorFromMesh(cached, [liveFaceId, ref.id]) : undefined
     if (baseHandle === undefined || restoreHandle === undefined || anchor === undefined) {
-      refuse(`Push/Pull edit refused: '${nodeId}' does not have a current owner, live presentation body, and face anchor`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedDoesNotHaveACurrent', { nodeId: String(nodeId) }))
       return
     }
     const presentation = cacheRef.current.retain(previewFeatureId)
     if (presentation === undefined) {
-      refuse(`Push/Pull edit refused: '${previewFeatureId}' has no committed viewport presentation`)
+      refuse(workbenchText('SolidsWorkbenchPage.pushPullEditRefusedHasNoCommittedViewportPresentation', { previewFeatureId: String(previewFeatureId) }))
       return
     }
 
@@ -18467,7 +19115,7 @@ function SolidsWorkbenchPageDocument({
   const referencePlaneSources = useCallback((): OffsetPlaneSource[] => {
     const base = (Object.keys(NODE_ID_BY_BASE_PLANE) as Array<keyof typeof NODE_ID_BY_BASE_PLANE>).map((kind) => ({
       id: NODE_ID_BY_BASE_PLANE[kind],
-      label: `${BASE_PLANE_LABELS[kind]} plane`,
+      label: workbenchText('SolidsWorkbenchPage.plane3', { value1: String(BASE_PLANE_LABELS[kind]) }),
       frame: BASE_PLANE_FRAMES[kind],
     }))
     const constructed = dag.nodeIds().flatMap((id): OffsetPlaneSource[] => {
@@ -18499,7 +19147,7 @@ function SolidsWorkbenchPageDocument({
       if (offsetPlaneFaceProbeGenerationRef.current !== generation) return
       const preferred = sources.find((source) => source.id === selectedId) ?? sources[0]
       if (preferred === undefined) {
-        notify('error', 'Offset Plane refused: no supported source plane is available.')
+        notify('error', workbenchText('SolidsWorkbenchPage.offsetPlaneRefusedNoSupportedSourcePlaneIsAvailable'))
         return
       }
       const rawId = nextReferencePlaneId(dag)
@@ -18512,7 +19160,7 @@ function SolidsWorkbenchPageDocument({
 
   const openAxisCreate = useCallback((): void => {
     const rawId = nextAxisDatumId(dag)
-    setDialog({ kind: 'axis', mode: 'create', axisType: 'cylinder', initialName: `Axis ${rawId}` })
+    setDialog({ kind: 'axis', mode: 'create', axisType: 'cylinder', initialName: workbenchText('SolidsWorkbenchPage.axis2', { rawId: String(rawId) }) })
     // selection first: a face already selected makes its axis at once
     const selectedFace = selectedFacePickRef.current
     if (selectedFace === null) return
@@ -18536,12 +19184,12 @@ function SolidsWorkbenchPageDocument({
   }, [])
 
   const applyAxis = useCallback(async (value: AxisDialogValue): Promise<string | undefined> => {
-    if (dialog.kind !== 'axis') return 'Axis is no longer active.'
+    if (dialog.kind !== 'axis') return workbenchText('SolidsWorkbenchPage.axisIsNoLongerActive')
     let nodeId: string
     let command: Command
     if (dialog.mode === 'create') {
       const pick = dialog.pick
-      if (pick === undefined) return 'Axis: pick in the viewport first.'
+      if (pick === undefined) return workbenchText('SolidsWorkbenchPage.axisPickInTheViewportFirst')
       const built = buildAxisDatumNodeInput({
         id: nextAxisDatumId(dag),
         name: value.name,
@@ -18555,7 +19203,7 @@ function SolidsWorkbenchPageDocument({
     } else {
       nodeId = dialog.featureId
       const node = dag.getNode(nodeId)
-      if (node === undefined || !isAxisDatumPayload(node.payload)) return 'The axis no longer exists.'
+      if (node === undefined || !isAxisDatumPayload(node.payload)) return workbenchText('SolidsWorkbenchPage.theAxisNoLongerExists')
       const payload: AxisDatumPayload = { ...node.payload, name: value.name, definition: { ...node.payload.definition, flip: value.flip } }
       command = new EditFeaturePayloadCommand(nodeId, payload)
     }
@@ -18567,18 +19215,18 @@ function SolidsWorkbenchPageDocument({
         const reason = regenDiagnosticsReason(scheduler.diagnosticsOf(nodeId))
         history.undo()
         await fullResync([])
-        return `Axis replay refused: ${reason}`
+        return workbenchText('SolidsWorkbenchPage.axisReplayRefused', { reason: String(reason) })
       }
     } catch (error) {
       history.undo()
       await fullResync([]).catch(() => undefined)
-      return `Axis replay failed: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.axisReplayFailed', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
     touchedPastRef.current.push([nodeId])
     touchedFutureRef.current = []
     setSelectedId(nodeId)
     const made = dialog.mode === 'create' && dialog.pick !== undefined ? dialog.pick.said : AXIS_TYPE_WORDS[value.kind].toLowerCase()
-    notify('success', `${value.name} applied: ${made}${value.flip ? ', flipped' : ''}.`)
+    notify('success', workbenchText('SolidsWorkbenchPage.applied', { name: String(value.name), made: String(made), value3: String(value.flip ? workbenchText('SolidsWorkbenchPage.flipped') : '') }))
     return undefined
   }, [dag, dialog, fullResync, history, notify, scheduler])
 
@@ -18619,7 +19267,7 @@ function SolidsWorkbenchPageDocument({
 
   // ---- WO-2223: Construct, second wave -- open, Type, Apply, and the glyphs.
   const openPickedPlaneCreate = useCallback((planeType: PickedPlaneKind): void => {
-    setDialog({ kind: 'picked-plane', mode: 'create', planeType, initialName: `${planeType === 'tangent' ? 'Tangent plane' : 'Plane'} ${nextReferencePlaneId(dag)}` })
+    setDialog({ kind: 'picked-plane', mode: 'create', planeType, initialName: `${planeType === 'tangent' ? workbenchText('SolidsWorkbenchPage.tangentPlane') : workbenchText('SolidsWorkbenchPage.plane')} ${nextReferencePlaneId(dag)}` })
   }, [dag, setDialog])
 
   const setPickedPlaneType = useCallback((planeType: PickedPlaneKind): void => {
@@ -18633,7 +19281,7 @@ function SolidsWorkbenchPageDocument({
   }, [])
 
   const openPointCreate = useCallback((): void => {
-    setDialog({ kind: 'point-datum', mode: 'create', pointType: 'vertex', initialName: `Point ${nextPointDatumId(dag)}`, planeId: NODE_ID_BY_BASE_PLANE.xy })
+    setDialog({ kind: 'point-datum', mode: 'create', pointType: 'vertex', initialName: workbenchText('SolidsWorkbenchPage.point3', { value1: String(nextPointDatumId(dag)) }), planeId: NODE_ID_BY_BASE_PLANE.xy })
   }, [dag, setDialog])
 
   const setPointType = useCallback((pointType: PointDefinitionKind): void => {
@@ -18662,12 +19310,12 @@ function SolidsWorkbenchPageDocument({
         const reason = regenDiagnosticsReason(scheduler.diagnosticsOf(nodeId))
         history.undo()
         await fullResync([])
-        return `${word} replay refused: ${reason}`
+        return workbenchText('SolidsWorkbenchPage.replayRefused', { word: String(word), reason: String(reason) })
       }
     } catch (error) {
       history.undo()
       await fullResync([]).catch(() => undefined)
-      return `${word} replay failed: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.replayFailed', { word: String(word), value2: String(error instanceof Error ? error.message : String(error)) })
     }
     touchedPastRef.current.push([nodeId])
     touchedFutureRef.current = []
@@ -18676,13 +19324,13 @@ function SolidsWorkbenchPageDocument({
   }, [fullResync, history, scheduler])
 
   const applyPickedPlane = useCallback(async (value: ConstructDatumDialogValue): Promise<string | undefined> => {
-    if (dialog.kind !== 'picked-plane') return 'Plane is no longer active.'
+    if (dialog.kind !== 'picked-plane') return workbenchText('SolidsWorkbenchPage.planeIsNoLongerActive')
     let nodeId: string
     let command: Command
     let made: string
     if (dialog.mode === 'create') {
       const pick = dialog.pick
-      if (pick === undefined) return 'Plane: pick in the viewport first.'
+      if (pick === undefined) return workbenchText('SolidsWorkbenchPage.planePickInTheViewportFirst')
       const built = buildPickedPlaneDatumNodeInput({
         id: nextReferencePlaneId(dag),
         name: value.name,
@@ -18697,25 +19345,25 @@ function SolidsWorkbenchPageDocument({
     } else {
       nodeId = dialog.featureId
       const node = dag.getNode(nodeId)
-      if (node === undefined || !isOffsetPlaneDatumPayload(node.payload) || isParentPlaneDefinition(node.payload.definition)) return 'The plane no longer exists.'
+      if (node === undefined || !isOffsetPlaneDatumPayload(node.payload) || isParentPlaneDefinition(node.payload.definition)) return workbenchText('SolidsWorkbenchPage.thePlaneNoLongerExists')
       const payload: OffsetPlaneDatumPayload = { ...node.payload, name: value.name, definition: { ...node.payload.definition, flipNormal: value.flip } }
       command = new EditFeaturePayloadCommand(nodeId, payload)
       made = PICKED_PLANE_TYPE_WORDS[node.payload.definition.kind].toLowerCase()
     }
-    const refusal = await commitConstructDatum(nodeId, command, 'Plane')
+    const refusal = await commitConstructDatum(nodeId, command, workbenchText('SolidsWorkbenchPage.plane'))
     if (refusal !== undefined) return refusal
-    notify('success', `${value.name} applied: ${made}${value.flip ? ', flipped' : ''}.`)
+    notify('success', workbenchText('SolidsWorkbenchPage.applied', { name: String(value.name), made: String(made), value3: String(value.flip ? workbenchText('SolidsWorkbenchPage.flipped') : '') }))
     return undefined
   }, [commitConstructDatum, dag, dialog, notify])
 
   const applyPointDatum = useCallback(async (value: ConstructDatumDialogValue): Promise<string | undefined> => {
-    if (dialog.kind !== 'point-datum') return 'Point is no longer active.'
+    if (dialog.kind !== 'point-datum') return workbenchText('SolidsWorkbenchPage.pointIsNoLongerActive')
     let nodeId: string
     let command: Command
     let made: string
     if (dialog.mode === 'create') {
       const pick = dialog.pick
-      if (pick === undefined) return 'Point: pick in the viewport first.'
+      if (pick === undefined) return workbenchText('SolidsWorkbenchPage.pointPickInTheViewportFirst')
       const built = buildPointDatumNodeInput({
         id: nextPointDatumId(dag),
         name: value.name,
@@ -18731,14 +19379,14 @@ function SolidsWorkbenchPageDocument({
     } else {
       nodeId = dialog.featureId
       const node = dag.getNode(nodeId)
-      if (node === undefined || !isPointDatumPayload(node.payload)) return 'The point no longer exists.'
+      if (node === undefined || !isPointDatumPayload(node.payload)) return workbenchText('SolidsWorkbenchPage.thePointNoLongerExists')
       const payload: PointDatumPayload = { ...node.payload, name: value.name }
       command = new EditFeaturePayloadCommand(nodeId, payload)
       made = POINT_TYPE_WORDS[node.payload.definition.kind].toLowerCase()
     }
-    const refusal = await commitConstructDatum(nodeId, command, 'Point')
+    const refusal = await commitConstructDatum(nodeId, command, workbenchText('SolidsWorkbenchPage.point'))
     if (refusal !== undefined) return refusal
-    notify('success', `${value.name} applied: ${made}.`)
+    notify('success', workbenchText('SolidsWorkbenchPage.applied2', { name: String(value.name), made: String(made) }))
     return undefined
   }, [commitConstructDatum, dag, dialog, notify])
 
@@ -18817,7 +19465,7 @@ function SolidsWorkbenchPageDocument({
   }, [removeOffsetPlanePreviewGhost])
 
   const applyOffsetPlane = useCallback(async (value: OffsetPlaneDialogValue): Promise<string | undefined> => {
-    if (dialog.kind !== 'offset-plane') return 'Offset Plane is no longer active.'
+    if (dialog.kind !== 'offset-plane') return workbenchText('SolidsWorkbenchPage.offsetPlaneIsNoLongerActive')
     // WO-034 (WO-030 audit, finding 1): Apply publishes only what the preview
     // session already accepted -- the same commit-time guards the delivered
     // fillet/chamfer/shell adapters apply. The applied value must BE the
@@ -18828,7 +19476,7 @@ function SolidsWorkbenchPageDocument({
     const session = offsetPlanePreviewSessionRef.current
     const acceptedIntent = offsetPlanePreviewIntentRef.current
     if (session === null || acceptedIntent === null || offsetPlanePreviewState.status !== 'ready') {
-      return 'Offset Plane Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.offsetPlaneApplyRefusedTheAcceptedPreviewIsNo')
     }
     if (
       acceptedIntent.sourceId !== value.sourceId ||
@@ -18841,13 +19489,13 @@ function SolidsWorkbenchPageDocument({
       acceptedIntent.hinge !== value.hinge ||
       acceptedIntent.hingeAxisId !== value.hingeAxisId
     ) {
-      return 'Offset Plane Apply refused: the preview does not match the current settings.'
+      return workbenchText('SolidsWorkbenchPage.offsetPlaneApplyRefusedThePreviewDoesNotMatch')
     }
     const { snapshot } = session.baseline
     const fingerprintNow = JSON.stringify({ dag: dag.serialize(), sourceId: snapshot.sourceId, featureId: snapshot.featureId })
     if (session.baseline.fingerprint !== fingerprintNow) {
       await cancelOffsetPlanePreviewSession()
-      return 'Offset Plane Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.offsetPlaneApplyRefusedTheModelChangedAfterThe')
     }
     let nodeId: string
     let command: Command
@@ -18856,7 +19504,7 @@ function SolidsWorkbenchPageDocument({
     const { definition, parentIds, axisId } = constructionPlaneOf(value)
     if (dialog.mode === 'create') {
       const parents = constructionPlaneParentOrder(definition, parentIds).map((id) => dialog.sources.find((candidate) => candidate.id === id))
-      if (parents.some((source) => source === undefined)) return 'The selected source plane is no longer available.'
+      if (parents.some((source) => source === undefined)) return workbenchText('SolidsWorkbenchPage.theSelectedSourcePlaneIsNoLongerAvailable')
       // the frame itself was checked by the accepted preview (same parents, same math, model unchanged)
       const sources = parents as OffsetPlaneSource[]
       const rawId = nextReferencePlaneId(dag)
@@ -18875,7 +19523,7 @@ function SolidsWorkbenchPageDocument({
     } else {
       nodeId = dialog.featureId
       const node = dag.getNode(nodeId)
-      if (node === undefined || !isOffsetPlaneDatumPayload(node.payload) || !isParentPlaneDefinition(node.payload.definition)) return 'The offset plane no longer exists.'
+      if (node === undefined || !isOffsetPlaneDatumPayload(node.payload) || !isParentPlaneDefinition(node.payload.definition)) return workbenchText('SolidsWorkbenchPage.theOffsetPlaneNoLongerExists')
       // the new frame was checked by the accepted preview against these same parents; the axis it
       // turns about may have changed (WO-2222), so the consumes are rewritten with it
       const payload: OffsetPlaneDatumPayload = { ...node.payload, name: value.name, definition }
@@ -18892,21 +19540,21 @@ function SolidsWorkbenchPageDocument({
         const reason = regenDiagnosticsReason(scheduler.diagnosticsOf(nodeId))
         history.undo()
         await fullResync([])
-        return `${planeWord} replay refused: ${reason}`
+        return workbenchText('SolidsWorkbenchPage.replayRefused2', { planeWord: String(planeWord), reason: String(reason) })
       }
     } catch (error) {
       history.undo()
       await fullResync([]).catch(() => undefined)
-      return `${planeWord} replay failed: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.replayFailed2', { planeWord: String(planeWord), value2: String(error instanceof Error ? error.message : String(error)) })
     }
     touchedPastRef.current.push(touchedIds)
     touchedFutureRef.current = []
     setSelectedId(nodeId)
     notify('success', value.planeType === 'midplane'
-      ? `${value.name} applied halfway between ${featureLabel(dag, parentIds[0])} and ${featureLabel(dag, parentIds[1])}.`
+      ? workbenchText('SolidsWorkbenchPage.appliedHalfwayBetweenAnd', { name: String(value.name), value2: String(featureLabel(dag, parentIds[0])), value3: String(featureLabel(dag, parentIds[1])) })
       : value.planeType === 'angle'
-        ? `${value.name} applied at ${value.angleDeg} deg about ${axisId !== undefined ? featureLabel(dag, axisId) : `${featureLabel(dag, parentIds[0])}'s ${value.hinge === 'y' ? 'Y' : 'X'} axis`}.`
-        : `${value.name} applied at ${value.distance >= 0 ? '+' : ''}${value.distance} mm.`)
+        ? workbenchText('SolidsWorkbenchPage.appliedAtDegAbout', { name: String(value.name), angleDeg: String(value.angleDeg), value3: String(axisId !== undefined ? featureLabel(dag, axisId) : workbenchText('SolidsWorkbenchPage.sAxis', { value1: String(featureLabel(dag, parentIds[0])), value2: String(value.hinge === 'y' ? 'Y' : 'X') })) })
+        : workbenchText('SolidsWorkbenchPage.appliedAtMm', { name: String(value.name), value2: String(value.distance >= 0 ? '+' : ''), distance: String(value.distance) }))
     return undefined
   }, [cancelOffsetPlanePreviewSession, dag, dialog, fullResync, history, notify, offsetPlanePreviewState, scheduler])
 
@@ -18977,7 +19625,7 @@ function SolidsWorkbenchPageDocument({
       // source frame, refused if the authored model drifted since capture.
       materializePreFeature: async (captured) => {
         if (dag.serialize() !== captured.snapshot.dag) {
-          throw new Error(`${CONSTRUCTION_PLANE_WORD[captured.snapshot.planeType]} preview refused: the source model changed.`)
+          throw new Error(workbenchText('SolidsWorkbenchPage.previewRefusedTheSourceModelChanged', { value1: String(CONSTRUCTION_PLANE_WORD[captured.snapshot.planeType]) }))
         }
         const { sourceId, sourceFrame, secondSourceId, secondFrame } = captured.snapshot
         if (secondSourceId === undefined || secondFrame === undefined) return [sourceFrame]
@@ -18989,20 +19637,20 @@ function SolidsWorkbenchPageDocument({
       evaluate: async ({ snapshot, intent, preFeature }) => {
         const planeWord = CONSTRUCTION_PLANE_WORD[snapshot.planeType]
         if (intent.sourceId !== snapshot.sourceId) {
-          return { ok: false, reason: `${planeWord} preview refused: the source plane changed.` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.previewRefusedTheSourcePlaneChanged', { planeWord: String(planeWord) }) }
         }
         if (dag.serialize() !== snapshot.dag) {
-          return { ok: false, reason: `${planeWord} preview refused: the model changed while previewing.` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.previewRefusedTheModelChangedWhilePreviewing', { planeWord: String(planeWord) }) }
         }
         // a new second plane restarts the session (handleOffsetPlanePreviewIntent), so the snapshot's is the intent's
         // WO-2222: an axis hinge is read from the model this preview was captured against (checked above)
         const { definition: previewDefinition, axisId: previewAxisId } = constructionPlaneOf(intent)
         const hingeAxis = previewAxisId === undefined ? undefined : axisLineOfNode(dag, previewAxisId)
         if (previewAxisId !== undefined && hingeAxis === undefined) {
-          return { ok: false, reason: `${planeWord} preview refused: ${featureLabel(dag, previewAxisId)} has no resolved line.` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.previewRefusedHasNoResolvedLine', { planeWord: String(planeWord), value2: String(featureLabel(dag, previewAxisId)) }) }
         }
         const checked = constructionPlaneFrame(previewDefinition, preFeature, snapshot.priorFrame, hingeAxis)
-        if (!checked.ok) return { ok: false, reason: `${planeWord} preview refused: ${checked.reason}.` }
+        if (!checked.ok) return { ok: false, reason: workbenchText('SolidsWorkbenchPage.previewRefused', { planeWord: String(planeWord), reason: String(checked.reason) }) }
         return { ok: true, candidate: { frame: checked.frame, name: intent.name } }
       },
       presentCandidate: ({ candidate, isCurrent }) => {
@@ -19013,7 +19661,7 @@ function SolidsWorkbenchPageDocument({
         const ghost = buildReferencePlaneGlyph(
           OFFSET_PLANE_PREVIEW_GHOST_ID,
           candidate.frame,
-          candidate.name.length > 0 ? candidate.name : 'Construction plane',
+          candidate.name.length > 0 ? candidate.name : workbenchText('SolidsWorkbenchPage.constructionPlane'),
           'emphasis',
         )
         // The ghost is session-owned feedback, never a pick target: a ray
@@ -19050,7 +19698,7 @@ function SolidsWorkbenchPageDocument({
       session = createOffsetPlanePreviewSession(value)
       if (session === null) {
         const planeWord = CONSTRUCTION_PLANE_WORD[value.planeType ?? 'offset']
-        setOffsetPlanePreviewState({ status: 'refused', message: `${planeWord} preview refused: the source plane is unavailable.` })
+        setOffsetPlanePreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.previewRefusedTheSourcePlaneIsUnavailable', { planeWord: String(planeWord) }) })
         return
       }
       offsetPlanePreviewSessionRef.current = session
@@ -19187,7 +19835,7 @@ function SolidsWorkbenchPageDocument({
       // undo-retention the dress-ups rely on for their owner).
       materializePreFeature: async (captured) => {
         if (stripDerivedRegenState(dag.serialize()) !== strippedBaselineDag) {
-          throw new Error('Extrude preview refused: the source model changed.')
+          throw new Error(workbenchText('SolidsWorkbenchPage.extrudePreviewRefusedTheSourceModelChanged'))
         }
         const restored = new Map<string, BodyHandle>()
         for (const id of captured.snapshot.supportBodyIds) {
@@ -19195,7 +19843,7 @@ function SolidsWorkbenchPageDocument({
           const delta = supportDeltas.get(id)
           if (stableHandle === undefined || delta === undefined || bodyHandlesRef.current.get(id) !== stableHandle) {
             await Promise.all([...restored.values()].map((handle) => client.dispose(handle).catch(() => undefined)))
-            throw new Error(`Extrude preview refused: support body '${id}' changed.`)
+            throw new Error(workbenchText('SolidsWorkbenchPage.extrudePreviewRefusedSupportBodyChanged', { id: String(id) }))
           }
           restored.set(id, await client.restoreBody(await client.serializeBody(stableHandle), delta))
         }
@@ -19207,7 +19855,7 @@ function SolidsWorkbenchPageDocument({
           (snapshot.mode === 'edit' && intent.featureId !== snapshot.featureId) ||
           (intent.boolMode === 'newBody' ? null : intent.targetFeatureId ?? null) !== snapshot.targetFeatureId
         ) {
-          return { ok: false, reason: 'Extrude preview refused: feature or target identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.extrudePreviewRefusedFeatureOrTargetIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -19234,7 +19882,7 @@ function SolidsWorkbenchPageDocument({
         if (snapshot.mode === 'edit') {
           const node = candidateDag.getNode(snapshot.featureId)
           if (node === undefined) {
-            return { ok: false, reason: 'Extrude preview refused: the feature no longer exists.' }
+            return { ok: false, reason: workbenchText('SolidsWorkbenchPage.extrudePreviewRefusedTheFeatureNoLongerExists') }
           }
           const {
             expression: _priorExpression,
@@ -19253,7 +19901,7 @@ function SolidsWorkbenchPageDocument({
             id: snapshot.featureId,
             kind: 'feature',
             consumes,
-            payload: { opType: 'extrude', ...intentFields, name: `Extrude ${snapshot.featureId}` },
+            payload: { opType: 'extrude', ...intentFields, name: workbenchText('SolidsWorkbenchPage.extrude2', { featureId: String(snapshot.featureId) }) },
           }).do(candidateDag)
         }
 
@@ -19318,9 +19966,9 @@ function SolidsWorkbenchPageDocument({
         ) {
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           const reason = pass.cancelled
-            ? 'Extrude preview was superseded.'
+            ? workbenchText('SolidsWorkbenchPage.extrudePreviewWasSuperseded')
             : regenDiagnosticsReason(candidateScheduler.diagnosticsOf(snapshot.featureId))
-          return { ok: false, reason: `Extrude preview refused: ${reason}` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.extrudePreviewRefused', { reason: String(reason) }) }
         }
         const candidateBody = result.body
         owned.delete(candidateBody)
@@ -19370,7 +20018,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createExtrudePreviewSession(intent)
       if (session === null) {
-        setExtrudePreviewState({ status: 'refused', message: 'Extrude preview refused: the profile or target body is unavailable.' })
+        setExtrudePreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.extrudePreviewRefusedTheProfileOrTargetBodyIs') })
         return
       }
       extrudePreviewSessionRef.current = session
@@ -19401,22 +20049,22 @@ function SolidsWorkbenchPageDocument({
     const pending = extrudePreviewPendingRef.current
     const client = clientRef.current
     if (session === null || accepted === null || pending === null || client === null) {
-      return 'Extrude Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.extrudeApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     if (JSON.stringify(accepted) !== JSON.stringify(value)) {
-      return 'Extrude Apply refused: the preview does not match the current settings.'
+      return workbenchText('SolidsWorkbenchPage.extrudeApplyRefusedThePreviewDoesNotMatchThe')
     }
     // An Apply during evaluation waits for THAT evaluation to settle rather
     // than hard-refusing; only its accepted candidate may commit.
     const settled = await pending
     if (extrudePreviewSessionRef.current !== session || extrudePreviewIntentRef.current !== accepted) {
-      return 'Extrude Apply refused: the preview changed while applying.'
+      return workbenchText('SolidsWorkbenchPage.extrudeApplyRefusedThePreviewChangedWhileApplying')
     }
     if (settled.status !== 'ready') {
       const reason = settled.status === 'refused' || settled.status === 'error'
         ? settled.reason
-        : 'the preview is no longer current.'
-      return `Extrude Apply refused: ${reason}`
+        : workbenchText('SolidsWorkbenchPage.thePreviewIsNoLongerCurrent')
+      return workbenchText('SolidsWorkbenchPage.extrudeApplyRefused', { reason: String(reason) })
     }
     const fingerprintNow = JSON.stringify({
       dag: stripDerivedRegenState(dag.serialize()),
@@ -19427,13 +20075,13 @@ function SolidsWorkbenchPageDocument({
     })
     if (session.baseline.fingerprint !== fingerprintNow) {
       await cancelExtrudePreviewSession()
-      return 'Extrude Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.extrudeApplyRefusedTheModelChangedAfterThePreview')
     }
     let candidate: ExtrudePreviewCandidate
     try {
       candidate = await session.takeCandidate()
     } catch (error) {
-      return `Extrude Apply refused: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.extrudeApplyRefused2', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
     const resolvedEndTargets = value.endCondition === 'upToNext' || value.endCondition === 'throughAll'
       ? candidate.result.resolvedExtrudeEnd?.targets
@@ -19542,7 +20190,7 @@ function SolidsWorkbenchPageDocument({
       // Revolve authors newBody only: there is never a pre-feature body.
       materializePreFeature: async () => {
         if (stripDerivedRegenState(dag.serialize()) !== strippedBaselineDag) {
-          throw new Error('Revolve preview refused: the source model changed.')
+          throw new Error(workbenchText('SolidsWorkbenchPage.revolvePreviewRefusedTheSourceModelChanged'))
         }
         return null
       },
@@ -19551,7 +20199,7 @@ function SolidsWorkbenchPageDocument({
           intent.mode !== snapshot.mode ||
           (snapshot.mode === 'edit' && intent.featureId !== snapshot.featureId)
         ) {
-          return { ok: false, reason: 'Revolve preview refused: feature identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.revolvePreviewRefusedFeatureIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -19571,7 +20219,7 @@ function SolidsWorkbenchPageDocument({
         if (snapshot.mode === 'edit') {
           const node = candidateDag.getNode(snapshot.featureId)
           if (node === undefined) {
-            return { ok: false, reason: 'Revolve preview refused: the feature no longer exists.' }
+            return { ok: false, reason: workbenchText('SolidsWorkbenchPage.revolvePreviewRefusedTheFeatureNoLongerExists') }
           }
           const {
             expression: _priorExpression,
@@ -19593,7 +20241,7 @@ function SolidsWorkbenchPageDocument({
             id: snapshot.featureId,
             kind: 'feature',
             consumes: [intent.sketchId, ...axisConsumes, ...paramConsumes],
-            payload: { opType: 'revolve', ...intentFields, name: `Revolve ${snapshot.featureId}` },
+            payload: { opType: 'revolve', ...intentFields, name: workbenchText('SolidsWorkbenchPage.revolve2', { featureId: String(snapshot.featureId) }) },
 
           }).do(candidateDag)
         }
@@ -19655,9 +20303,9 @@ function SolidsWorkbenchPageDocument({
         ) {
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           const reason = pass.cancelled
-            ? 'Revolve preview was superseded.'
+            ? workbenchText('SolidsWorkbenchPage.revolvePreviewWasSuperseded')
             : regenDiagnosticsReason(candidateScheduler.diagnosticsOf(snapshot.featureId))
-          return { ok: false, reason: `Revolve preview refused: ${reason}` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.revolvePreviewRefused', { reason: String(reason) }) }
         }
         const candidateBody = result.body
         owned.delete(candidateBody)
@@ -19701,7 +20349,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createRevolvePreviewSession(intent)
       if (session === null) {
-        setRevolvePreviewState({ status: 'refused', message: 'Revolve preview refused: the profile is unavailable.' })
+        setRevolvePreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.revolvePreviewRefusedTheProfileIsUnavailable') })
         return
       }
       revolvePreviewSessionRef.current = session
@@ -19729,22 +20377,22 @@ function SolidsWorkbenchPageDocument({
     const pending = revolvePreviewPendingRef.current
     const client = clientRef.current
     if (session === null || accepted === null || pending === null || client === null) {
-      return 'Revolve Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.revolveApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     if (JSON.stringify(accepted) !== JSON.stringify(value)) {
-      return 'Revolve Apply refused: the preview does not match the current settings.'
+      return workbenchText('SolidsWorkbenchPage.revolveApplyRefusedThePreviewDoesNotMatchThe')
     }
     // An Apply during evaluation waits for THAT evaluation to settle rather
     // than hard-refusing; only its accepted candidate may commit.
     const settled = await pending
     if (revolvePreviewSessionRef.current !== session || revolvePreviewIntentRef.current !== accepted) {
-      return 'Revolve Apply refused: the preview changed while applying.'
+      return workbenchText('SolidsWorkbenchPage.revolveApplyRefusedThePreviewChangedWhileApplying')
     }
     if (settled.status !== 'ready') {
       const reason = settled.status === 'refused' || settled.status === 'error'
         ? settled.reason
-        : 'the preview is no longer current.'
-      return `Revolve Apply refused: ${reason}`
+        : workbenchText('SolidsWorkbenchPage.thePreviewIsNoLongerCurrent')
+      return workbenchText('SolidsWorkbenchPage.revolveApplyRefused', { reason: String(reason) })
     }
     const fingerprintNow = JSON.stringify({
       dag: stripDerivedRegenState(dag.serialize()),
@@ -19755,13 +20403,13 @@ function SolidsWorkbenchPageDocument({
     })
     if (session.baseline.fingerprint !== fingerprintNow) {
       await cancelRevolvePreviewSession()
-      return 'Revolve Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.revolveApplyRefusedTheModelChangedAfterThePreview')
     }
     let candidate: RevolvePreviewCandidate
     try {
       candidate = await session.takeCandidate()
     } catch (error) {
-      return `Revolve Apply refused: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.revolveApplyRefused2', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
     // Apply re-executes the ONE history command through the dialog's existing
     // path; the scratch candidate is preview-only (see guardExtrudeApply).
@@ -19960,12 +20608,12 @@ function SolidsWorkbenchPageDocument({
         if (
           stripDerivedRegenState(dag.serialize()) !== strippedBaselineDag ||
           bodyHandlesRef.current.get(captured.snapshot.ownerId) !== stableSourceHandle
-        ) throw new Error('Hole preview refused: the source model changed.')
+        ) throw new Error(workbenchText('SolidsWorkbenchPage.holePreviewRefusedTheSourceModelChanged'))
         return client.restoreBody(await client.serializeBody(stableSourceHandle), ownerDelta)
       },
       evaluate: async ({ snapshot, intent, preFeature }) => {
         if (intent.featureId !== snapshot.featureId || intent.payload.ownerId !== snapshot.ownerId) {
-          return { ok: false, reason: 'Hole preview refused: feature or source identity changed.' }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.holePreviewRefusedFeatureOrSourceIdentityChanged') }
         }
         const candidateDag = FeatureDag.restore(snapshot.dag)
         candidateDag.restoreRollbackState({ featureOrder: snapshot.featureOrder, marker: snapshot.rollbackMarker })
@@ -19975,7 +20623,7 @@ function SolidsWorkbenchPageDocument({
         if (snapshot.mode === 'edit') {
           const node = candidateDag.getNode(snapshot.featureId)
           if (node === undefined) {
-            return { ok: false, reason: 'Hole preview refused: the feature no longer exists.' }
+            return { ok: false, reason: workbenchText('SolidsWorkbenchPage.holePreviewRefusedTheFeatureNoLongerExists') }
           }
           new EditFeaturePayloadCommand(snapshot.featureId, { ...intent.payload }, node.consumes).do(candidateDag)
           candidateDag.setRollbackMarker({ kind: 'after', nodeId: snapshot.featureId })
@@ -20034,9 +20682,9 @@ function SolidsWorkbenchPageDocument({
         ) {
           await Promise.all([...owned].map((handle) => client.dispose(handle).catch(() => undefined)))
           const reason = pass.cancelled
-            ? 'Hole preview was superseded.'
+            ? workbenchText('SolidsWorkbenchPage.holePreviewWasSuperseded')
             : regenDiagnosticsReason(candidateScheduler.diagnosticsOf(snapshot.featureId))
-          return { ok: false, reason: `Hole preview refused: ${reason}` }
+          return { ok: false, reason: workbenchText('SolidsWorkbenchPage.holePreviewRefused', { reason: String(reason) }) }
         }
         const candidateBody = result.body
         owned.delete(candidateBody)
@@ -20084,7 +20732,7 @@ function SolidsWorkbenchPageDocument({
     if (session === null) {
       session = createHolePreviewSession(intent)
       if (session === null) {
-        setHolePreviewState({ status: 'refused', message: 'Hole preview refused: the source body is unavailable.' })
+        setHolePreviewState({ status: 'refused', message: workbenchText('SolidsWorkbenchPage.holePreviewRefusedTheSourceBodyIsUnavailable') })
         return
       }
       holePreviewSessionRef.current = session
@@ -20112,22 +20760,22 @@ function SolidsWorkbenchPageDocument({
     const pending = holePreviewPendingRef.current
     const client = clientRef.current
     if (session === null || accepted === null || pending === null || client === null) {
-      return 'Hole Apply refused: the accepted preview is no longer available.'
+      return workbenchText('SolidsWorkbenchPage.holeApplyRefusedTheAcceptedPreviewIsNoLonger')
     }
     if (JSON.stringify(accepted) !== JSON.stringify(value)) {
-      return 'Hole Apply refused: the preview does not match the current settings.'
+      return workbenchText('SolidsWorkbenchPage.holeApplyRefusedThePreviewDoesNotMatchThe')
     }
     // An Apply during evaluation waits for THAT evaluation to settle rather
     // than hard-refusing; only its accepted candidate may commit.
     const settled = await pending
     if (holePreviewSessionRef.current !== session || holePreviewIntentRef.current !== accepted) {
-      return 'Hole Apply refused: the preview changed while applying.'
+      return workbenchText('SolidsWorkbenchPage.holeApplyRefusedThePreviewChangedWhileApplying')
     }
     if (settled.status !== 'ready') {
       const reason = settled.status === 'refused' || settled.status === 'error'
         ? settled.reason
-        : 'the preview is no longer current.'
-      return `Hole Apply refused: ${reason}`
+        : workbenchText('SolidsWorkbenchPage.thePreviewIsNoLongerCurrent')
+      return workbenchText('SolidsWorkbenchPage.holeApplyRefused', { reason: String(reason) })
     }
     const fingerprintNow = JSON.stringify({
       dag: stripDerivedRegenState(dag.serialize()),
@@ -20138,13 +20786,13 @@ function SolidsWorkbenchPageDocument({
     })
     if (session.baseline.fingerprint !== fingerprintNow) {
       await cancelHolePreviewSession()
-      return 'Hole Apply refused: the model changed after the preview was created.'
+      return workbenchText('SolidsWorkbenchPage.holeApplyRefusedTheModelChangedAfterThePreview')
     }
     let candidate: HolePreviewCandidate
     try {
       candidate = await session.takeCandidate()
     } catch (error) {
-      return `Hole Apply refused: ${error instanceof Error ? error.message : String(error)}`
+      return workbenchText('SolidsWorkbenchPage.holeApplyRefused2', { value1: String(error instanceof Error ? error.message : String(error)) })
     }
     // Apply re-executes the ONE history command through the dialog's existing
     // path; the scratch candidate is preview-only (see guardExtrudeApply).
@@ -20222,21 +20870,27 @@ function SolidsWorkbenchPageDocument({
     // eslint-disable-next-line react-hooks/preserve-manual-memoization -- advisory: no React Compiler runs in this build; the manual memo is intentional
     (nodeId: string): FeatureTreeEditEntry | undefined => {
       if (chamferAdoptionPendingRef.current) {
-        return { reason: 'Feature editing is unavailable while the accepted Chamfer is being applied' }
+        return { reason: workbenchText('SolidsWorkbenchPage.featureEditingIsUnavailableWhileTheAcceptedChamferIs') }
       }
       if (shellAdoptionPendingRef.current) {
-        return { reason: 'Feature editing is unavailable while the accepted Shell is being applied' }
+        return { reason: workbenchText('SolidsWorkbenchPage.featureEditingIsUnavailableWhileTheAcceptedShellIs') }
       }
       if (resizeHoleAdoptionPendingRef.current) {
-        return { reason: 'Feature editing is unavailable while the accepted Resize Hole is being applied' }
+        return { reason: workbenchText('SolidsWorkbenchPage.featureEditingIsUnavailableWhileTheAcceptedResizeHole') }
       }
       const toolSwitchEntry = (onEdit: () => void): FeatureTreeEditEntry => ({
         onEdit: () => runAfterResizeHoleToolSwitch(onEdit),
       })
+      const meshEdit = modelStlMeshEdits?.find((record) => stlEditRowId(record.id) === nodeId)
+      if (meshEdit !== undefined) {
+        return meshEdit.kind === MOVE_FLAT_FACE_KIND || meshEdit.kind === MOVE_HOLE_KIND
+          ? toolSwitchEntry(() => { void stlTools.reopen(meshEdit.id) })
+          : { reason: workbenchText('SolidsWorkbenchPage.meshEditUnavailable', { edit: describeMeshEdit(meshEdit) }) }
+      }
       if (isGenesisNodeId(nodeId)) return undefined
       const node = dag.getNode(nodeId)
       if (node === undefined) {
-        throw new Error(`editEntryFor: node '${nodeId}' not found in dag (stale or deleted selection reached the edit resolver)`)
+        throw new Error(workbenchText('SolidsWorkbenchPage.editentryforNodeNotFoundInDagStaleOrDeleted', { nodeId: String(nodeId) }))
       }
       switch (node.kind) {
         case 'feature': {
@@ -20339,12 +20993,12 @@ function SolidsWorkbenchPageDocument({
           // Relief: editing reopens relief mode with the picture and every value.
           if (opType === 'relief') return toolSwitchEntry(() => openRelief(nodeId))
           const FEATURE_OP_LABEL: Record<string, string> = {
-            boolean: 'Boolean', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell',
-            draft: 'Draft', hole: 'Hole', sweep: 'Sweep', loft: 'Loft', defeature: 'Defeature',
-            resizeHole: 'Resize hole',
+            boolean: workbenchText('SolidsWorkbenchPage.boolean'), fillet: workbenchText('SolidsWorkbenchPage.fillet'), chamfer: workbenchText('SolidsWorkbenchPage.chamfer'), shell: workbenchText('SolidsWorkbenchPage.shell'),
+            draft: workbenchText('SolidsWorkbenchPage.draft'), hole: workbenchText('SolidsWorkbenchPage.hole'), sweep: workbenchText('SolidsWorkbenchPage.sweep'), loft: workbenchText('SolidsWorkbenchPage.loft'), defeature: workbenchText('SolidsWorkbenchPage.defeature'),
+            resizeHole: workbenchText('SolidsWorkbenchPage.resizeHole'),
           }
-          const label = opType !== undefined ? (FEATURE_OP_LABEL[opType] ?? opType) : 'This feature'
-          return { reason: `${label} has no edit dialog yet -- delete and recreate to change it` }
+          const label = opType !== undefined ? (FEATURE_OP_LABEL[opType] ?? opType) : workbenchText('SolidsWorkbenchPage.thisFeature')
+          return { reason: workbenchText('SolidsWorkbenchPage.hasNoEditDialogYetDeleteAndRecreateTo', { label: String(label) }) }
         }
         case 'sketch': {
           const isPackageSketch = typeof node.payload.sketch === 'object' && node.payload.sketch !== null
@@ -20357,7 +21011,7 @@ function SolidsWorkbenchPageDocument({
           // Nothing in the live app can create one anymore; a node like this
           // only exists in an old in-repo test/example project. Named refusal
           // BY NAME (ADR-0003), never a silent no-op.
-          return { reason: 'This is a legacy rectangle sketch from an old test file -- it has no editor. Recreate it as a parametric sketch to change it.' }
+          return { reason: workbenchText('SolidsWorkbenchPage.thisIsALegacyRectangleSketchFromAnOld') }
         }
         // Non-genesis only (genesis 'datum' rows returned above): an
         // auto-created face-plane datum (reattach / sketch-on-face).
@@ -20377,23 +21031,23 @@ function SolidsWorkbenchPageDocument({
           }
           if (isAxisDatumPayload(datumPayload)) return { onEdit: () => setDialog({ kind: 'axis', mode: 'edit', featureId: nodeId }) }
           if (isPointDatumPayload(datumPayload)) return { onEdit: () => setDialog({ kind: 'point-datum', mode: 'edit', featureId: nodeId }) }
-          return { reason: 'This support datum is managed by its consuming feature.' }
+          return { reason: workbenchText('SolidsWorkbenchPage.thisSupportDatumIsManagedByItsConsumingFeature') }
         }
         case 'parameter':
-          return { reason: 'Parameters have no edit dialog yet -- edit the value in the Parameters panel' }
+          return { reason: workbenchText('SolidsWorkbenchPage.parametersHaveNoEditDialogYetEditTheValue') }
         case 'body':
-          return { reason: 'Bodies have no edit dialog yet -- edit the feature that created this body' }
+          return { reason: workbenchText('SolidsWorkbenchPage.bodiesHaveNoEditDialogYetEditTheFeature') }
         case 'import':
-          return { reason: 'Imported geometry has no edit dialog yet -- delete and re-import to change it' }
+          return { reason: workbenchText('SolidsWorkbenchPage.importedGeometryHasNoEditDialogYetDeleteAnd') }
         case 'meshImport':
-          return { reason: 'Imported mesh geometry has no edit dialog yet -- use defeature / dress-up ops, or delete and re-import to change it' }
+          return { reason: workbenchText('SolidsWorkbenchPage.importedMeshGeometryHasNoEditDialogYetUse') }
         default: {
           const _exhaustive: never = node.kind
-          throw new Error(`editEntryFor: unhandled DagNodeKind '${String(_exhaustive)}'`)
+          throw new Error(workbenchText('SolidsWorkbenchPage.editentryforUnhandledDagNodeKind', { value1: String(String(_exhaustive)) }))
         }
       }
     },
-    [beginReferenceCalibration, toggleReferenceScaleLock, beginChamferEditPick, beginFilletEditPick, beginShellEditPick, bumpUi4Repaint, dag, handleEditPushPull, openForm, openRelief, handleEditSketch, handleEditDefeature, handleEditResizeHole, runAfterResizeHoleToolSwitch, setDialog],
+    [modelStlMeshEdits, stlTools.reopen, beginReferenceCalibration, toggleReferenceScaleLock, beginChamferEditPick, beginFilletEditPick, beginShellEditPick, bumpUi4Repaint, dag, handleEditPushPull, openForm, openRelief, handleEditSketch, handleEditDefeature, handleEditResizeHole, runAfterResizeHoleToolSwitch, setDialog],
   )
 
   // WO UI-17 (criterion 2): the right rail's modeling sections -- every command
@@ -20414,8 +21068,9 @@ function SolidsWorkbenchPageDocument({
    *  STL feature that tool edits takes the STL route: the kernel pick mode
    *  stands down and the tool opens on that feature. False = not an STL pick
    *  for this tool; the tool's own kernel path handles the click. */
-  const startStlToolFromPick = (tool: 'push-pull' | 'fillet' | 'resize-hole', clientX: number, clientY: number): boolean => {
-    const feature = stlTools.acceptedFeature(tool, pickStlBodyAt(clientX, clientY))
+  const startStlToolFromPick = (tool: 'push-pull' | 'fillet' | 'chamfer' | 'resize-hole', clientX: number, clientY: number): boolean => {
+    const stlPick = pickStlBodyAt(clientX, clientY)
+    const feature = stlTools.acceptedFeature(tool, stlPick)
     if (feature === null) return false
     // WO-2117: Hole depth armed (the pick's Depth field) opens the STL hole's
     // depth card, not its diameter card.
@@ -20425,12 +21080,18 @@ function SolidsWorkbenchPageDocument({
     } else if (tool === 'resize-hole') {
       finishResizeHoleInteraction()
     } else {
-      void cancelFilletPreviewSession()
-      finishFilletInteraction()
+      if (tool === 'chamfer') {
+        void cancelChamferPreviewSession()
+        finishChamferInteraction()
+      } else {
+        void cancelFilletPreviewSession()
+        finishFilletInteraction()
+      }
       setDressUpPickMode({ kind: 'none' })
       setDialog({ kind: 'none' })
     }
-    stlTools.start(tool, feature, field)
+    // WO-2762: the hit facet tells Resize Hole which step of a counterbore was picked.
+    stlTools.start(field === 'move' ? 'move-hole' : tool, feature, field === 'depth' ? field : undefined, stlPick?.kind === 'feature' ? stlPick.facet : undefined)
     return true
   }
   /** WO-2120: an armed Fillet clicked on the STL where it has no rounded edge
@@ -20462,7 +21123,7 @@ function SolidsWorkbenchPageDocument({
       stlTools.close()
       setDialog({ kind: 'stl-hole', origin, normal })
     }
-    notify('info', `Hole on "${stlBody.name}" at ${origin.x.toFixed(3)}, ${origin.y.toFixed(3)}, ${origin.z.toFixed(3)} - square to the face clicked.`)
+    notify('info', workbenchText('SolidsWorkbenchPage.holeOnAtSquareToTheFaceClicked', { name: String(stlBody.name), value2: String(origin.x.toFixed(3)), value3: String(origin.y.toFixed(3)), value4: String(origin.z.toFixed(3)) }))
     return true
   }
   /** WO-2089: an armed Chamfer whose click lands on a sharp edge of the STL
@@ -20474,7 +21135,7 @@ function SolidsWorkbenchPageDocument({
     setDressUpPickMode({ kind: 'none' })
     stlTools.close()
     setDialog({ kind: 'stl-chamfer', edges: [edge] })
-    notify('info', `Selected a ${edge.lengthMm.toFixed(2)} mm edge on "${stlBody.name}" (1 selected).`)
+    notify('info', workbenchText('SolidsWorkbenchPage.selectedAMmEdgeOn1Selected', { value1: String(edge.lengthMm.toFixed(2)), name: String(stlBody.name) }))
     return true
   }
   /** WO-2089: with Chamfer open on the STL, a click on a sharp edge adds it,
@@ -20486,7 +21147,7 @@ function SolidsWorkbenchPageDocument({
     const removing = dialog.edges.some((e) => e.id === edge.id)
     const edges = removing ? dialog.edges.filter((e) => e.id !== edge.id) : [...dialog.edges, edge]
     setDialogState((current) => current.kind === 'stl-chamfer' ? { ...current, edges } : current)
-    notify('info', `${removing ? 'Removed' : 'Added'} a ${edge.lengthMm.toFixed(2)} mm edge (${edges.length} selected).`)
+    notify('info', workbenchText('SolidsWorkbenchPage.aMmEdgeSelected', { value1: String(removing ? workbenchText('SolidsWorkbenchPage.removed') : workbenchText('SolidsWorkbenchPage.added')), value2: String(edge.lengthMm.toFixed(2)), length: String(edges.length) }))
   }
   /** WO-2089: the edge an armed or open Chamfer would pick, lit under the cursor. */
   const hoverStlChamferEdgeAt = (clientX: number, clientY: number): void => {
@@ -20501,8 +21162,13 @@ function SolidsWorkbenchPageDocument({
   }
   /** WO-2090: the flat face of the STL under a canvas point - what Shell and
    *  Draft pick (the faces Push/Pull moves) - or null. */
-  const stlFlatFaceAt = (clientX: number, clientY: number): StlModelFeature | null =>
-    stlTools.acceptedFeature('push-pull', pickStlBodyAt(clientX, clientY))
+  const stlFlatFaceAt = (clientX: number, clientY: number): StlModelFeature | null => {
+    const pick = pickStlBodyAt(clientX, clientY)
+    const feature = pick?.kind === 'feature' ? stlBodyRef.current?.model.features[pick.featureIndex] : undefined
+    // WO-2803 changes Push/Pull's floor pick only. Shell/Draft retain their
+    // existing resting-feature eligibility, including whole-hole priority.
+    return feature?.target.family === 'flat' ? feature : null
+  }
   /** WO-2090: an armed Shell whose click lands on a flat face of the STL
    *  opens Shell on the STL with that face to open (the kernel pick stands
    *  down). */
@@ -20514,7 +21180,7 @@ function SolidsWorkbenchPageDocument({
     setDressUpPickMode({ kind: 'none' })
     stlTools.close()
     setDialog({ kind: 'stl-shell', faces: [face] })
-    notify('info', `Shell on "${stlBody.name}": opening the ${face.label} (1 selected).`)
+    notify('info', workbenchText('SolidsWorkbenchPage.shellOnOpeningThe1Selected', { name: String(stlBody.name), label: String(face.label) }))
     return true
   }
   /** WO-2090: with Shell open on the STL, a click on a flat face opens it too,
@@ -20526,7 +21192,7 @@ function SolidsWorkbenchPageDocument({
     const removing = dialog.faces.some((f) => f.id === face.id)
     const faces = removing ? dialog.faces.filter((f) => f.id !== face.id) : [...dialog.faces, face]
     setDialogState((current) => current.kind === 'stl-shell' ? { ...current, faces } : current)
-    notify('info', `${removing ? 'Keeping closed' : 'Opening'} the ${face.label} (${faces.length} selected).`)
+    notify('info', workbenchText('SolidsWorkbenchPage.theSelected', { value1: String(removing ? workbenchText('SolidsWorkbenchPage.keepingClosed') : workbenchText('SolidsWorkbenchPage.opening')), label: String(face.label), length: String(faces.length) }))
   }
   /** WO-2090: an armed Draft whose click lands on a flat face of the STL
    *  opens Draft on the STL with that face as its neutral face. */
@@ -20537,7 +21203,7 @@ function SolidsWorkbenchPageDocument({
     setDressUpPickMode({ kind: 'none' })
     stlTools.close()
     setDialog({ kind: 'stl-draft', neutral: face, step: 'neutral', faces: [] })
-    notify('info', `Draft on "${stlBody.name}": neutral face the ${face.label}.`)
+    notify('info', workbenchText('SolidsWorkbenchPage.draftOnNeutralFaceThe', { name: String(stlBody.name), label: String(face.label) }))
     return true
   }
   /** WO-2090: with Draft open on the STL, a click picks the neutral face (its
@@ -20550,14 +21216,14 @@ function SolidsWorkbenchPageDocument({
       setDialogState((current) => current.kind === 'stl-draft'
         ? { ...current, neutral: face, faces: current.faces.filter((f) => f.id !== face.id) }
         : current)
-      notify('info', `Draft: neutral face the ${face.label}.`)
+      notify('info', workbenchText('SolidsWorkbenchPage.draftNeutralFaceThe', { label: String(face.label) }))
       return
     }
     if (face.id === dialog.neutral.id) return
     const removing = dialog.faces.some((f) => f.id === face.id)
     const faces = removing ? dialog.faces.filter((f) => f.id !== face.id) : [...dialog.faces, face]
     setDialogState((current) => current.kind === 'stl-draft' ? { ...current, faces } : current)
-    notify('info', `${removing ? 'Removed' : 'Added'} the ${face.label} (${faces.length} to draft).`)
+    notify('info', workbenchText('SolidsWorkbenchPage.theToDraft', { value1: String(removing ? workbenchText('SolidsWorkbenchPage.removed') : workbenchText('SolidsWorkbenchPage.added')), label: String(face.label), length: String(faces.length) }))
   }
   /** WO-2089 / WO-2090: what the STL Hole, Chamfer, Shell and Draft dialogs
    *  show of their preview - the STL tool session's boolean-body preview. */
@@ -20590,10 +21256,10 @@ function SolidsWorkbenchPageDocument({
   const modelingSections: RailSection[] = [
     {
       id: 'sketch',
-      title: 'Sketch',
+      title: workbenchText('SolidsWorkbenchPage.sketch'),
       tools: [
         {
-          testId: 'workbench-new-sketch', label: 'New sketch', icon: PenTool,
+          testId: 'workbench-new-sketch', label: workbenchText('SolidsWorkbenchPage.newSketch'), icon: PenTool,
           disabled: anyPickModeArmed,
           // WO SKETCH-PLANE-INWORKSPACE (Operator Q-68 item 4): "New sketch" arms the plane pick ENTIRELY
           // in the workspace -- no modal step. The three labeled base-plane glyphs light up and the
@@ -20602,7 +21268,7 @@ function SolidsWorkbenchPageDocument({
         },
         ...(reattachTarget !== undefined && sketchMode.kind === 'none'
           ? [{
-              testId: 'workbench-reattach-face', label: 'Reattach', icon: Link, title: 'Reattach face',
+              testId: 'workbench-reattach-face', label: workbenchText('SolidsWorkbenchPage.reattach'), icon: Link, title: workbenchText('SolidsWorkbenchPage.reattachFace'),
               onClick: () => runAfterResizeHoleToolSwitch(() => setSketchMode({ kind: 'pick-face', forDatumId: reattachTarget })),
             }]
           : []),
@@ -20610,12 +21276,12 @@ function SolidsWorkbenchPageDocument({
     },
     {
       id: 'create',
-      title: 'Create',
+      title: workbenchText('SolidsWorkbenchPage.create'),
       tools: [
-        { testId: 'workbench-extrude', label: 'Extrude', icon: ArrowUpFromLine, disabled: availableSketches.length === 0, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'extrude', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
-        { testId: 'workbench-revolve', label: 'Revolve', icon: Rotate3d, disabled: availableSketches.length === 0, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'revolve', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
-        { testId: 'workbench-sweep', label: 'Sweep', icon: cadIcon('sweep'), disabled: availableSketches.length === 0, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'sweep', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
-        { testId: 'workbench-loft', label: 'Loft', icon: cadIcon('loft'), disabled: availableSketches.length < 2, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'loft', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
+        { testId: 'workbench-extrude', label: workbenchText('SolidsWorkbenchPage.extrude'), icon: ArrowUpFromLine, disabled: availableSketches.length === 0, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'extrude', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
+        { testId: 'workbench-revolve', label: workbenchText('SolidsWorkbenchPage.revolve'), icon: Rotate3d, disabled: availableSketches.length === 0, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'revolve', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
+        { testId: 'workbench-sweep', label: workbenchText('SolidsWorkbenchPage.sweep'), icon: cadIcon('sweep'), disabled: availableSketches.length === 0, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'sweep', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
+        { testId: 'workbench-loft', label: workbenchText('SolidsWorkbenchPage.loft'), icon: cadIcon('loft'), disabled: availableSketches.length < 2, onClick: () => runAfterResizeHoleToolSwitch(() => setDialog({ kind: 'loft', mode: 'create', treeSketchPick: treeSketchPickForCreate() })) },
         // WO UI-51A-R2 (audit MAJOR): gated on the LIVE count -- two consumed
         // bodies plus zero live ones must not enable a dialog that can only
         // offer stale targets (currentLiveBodyIds is the same live-body
@@ -20623,8 +21289,8 @@ function SolidsWorkbenchPageDocument({
         // WO-1961: an open STL is a Boolean target on its own - its tool is a
         // box or cylinder made in the dialog.
         {
-          testId: 'workbench-form', label: 'Form', icon: FormIcon,
-          title: 'Form - shape a smooth organic body from a control cage',
+          testId: 'workbench-form', label: workbenchText('SolidsWorkbenchPage.form'), icon: FormIcon,
+          title: workbenchText('SolidsWorkbenchPage.formShapeASmoothOrganicBodyFromAControl'),
           onClick: () => runAfterResizeHoleToolSwitch(() => {
             stlTools.close()
             setDialog({ kind: 'none' })
@@ -20632,9 +21298,12 @@ function SolidsWorkbenchPageDocument({
           }),
         },
         {
-          testId: 'workbench-relief', label: 'Relief', icon: ReliefIcon,
+          testId: 'workbench-relief', label: workbenchText('SolidsWorkbenchPage.relief'), icon: ReliefIcon,
           disabled: currentLiveBodyIds.length === 0,
-          title: 'Relief - emboss or engrave a picture into a flat face',
+          // WO-2820: the open STL alone cannot take a relief yet - the button says why
+          title: currentLiveBodyIds.length === 0 && stlBody !== null
+            ? workbenchText('SolidsWorkbenchPage.reliefNotOnAMeshYet', { name: String(stlBody.name) })
+            : workbenchText('SolidsWorkbenchPage.reliefEmbossOrEngraveAPictureIntoAFlat'),
           onClick: () => runAfterResizeHoleToolSwitch(() => {
             stlTools.close()
             setDialog({ kind: 'none' })
@@ -20645,7 +21314,7 @@ function SolidsWorkbenchPageDocument({
           }),
         },
         {
-          testId: 'workbench-boolean', label: 'Boolean', icon: Combine,
+          testId: 'workbench-boolean', label: workbenchText('SolidsWorkbenchPage.boolean'), icon: Combine,
           disabled: currentLiveBodyIds.length < 2 && stlBody === null,
           onClick: () => runAfterResizeHoleToolSwitch(() => {
             stlTools.close()
@@ -20656,16 +21325,16 @@ function SolidsWorkbenchPageDocument({
     },
     {
       id: 'construct',
-      title: 'Construct',
+      title: workbenchText('SolidsWorkbenchPage.construct'),
       tools: [
         {
           testId: 'workbench-offset-plane',
-          label: 'Offset plane',
+          label: workbenchText('SolidsWorkbenchPage.offsetPlane'),
           icon: cadIcon('offset-plane'),
           disabled: anyPickModeArmed,
           title: selectedFacePickRef.current === null
-            ? 'Create a signed offset from a base or construction plane'
-            : 'Create a signed offset from the selected planar face',
+            ? workbenchText('SolidsWorkbenchPage.createASignedOffsetFromABaseOrConstruction')
+            : workbenchText('SolidsWorkbenchPage.createASignedOffsetFromTheSelectedPlanarFace'),
           onClick: openOffsetPlaneCreate,
         },
       // Midplane and At angle open the same construction-plane dialog, so they take Offset plane's state as is
@@ -20674,59 +21343,59 @@ function SolidsWorkbenchPageDocument({
         {
           ...offsetPlaneTool,
           testId: 'workbench-midplane',
-          label: 'Midplane',
+          label: workbenchText('SolidsWorkbenchPage.midplane'),
           icon: cadIcon('midplane'),
-          title: 'A plane halfway between two planes or planar faces (where they meet: halving the angle)',
+          title: workbenchText('SolidsWorkbenchPage.aPlaneHalfwayBetweenTwoPlanesOrPlanarFaces'),
           onClick: () => openOffsetPlaneCreate('midplane'),
         },
         {
           ...offsetPlaneTool,
           testId: 'workbench-angle-plane',
-          label: 'At angle',
+          label: workbenchText('SolidsWorkbenchPage.atAngle'),
           icon: cadIcon('angle-plane'),
-          title: 'Plane at angle: a plane or planar face turned about its own X or Y axis, or about an axis',
+          title: workbenchText('SolidsWorkbenchPage.planeAtAngleAPlaneOrPlanarFaceTurned'),
           onClick: () => openOffsetPlaneCreate('angle'),
         },
         {
           ...offsetPlaneTool,
           testId: 'workbench-axis',
-          label: 'Axis',
+          label: workbenchText('SolidsWorkbenchPage.axis'),
           icon: cadIcon('axis-datum'),
-          title: 'Axis: through a cylinder or hole, along an edge, or through two points',
+          title: workbenchText('SolidsWorkbenchPage.axisThroughACylinderOrHoleAlongAnEdge'),
           onClick: () => openAxisCreate(),
         },
         {
           ...offsetPlaneTool,
           testId: 'workbench-plane-through',
-          label: 'Plane through',
+          label: workbenchText('SolidsWorkbenchPage.planeThrough'),
           icon: cadIcon('plane-through'),
-          title: 'A plane through three points, or through two edges',
+          title: workbenchText('SolidsWorkbenchPage.aPlaneThroughThreePointsOrThroughTwoEdges'),
           onClick: () => openPickedPlaneCreate('three-points'),
         },
         {
           ...offsetPlaneTool,
           testId: 'workbench-tangent-plane',
-          label: 'Tangent plane',
+          label: workbenchText('SolidsWorkbenchPage.tangentPlane'),
           icon: cadIcon('tangent-plane'),
-          title: 'A plane tangent to a cylinder or shaft, touching it where you click',
+          title: workbenchText('SolidsWorkbenchPage.aPlaneTangentToACylinderOrShaftTouching'),
           onClick: () => openPickedPlaneCreate('tangent'),
         },
         {
           ...offsetPlaneTool,
           testId: 'workbench-point',
-          label: 'Point',
+          label: workbenchText('SolidsWorkbenchPage.point'),
           icon: cadIcon('point-datum'),
-          title: 'Point: at a vertex, at a circle\'s centre, or where an edge meets a plane',
+          title: workbenchText('SolidsWorkbenchPage.pointAtAVertexAtACircleSCentre'),
           onClick: () => openPointCreate(),
         },
       ]),
     },
     {
       id: 'modify',
-      title: 'Modify',
+      title: workbenchText('SolidsWorkbenchPage.modify'),
       tools: [
         {
-          testId: 'workbench-push-pull', label: 'Push/Pull', icon: Move3D,
+          testId: 'workbench-push-pull', label: workbenchText('SolidsWorkbenchPage.pushPull2'), icon: Move3D,
           // WO-1936: an STL open in this screen is a body Push/Pull edits too.
           disabled: sketchMode.kind !== 'none' || dressUpPickMode.kind !== 'none' || resizeHolePickMode.kind !== 'none' || (availableBodies.length === 0 && stlBody === null),
           active: pushPullMode.kind !== 'none' || stlTools.session.kind === 'push-pull',
@@ -20758,12 +21427,12 @@ function SolidsWorkbenchPageDocument({
             (availableBodies.length === 0 && stlBody === null),
           active: (dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === feature) ||
             (feature === 'fillet' && stlTools.session.kind === 'fillet') ||
-            (feature === 'chamfer' && dialog.kind === 'stl-chamfer') ||
+            (feature === 'chamfer' && (dialog.kind === 'stl-chamfer' || stlTools.session.kind === 'chamfer')) ||
             (feature === 'hole' && dialog.kind === 'stl-hole') ||
             (feature === 'shell' && dialog.kind === 'stl-shell') ||
             (feature === 'draft' && dialog.kind === 'stl-draft'),
           onClick: () => {
-            if (feature === 'fillet' && stlTools.session.kind === 'fillet') return stlTools.close()
+            if ((feature === 'fillet' && stlTools.session.kind === 'fillet') || (feature === 'chamfer' && stlTools.session.kind === 'chamfer')) return stlTools.close()
             if ((feature === 'chamfer' && dialog.kind === 'stl-chamfer') || (feature === 'hole' && dialog.kind === 'stl-hole') ||
               (feature === 'shell' && dialog.kind === 'stl-shell') || (feature === 'draft' && dialog.kind === 'stl-draft')) {
               return closeStlCreateTool()
@@ -20772,9 +21441,9 @@ function SolidsWorkbenchPageDocument({
               setDialog({ kind: 'none' })
             }
             stlTools.close()
-            if (feature === 'fillet') {
-              const picked = selectedStlFeatureFor('fillet')
-              if (picked !== null) return stlTools.start('fillet', picked)
+            if (feature === 'fillet' || feature === 'chamfer') {
+              const picked = selectedStlFeatureFor(feature)
+              if (picked !== null) return stlTools.start(feature, picked)
             }
             if (feature === 'fillet') {
               filletPreviewSelectionRestoreRef.current = {
@@ -20812,37 +21481,53 @@ function SolidsWorkbenchPageDocument({
           },
         }))),
         {
-          testId: 'workbench-resize-hole', label: 'Resize hole', icon: CircleDot,
+          testId: 'workbench-move-hole', label: workbenchText('MoveHoleEntry.title'), icon: CircleDot,
+          title: workbenchText('MoveHoleEntry.hint'),
+          active: (resizeHolePickMode.kind !== 'none' && resizeHolePickMode.field === 'move') || stlTools.session.kind === 'move-hole',
+          disabled: otherPickModeArmed || (!resizeHoleAnyLiveBody && stlBody === null),
+          onClick: () => {
+            if (resizeHolePickMode.kind !== 'none' && resizeHolePickMode.field === 'move') return handleResizeHoleCancel()
+            if (stlTools.session.kind === 'move-hole') return stlTools.close()
+            runAfterResizeHoleToolSwitch(() => {
+              stlTools.close()
+              const picked = selectedStlFeatureFor('move-hole')
+              if (picked !== null) stlTools.start('move-hole', picked)
+              else beginResizeHoleInteraction('move')
+            })
+          },
+        },
+        {
+          testId: 'workbench-resize-hole', label: workbenchText('SolidsWorkbenchPage.resizeHole'), icon: CircleDot,
           title: resizeHolePickMode.kind !== 'none'
-            ? (resizeHoleRecognizing ? 'Resize hole - recognizing features...' : 'Click a recognized hole in the viewport to resize it')
+            ? (resizeHoleRecognizing ? workbenchText('SolidsWorkbenchPage.resizeHoleRecognizingFeatures') : workbenchText('SolidsWorkbenchPage.clickARecognizedHoleInTheViewportToResize'))
             : resizeHoleAnyLiveBody
-              ? 'Resize hole - click a recognized hole in the viewport'
-              : 'Resize hole - no live body',
+              ? workbenchText('SolidsWorkbenchPage.resizeHoleClickARecognizedHoleInTheViewport')
+              : workbenchText('SolidsWorkbenchPage.resizeHoleNoLiveBody'),
           // Tier A in the existing Modify section; this fills the section's
           // existing third-row empty cell rather than adding a new rail row.
           // WO UI-58: re-click-to-disarm toggle (own state excluded from the
           // disabled test, matching push-pull's own button above) -- armed
           // whenever >=1 live body exists (P5, no single-owner requirement).
           // WO-1936: an STL's holes resize here too.
-          active: resizeHolePickMode.kind !== 'none' || stlTools.session.kind === 'resize-hole',
+          active: (resizeHolePickMode.kind !== 'none' && resizeHolePickMode.field !== 'move') || stlTools.session.kind === 'resize-hole',
           disabled: otherPickModeArmed || (resizeHolePickMode.kind === 'none' && !resizeHoleAnyLiveBody && stlBody === null),
           onClick: () => {
             if (resizeHolePickMode.kind !== 'none') return handleResizeHoleCancel()
             if (stlTools.session.kind === 'resize-hole') return stlTools.close()
             stlTools.close()
             const picked = selectedStlFeatureFor('resize-hole')
-            if (picked !== null) stlTools.start('resize-hole', picked)
+            if (picked !== null) stlTools.start('resize-hole', picked, undefined, stlSelection?.kind === 'feature' ? stlSelection.facet : undefined)
             else beginResizeHoleInteraction()
           },
         },
         {
-          testId: 'workbench-defeature', label: 'Defeature', icon: Eraser,
+          testId: 'workbench-defeature', label: workbenchText('SolidsWorkbenchPage.defeature'), icon: Eraser,
           // WO-1936: with the STL selected (or no kernel body to defeature),
           // Defeature opens on the STL's recognised features.
           disabled: defeatureOwnerId === undefined && stlBody === null,
           title: stlBody !== null && (stlSelection !== null || defeatureOwnerId === undefined)
-            ? `Remove recognized features from "${stlBody.name}"`
-            : (defeatureDisabledReason ?? 'Delete recognized face groups and heal the body'),
+            ? workbenchText('SolidsWorkbenchPage.removeRecognizedFeaturesFrom', { name: String(stlBody.name) })
+            : (defeatureDisabledReason ?? workbenchText('SolidsWorkbenchPage.deleteRecognizedFaceGroupsAndHealTheBody')),
           onClick: () => {
             if (stlBody !== null && (stlSelection !== null || defeatureOwnerId === undefined)) {
               runAfterResizeHoleToolSwitch(() => stlTools.start('defeature', selectedStlFeatureFor('defeature')))
@@ -20853,12 +21538,12 @@ function SolidsWorkbenchPageDocument({
           },
         },
         {
-          testId: 'workbench-edit-feature', label: 'Edit...', icon: Pencil,
+          testId: 'workbench-edit-feature', label: workbenchText('SolidsWorkbenchPage.edit'), icon: Pencil,
           // WO UI-80: push/pull is editable-after-the-fact (AM4), so the toolbar
           // Edit button enables for it too -- keeping this gate in lockstep with
           // editEntryFor's onEdit set (extrude/revolve/boolean/fillet/chamfer/shell/draft/hole/pushPull/package-sketch),
           // the SAME resolver this button's onClick and the tree menu both call.
-          disabled: selectedOpType !== 'extrude' && selectedOpType !== 'revolve' && selectedOpType !== 'boolean' && selectedOpType !== 'fillet' && selectedOpType !== 'chamfer' && selectedOpType !== 'shell' && selectedOpType !== 'draft' && selectedOpType !== 'hole' && selectedOpType !== 'pushPull' && selectedOpType !== 'sweep' && selectedOpType !== 'loft' && selectedOpType !== 'defeature' && selectedOpType !== 'resizeHole' && !selectedIsPackageSketch && !selectedIsOffsetPlane && !selectedIsAxis && !selectedIsPoint,
+          disabled: !modelStlMeshEdits?.some((record) => stlEditRowId(record.id) === selectedId && (record.kind === MOVE_FLAT_FACE_KIND || record.kind === MOVE_HOLE_KIND)) && selectedOpType !== 'extrude' && selectedOpType !== 'revolve' && selectedOpType !== 'boolean' && selectedOpType !== 'fillet' && selectedOpType !== 'chamfer' && selectedOpType !== 'shell' && selectedOpType !== 'draft' && selectedOpType !== 'hole' && selectedOpType !== 'pushPull' && selectedOpType !== 'sweep' && selectedOpType !== 'loft' && selectedOpType !== 'defeature' && selectedOpType !== 'resizeHole' && !selectedIsPackageSketch && !selectedIsOffsetPlane && !selectedIsAxis && !selectedIsPoint,
           // WO UI-18 (D3): routed through editEntryFor -- the SAME per-node
           // resolver the tree context menu's own "Edit..." item calls, so this
           // button and that menu item are provably the SAME code path, not two
@@ -20873,28 +21558,28 @@ function SolidsWorkbenchPageDocument({
     },
     {
       id: 'document',
-      title: 'Document',
+      title: workbenchText('SolidsWorkbenchPage.document'),
       tools: [
-        { testId: 'workbench-undo', label: 'Undo', icon: Undo2, disabled: !history.canUndo(), onClick: handleUndo },
-        { testId: 'workbench-redo', label: 'Redo', icon: Redo2, disabled: !history.canRedo(), onClick: handleRedo },
+        { testId: 'workbench-undo', label: workbenchText('SolidsWorkbenchPage.undo'), icon: Undo2, disabled: !history.canUndo(), onClick: handleUndo },
+        { testId: 'workbench-redo', label: workbenchText('SolidsWorkbenchPage.redo'), icon: Redo2, disabled: !history.canRedo(), onClick: handleRedo },
         // WO INT-6A (deliverable #1): beside Export -- import STEP into the SAME
         // Document rail group its export counterpart lives in (no new UI pattern,
         // COHESION-STANDARD item 2). The real affordance is the hidden file input
         // below (importStepInputRef); this button just opens its picker, same
         // click-through shape a styled upload button always uses.
-        { testId: 'workbench-import-step', label: 'Import', icon: Upload, title: 'Import STEP', onClick: handleImportStepClick },
-        { testId: 'workbench-export-step', label: 'Export', icon: cadIcon('export-step'), title: 'Export STEP', disabled: availableBodies.length === 0, onClick: () => void handleExportStepClick() },
+        { testId: 'workbench-import-step', label: workbenchText('SolidsWorkbenchPage.import'), icon: Upload, title: workbenchText('SolidsWorkbenchPage.importSTEP'), onClick: handleImportStepClick },
+        { testId: 'workbench-export-step', label: workbenchText('SolidsWorkbenchPage.export'), icon: cadIcon('export-step'), title: workbenchText('SolidsWorkbenchPage.exportSTEP'), disabled: availableBodies.length === 0, onClick: () => void handleExportStepClick() },
         // WO MODEL-WORKSPACE-STL-EXPORT: one-click STL export in the SAME
         // Document rail group, immediately after Export STEP -- reuses the
         // SAME .sketch-tool-btn pattern (no new UI pattern, COHESION-STANDARD
         // item 2), no dialog (a single-click download, exactly like Export
         // STEP). Same availableBodies affordance gate as Export STEP; named
         // failures surface on the existing workbench-export-error strip.
-        { testId: 'workbench-export-stl', label: 'STL', icon: cadIcon('export-stl'), title: 'Export STL', disabled: availableBodies.length === 0, onClick: () => void handleExportStlClick() },
+        { testId: 'workbench-export-stl', label: 'STL', icon: cadIcon('export-stl'), title: workbenchText('SolidsWorkbenchPage.exportSTL'), disabled: availableBodies.length === 0, onClick: () => void handleExportStlClick() },
         // WO UI-24 (Operator Q-17): same Document-section rail-tool shape as Export STEP above --
         // reuses the SAME .sketch-tool-btn pattern (no new UI pattern, COHESION-STANDARD item 2),
         // no dialog (a single-click download, exactly like Export STEP has no dialog either).
-        { testId: 'workbench-debug-export', label: 'Debug export', icon: Bug, title: 'Download a debug scene snapshot (JSON)', onClick: handleDebugExportClick },
+        { testId: 'workbench-debug-export', label: workbenchText('SolidsWorkbenchPage.debugExport'), icon: Bug, title: workbenchText('SolidsWorkbenchPage.downloadADebugSceneSnapshotJSON'), onClick: handleDebugExportClick },
       ],
     },
   ]
@@ -20941,7 +21626,7 @@ function SolidsWorkbenchPageDocument({
     onLeave: () => setHolePointHover(null),
   })
 
-  const featureCount = visibleFeatureTreeOrder(dag).length
+  const featureCount = visibleFeatureTreeOrder(dag).length + (modelStlMeshEdits?.length ?? 0)
 
   // WO GEO-UNIFY-S1b: the workspace header's own data -- see
   // ModelWorkspaceHeader.tsx's header comment for the full design and the
@@ -21008,13 +21693,13 @@ function SolidsWorkbenchPageDocument({
   const workspaceHeaderActiveItem = workspaceActiveModelItemId === null ? null : {
     id: workspaceActiveModelItemId,
     name: workspaceModelItems?.find((m) => m.id === workspaceActiveModelItemId)?.name
-      ?? (workspaceActiveModelItemId === LEGACY_MODEL_ITEM_ID ? 'Model' : workspaceActiveModelItemId),
+      ?? (workspaceActiveModelItemId === LEGACY_MODEL_ITEM_ID ? workbenchText('SolidsWorkbenchPage.model') : workspaceActiveModelItemId),
   }
   const workspaceHeaderItems = (workspaceModelItems ?? []).map((m) => ({ id: m.id, name: m.name }))
   // WO-2120: Finish says so, so the last Model-screen line (a Defeature's
   // "Removed ...") does not stay on Setup's console strip as if it were news.
   const finishModelItemWithLine = (): void => {
-    if (workspaceHeaderActiveItem !== null) notify('info', `Finished "${workspaceHeaderActiveItem.name}" - back to Setup.`)
+    if (workspaceHeaderActiveItem !== null) notify('info', workbenchText('SolidsWorkbenchPage.finishedBackToSetup', { name: String(workspaceHeaderActiveItem.name) }))
     void finishModelItemAction()
   }
 
@@ -21087,7 +21772,7 @@ function SolidsWorkbenchPageDocument({
         minSize={WORKBENCH_LEFT_PANEL_MIN}
         maxSize={WORKBENCH_LEFT_PANEL_MAX}
         fillMinSize={WORKBENCH_VIEWPORT_MIN}
-        label="Resize the feature tree and viewport"
+        label={workbenchText('SolidsWorkbenchPage.resizeTheFeatureTreeAndViewport')}
         sizedCollapsed={leftPanelCollapsed}
         first={
       <aside data-testid="workbench-left-panel" className="panel-left" style={{ width: '100%', minWidth: 0 }}>
@@ -21125,7 +21810,7 @@ function SolidsWorkbenchPageDocument({
               data-ui78-sanctioned=""
               onClick={() => toggleWorkbenchSection('model')}
             >
-              Model <span className="tree-count">{featureCount}</span>
+              {workbenchText('SolidsWorkbenchPage.model2')}<span className="tree-count">{featureCount}</span>
               <span className="tree-section-header-chevron">
                 {isWorkbenchSectionCollapsed('model') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               </span>
@@ -21177,6 +21862,7 @@ function SolidsWorkbenchPageDocument({
                 suppress={{ onToggleSuppress: handleToggleSuppress }}
                 hide={{ isHidden: (id) => dag.getNode(id)?.hidden === true, onToggleHidden: handleToggleHidden }}
                 rollback={{ marker: dag.getRollbackMarker(), onMoveMarker: handleMoveMarker }}
+                diagnosticText={treeDiagnosticText}
                 reorder={{ checkReorder: (id, targetIndex) => dag.checkReorder(id, targetIndex), onReorder: handleReorder }}
                 del={{ consumersOf: (id) => dag.transitiveConsumersOf(id), onDelete: handleDelete }}
                 edit={{ editEntryFor }}
@@ -21194,6 +21880,11 @@ function SolidsWorkbenchPageDocument({
                 }}
               />
             )}
+            {!isWorkbenchSectionCollapsed('model') && stlBody !== null && (
+              <StlEditTree records={modelStlMeshEdits ?? []} selectedId={selectedId}
+                onSelect={(id) => { setSelectedId(id); setSelectedBodyRowId(null); setStlSelection(null) }}
+                editEntryFor={editEntryFor} />
+            )}
           </div>
 
           <div className="tree-section" data-testid="workbench-section-bodies">
@@ -21203,7 +21894,7 @@ function SolidsWorkbenchPageDocument({
               data-ui78-sanctioned=""
               onClick={() => toggleWorkbenchSection('bodies')}
             >
-              Bodies <span className="tree-count">{bodies.length + (stlBody === null ? 0 : 1)}</span>
+              {workbenchText('SolidsWorkbenchPage.bodies')}<span className="tree-count">{bodies.length + (stlBody === null || stlInModel ? 0 : 1)}</span>
               <span className="tree-section-header-chevron">
                 {isWorkbenchSectionCollapsed('bodies') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               </span>
@@ -21224,7 +21915,7 @@ function SolidsWorkbenchPageDocument({
                     hasCamRow: bodyCamRowByBodyId.has(b.bodyId),
                   })),
                   // WO-1935: the STL shown as a mesh-backed body.
-                  ...(stlBody === null ? [] : [{
+                  ...(stlBody === null || stlInModel ? [] : [{
                     bodyId: stlBody.bodyId,
                     name: stlBody.name,
                     visible: stlBodyVisible,
@@ -21296,7 +21987,7 @@ function SolidsWorkbenchPageDocument({
               data-ui78-sanctioned=""
               onClick={() => toggleWorkbenchSection('parameters')}
             >
-              Parameters <span className="tree-count">{paramTable.names().length}</span>
+              {workbenchText('SolidsWorkbenchPage.parameters')}<span className="tree-count">{paramTable.names().length}</span>
               <span className="tree-section-header-chevron">
                 {isWorkbenchSectionCollapsed('parameters') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               </span>
@@ -21323,8 +22014,7 @@ function SolidsWorkbenchPageDocument({
               data-ui78-sanctioned=""
               onClick={() => toggleWorkbenchSection('inspect')}
             >
-              Inspect
-              <span className="tree-section-header-chevron">
+              {workbenchText('SolidsWorkbenchPage.inspect')}<span className="tree-section-header-chevron">
                 {isWorkbenchSectionCollapsed('inspect') ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               </span>
             </div>
@@ -21340,8 +22030,7 @@ function SolidsWorkbenchPageDocument({
                   disabled={anyPickModeArmed}
                   onClick={() => setActiveUi4Tool((t) => (t === 'measure' ? 'none' : 'measure'))}
                 >
-                  Measure
-                </button>
+                  {workbenchText('SolidsWorkbenchPage.measure')}</button>
                 <button
                   type="button"
                   data-testid="workbench-ui4-tool-appearance"
@@ -21351,8 +22040,7 @@ function SolidsWorkbenchPageDocument({
                   disabled={anyPickModeArmed}
                   onClick={() => setActiveUi4Tool((t) => (t === 'appearance' ? 'none' : 'appearance'))}
                 >
-                  Appearance
-                </button>
+                  {workbenchText('SolidsWorkbenchPage.appearance')}</button>
                 {activeUi4Tool === 'measure' &&
                   (['face', 'edge', 'vertex', 'body'] as const).map((mode) => (
                     <button
@@ -21409,14 +22097,14 @@ function SolidsWorkbenchPageDocument({
                 }
               />
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Mass body</span>
+                <span style={{ color: 'var(--text-muted)' }}>{workbenchText('SolidsWorkbenchPage.massBody')}</span>
                 <select
                   data-testid="mass-body-select"
                   value={massBodyId ?? ''}
                   onChange={(e) => setMassBodySelectId(e.target.value === '' ? null : e.target.value)}
                   style={{ flex: 1 }}
                 >
-                  {massBodyCandidateIds.length === 0 && <option value="">(none)</option>}
+                  {massBodyCandidateIds.length === 0 && <option value="">{workbenchText('SolidsWorkbenchPage.none')}</option>}
                   {massBodyCandidateIds.map((id) => (
                     <option key={id} value={id}>
                       {featureLabel(dag, id)}
@@ -21518,7 +22206,7 @@ function SolidsWorkbenchPageDocument({
             } else if (dressUpPickMode.kind !== 'none') {
               const armed = dressUpPickMode.feature
               if (!(armed === 'fillet' && (startStlToolFromPick('fillet', e.clientX, e.clientY) || explainStlFilletPick(e.clientX, e.clientY))) &&
-                !(armed === 'chamfer' && startStlChamferAt(e.clientX, e.clientY)) &&
+                !(armed === 'chamfer' && (startStlToolFromPick('chamfer', e.clientX, e.clientY) || startStlChamferAt(e.clientX, e.clientY))) &&
                 !(armed === 'hole' && placeStlHoleAt(e.clientX, e.clientY)) &&
                 !(armed === 'shell' && startStlShellAt(e.clientX, e.clientY)) &&
                 !(armed === 'draft' && startStlDraftAt(e.clientX, e.clientY))) {
@@ -21583,8 +22271,8 @@ function SolidsWorkbenchPageDocument({
                 ? 'push-pull'
                 : resizeHolePickMode.kind === 'arm'
                   ? 'resize-hole'
-                  : dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === 'fillet'
-                    ? 'fillet'
+                  : dressUpPickMode.kind !== 'none' && (dressUpPickMode.feature === 'fillet' || dressUpPickMode.feature === 'chamfer')
+                    ? dressUpPickMode.feature
                     // WO-2090: Shell and Draft pick the flat faces Push/Pull does.
                     : dressUpPickMode.kind !== 'none' && (dressUpPickMode.feature === 'shell' || dressUpPickMode.feature === 'draft')
                       ? 'push-pull'
@@ -21672,14 +22360,14 @@ function SolidsWorkbenchPageDocument({
               profilePickMode.request.maxPicks === 1
                 ? profilePickMode.request.prompt
                 : profilePickMode.request.maxPicks === 'many'
-                  ? `${profilePickMode.request.prompt} ${profilePickMode.selected.length} selected.`
-                  : `${profilePickMode.request.prompt} ${profilePickMode.selected.length}/2 selected.`
+                  ? workbenchText('SolidsWorkbenchPage.selected', { prompt: String(profilePickMode.request.prompt), length: String(profilePickMode.selected.length) })
+                  : workbenchText('SolidsWorkbenchPage.2Selected', { prompt: String(profilePickMode.request.prompt), length: String(profilePickMode.selected.length) })
             }
             actions={[
-              { testId: 'workbench-cancel-profile-pick', label: 'Cancel', onClick: cancelProfilePick },
+              { testId: 'workbench-cancel-profile-pick', label: workbenchText('SolidsWorkbenchPage.cancel'), onClick: cancelProfilePick },
               ...((profilePickMode.request.maxPicks === 2 && profilePickMode.selected.length === 2) ||
                   (profilePickMode.request.maxPicks === 'many' && profilePickMode.selected.length > 0)
-                ? [{ testId: 'workbench-done-profile-pick', label: 'Done', variant: 'primary' as const, onClick: finishProfilePick }]
+                ? [{ testId: 'workbench-done-profile-pick', label: workbenchText('SolidsWorkbenchPage.done'), variant: 'primary' as const, onClick: finishProfilePick }]
                 : []),
             ]}
           >
@@ -21688,8 +22376,7 @@ function SolidsWorkbenchPageDocument({
                 .find((candidate) => candidate.key === profilePickMode.hoveredKey)
               return hovered === undefined ? null : (
                 <span className="workbench-confirm-readout" data-testid="workbench-profile-hover-readout">
-                  {featureLabel(dag, hovered.sketchId)} - closed region
-                </span>
+                  {featureLabel(dag, hovered.sketchId)}{workbenchText('SolidsWorkbenchPage.closedRegion')}</span>
               )
             })()}
           </WorkbenchConfirmBar>
@@ -21703,7 +22390,7 @@ function SolidsWorkbenchPageDocument({
             refusal={planePickStatus !== null && hoveredBasePlaneNodeId === null && !basePlanePickFaceHover}
             actions={[{
               testId: 'workbench-cancel-plane-pick',
-              label: 'Cancel',
+              label: workbenchText('SolidsWorkbenchPage.cancel'),
               onClick: () => cancelBasePlanePick(),
             }]}
           >
@@ -21724,12 +22411,12 @@ function SolidsWorkbenchPageDocument({
             testId="solids-workbench-boolean-pick-hint"
             message={
               booleanBodyPickRole === 'target'
-                ? 'Click the target body for the Boolean...'
-                : 'Target selected - click the tool body...'
+                ? workbenchText('SolidsWorkbenchPage.clickTheTargetBodyForTheBoolean')
+                : workbenchText('SolidsWorkbenchPage.targetSelectedClickTheToolBody')
             }
             actions={[{
               testId: 'workbench-cancel-boolean-pick',
-              label: 'Cancel pick',
+              label: workbenchText('SolidsWorkbenchPage.cancelPick'),
               onClick: cancelBooleanBodyPick,
             }]}
           />
@@ -21745,12 +22432,12 @@ function SolidsWorkbenchPageDocument({
             testId="solids-workbench-extrude-target-pick-hint"
             message={
               extrudeTargetHoverId !== null
-                ? `Click to set the extrude target - hovering: ${featureLabel(dag, extrudeTargetHoverId)}`
-                : 'Click a body in the viewport to set the extrude target...'
+                ? workbenchText('SolidsWorkbenchPage.clickToSetTheExtrudeTargetHovering', { value1: String(featureLabel(dag, extrudeTargetHoverId)) })
+                : workbenchText('SolidsWorkbenchPage.clickABodyInTheViewportToSetThe')
             }
             actions={[{
               testId: 'workbench-cancel-extrude-target-pick',
-              label: 'Cancel pick',
+              label: workbenchText('SolidsWorkbenchPage.cancelPick'),
               onClick: cancelExtrudeTargetPick,
             }]}
           />
@@ -21759,13 +22446,13 @@ function SolidsWorkbenchPageDocument({
           <WorkbenchConfirmBar
             testId="solids-workbench-extrude-end-target-pick-hint"
             message={extrudeEndTargetHoverBodyId !== null
-              ? `Click the eligible ${extrudeEndTargetPickKind === 'part' ? 'body' : extrudeEndTargetPickKind} target on ${featureLabel(dag, extrudeEndTargetHoverBodyId)}...`
+              ? workbenchText('SolidsWorkbenchPage.clickTheEligibleTargetOn', { value1: String(extrudeEndTargetPickKind === 'part' ? 'body' : extrudeEndTargetPickKind), value2: String(featureLabel(dag, extrudeEndTargetHoverBodyId)) })
               : extrudeEndTargetPickKind === 'face'
-                ? 'Hover a planar face, or click a plane in the model tree...'
+                ? workbenchText('SolidsWorkbenchPage.hoverAPlanarFaceOrClickAPlaneIn')
                 : extrudeEndTargetPickKind === 'part'
-                  ? 'Hover a live body, or click it in the model tree...'
-                  : 'Hover a stable topological vertex...'}
-            actions={[{ testId: 'workbench-cancel-extrude-end-target-pick', label: 'Cancel', onClick: cancelExtrudeEndTargetPick }]}
+                  ? workbenchText('SolidsWorkbenchPage.hoverALiveBodyOrClickItInThe')
+                  : workbenchText('SolidsWorkbenchPage.hoverAStableTopologicalVertex')}
+            actions={[{ testId: 'workbench-cancel-extrude-end-target-pick', label: workbenchText('SolidsWorkbenchPage.cancel'), onClick: cancelExtrudeEndTargetPick }]}
           />
         )}
         {/* WO UI-18 (D2): all four pick-flow hint bars now route through the ONE
@@ -21774,8 +22461,8 @@ function SolidsWorkbenchPageDocument({
         {sketchMode.kind === 'pick-face' && (
           <WorkbenchConfirmBar
             testId="solids-workbench-pick-hint"
-            message="Click a planar face to reattach the plane..."
-            actions={[{ testId: 'workbench-cancel-pick', label: 'Cancel', onClick: () => setSketchMode({ kind: 'none' }) }]}
+            message={workbenchText('SolidsWorkbenchPage.clickAPlanarFaceToReattachThePlane')}
+            actions={[{ testId: 'workbench-cancel-pick', label: workbenchText('SolidsWorkbenchPage.cancel'), onClick: () => setSketchMode({ kind: 'none' }) }]}
           >
             {pickHoverInfo !== null && (
               <span
@@ -21791,7 +22478,7 @@ function SolidsWorkbenchPageDocument({
         {offsetPlaneFacePickArmed && pickHoverInfo !== null && (
           <WorkbenchConfirmBar
             testId="solids-workbench-offset-plane-pick-hint"
-            message="Click to use this planar face as the offset source..."
+            message={workbenchText('SolidsWorkbenchPage.clickToUseThisPlanarFaceAsTheOffset')}
             actions={[]}
           >
             <span
@@ -21806,8 +22493,8 @@ function SolidsWorkbenchPageDocument({
         {nPickArmed && (
           <WorkbenchConfirmBar
             testId="solids-workbench-npick-hint"
-            message="Click a face (or a plane) to look normal to it..."
-            actions={[{ testId: 'workbench-cancel-npick', label: 'Cancel', onClick: () => setNPickArmed(false) }]}
+            message={workbenchText('SolidsWorkbenchPage.clickAFaceOrAPlaneToLookNormal')}
+            actions={[{ testId: 'workbench-cancel-npick', label: workbenchText('SolidsWorkbenchPage.cancel'), onClick: () => setNPickArmed(false) }]}
           />
         )}
         {pushPullMode.kind !== 'none' && (
@@ -21818,7 +22505,7 @@ function SolidsWorkbenchPageDocument({
               pushPullRefusal !== null
                 ? pushPullRefusal
                 : pushPullMode.kind === 'arm'
-                  ? 'Click a planar face to push/pull...'
+                  ? workbenchText('SolidsWorkbenchPage.clickAPlanarFaceToPushPull')
                   // WO-011: the old 138-char mounted hint measured 763px against
                   // the bar's 444px message slot (real-app probe, evidence/WO-011)
                   // and ellipsized mid-word ("Apply (Enter) comm...") at EVERY
@@ -21827,9 +22514,9 @@ function SolidsWorkbenchPageDocument({
                   // Dropped: "along the face normal" (the arrow gizmo shows the
                   // direction) and "releasing the drag keeps the value staged"
                   // (the staged value stays visible in the bar's own mm input).
-                  : 'Drag the arrow or type a distance - Apply (Enter) commits, Esc cancels...'
+                  : workbenchText('SolidsWorkbenchPage.dragTheArrowOrTypeADistanceApplyEnter')
             }
-            actions={[{ testId: 'workbench-cancel-pushpull', label: 'Cancel', onClick: () => void handlePushPullCancel() }]}
+            actions={[{ testId: 'workbench-cancel-pushpull', label: workbenchText('SolidsWorkbenchPage.cancel'), onClick: () => void handlePushPullCancel() }]}
           >
             {pushPullMode.kind === 'arm' && pickHoverInfo !== null && (
               <span
@@ -21847,13 +22534,13 @@ function SolidsWorkbenchPageDocument({
             testId="solids-workbench-dressup-hint"
             message={
               dressUpPickMode.kind === 'arm'
-                ? `Click ${dressUpEntityKind(dressUpPickMode.feature)}s on the body to ${dressUpPickMode.feature}...`
-                : `${dressUpPickMode.ids.length} ${dressUpEntityKind(dressUpPickMode.feature)}(s) picked -- click more, or Done.`
+                ? workbenchText('SolidsWorkbenchPage.clickSOnTheBodyTo', { value1: String(dressUpEntityKind(dressUpPickMode.feature)), feature: String(dressUpPickMode.feature) })
+                : workbenchText('SolidsWorkbenchPage.sPickedClickMoreOrDone', { length: String(dressUpPickMode.ids.length), value2: String(dressUpEntityKind(dressUpPickMode.feature)) })
             }
             actions={[
               {
                 testId: 'workbench-dressup-cancel',
-                label: 'Cancel',
+                label: workbenchText('SolidsWorkbenchPage.cancel'),
                 onClick: () => {
                   finishFilletInteraction()
                   finishChamferInteraction()
@@ -21863,7 +22550,7 @@ function SolidsWorkbenchPageDocument({
               },
               ...(dressUpPickMode.kind === 'armed' && dressUpPickMode.ids.length > 0
                 ? [{
-                    testId: 'workbench-dressup-done', label: 'Done', variant: 'primary' as const,
+                    testId: 'workbench-dressup-done', label: workbenchText('SolidsWorkbenchPage.done'), variant: 'primary' as const,
                     onClick: () => {
                       const { feature, ownerId, ids } = dressUpPickMode
                       if (feature === 'shell') setDialog({ kind: 'shell', mode: 'create', ownerId, faceIds: ids })
@@ -21901,45 +22588,45 @@ function SolidsWorkbenchPageDocument({
           const failures = resizeHoleFailuresByBody
           const failureText =
             failures.length > 0
-              ? `Resize hole: recognition FAILED on ${failures.map((f) => `${f.ownerLabel} (${f.reason})`).join('; ')}.`
+              ? workbenchText('SolidsWorkbenchPage.resizeHoleRecognitionFAILEDOn', { value1: String(failures.map((f) => `${f.ownerLabel} (${f.reason})`).join('; ')) })
               : undefined
           // WO-2092: an open STL's holes are found at the pick
           // (startStlToolFromPick), not by the kernel recognizer counted
           // here, so zero kernel holes is no reason to say "no holes".
           const stlHolesPickable = stlBody !== null
           const message = resizeHoleRecognizing
-            ? 'Recognizing holes...'
+            ? workbenchText('SolidsWorkbenchPage.recognizingHoles')
             : failureText !== undefined
               ? eligibleCount > 0
-                ? `${failureText} ${eligibleCount} eligible hole(s) still pickable on other live bodies.`
+                ? workbenchText('SolidsWorkbenchPage.eligibleHoleSStillPickableOnOtherLiveBodies', { value1: String(failureText), value2: String(eligibleCount) })
                 : failureText
               : eligibleCount === 0 && !stlHolesPickable
-                ? 'Resize hole: no recognized through, blind, or counterbore holes on any live body.'
-                : resizeHolePickMode.field === 'depth'
+                ? workbenchText('SolidsWorkbenchPage.resizeHoleNoRecognizedThroughBlindOrCounterboreHoles')
+                : resizeHolePickMode.field === 'move' ? workbenchText('MoveHoleEntry.hint') : resizeHolePickMode.field === 'depth'
                   ? resizeHolePickMode.kind === 'armed'
-                    ? 'Type a new depth (or "through"), Enter to apply -- or click a different hole to re-anchor.'
-                    : 'Click a hole in the viewport to change its depth...'
+                    ? workbenchText('SolidsWorkbenchPage.typeANewDepthOrThroughEnterToApply')
+                    : workbenchText('SolidsWorkbenchPage.clickAHoleInTheViewportToChangeIts')
                   : resizeHolePickMode.kind === 'armed'
-                    ? 'Type a new diameter, Enter to apply -- or click a different hole to re-anchor.'
-                    : 'Click a hole in the viewport to resize it...'
+                    ? workbenchText('SolidsWorkbenchPage.typeANewDiameterEnterToApplyOrClick')
+                    : workbenchText('SolidsWorkbenchPage.clickAHoleInTheViewportToResizeIt')
           return (
             <WorkbenchConfirmBar
               testId="solids-workbench-resizehole-hint"
               refusal={eligibleCount === 0 && !resizeHoleRecognizing && (failureText !== undefined || !stlHolesPickable)}
               message={message}
               actions={[
-                { testId: 'workbench-cancel-resizehole', label: 'Cancel', onClick: handleResizeHoleCancel },
+                { testId: 'workbench-cancel-resizehole', label: workbenchText('SolidsWorkbenchPage.cancel'), onClick: handleResizeHoleCancel },
                 // WO-2091: the same pick edits a hole's depth; this switches field.
-                {
+                ...(resizeHolePickMode.field === 'move' ? [] : [{
                   testId: 'workbench-resizehole-field',
                   label: resizeHolePickMode.field === 'depth' ? 'Diameter' : 'Depth',
                   onClick: handleResizeHoleFieldToggle,
-                },
+                }]),
                 // Only while NOT already armed-with-a-selection -- the anchored entry (rendered
                 // separately below) carries its own List affordance once a hole is selected, and a
                 // testid must never render twice at once.
                 ...(eligibleCount > 0 && resizeHolePickMode.kind === 'arm'
-                  ? [{ testId: 'workbench-resizehole-list', label: 'List', onClick: openResizeHoleSupplementList }]
+                  ? [{ testId: 'workbench-resizehole-list', label: workbenchText('SolidsWorkbenchPage.list'), onClick: openResizeHoleSupplementList }]
                   : []),
               ]}
             >
@@ -21955,18 +22642,28 @@ function SolidsWorkbenchPageDocument({
             </WorkbenchConfirmBar>
           )
         })()}
+        {resizeHolePickMode.kind === 'armed' && resizeHolePickMode.field === 'move' && <MoveHoleEntry
+          draft={resizeHolePickMode.draft} onChange={handleResizeHoleDraftChange}
+          status={resizeHolePickMode.preview.status} message={resizeHolePickMode.preview.message}
+          onApply={() => { void handleResizeHoleEntryApply(resizeHolePickMode.draft) }} onCancel={handleResizeHoleCancel} />}
+        {stlTools.session.kind === 'move-hole' && <MoveHoleEntry
+          draft={stlTools.session.draft} onChange={stlTools.setDraft}
+          status={stlTools.session.preview.kind === 'failed' ? 'refused' : stlTools.session.preview.kind}
+          message={stlTools.session.preview.message} onApply={() => { void stlTools.apply() }} onCancel={stlTools.close} />}
         {resizeHolePickMode.kind === 'armed' && runtimeRef.current !== null && resizeHolePickMode.field === 'depth' && resizeHolePickMode.currentDepth !== undefined && (() => {
           // WO-2091: the same anchored entry, editing the hole's depth.
           const armed = resizeHolePickMode
           const currentDepth = resizeHolePickMode.currentDepth
           return (
             <AnchoredValueEntry
-              key={`${armed.ownerId}:${armed.featureKey}:depth`}
+              key={`${armed.ownerId}:${armed.featureKey}:depth:${armed.step ?? 'pilot'}`}
               testId="resize-hole-anchor-entry"
               anchorWorldPoint={armed.anchorPoint}
               projectToCanvas={(point) => runtimeRef.current?.projectToCanvas(point) ?? null}
-              title={armed.editFeatureId !== undefined ? 'Edit: hole depth' : 'Hole depth'}
-              currentValueLabel="Current depth"
+              title={armed.step === 'counterbore'
+                ? workbenchText('SolidsWorkbenchPage.counterboreDepth')
+                : armed.editFeatureId !== undefined ? workbenchText('SolidsWorkbenchPage.editHoleDepth') : workbenchText('SolidsWorkbenchPage.holeDepth')}
+              currentValueLabel={armed.step === 'counterbore' ? 'Current counterbore depth' : 'Current depth'}
               currentValueText={armed.currentThrough === true ? `${formatMm(currentDepth)} (through)` : formatMm(currentDepth)}
               valueLabel="New depth"
               deltaLabel="Depth change"
@@ -21984,19 +22681,21 @@ function SolidsWorkbenchPageDocument({
               onApply={handleResizeHoleEntryApply}
               onCancel={cancelResizeHoleSelection}
               extraAction={armed.currentThrough === true
-                ? { testId: 'workbench-resizehole-list', label: 'List', onClick: openResizeHoleSupplementList }
-                : { testId: 'workbench-holedepth-through', label: 'Through', onClick: () => handleResizeHoleDraftChange('through') }}
+                ? { testId: 'workbench-resizehole-list', label: workbenchText('SolidsWorkbenchPage.list'), onClick: openResizeHoleSupplementList }
+                : { testId: 'workbench-holedepth-through', label: workbenchText('SolidsWorkbenchPage.through'), onClick: () => handleResizeHoleDraftChange('through') }}
             />
           )
         })()}
-        {resizeHolePickMode.kind === 'armed' && runtimeRef.current !== null && !(resizeHolePickMode.field === 'depth' && resizeHolePickMode.currentDepth !== undefined) && (
+        {resizeHolePickMode.kind === 'armed' && resizeHolePickMode.field !== 'move' && runtimeRef.current !== null && !(resizeHolePickMode.field === 'depth' && resizeHolePickMode.currentDepth !== undefined) && (
           <AnchoredValueEntry
-            key={`${resizeHolePickMode.ownerId}:${resizeHolePickMode.featureKey}`}
+            key={`${resizeHolePickMode.ownerId}:${resizeHolePickMode.featureKey}:${resizeHolePickMode.step ?? 'pilot'}`}
             testId="resize-hole-anchor-entry"
             anchorWorldPoint={resizeHolePickMode.anchorPoint}
             projectToCanvas={(point) => runtimeRef.current?.projectToCanvas(point) ?? null}
-            title={resizeHolePickMode.editFeatureId !== undefined ? 'Edit: resize hole' : 'Resize hole'}
-            currentValueLabel="Current diameter"
+            title={resizeHolePickMode.step === 'counterbore'
+              ? workbenchText('SolidsWorkbenchPage.resizeCounterbore')
+              : resizeHolePickMode.editFeatureId !== undefined ? workbenchText('SolidsWorkbenchPage.editResizeHole') : workbenchText('SolidsWorkbenchPage.resizeHole')}
+            currentValueLabel={resizeHolePickMode.step === 'counterbore' ? 'Current counterbore diameter' : 'Current diameter'}
             currentValueText={formatMm(resizeHolePickMode.currentDiameter)}
             valueLabel="New diameter"
             deltaLabel="Diameter change"
@@ -22018,7 +22717,7 @@ function SolidsWorkbenchPageDocument({
             interactionDisabled={resizeHolePickMode.preview.status === 'applying'}
             onApply={handleResizeHoleEntryApply}
             onCancel={cancelResizeHoleSelection}
-            extraAction={{ testId: 'workbench-resizehole-list', label: 'List', onClick: openResizeHoleSupplementList }}
+            extraAction={{ testId: 'workbench-resizehole-list', label: workbenchText('SolidsWorkbenchPage.list'), onClick: openResizeHoleSupplementList }}
           />
         )}
         {/* WO UI-17 (criterion 2): the top horizontal strip is REMOVED ENTIRELY
@@ -22049,7 +22748,7 @@ function SolidsWorkbenchPageDocument({
             // the test-driver seam rather than a real raycast. The card slides
             // clear of this box instead.
             avoidRects={(anchor, box) => [pushPullHandleAvoidRect(anchor, { width: box.right - box.left, height: box.bottom - box.top })]}
-            title="Push/Pull"
+            title={workbenchText('SolidsWorkbenchPage.pushPull2')}
             currentValueLabel="Convention"
             currentValueText="+ pulls, - pushes"
             deltaLabel="Offset"
@@ -22060,8 +22759,8 @@ function SolidsWorkbenchPageDocument({
             twoStageEnter
             validate={(draft) => {
               const v = parseFloat(draft)
-              if (!Number.isFinite(v)) return { ok: false, reason: 'Enter a number' }
-              if (Math.abs(v) < 1e-6) return { ok: false, reason: 'a zero offset is a no-op' }
+              if (!Number.isFinite(v)) return { ok: false, reason: workbenchText('SolidsWorkbenchPage.enterANumber') }
+              if (Math.abs(v) < 1e-6) return { ok: false, reason: workbenchText('SolidsWorkbenchPage.aZeroOffsetIsANoOp') }
               return { ok: true, deltaText: formatSignedMm(v) }
             }}
             onAdjust={(draft) => {
@@ -22071,7 +22770,7 @@ function SolidsWorkbenchPageDocument({
             }}
             onApply={async (draft) => {
               const v = parseFloat(draft)
-              if (!Number.isFinite(v)) return 'Enter a number'
+              if (!Number.isFinite(v)) return workbenchText('SolidsWorkbenchPage.enterANumber')
               await handlePushPullCommit(pushPullMode, v)
               return undefined
             }}
@@ -22092,7 +22791,7 @@ function SolidsWorkbenchPageDocument({
               testId="resize-hole-anchor-entry"
               anchorWorldPoint={stlDepth.anchor}
               projectToCanvas={(point) => runtimeRef.current?.projectToCanvas(point) ?? null}
-              title="Hole depth"
+              title={workbenchText('SolidsWorkbenchPage.holeDepth')}
               currentValueLabel="Current depth"
               currentValueText={depth.through ? `${formatMm(depth.currentMm)} (through)` : formatMm(depth.currentMm)}
               valueLabel="New depth"
@@ -22112,7 +22811,7 @@ function SolidsWorkbenchPageDocument({
               canApply={stlDepth.preview.kind === 'ready'}
               onApply={stlTools.apply}
               onCancel={stlTools.close}
-              {...(depth.through ? {} : { extraAction: { testId: 'workbench-holedepth-through', label: 'Through', onClick: () => stlTools.setDraft('through') } })}
+              {...(depth.through ? {} : { extraAction: { testId: 'workbench-holedepth-through', label: workbenchText('SolidsWorkbenchPage.through'), onClick: () => stlTools.setDraft('through') } })}
             />
           )
         })()}
@@ -22120,12 +22819,12 @@ function SolidsWorkbenchPageDocument({
           const stlResize = stlTools.session
           return (
             <AnchoredValueEntry
-              key={`stl:${stlResize.featureId}`}
+              key={`stl:${stlResize.featureId}:${stlResize.step ?? 'pilot'}`}
               testId="resize-hole-anchor-entry"
               anchorWorldPoint={stlResize.anchor}
               projectToCanvas={(point) => runtimeRef.current?.projectToCanvas(point) ?? null}
-              title="Resize hole"
-              currentValueLabel="Current diameter"
+              title={stlResize.step === 'counterbore' ? workbenchText('SolidsWorkbenchPage.resizeCounterbore') : workbenchText('SolidsWorkbenchPage.resizeHole')}
+              currentValueLabel={stlResize.step === 'counterbore' ? 'Current counterbore diameter' : 'Current diameter'}
               currentValueText={formatMm(stlResize.currentDiameter)}
               valueLabel="New diameter"
               deltaLabel="Diameter change"
@@ -22156,7 +22855,7 @@ function SolidsWorkbenchPageDocument({
               anchorWorldPoint={stlPush.frame.origin}
               projectToCanvas={(point) => runtimeRef.current?.projectToCanvas(point) ?? null}
               avoidRects={(anchor, box) => [pushPullHandleAvoidRect(anchor, { width: box.right - box.left, height: box.bottom - box.top })]}
-              title="Push/Pull"
+              title={workbenchText('SolidsWorkbenchPage.pushPull2')}
               currentValueLabel="Convention"
               currentValueText="+ pulls, - pushes"
               deltaLabel="Offset"
@@ -22167,8 +22866,8 @@ function SolidsWorkbenchPageDocument({
               twoStageEnter
               validate={(draft) => {
                 const v = parseFloat(draft)
-                if (!Number.isFinite(v)) return { ok: false, reason: 'Enter a number' }
-                if (Math.abs(v) < 1e-6) return { ok: false, reason: 'a zero offset is a no-op' }
+                if (!Number.isFinite(v)) return { ok: false, reason: workbenchText('SolidsWorkbenchPage.enterANumber') }
+                if (Math.abs(v) < 1e-6) return { ok: false, reason: workbenchText('SolidsWorkbenchPage.aZeroOffsetIsANoOp') }
                 return { ok: true, deltaText: formatSignedMm(v) }
               }}
               onAdjust={stlTools.adjust}
@@ -22196,6 +22895,25 @@ function SolidsWorkbenchPageDocument({
               ? { status: 'refused', message: stlTools.session.preview.message }
               : { status: stlTools.session.preview.kind === 'building' ? 'pending' : stlTools.session.preview.kind }}
             onPreviewIntent={handleStlFilletPreviewIntent}
+            onApplyPreview={stlTools.apply}
+            onApplied={() => {}}
+            onClose={stlTools.close}
+          />
+        )}
+        {stlTools.session.kind === 'chamfer' && stlBody !== null && (
+          <ChamferDialog
+            key={`stl-chamfer-size:${stlBody.geoId}`}
+            dag={dag}
+            history={history}
+            mode="create"
+            ownerId={stlBody.bodyId}
+            edgeIds={stlTools.session.featureIds}
+            initialDistance={stlTools.session.initialRadius}
+            previewFeatureId={`stl-chamfer-size:${stlBody.geoId}`}
+            previewState={stlTools.session.preview.kind === 'failed'
+              ? { status: 'refused', message: stlTools.session.preview.message }
+              : { status: stlTools.session.preview.kind === 'building' ? 'pending' : stlTools.session.preview.kind }}
+            onPreviewIntent={handleStlChamferSizePreviewIntent}
             onApplyPreview={stlTools.apply}
             onApplied={() => {}}
             onClose={stlTools.close}
@@ -22290,6 +23008,7 @@ function SolidsWorkbenchPageDocument({
         )}
         {dialog.kind === 'chamfer' && (
           <ChamferDialog
+            key={dialog.mode === 'imported-edit' ? `imported-chamfer:${dialog.featureKey}` : `chamfer:${dialog.mode}`}
             dag={dag}
             history={history}
             {...(dialog.mode === 'edit'
@@ -22306,18 +23025,23 @@ function SolidsWorkbenchPageDocument({
               : {
                   mode: 'create' as const,
                   ownerId:
-                    dressUpPickMode.kind === 'armed' &&
+                    dialog.mode === 'imported-edit'
+                      ? dialog.ownerId
+                      : dressUpPickMode.kind === 'armed' &&
                     dressUpPickMode.feature === 'chamfer' &&
                     dressUpPickMode.editFeatureId === undefined
                       ? dressUpPickMode.ownerId
                       : dialog.ownerId,
                   edgeIds:
-                    dressUpPickMode.kind === 'armed' &&
+                    dialog.mode === 'imported-edit'
+                      ? [dialog.faceId]
+                      : dressUpPickMode.kind === 'armed' &&
                     dressUpPickMode.feature === 'chamfer' &&
                     dressUpPickMode.editFeatureId === undefined
                       ? dressUpPickMode.ids
                       : dialog.edgeIds,
                   previewFeatureId: nextId(dag, 'F'),
+                  ...(dialog.mode === 'imported-edit' ? { initialDistance: dialog.currentDistance } : {}),
                 })}
             hoverReadout={
               dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === 'chamfer' && pickHoverInfo !== null
@@ -22325,8 +23049,8 @@ function SolidsWorkbenchPageDocument({
                 : undefined
             }
             previewState={chamferPreviewState}
-            onPreviewIntent={handleChamferPreviewIntent}
-            onApplyPreview={handleChamferPreviewApply}
+            onPreviewIntent={handleChamferDialogPreviewIntent}
+            onApplyPreview={handleChamferDialogPreviewApply}
             onApplied={handleDialogApplied}
             onClose={() => {
               void cancelChamferPreviewSession()
@@ -22393,7 +23117,7 @@ function SolidsWorkbenchPageDocument({
       <input
         ref={importStepInputRef}
         type="file"
-        accept=".step,.stp"
+        accept=".step,.stp,.stl"
         data-testid="workbench-import-step-input"
         style={{ display: 'none' }}
         onChange={(e) => void handleImportStepFileChange(e)}
@@ -22438,8 +23162,8 @@ function SolidsWorkbenchPageDocument({
             }))
           : modelingSections}
         sketchHistoryTools={[
-          { testId: 'workbench-undo', label: 'Undo', icon: Undo2, disabled: featureAdoptionPending || !history.canUndo(), onClick: handleUndo },
-          { testId: 'workbench-redo', label: 'Redo', icon: Redo2, disabled: featureAdoptionPending || !history.canRedo(), onClick: handleRedo },
+          { testId: 'workbench-undo', label: workbenchText('SolidsWorkbenchPage.undo'), icon: Undo2, disabled: featureAdoptionPending || !history.canUndo(), onClick: handleUndo },
+          { testId: 'workbench-redo', label: workbenchText('SolidsWorkbenchPage.redo'), icon: Redo2, disabled: featureAdoptionPending || !history.canRedo(), onClick: handleRedo },
         ]}
         onFinishSketch={() => { void finishPackageSketch() }}
         onCancelSketch={() => { void cancelPackageSketch() }}
@@ -22513,15 +23237,15 @@ function SolidsWorkbenchPageDocument({
                 the terminal one, and it is branched on FIRST so a future
                 fourth state cannot fall through into it by accident. */}
             {solverState === 'unavailable'
-              ? 'sketch solver unavailable - sketches are committed exactly as drawn'
-              : `sketch solver: loading...${solverElapsedS === null ? '' : ` (${solverElapsedS}s)`}`}
+              ? workbenchText('SolidsWorkbenchPage.sketchSolverUnavailableSketchesAreCommittedExactlyAsDrawn')
+              : workbenchText('SolidsWorkbenchPage.sketchSolverLoading', { value1: String(solverElapsedS === null ? '' : ` (${solverElapsedS}s)`) })}
           </span>
         )}
         <span className="wb-status-sep" />
-        <span className="wb-status-dim" data-testid="workbench-status-bodies">{bodies.length + (stlBody === null ? 0 : 1)} bodies</span>
-        <span className="wb-status-dim">{featureCount} features</span>
+        <span className="wb-status-dim" data-testid="workbench-status-bodies">{workbenchText('SolidsWorkbenchPage.bodies2', { value1: String((bodies.length + (stlBody === null || stlInModel ? 0 : 1))) })}</span>
+        <span className="wb-status-dim">{featureCount}{workbenchText('SolidsWorkbenchPage.features')}</span>
         <KernelCancelControl busySince={kernelBusySince} onCancel={() => { void handleKernelCancel() }} />
-        {sketchMode.kind === 'package' && <span>sketch session active</span>}
+        {sketchMode.kind === 'package' && <span>{workbenchText('SolidsWorkbenchPage.sketchSessionActive')}</span>}
         {exportError !== null && (
           <span data-testid="workbench-export-error" style={{ color: 'var(--text-danger)' }}>
             {exportError}
@@ -22534,12 +23258,12 @@ function SolidsWorkbenchPageDocument({
         )}
         {debugSceneLoadStatus !== null && (
           <span data-testid="workbench-debug-scene-load-status" className="wb-status-dim">
-            debug scene: {debugSceneLoadStatus}
+            {workbenchText('SolidsWorkbenchPage.debugScene')}{debugSceneLoadStatus}
           </span>
         )}
         {documentLoadStatus !== null && (
           <span data-testid="workbench-document-load-status" className="wb-status-dim">
-            model: {documentLoadStatus}
+            {workbenchText('SolidsWorkbenchPage.model3')}{documentLoadStatus}
           </span>
         )}
       </div>
@@ -22637,7 +23361,7 @@ function SolidsWorkbenchPageDocument({
           return (
             <ConstructDatumDialog
               testId="picked-plane"
-              title="Plane"
+              title={workbenchText('SolidsWorkbenchPage.plane')}
               mode="create"
               kind={dialog.planeType}
               typeWords={PICKED_PLANE_TYPE_WORDS}
@@ -22646,7 +23370,7 @@ function SolidsWorkbenchPageDocument({
               initialFlip={false}
               showFlip
               picked={dialog.pick?.said ?? null}
-              progress={so > 0 ? `${so} of ${want} ${dialog.planeType === 'three-points' ? 'points' : 'edges'} picked - now the next.` : undefined}
+              progress={so > 0 ? workbenchText('SolidsWorkbenchPage.ofPickedNowTheNext', { value1: String(so), value2: String(want), value3: String(dialog.planeType === 'three-points' ? workbenchText('SolidsWorkbenchPage.points') : workbenchText('SolidsWorkbenchPage.edges')) }) : undefined}
               onKindChange={setPickedPlaneType}
               onValueChange={followPickedPlaneValue}
               onApply={applyPickedPlane}
@@ -22660,7 +23384,7 @@ function SolidsWorkbenchPageDocument({
           <ConstructDatumDialog
             key={dialog.featureId}
             testId="picked-plane"
-            title="Plane"
+            title={workbenchText('SolidsWorkbenchPage.plane')}
             mode="edit"
             kind={node.payload.definition.kind}
             typeWords={PICKED_PLANE_TYPE_WORDS}
@@ -22681,7 +23405,7 @@ function SolidsWorkbenchPageDocument({
           return (
             <ConstructDatumDialog
               testId="point-datum"
-              title="Point"
+              title={workbenchText('SolidsWorkbenchPage.point')}
               mode="create"
               kind={dialog.pointType}
               typeWords={POINT_TYPE_WORDS}
@@ -22690,11 +23414,11 @@ function SolidsWorkbenchPageDocument({
               initialFlip={false}
               showFlip={false}
               picked={dialog.pick?.said ?? null}
-              progress={edgePlane && dialog.line !== undefined ? `Edge picked (${dialog.line.said}) - now the plane.` : undefined}
+              progress={edgePlane && dialog.line !== undefined ? workbenchText('SolidsWorkbenchPage.edgePickedNowThePlane', { value1: String(dialog.line.said) }) : undefined}
               {...(edgePlane ? {
                 planeOptions: referencePlaneSources().map((source) => ({ id: source.id, label: source.label })),
                 planeId: dialog.planeId ?? '',
-                pickedFaceLabel: 'The clicked face',
+                pickedFaceLabel: workbenchText('SolidsWorkbenchPage.theClickedFace'),
                 onPlaneChange: choosePointPlane,
               } : {})}
               onKindChange={setPointType}
@@ -22709,7 +23433,7 @@ function SolidsWorkbenchPageDocument({
           <ConstructDatumDialog
             key={dialog.featureId}
             testId="point-datum"
-            title="Point"
+            title={workbenchText('SolidsWorkbenchPage.point')}
             mode="edit"
             kind={node.payload.definition.kind}
             typeWords={POINT_TYPE_WORDS}
@@ -22740,8 +23464,8 @@ function SolidsWorkbenchPageDocument({
           onRequestEndTargetPick={requestExtrudeEndTargetPick}
           onCancelEndTargetPick={cancelExtrudeEndTargetPick}
           endTargetLabel={(identity) => 'planeFeatureId' in identity
-            ? `${featureLabel(dag, identity.planeFeatureId)} plane`
-            : `${featureLabel(dag, identity.bodyFeatureId)}${identity.subshape === undefined ? '' : ` / ${identity.subshape.kind} ${identity.subshape.stableId}`}`}
+            ? workbenchText('SolidsWorkbenchPage.plane3', { value1: String(featureLabel(dag, identity.planeFeatureId)) })
+            : `${featureLabel(dag, identity.bodyFeatureId)}${identity.subshape === undefined ? '' : ` / ${identity.subshape.kind}`}`}
           previewState={extrudePreviewState}
           onPreviewIntent={handleExtrudePreviewIntent}
           onApplyGuard={guardExtrudeApply}
@@ -22784,8 +23508,9 @@ function SolidsWorkbenchPageDocument({
             : { mode: 'create' as const })}
           bodyOptions={booleanBodyOptions}
           // WO-1961: the open STL as a target - union adds a box or cylinder,
-          // subtract cuts one, into the part's own edit journal.
-          meshTarget={dialog.mode === 'create' && stlBody !== null && stlBooleanSeed !== null
+          // subtract cuts one, into the part's own edit journal. WO-2823: not
+          // once a body Boolean has taken it in (stlInModel).
+          meshTarget={dialog.mode === 'create' && stlBody !== null && !stlInModel && stlBooleanSeed !== null
             ? {
                 id: stlBody.bodyId,
                 label: stlBody.name,
@@ -22793,9 +23518,10 @@ function SolidsWorkbenchPageDocument({
                 seedLengthMm: stlBooleanSeed.lengthMm,
                 preview: stlTools.session.kind === 'boolean'
                   ? stlTools.session.preview
-                  : { kind: 'idle', message: 'Enter a shape to preview it.' },
+                  : { kind: 'idle', message: workbenchText('SolidsWorkbenchPage.enterAShapeToPreviewIt') },
                 onToolShapeChange: stlTools.setBooleanShape,
                 onApply: stlTools.apply,
+                onApplyBody: applyStlBodyBoolean,
               }
             : undefined}
           activeBodyPickRole={booleanBodyPickRole}
@@ -23096,7 +23822,7 @@ function SolidsWorkbenchPageDocument({
     rawSupportId: string,
   ): Promise<OffsetPlaneSource | null> {
     const ownerLabel = featureLabel(dag, ownerId)
-    const label = `Face ${faceId} of ${ownerLabel}`
+    const label = workbenchText('SolidsWorkbenchPage.faceOf', { faceLabel: faceDisplayWords(map.snapshotOf(faceId)), ownerLabel: String(ownerLabel) })
     const built = buildFacePlaneDatumNodeInput({ id: rawSupportId, ownerId, faceId })
     dag.insertNode(built.input)
     try {
@@ -23105,7 +23831,7 @@ function SolidsWorkbenchPageDocument({
       const probeNode = dag.getNode(built.nodeId)
       const frame = (probeNode?.payload as DatumPlanePayload | undefined)?.lastGoodFrame
       if (!isFinitePlaneFrame(frame)) {
-        notify('error', `Offset Plane refused: ${label} is not planar or has a degenerate frame.`)
+        notify('error', workbenchText('SolidsWorkbenchPage.offsetPlaneRefusedIsNotPlanarOrHasA', { label: String(label) }))
         return null
       }
       return {
@@ -23118,7 +23844,7 @@ function SolidsWorkbenchPageDocument({
         },
       }
     } catch (error) {
-      notify('error', `Offset Plane refused: ${label} could not be evaluated (${error instanceof Error ? error.message : String(error)}).`)
+      notify('error', workbenchText('SolidsWorkbenchPage.offsetPlaneRefusedCouldNotBeEvaluated', { label: String(label), value2: String(error instanceof Error ? error.message : String(error)) }))
       return null
     } finally {
       if (dag.has(built.nodeId)) dag.removeNode(built.nodeId)

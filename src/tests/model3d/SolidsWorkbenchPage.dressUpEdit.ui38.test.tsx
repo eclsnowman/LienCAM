@@ -12,6 +12,17 @@ import { mintRectangleSketch } from './mintRectangleSketch'
 
 afterEach(cleanup)
 
+// WO-2858: the hover readout names the body, never the edge key. The hovered
+// key is the owner edge the pick highlight paints (a picked edge stays 'selected').
+function hoveredEdgeOn(ownerId: string): string | undefined {
+  const text = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
+  expect(text).toMatch(/^Edge on /)
+  const hovered = (hooks().getBodyEdgeIds(ownerId) ?? []).filter((id) => hooks().getPickHighlightState(id) === 'hovered')
+  expect(hovered.length).toBeLessThanOrEqual(1)
+  if (hovered[0] !== undefined) expect(text).not.toContain(hovered[0])
+  return hovered[0]
+}
+
 function hooks(): SolidsWorkbenchHooks {
   const value = window.__solidsWorkbenchHooks
   if (value === undefined) throw new Error('__solidsWorkbenchHooks not installed')
@@ -173,8 +184,7 @@ describe('UI-38 Fillet and Chamfer editability', () => {
       runtime.rayOverride = ray
       fireEvent.pointerMove(screen.getByTestId('solids-workbench-canvas'))
       await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
-      const text = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-      const hovered = text.match(/^Edge (\S+) on/)?.[1]
+      const hovered = hoveredEdgeOn('F1')
       if (hovered !== undefined && hovered !== initialFilletEdge) {
         changedEdge = hovered
         break
@@ -287,8 +297,7 @@ describe('UI-38 Fillet and Chamfer editability', () => {
       runtime.rayOverride = ray
       fireEvent.pointerMove(screen.getByTestId('solids-workbench-canvas'))
       await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
-      const text = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-      const hovered = text.match(/^Edge (\S+) on/)?.[1]
+      const hovered = hoveredEdgeOn('F2')
       if (hovered !== undefined && hovered !== 'F2:EDGE:side') {
         changedChamferEdge = hovered
         break

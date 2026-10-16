@@ -26,6 +26,7 @@ import type {
 } from '../../lib/sketch/sketcher'
 import type { Sketch, SketchConstraintKind, TextPathAlign } from '../../lib/sketch/types'
 import type { Units } from '../../lib/ui/unitFormat'
+import { resolveSketchEditorPose } from '../../lib/sketch/sketchEditorPose'
 
 /** The live projection surface, owned by the Viewport MOUNT and published here for the port. Null
  *  before the viewport exists and after it is disposed -- the overlays' rAF loops already bail on
@@ -72,6 +73,22 @@ export function createCamOverlaysPort(
     getDisplayUnits: (): Units => useCamStore.getState().appSettings.displayUnits,
     getTextEditId: (): string | null => useCamStore.getState().sketchTextEditId,
     getSurface,
+    projectDimensionPreview: (point) => {
+      const surface = getSurface()
+      if (!surface) return null
+      const state = useCamStore.getState(), sketch = state.activeSketch
+      // Mirror Viewport.updateSketch's display-only owner pose (WO-2854);
+      // workbench does its own plane lift and never uses this CAM adapter.
+      // Sample live for rAF refresh.
+      const offset = sketch
+        ? resolveSketchEditorPose(state.project.geometry, sketch)
+        : undefined
+      if (!offset) return surface.worldToScreen(point.x, point.y)
+      const rad = offset.rotationDeg * Math.PI / 180
+      const c = Math.cos(rad), s = Math.sin(rad)
+      return surface.worldToScreen(offset.x + c * point.x - s * point.y,
+        offset.y + s * point.x + c * point.y)
+    },
 
     // ---- Commands. Each is a document edit that owns its own undo step (or, for the dimension
     //      editor, pure UI state). None of them branch on the armed tool. ----

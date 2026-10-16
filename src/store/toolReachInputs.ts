@@ -186,7 +186,7 @@ const replayed = new WeakMap<readonly ToolpathMove[], { before: StockState; cutt
  * slitting saw) are not replayed: a pointed side is not a flat or a ball, and
  * a height field cannot hold what an undercut leaves.
  */
-function stockCutterOf(tool: Tool | undefined): ReplayCutter | undefined {
+export function stockCutterOf(tool: Tool | undefined): ReplayCutter | undefined {
   if (!tool || !(tool.diameter > 0) || !Number.isFinite(tool.diameter)) return undefined
   switch (tool.type) {
     case 'flat_end_mill':
@@ -207,7 +207,7 @@ function stockCutterOf(tool: Tool | undefined): ReplayCutter | undefined {
 }
 
 /** How far a replayed cutter's flat sits above the moves' tip Z. */
-interface ReplayCutter {
+export interface ReplayCutter {
   readonly cutter: StockStateCutter
   readonly liftMm: number
 }

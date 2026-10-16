@@ -10,6 +10,7 @@
 // The live-preview SEAM lives one level up (in the field-editing dialog, e.g.
 // BoxSizeDialog): DialogShell itself is presentation-only, no preview state.
 
+import { useText, textFor } from '../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 
@@ -66,14 +67,15 @@ export function DialogShell({
   icon,
   onApply,
   onCancel,
-  applyLabel = 'Apply',
-  cancelLabel = 'Cancel',
+  applyLabel = textFor('sketch-and-model-workbench')('DialogShell.apply'),
+  cancelLabel = textFor('sketch-and-model-workbench')('DialogShell.cancel'),
   applyDisabled = false,
   allowViewportInteraction = false,
   floatingPalette = false,
   backdropless = false,
   children,
 }: DialogShellProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const panelRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
   const [palettePosition, setPalettePosition] = useState(() => ({
@@ -170,7 +172,7 @@ export function DialogShell({
         <button
           type="button"
           className="modal-close-btn"
-          aria-label="Cancel"
+          aria-label={workbenchText('DialogShell.cancel')}
           data-testid="dialog-shell-close"
           onClick={onCancel}
         >

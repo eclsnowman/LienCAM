@@ -1,3 +1,8 @@
+import { catalogChildren } from './probing/catalogText'
+import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 import { fmtMachineLength } from '../../lib/ui/unitFormat'
 // WO-411 slice 4 - the PREVIEW of a probe routine: the numbered concrete steps
 // the expander produced (slice 2), the proposals it would make, and the errors
@@ -46,8 +51,8 @@ export interface ProbeRoutinePreviewProps {
   run?: { probe: EffectiveProbeConfig; envelope: MachineEnvelope; activeWcs: string | null } | null
 }
 
-const RUN_WAITS = 'Running is available from the Routines tab, where the machine position and probe settings are known.'
-const RUN_NEEDS_CHECK = 'Check the routine first; Run appears with a clean preview.'
+const RUN_WAITS = probeText('probeRoutinePreview1')
+const RUN_NEEDS_CHECK = probeText('probeRoutinePreview2')
 
 /** WO-1667: a routine position through the one position formatter
  *  ("machine X 1.0 Y 2.0 Z 3.0") - a routine is written in machine coordinates. */
@@ -61,21 +66,21 @@ export function describeExpandedProposal(proposal: ExpandedProposal): string {
   switch (proposal.kind) {
     case 'workOffset': {
       const target = proposal.wcs === 'active'
-        ? `the active work offset${proposal.activeWcs ? ` (${proposal.activeWcs})` : ''}`
+        ? probeText('probeRoutinePreview3', { value1: String(proposal.activeWcs ? ` (${proposal.activeWcs})` : '') })
         : proposal.wcs
       const axes = (['X', 'Y', 'Z'] as const)
         .filter((a) => proposal.axes[a] !== undefined)
         .map((a) => `${a} = ${proposal.axes[a]!.source}`)
         .join(', ')
       const note = proposal.compensationNote ? ` ${proposal.compensationNote}` : ''
-      return `Would propose ${target}: ${axes} - "${proposal.label}"; written only after you confirm.${note}`
+      return probeText('probeRoutinePreview4', { value1: String(target), value2: String(axes), value3: String(proposal.label), value4: String(note) })
     }
     case 'toolLength': {
-      const tool = proposal.tool === 'active' ? 'the active tool' : `T${proposal.tool}`
-      return `Would propose a length for ${tool} from machine Z = ${proposal.machineZ.source} - "${proposal.label}"; written only after you confirm.`
+      const tool = proposal.tool === 'active' ? probeText('probeRoutinePreview5') : `T${proposal.tool}`
+      return probeText('probeRoutinePreview6', { value1: String(tool), value2: String(proposal.machineZ.source), value3: String(proposal.label) })
     }
     case 'report':
-      return `Would report: ${proposal.items.map((i) => `${i.label} = ${i.expr.source} (${i.unit})`).join('; ')}.`
+      return probeText('probeRoutinePreview7', { value1: String(proposal.items.map((i) => `${i.label} = ${i.expr.source} (${i.unit})`).join('; ')) })
   }
 }
 
@@ -95,6 +100,7 @@ function sketchPoints(expanded: ExpandedRoutine): SketchPoint[] {
 }
 
 function PathSketch({ expanded }: { expanded: ExpandedRoutine }) {
+  useText('probing-screens')
   const points = useMemo(() => sketchPoints(expanded), [expanded])
   const size = 200
   const pad = 18
@@ -115,7 +121,7 @@ function PathSketch({ expanded }: { expanded: ExpandedRoutine }) {
       className="probe-routine-sketch"
       viewBox={`0 0 ${size} ${size}`}
       role="img"
-      aria-label="Top-down sketch of the previewed path: moves and nominal touch points in order"
+      aria-label={probeText('probeRoutinePreview8')}
       data-testid="probe-routine-sketch"
     >
       <polyline className="probe-routine-sketch-track" points={track} />
@@ -127,9 +133,7 @@ function PathSketch({ expanded }: { expanded: ExpandedRoutine }) {
           )}
         </g>
       ))}
-      <text className="probe-routine-sketch-caption" x={4} y={size - 5}>
-        XY, start at 0; numbers are preview steps
-      </text>
+      <text className="probe-routine-sketch-caption" x={4} y={size - 5}>{probeText('probeRoutinePreview10')}</text>
     </svg>
   )
 }
@@ -137,28 +141,23 @@ function PathSketch({ expanded }: { expanded: ExpandedRoutine }) {
 // --- the component ------------------------------------------------------------------
 
 export function ProbeRoutinePreview({ state, stale, units, routineName, run = null }: ProbeRoutinePreviewProps) {
+  useText('probing-screens')
   return (
     <section className="probe-routine-preview" data-testid="probe-routine-preview" data-state={state.kind}>
       <div className="control-probe-zone-head">
-        <strong>
-          Preview
-          <HelpLink topic="probe-routines" anchor="check-preview" testId="probe-routine-preview-help" />
+        <strong>{probeText('probeRoutinePreview12')}<HelpLink topic="probe-routines" anchor="check-preview" testId="probe-routine-preview-help" />
         </strong>
         <span>
           {state.kind === 'ok'
-            ? `Real machine numbers for "${routineName}" with the inputs and position above. Nothing moves from here.`
-            : 'Press Check to place the routine on this machine before anything else happens.'}
+            ? probeText('probeRoutinePreview13', { value1: String(routineName) })
+            : probeText('probeRoutinePreview14')}
         </span>
       </div>
       {stale && state.kind !== 'idle' && (
-        <div className="probe-routine-stale" data-testid="probe-routine-preview-stale">
-          The routine or its inputs changed since this preview - press Check again.
-        </div>
+        <div className="probe-routine-stale" data-testid="probe-routine-preview-stale">{probeText('probeRoutinePreview16')}</div>
       )}
       {state.kind === 'idle' && (
-        <div className="control-probe-plan" data-testid="probe-routine-preview-idle">
-          No preview yet.
-        </div>
+        <div className="control-probe-plan" data-testid="probe-routine-preview-idle">{probeText('probeRoutinePreview18')}</div>
       )}
       {state.kind === 'blocked' && (
         <div className="control-probe-plan control-probe-status-error" data-testid="probe-routine-preview-blocked">
@@ -169,8 +168,8 @@ export function ProbeRoutinePreview({ state, stale, units, routineName, run = nu
         <div className="probe-routine-error-list" data-testid="probe-routine-preview-errors">
           <strong className="control-probe-status-error">
             {state.stage === 'static'
-              ? `${state.errors.length} problem${state.errors.length === 1 ? '' : 's'} in the routine itself - fix these first:`
-              : `${state.errors.length} problem${state.errors.length === 1 ? '' : 's'} placing this routine on the machine:`}
+              ? probeText('probeRoutinePreview19', { value1: String(state.errors.length), value2: String(state.errors.length === 1 ? '' : 's') })
+              : probeText('probeRoutinePreview20', { value1: String(state.errors.length), value2: String(state.errors.length === 1 ? '' : 's') })}
           </strong>
           <ul>
             {state.errors.map((error, i) => (
@@ -180,7 +179,7 @@ export function ProbeRoutinePreview({ state, stale, units, routineName, run = nu
                 <HelpLink
                   topic="probe-routines"
                   anchor={errorCodeAnchor(error.code)}
-                  title={`What ${error.code} means`}
+                  title={probeText('probeRoutinePreview21', { value1: String(error.code) })}
                   testId={`probe-routine-preview-error-help-${i}`}
                 />
               </li>
@@ -206,9 +205,7 @@ export function ProbeRoutinePreview({ state, stale, units, routineName, run = nu
             disabled
             title={state.kind === 'ok' ? RUN_WAITS : RUN_NEEDS_CHECK}
             aria-describedby="probe-routine-run-note"
-          >
-            Run
-          </button>
+          >{probeText('probeRoutinePreview23')}</button>
           <span id="probe-routine-run-note" className="control-offsets-meta" data-testid="probe-routine-run-note">
             {state.kind === 'ok' ? RUN_WAITS : RUN_NEEDS_CHECK}
           </span>
@@ -223,6 +220,7 @@ function stepIndent(step: ExpandedStep): number {
 }
 
 function ExpandedPreview({ expanded, units }: { expanded: ExpandedRoutine; units: ExpandedDisplayUnits }) {
+  useText('probing-screens')
   const steps = useMemo(() => listExpandedSteps(expanded.steps), [expanded])
   const motion = steps.filter((s) => s.kind === 'move' || s.kind === 'touch').length
   const touches = steps.filter((s) => s.kind === 'touch').length
@@ -232,22 +230,19 @@ function ExpandedPreview({ expanded, units }: { expanded: ExpandedRoutine; units
       <div className="control-probe-plan-title">
         <strong>{expanded.routineName}</strong>
         <span data-testid="probe-routine-preview-count">
-          {motion} motion step{motion === 1 ? '' : 's'}, {touches} touch{touches === 1 ? '' : 'es'}
+          {probeText('probeRoutinePreview26', { value1: jsxTextValue(motion), value2: jsxTextValue(motion === 1 ? '' : 's'), value3: jsxTextValue(touches), value4: jsxTextValue(touches === 1 ? '' : 'es') })}
         </span>
       </div>
       <div className="probe-routine-preview-meta" data-testid="probe-routine-preview-meta">
-        <span>Start: {coordText(expanded.start, units)}</span>
-        <span>Ends at: {coordText(expanded.end, units)}</span>
+        <span>{probeText('probeRoutinePreview28', { value1: jsxTextValue(coordText(expanded.start, units)) })}</span>
+        <span>{probeText('probeRoutinePreview30', { value1: jsxTextValue(coordText(expanded.end, units)) })}</span>
         {inputs.length > 0 && (
-          <span>Inputs: {inputs.map(([k, v]) => `${k} = ${v}`).join(', ')}</span>
+          <span>{probeText('probeRoutinePreview32', { value1: jsxTextValue(inputs.map(([k, v]) => `${k} = ${v}`).join(', ')) })}</span>
         )}
-        <span>
-          Feeds: position {expanded.profile.positioningFeedMmMin}, search {expanded.profile.searchFeedMmMin},
-          final {expanded.profile.finalFeedMmMin} mm/min (profile values; a routine never raises them)
-        </span>
+        <span>{catalogChildren(probeText('probeRoutinePreview37', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: expanded.profile.positioningFeedMmMin, value2: expanded.profile.searchFeedMmMin, value3: expanded.profile.finalFeedMmMin })}</span>
       </div>
       <div className="probe-routine-preview-body">
-        <ol className="probe-routine-preview-steps" aria-label="Previewed steps">
+        <ol className="probe-routine-preview-steps" aria-label={probeText('probeRoutinePreview38')}>
           {steps.map((step) => (
             <li
               key={`${step.number}-${step.arms.join('.')}`}
@@ -265,7 +260,7 @@ function ExpandedPreview({ expanded, units }: { expanded: ExpandedRoutine; units
       </div>
       {expanded.proposals.length > 0 && (
         <div className="probe-routine-proposals" data-testid="probe-routine-preview-proposals">
-          <strong>When it finishes</strong>
+          <strong>{probeText('probeRoutinePreview40')}</strong>
           <ul>
             {expanded.proposals.map((p, i) => (
               <li key={i} data-testid="probe-routine-preview-proposal">{describeExpandedProposal(p)}</li>
@@ -273,8 +268,7 @@ function ExpandedPreview({ expanded, units }: { expanded: ExpandedRoutine; units
           </ul>
         </div>
       )}
-      <div className="probe-routine-hash" data-testid="probe-routine-preview-hash" title="Changes whenever the routine, its inputs, the start or the profile values change">
-        preview {expanded.hash.slice(0, 12)}
+      <div className="probe-routine-hash" data-testid="probe-routine-preview-hash" title={probeText('probeRoutinePreview41')}>{catalogChildren(probeText('probeRoutinePreview43', { value1: '\u0000value1\u0000' }), { value1: expanded.hash.slice(0, 12) })}
       </div>
     </div>
   )

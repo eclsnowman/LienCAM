@@ -2,6 +2,7 @@
 // readout. Presentational -- material list is a plain <select>, custom
 // density a NumericInput, matching BoxSizeDialog.tsx's field idiom.
 
+import { useText } from '../../../i18n'
 import { NumericInput } from '../../ui/NumericInput'
 import { BUILTIN_MATERIALS, CUSTOM_MATERIAL_ID } from './materialDensity'
 import type { MassProperties } from './massProperties'
@@ -25,6 +26,7 @@ export function MassPropertiesPanel({
   properties,
   busy,
 }: MassPropertiesPanelProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <div
       data-testid="mass-properties-panel"
@@ -41,8 +43,7 @@ export function MassPropertiesPanel({
     >
       {bodyId === null ? (
         <div style={{ color: 'var(--text-muted)' }} data-testid="mass-properties-empty">
-          (pick a body)
-        </div>
+          {workbenchText('MassPropertiesPanel.pickABody')}</div>
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
@@ -64,31 +65,28 @@ export function MassPropertiesPanel({
                   {m.label}
                 </option>
               ))}
-              <option value={CUSTOM_MATERIAL_ID}>Custom...</option>
+              <option value={CUSTOM_MATERIAL_ID}>{workbenchText('MassPropertiesPanel.custom')}</option>
             </select>
           </div>
           {materialId === CUSTOM_MATERIAL_ID && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span style={{ color: 'var(--text-muted)' }}>density</span>
+              <span style={{ color: 'var(--text-muted)' }}>{workbenchText('MassPropertiesPanel.density')}</span>
               <span data-testid="mass-custom-density" style={{ flex: 1 }}>
                 <NumericInput value={customDensityGPerCm3} onChange={onCustomDensityChange} min={0.001} style={{ width: '100%' }} />
               </span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>g/cm^3</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('MassPropertiesPanel.gCm3')}</span>
             </label>
           )}
           {busy && (
             <div data-testid="mass-busy" style={{ color: 'var(--text-muted)' }}>
-              computing...
-            </div>
+              {workbenchText('MassPropertiesPanel.computing')}</div>
           )}
           {!busy && properties !== null && (
             <div data-testid="mass-readout">
-              <div data-testid="mass-value">Mass: {properties.massGrams.toFixed(3)} g</div>
-              <div data-testid="mass-volume-value">Volume: {properties.volumeMm3.toFixed(3)} mm^3</div>
+              <div data-testid="mass-value">{workbenchText('MassPropertiesPanel.massG', { value1: String((properties.massGrams.toFixed(3)) ?? '') })}</div>
+              <div data-testid="mass-volume-value">{workbenchText('MassPropertiesPanel.volumeMm3', { value1: String((properties.volumeMm3.toFixed(3)) ?? '') })}</div>
               <div data-testid="mass-com-value">
-                CoM: ({properties.centerOfMass.x.toFixed(3)}, {properties.centerOfMass.y.toFixed(3)}, {properties.centerOfMass.z.toFixed(3)}) mm
-                {properties.centerOfMassApprox ? ' (approx, mesh-derived)' : ''}
-              </div>
+                {workbenchText('MassPropertiesPanel.comMm', { value1: String((properties.centerOfMass.x.toFixed(3)) ?? ''), value2: String((properties.centerOfMass.y.toFixed(3)) ?? ''), value3: String((properties.centerOfMass.z.toFixed(3)) ?? ''), value4: String((properties.centerOfMassApprox ? workbenchText('MassPropertiesPanel.approxMeshDerived') : '')) })}</div>
             </div>
           )}
         </>

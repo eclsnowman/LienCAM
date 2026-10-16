@@ -15,6 +15,8 @@ Relief turns a picture into heights on a flat face of the part - Raise, Emboss o
 3. Open image: a PNG or JPG, 8- or 16-bit. Light is high. Auto adjusts the picture and fits it inside the face, centred, and the part shows the relief live.
 4. Set the Depth and pick Raise, Emboss or Engrave, then Apply Relief. The relief is one row in the design tree; Edit on it reopens the palette with the picture and every value.
 
+Relief is not available on an STL mesh body yet. Hover its disabled button for the reason; a flat face on a modelled solid can use Relief.
+
 ![Relief on the top face of a plate: the terrain picture raised in the view, the Relief palette docked beside the rail with its height map](images/model-relief/relief-palette.webp)
 
 <a id="model-relief-height"></a>

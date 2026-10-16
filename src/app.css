@@ -33,11 +33,22 @@
   font-weight: 600;
 }
 
-/* WO-2473: Linux Chromium needs 1647px for the full-label header (WO-2465
-   measured 1640px on Windows). Restore utility labels at 1650px, leaving
-   3px of font-metric margin, including the machine label shown from 1600px. */
-@media (max-width: 1649px) {
+/* WO-2831: with WO-2724's About button the full-label header needs 1727px on
+   Linux Chromium (WO-2830 measured; WO-2473 had 1647px before About). Restore
+   utility labels at 1730px, keeping the 3px font-metric margin, so About and
+   the machine status chip stay on screen from 1650px to 1729px. */
+@media (max-width: 1729px) {
   .toolbar-section-right .tb-btn span {
+    display: none;
+  }
+}
+
+/* WO-2831: About's icon also widens the compact header to 1476px on Linux
+   (1439px before it). Below 1480px the file commands go icon-only first, so a
+   1440x900 screen keeps its mode-tab labels (WO-2473) and the header still
+   fits. Tooltips retain every command name. */
+@media (max-width: 1479px) {
+  .toolbar-section-left .tb-btn span {
     display: none;
   }
 }

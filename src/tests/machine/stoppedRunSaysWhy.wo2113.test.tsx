@@ -129,11 +129,11 @@ describe('WO-2113 a stopped probe run says why, on the Probing screen', () => {
 
     expect(screen.getByTestId('probing-run-state').textContent).toBe('Stopped at step 3')
     const line = screen.getByTestId('probing-run-line')
-    expect(within(line).getByTestId('probing-run-why').textContent).toBe(why)
+    expect(within(line).getByTestId('probing-run-why').textContent).toBe('No probe contact.')
     // The same words as the console line.
     expect(lastConsoleError()).toBe(why)
     // The step card's own line - inside the step strip, not a banner.
-    expect(screen.getByTestId('probing-step-strip').contains(line)).toBe(true)
+    expect(screen.getByTestId('probing-step-sentence').contains(line)).toBe(true)
 
     // The picture: where the machine went (25 mm down from the start), past
     // the drawn top (z 0) - never resting on it.
@@ -165,7 +165,7 @@ describe('WO-2113 a stopped probe run says why, on the Probing screen', () => {
     await act(async () => { finishCycle!({ ok: false, message: why, touches: {}, topMachineZ: -20 }) })
 
     expect(screen.getByTestId('probing-run-state').textContent).toBe(`Stopped at step ${touchStep}`)
-    expect(screen.getByTestId('probing-run-why').textContent).toBe(why)
+    expect(screen.getByTestId('probing-run-why').textContent).toBe('No probe contact.')
     expect(lastConsoleError()).toBe(why)
     // It stepped out 16.5 mm X- from the start, then went 20 mm X+: drawn
     // 3.5 mm X+ of the start - past the face it never found, which is drawn
@@ -183,7 +183,7 @@ describe('WO-2113 a stopped probe run says why, on the Probing screen', () => {
     const why = 'Edge probe: stopped by Stop during Top touch (the search). No further probe or move was sent.'
     await act(async () => { finishCycle!({ ok: false, message: why, touches: {}, topMachineZ: null, stopped: true }) })
     expect(screen.getByTestId('probing-run-state').textContent).toBe('Stopped at step 3')
-    expect(screen.getByTestId('probing-run-why').textContent).toBe(why)
+    expect(screen.getByTestId('probing-run-why').textContent).toBe('Stopped by Stop.')
     // WO-2139: the runner says its own Stop/Reset line (info) - the screen
     // never prints it again, and never red: the operator's Stop is no error.
     expect(lastConsoleError()).toBeUndefined()
@@ -198,7 +198,7 @@ describe('WO-2113 a stopped probe run says why, on the Probing screen', () => {
     await stream(path(START, { z: START.z - 25 }))
     const why = 'Top touch stopped: no top found within 25 mm below where the probe started (searched machine Z -10 to -35).'
     await act(async () => { finishCycle!({ ok: false, message: why, touches: {}, topMachineZ: null }) })
-    expect(screen.getByTestId('probing-run-why').textContent).toBe(why)
+    expect(screen.getByTestId('probing-run-why').textContent).toBe('No probe contact.')
     fireEvent.click(screen.getByTestId('control-work-probe-routine-boss'))
     expect(screen.queryByTestId('probing-run-why')).toBeNull()
     expect(screen.queryByTestId('probing-run-state')).toBeNull()
@@ -210,7 +210,7 @@ describe('WO-2113 a stopped probe run says why, on the Probing screen', () => {
     const why = 'Moved and returned to the start before stopping.'
     await act(async () => { finishCycle!({ ok: false, message: why, touches: {}, topMachineZ: null }) })
     expect(screen.getByTestId('probing-run-state').textContent).toBe('Stopped at step 3')
-    expect(screen.getByTestId('probing-run-why').textContent).toBe(why)
+    expect(screen.getByTestId('probing-run-why').textContent).toBe('See console for the failure reason.')
   })
 
   it('a refused retry preserves a previous stopped run\'s picture; its reason replaces the old one (WO-2664)', async () => {
@@ -226,7 +226,7 @@ describe('WO-2113 a stopped probe run says why, on the Probing screen', () => {
     expect(screen.getByTestId('probe-picture').outerHTML).toBe(picture)
     // WO-2664 (machine seat 10-07 7:40 PM): never two reasons on the screen.
     expect(screen.getByTestId('probing-run-state').textContent).toBe('Did not start')
-    expect(screen.getByTestId('probing-run-why').textContent).toBe('The retry was refused before motion.')
+    expect(screen.getByTestId('probing-run-why').textContent).toBe('See console for the failure reason.')
     expect(lastConsoleError()).toBe('The retry was refused before motion.')
   })
 })

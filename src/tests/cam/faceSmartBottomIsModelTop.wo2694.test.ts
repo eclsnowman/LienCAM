@@ -326,7 +326,9 @@ const MAIN_DIGESTS: Record<string, string> = {
   // Diff is exactly those 5 plunge lines: src/tests/evidence/WO-2701/wo2694-adaptive-{main,branch}.nc.
   // WO-2713 repin: the Adaptive (no loops picked = All loops) now clears the part's
   // through hole (fresh profile, current placement) instead of six reach-trim dips; see adaptiveCutsOnASimplePart.wo2713.test.ts.
-  adaptive: '0f9794bec8cf65bd',
+  // WO-2838: landed WO-2787 (1f65317369 / b5f0240fc7) prices complete
+  // reposition + cleanup programs; only Adaptive changes on this project.
+  adaptive: 'c75618a02bb93fb1',
   // WO-2701 repin: contour's one re-entry plunge F1000 -> F300 (wo2694-contour-{main,branch}.nc).
   contour: '623c82d0e9c24b75',
   pocket: '4ef8fc8cca792099',

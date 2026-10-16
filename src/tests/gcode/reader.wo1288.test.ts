@@ -335,9 +335,9 @@ describe('WO-1288 named M-code items', () => {
     expect(result.items).toEqual(expect.arrayContaining([
       { kind: 'tool-change', line: 2, tool: 7 },
       { kind: 'spindle', line: 3, on: true, direction: 'cw', rpm: 12000 },
-      { kind: 'coolant', line: 4, flood: true, mist: false },
+      { kind: 'coolant', line: 4, flood: true, mist: false, standardCode: 8 },
       { kind: 'pause', line: 5, optional: false },
-      { kind: 'coolant', line: 6, flood: false, mist: false },
+      { kind: 'coolant', line: 6, flood: false, mist: false, standardCode: 9 },
       { kind: 'program-end', line: 8, code: 'M30' },
     ]))
     refused('G21\nM10\nM30', /^M10 is not in the UCCNC G-code word table/)

@@ -82,10 +82,10 @@ function stepOne(routine: string): string {
 describe('WO-2114: step 1 says where each routine starts', () => {
   it('Bore, Rect pocket and Inside corner: set Z0 on this part first - the probe descends from it', () => {
     render(React.createElement(ProbingPanel))
-    expect(stepOne('bore')).toBe('Set Z0 on this part first (G54): the probe descends from it. Then jog over the middle of the bore (by eye is fine), above the top.')
-    expect(stepOne('rectPocket')).toBe('Set Z0 on this part first (G54): the probe descends from it. Then jog over the middle of the pocket (by eye is fine), above the top.')
+    expect(stepOne('bore')).toBe('Set part Z0 (G54), then jog over the middle of the bore, above the top.')
+    expect(stepOne('rectPocket')).toBe('Set part Z0 (G54), then jog over the middle of the pocket, above the top.')
     const corner = stepOne('insideCorner')
-    expect(corner.startsWith('Set Z0 on this part first (G54): the probe descends from it. Then jog over the ')).toBe(true)
+    expect(corner.startsWith('Set part Z0 (G54), then jog over the ')).toBe(true)
     expect(corner).toContain('corner of the pocket')
   })
 
@@ -99,7 +99,7 @@ describe('WO-2114: step 1 says where each routine starts', () => {
   it('Z surface: asks only for a safe start height - the routine moves over point 1 itself', () => {
     render(React.createElement(ProbingPanel))
     const said = stepOne('zSurface')
-    expect(said).toBe('Load the program. Jog up to a safe start height, clear of the clamps and less than 50 mm above the top. The routine moves over point 1 itself.')
+    expect(said).toBe('Load the program; jog up clear of the clamps, less than 50 mm above the top.')
     expect(said).not.toContain('Jog over point 1')
     // WO-2179: the picture draws the zone's height as a dimension, where it
     // fits; the words are the sentence's.

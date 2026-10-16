@@ -23,6 +23,7 @@
 // panel the caller declares via `avoidRects` -- so an anchor near an edge
 // slides/flips the card instead of hanging it over the Design Tree.
 
+import { useText } from '../../../i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import { fmtDim, DIM_DECIMALS, type Units } from '../../../lib/ui/unitFormat'
@@ -228,6 +229,7 @@ export function AnchoredValueEntry({
   bounds,
   avoidRects,
 }: AnchoredValueEntryProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -529,8 +531,7 @@ export function AnchoredValueEntry({
       )}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
         <button type="button" data-testid={`${testId}-cancel`} className="modal-btn modal-btn-ghost" disabled={interactionDisabled} onClick={onCancel}>
-          Cancel
-        </button>
+          {workbenchText('AnchoredValueEntry.cancel')}</button>
         <button
           type="button"
           data-testid={`${testId}-apply`}
@@ -538,7 +539,7 @@ export function AnchoredValueEntry({
           disabled={!applyReady}
           onClick={() => void handleApply()}
         >
-          {busy ? 'Applying...' : 'Apply'}
+          {busy ? workbenchText('AnchoredValueEntry.applying') : workbenchText('AnchoredValueEntry.apply')}
         </button>
       </div>
     </div>

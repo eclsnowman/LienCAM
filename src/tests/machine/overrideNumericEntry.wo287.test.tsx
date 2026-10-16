@@ -94,6 +94,8 @@ function stubMachineController(): MachineController {
 
 vi.mock('../../lib/machine/machineSession', () => typedMock<typeof import('../../lib/machine/machineSession')>({
   getMachineController: () => stubMachineController(),
+  // WO-2669: the panel reads the session's Rapid note; this GRBL stub owns its own rapid override.
+  appRapidOverrideNote: () => null,
 }))
 
 /** One short token per override the panel sent, in order: 'feed:reset',

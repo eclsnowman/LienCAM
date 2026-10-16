@@ -26,6 +26,7 @@ import { dirname, resolve } from 'node:path'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { typedMock } from '../support/typedMock'
+import { withoutWo2665Wrappers, wo2665RecordedCard } from './support/wo2665Layout'
 
 type MeshInput = Parameters<typeof import('../../lib/machine/machineSession').runSurfaceMeshProbeCycle>[0]
 type MeshOnSample = NonNullable<Parameters<typeof import('../../lib/machine/machineSession').runSurfaceMeshProbeCycle>[3]>
@@ -404,6 +405,8 @@ describe('WO-2184 HARD LIMIT: every other routine renders as main does', () => {
     const main = JSON.parse(readFileSync(BASELINE, 'utf-8')) as Record<string, string>
     expect(Object.keys(now).length).toBeGreaterThan(100)
     expect(Object.keys(now)).toEqual(Object.keys(main))
-    for (const k of Object.keys(main)) expect(now[k], k).toBe(main[k])
+    // WO-2764: WO-2665's identity picture-scale wrapper, four shortened setup sentences and
+    // the run line moved into the sentence row are excused, nothing else.
+    for (const k of Object.keys(main)) expect(withoutWo2665Wrappers(now[k]), k).toBe(wo2665RecordedCard(main[k]))
   })
 })

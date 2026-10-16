@@ -26,8 +26,32 @@
   flex: 1 0 auto;
 }
 
+.pbn-screen .pbn-col-right {
+  /* Jog and the action cluster never scroll out of reach on short displays. */
+  overflow: hidden;
+}
+
 .pbn-screen .pbn-col-right > .pbn-disclosure-open {
+  flex: 1 1 0;
+  min-height: 38px;
+  display: flex;
+  flex-direction: column;
+}
+
+.pbn-disclosure-open > .disclosure-section {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pbn-disclosure-open .disclosure-header {
+  flex: 0 0 auto;
+}
+
+.pbn-disclosure-open .disclosure-body {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .pbn-screen .pbn-col-right > .pbn-controls {
@@ -248,6 +272,11 @@
   flex: 0 0 56px;
 }
 
+/* Preserve diagram space when a user expands the console on a short display. */
+@media (max-height: 1000px) {
+  .pbn-screen .pbn-band { flex-basis: 16px; }
+}
+
 .pbn-strip {
   flex: 0 0 auto;
   display: flex;
@@ -352,12 +381,10 @@
 }
 
 .pbn-run-line {
-  flex: 1 1 360px;
-  min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  margin-left: 12px;
+  flex-wrap: wrap;
+  gap: 2px 12px;
 }
 
 .pbn-run-state {
@@ -368,21 +395,9 @@
   white-space: nowrap;
 }
 
-/* WO-2113: why the run stopped, beside "Stopped at step N" (the console's
-   words; not a banner - COHESION-STANDARD s13). The line takes its own row
-   under the numbers, so the sentence reads across the card. */
-.pbn-run-line-why {
-  flex-basis: 100%;
-  order: 1;
-  margin-left: 0;
-  margin-top: 6px;
-}
-
 .pbn-run-why {
-  min-width: 0;
   font-size: 20px;
   line-height: 1.25;
-  color: var(--text-secondary);
 }
 
 /* ---- right column ---- */

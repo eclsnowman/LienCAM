@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { useEffect, useMemo } from 'react'
 import { useCamStore } from '../../../store'
 import { rowsForIds, type BrowserRow } from '../../../lib/sketch/browserModel'
@@ -20,6 +21,7 @@ import { AlertTriangle, Info } from 'lucide-react'
 // information). Removal is offered but optional.
 
 export function ConflictResolutionPanel({ onClose }: { onClose: () => void }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeSketch = useCamStore((s) => s.activeSketch)
   const liveStatus = useCamStore((s) => s.sketchSolveStatus)
   const selectedIds = useCamStore((s) => s.sketchSelectedIds)
@@ -78,8 +80,7 @@ export function ConflictResolutionPanel({ onClose }: { onClose: () => void }) {
           <div className="sketch-resolve-title sketch-resolve-title-conflict">
             <AlertTriangle size={11} />
             <span>
-              Conflicting set ({conflictRows.length}) - remove one to resolve
-            </span>
+              {workbenchText('ConflictResolution.conflictingSetRemoveOneToResolve', { length: String((conflictRows.length) ?? '') })}</span>
           </div>
           {conflictRows.map((row) => (
             <BrowserRowView
@@ -98,8 +99,7 @@ export function ConflictResolutionPanel({ onClose }: { onClose: () => void }) {
           <div className="sketch-resolve-title sketch-resolve-title-redundant">
             <Info size={11} />
             <span>
-              Redundant ({redundantRows.length}) - advisory, removal optional
-            </span>
+              {workbenchText('ConflictResolution.redundantAdvisoryRemovalOptional', { length: String((redundantRows.length) ?? '') })}</span>
           </div>
           {redundantRows.map((row) => (
             <BrowserRowView
@@ -114,8 +114,7 @@ export function ConflictResolutionPanel({ onClose }: { onClose: () => void }) {
         </>
       )}
       <button className="sketch-resolve-close" onClick={onClose}>
-        Close
-      </button>
+        {workbenchText('ConflictResolution.close')}</button>
     </div>
   )
 }

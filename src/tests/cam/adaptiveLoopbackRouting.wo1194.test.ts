@@ -110,7 +110,15 @@ describe('WO-1194 routed keep-down stays on the stock', () => {
     // Both: 0 mm air (WO-1194's metric) and 0 mm2 of standing stock under the full sweep.
     // Requests 6 and 14 kept their fed 4.27 mm ride (0.9 mm2 of wall band under it): it is
     // cut through at feed, not kept down, so it is not counted here.
-    expect(report.keepDownRides).toBe(20)
+    // WO-2752 re-pin (20 -> 16), measured per ride by the same probe with only
+    // src/lib/cam/adaptiveClearing2d swapped (src/tests/evidence/WO-2830/wo1194-ride-diff.json):
+    // engine at bce92ee126 gives 20 (byte-identical to wo1194-probe-fix2.json), WO-2752
+    // (02bbb81663, adaptive honours the milling direction, Operator 2026-10-11) gives 16, and
+    // WO-2787 moves none. WO-2752 refuses a dominant cut on the wrong flank, so every request's
+    // cut passes change and the links between them with it (requests 3 +1, 4 -1, 5 -1, 9 -1,
+    // 10 +1, 11 -1, 13 -2). The air gate is not the cause: airRejections is 4 on both engines
+    // and every surviving ride stands 0 mm in air.
+    expect(report.keepDownRides).toBe(16)
   }, 420_000)
 
   it('refuses an out-and-back apex into air, and passes a long ride that stays on stock', () => {

@@ -67,8 +67,8 @@ export const entries: HelpIndexEntry[] = [
     id: 'push-pull',
     title: 'Push/pull direct editing',
     category: 'modeling',
-    summary: 'Push/Pull grabs a flat face and moves it along its normal with a drag arrow or a typed distance - and the result is a feature row you can edit later.',
-    keywords: 'push pull direct edit face arrow drag distance normal pulls pushes offset preview commit enter feature row edit',
+    summary: 'Push/Pull moves a flat face along its normal, or offsets a cylindrical or conical hole face on a STEP body, with a drag arrow or a typed distance. The result is a feature row you can edit later.',
+    keywords: 'push pull direct edit face cylinder cone counterbore countersink arrow drag distance normal pulls pushes offset preview commit enter feature row edit',
     contextKeys: ['workspace:part'],
   },
   {
@@ -76,7 +76,7 @@ export const entries: HelpIndexEntry[] = [
     title: 'Defeature, resize hole and hole depth',
     category: 'modeling',
     summary: 'Defeature deletes recognized features - holes, pockets, bosses, fillets, chamfers, engravings - and heals the body; Resize hole changes a recognized hole\'s diameter, or its depth, right in the view.',
-    keywords: 'defeature delete faces heal recognized hole pocket boss fillet chamfer engraving group orange resize hole diameter depth through blind counterbore list current new',
+    keywords: 'defeature delete faces heal recognized hole pocket boss dome fillet chamfer engraving group orange resize hole move hole relocate xyz delta diameter depth through blind counterbore countersink list current new',
     contextKeys: ['modal:defeature-dialog', 'workspace:part'],
   },
   {

@@ -1,3 +1,7 @@
+import { liveCatalog } from './definition/catalogText'
+import { textFor } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // ProgramFitStatusLine - WO-414 batch 2 (Operator 2026-08-21, on the Table card:
 // "I have no idea how this is supposed to have value. I say remove it. The
 // operator just needs to know if it is homed and we handle that elsewhere.")
@@ -39,19 +43,19 @@ function sameFit(a: ProgramEnvelopeFit, b: ProgramEnvelopeFit): boolean {
   return a.state === b.state && JSON.stringify(a.offending) === JSON.stringify(b.offending)
 }
 
-export const FIT_WORD: Record<ProgramEnvelopeFit['state'], string> = {
-  inside: 'INSIDE',
-  partial: 'PARTLY OUTSIDE',
-  outside: 'OUTSIDE',
-}
+export const FIT_WORD: Record<ProgramEnvelopeFit['state'], string> = liveCatalog(() => ({
+  inside: controlText('ProgramFitStatusLine.text001'),
+  partial: controlText('ProgramFitStatusLine.text002'),
+  outside: controlText('ProgramFitStatusLine.text003'),
+}))
 
 /** The one sentence. Pure, so tests pin it without a render. Names every
  *  offending axis with the program's machine-coordinate extent beside the
  *  table's (WO-377's meaning, one line). */
 export function programFitSentence(fit: ProgramEnvelopeFit, wcs: string | null, units: Units = 'mm'): string {
   const length = (mm: number) => fmtMachineLength(mm, units)
-  const offsetName = wcs ?? 'the active work offset'
-  if (fit.state === 'inside') return `Program (after ${offsetName}) fits inside the table.`
+  const offsetName = wcs ?? controlText('ProgramFitStatusLine.text004')
+  if (fit.state === 'inside') return controlText('ProgramFitStatusLine.text005', { value1: String(offsetName) })
   const axes = fit.state === 'outside'
     ? fit.offending.filter((a) => a.state === 'outside')
     : fit.offending
@@ -59,8 +63,8 @@ export function programFitSentence(fit: ProgramEnvelopeFit, wcs: string | null, 
   const extents = fit.offending
     .map((a) => `${a.axis.toUpperCase()}: program ${length(a.programMin)}..${length(a.programMax)}, table ${length(a.machineMin)}..${length(a.machineMax)} ${unitLabel(units)}`)
     .join('; ')
-  const verb = fit.state === 'outside' ? 'lies entirely off the table on' : 'runs partly off the table on'
-  return `${FIT_WORD[fit.state]} - Program (after ${offsetName}) ${verb} ${where} (${extents}, machine coordinates).`
+  const verb = fit.state === 'outside' ? controlText('ProgramFitStatusLine.text006') : controlText('ProgramFitStatusLine.text007')
+  return controlText('ProgramFitStatusLine.text008', { value1: String(FIT_WORD[fit.state]), value2: String(offsetName), value3: String(verb), value4: String(where), value5: String(extents) })
 }
 
 /** Last verdict written to the console ('none' = nothing published yet). */

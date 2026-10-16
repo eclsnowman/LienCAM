@@ -31,4 +31,6 @@ Start with an empty project to follow the video, or open the finished project to
 
 The tree contains Lobed knob (Form), Shaft profile (sketch), Shaft (extrude), Bore (hole) and Rim fillet. On the finished project's Lobed knob row, choose Edit to reopen the cage shown in W7-1. Move a point and Finish Form; the later features rebuild on the new shape. Save your edited project under a new name if you want to keep the original tutorial.
 
+To turn a cage selection while editing, choose Rotate and use Selection centre with X, Y or Z, or pick a cage edge or an axis through a point. The [Form rotation controls](Form#form-workspace-edit-form) let you type an angle and Apply; the knob tutorial above does not require this step.
+
 Continue with [Form](Form), [Model](Model), [3D toolpaths](Toolpaths-3D) and [Post Process](Post-Process) when you are ready to machine a model.

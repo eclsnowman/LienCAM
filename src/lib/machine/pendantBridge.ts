@@ -1,6 +1,7 @@
 import { useMachineControl } from '../../store/machineControlStore'
 import { useUiPrefs } from '../../store/uiPrefs'
 import type { MachineStatus } from './controller'
+import { currentToolOf } from './currentTool'
 
 export type PendantBridgePhase = 'disabled' | 'connecting' | 'connected' | 'error'
 
@@ -206,8 +207,10 @@ function machineStatusPayload() {
       wcs: state.activeWcs,
       spindle: state.commandedAccessories?.spindle ?? null,
     },
-    tool: state.activeTool ?? 0,
-    toolInfo: { number: state.activeTool ?? 0, name: 'Active tool', diameterMm: null },
+    // WO-2878: the phone's tool readouts name the same tool as the Control
+    // screen's chip and TOOL glance - one selector (raw activeTool lags a run).
+    tool: currentToolOf(state) ?? 0,
+    toolInfo: { number: currentToolOf(state) ?? 0, name: 'Active tool', diameterMm: null },
     tlo: state.tlo ?? 0,
     pins: pinsString(state.inputs),
   }

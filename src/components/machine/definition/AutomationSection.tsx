@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { SectionHead } from './DefinitionFields'
 import { MacroLoopsTable } from './AutomationFields'
 import { SectionNoneSet } from './DefinitionFields'
@@ -14,17 +17,18 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 type AutomationSectionProps = Pick<MachineDefinitionPanelState, 'unsent'>
 
 export function AutomationSection({ unsent }: AutomationSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div data-testid="machine-def-panel-plugins-automation" style={{ marginTop: 12 }}>
                   <SectionHead
-                    title="Controller plugins and automation"
+                    title={controlText('AutomationSection.text001')}
                     summary="Automatic macros, digitizing output, laser engraving and RFH"
                     testId="machine-def-panel-head-plugins-automation"
                   />
 
                   <div data-testid="machine-def-panel-macro-loop-section">
                     <SectionHead
-                      title="Automatic macro loops"
+                      title={controlText('AutomationSection.text002')}
                       summary="48 controller slots; configured actions stay in view"
                       testId="machine-def-panel-head-macro-loops"
                     />
@@ -33,7 +37,7 @@ export function AutomationSection({ unsent }: AutomationSectionProps) {
 
                   <div data-testid="machine-def-panel-digitize" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Digitizing export"
+                      title={controlText('AutomationSection.text003')}
                       summary="Axes, output file and numeric format recorded by the plugin"
                       testId="machine-def-panel-head-digitize"
                     />
@@ -62,7 +66,7 @@ export function AutomationSection({ unsent }: AutomationSectionProps) {
                     </div>
                     <div style={{ marginTop: 5 }}>
                       <ProfileNotSent
-                        label="output file" section="Digitizesettings" settingKey="Filenametosave" settings={unsent}
+                        label={controlText('AutomationSection.text004')} section="Digitizesettings" settingKey="Filenametosave" settings={unsent}
                       />
                     </div>
                     <div
@@ -86,7 +90,7 @@ export function AutomationSection({ unsent }: AutomationSectionProps) {
                   }}>
                     <div data-testid="machine-def-panel-laser-engrave">
                       <SectionHead
-                        title="Laser engraving"
+                        title={controlText('AutomationSection.text005')}
                         summary="Workpiece, scan and feed settings"
                         testId="machine-def-panel-head-laser-engrave"
                       />
@@ -110,7 +114,7 @@ export function AutomationSection({ unsent }: AutomationSectionProps) {
 
                     <div data-testid="machine-def-panel-rfh">
                       <SectionHead
-                        title="RFH plugin"
+                        title={controlText('AutomationSection.text006')}
                         summary="Controller-recorded spindle and initial-move behavior"
                         testId="machine-def-panel-head-rfh"
                       />

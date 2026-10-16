@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { SectionHead } from './DefinitionFields'
 import { NotSentLegend } from './DefinitionFields'
 import { AXIS_NAMES } from '../../../types'
@@ -45,10 +48,11 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 type WiringSectionProps = Pick<MachineDefinitionPanelState, 'absentAxisRow' | 'draft' | 'notAcceptedCount' | 'patchIoPin' | 'pinProblem' | 'pinText' | 'polarityBoxFor' | 'unsent'> & { def: NonNullable<MachineDefinitionPanelState['def']> }
 
 export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin, pinProblem, pinText, polarityBoxFor, unsent }: WiringSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div data-testid="machine-def-group-wiring">
                 <SectionHead
-                  title="Wiring"
+                  title={controlText('WiringSection.text001')}
                   summary={`e-stop ${pinText(def.io.estop)} / probe ${pinText(def.io.probe)}`}
                   testId="machine-def-panel-head-wiring"
                 />
@@ -66,9 +70,9 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                   >
                     <thead>
                       <tr>
-                        <th>Axis</th>
-                        <th data-tooltip="axessettingscontrol<axis>.Currhilowportnumber / Currhilowpinnumber - the drive current hi/lo select line. Stored with this machine definition; nothing in this software drives it yet.">curr hi/lo</th>
-                        <th data-tooltip="Pin-polarity flags with no named pin of their own. Editable here and stored with the definition; an assigned pin's polarity stays on its pin triple.">profile-only polarity</th>
+                        <th>{controlText('WiringSection.text002')}</th>
+                        <th data-tooltip={controlText('WiringSection.text003')}>{controlText('WiringSection.text004')}</th>
+                        <th data-tooltip={controlText('WiringSection.text005')}>{controlText('WiringSection.text006')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -84,12 +88,12 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                             <td className="mform-axis-label">{name}</td>
                             <td>
                               <NotSent
-                                label="port" settings={unsent}
+                                label={controlText('WiringSection.text007')} settings={unsent}
                                 settingKey={`axessettingscontrol${name}.Currhilowportnumber`}
                               />
                               {' '}
                               <NotSent
-                                label="pin" settings={unsent}
+                                label={controlText('WiringSection.text008')} settings={unsent}
                                 settingKey={`axessettingscontrol${name}.Currhilowpinnumber`}
                               />
                             </td>
@@ -99,7 +103,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                                 fields={unsentAxisPolarityFields(name)}
                                 settings={unsent}
                                 testId={`machine-def-panel-axis-profile-polarity-${name}`}
-                                label="polarity"
+                                label={controlText('WiringSection.text009')}
                                 collapsed={!a.enabled}
                               />
                             </td>
@@ -112,7 +116,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                 <div style={{ marginTop: 12 }}>
                   <SectionHead
-                    title="Machine inputs"
+                    title={controlText('WiringSection.text010')}
                     summary={
                       `e-stop ${pinText(def.io.estop)}`
                       + ` / probe ${pinText(def.io.probe)}`
@@ -147,7 +151,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                         Probe 2 got a second negate editor that then overruled
                         the triple in the export (audit 2026-08-27). */}
                     <IoNotSent
-                      label="Probe 2 recorded active low"
+                      label={controlText('WiringSection.text011')}
                       settingKey="Probepin2negate"
                       settings={unsent}
                     />
@@ -164,7 +168,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                   <>
                   <div data-testid="machine-def-panel-general-debounce" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Input filtering"
+                      title={controlText('WiringSection.text012')}
                       summary="Debounce values for machine, home, torch and probe signals"
                       testId="machine-def-panel-general-head-debounce"
                     />
@@ -191,7 +195,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                   <div style={{ marginTop: 12 }} data-testid="machine-def-panel-io-setup">
                     <SectionHead
-                      title="Controller signals"
+                      title={controlText('WiringSection.text013')}
                       summary="Outputs, timing signals and the spindle index input"
                       testId="machine-def-panel-io-subhead-controller-signals"
                     />
@@ -218,17 +222,17 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 6 }}>
                       <IoNotSent
-                        label="Spindle index port"
+                        label={controlText('WiringSection.text014')}
                         settingKey="Indexportnumber"
                         settings={unsent}
                       />
                       <IoNotSent
-                        label="pin"
+                        label={controlText('WiringSection.text015')}
                         settingKey="Indexpinnumber"
                         settings={unsent}
                       />
                       <IoNotSent
-                        label="prescaler"
+                        label={controlText('WiringSection.text016')}
                         settingKey="Indexprescaler"
                         settings={unsent}
                       />
@@ -236,7 +240,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                     <div style={{ marginTop: 12 }}>
                       <SectionHead
-                        title="Torch height control"
+                        title={controlText('WiringSection.text017')}
                         summary="Arc feedback, torch corrections and anti-dive signals"
                         testId="machine-def-panel-io-subhead-thc"
                       />
@@ -276,9 +280,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 10 }}>
                         <div style={{ overflowX: 'auto' }}>
-                          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', marginBottom: 3 }}>
-                            Inputs from the torch controller
-                          </div>
+                          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', marginBottom: 3 }}>{controlText('WiringSection.text018')}</div>
                           <IoPinReadoutTable
                             testId="machine-def-panel-io-thc-inputs"
                             rows={IO_THC_INPUT_ROWS}
@@ -286,9 +288,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                           />
                         </div>
                         <div style={{ overflowX: 'auto' }}>
-                          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', marginBottom: 3 }}>
-                            Outputs to the torch controller
-                          </div>
+                          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', marginBottom: 3 }}>{controlText('WiringSection.text019')}</div>
                           <IoPinReadoutTable
                             testId="machine-def-panel-io-thc-outputs"
                             rows={IO_THC_OUTPUT_ROWS}
@@ -300,7 +300,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                     <div style={{ marginTop: 12 }}>
                       <SectionHead
-                        title="Handwheel and overrides"
+                        title={controlText('WiringSection.text020')}
                         summary="Manual pulse generator and analog override channels"
                         testId="machine-def-panel-io-subhead-handwheel"
                       />
@@ -336,20 +336,20 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                         >
                           <thead>
                             <tr>
-                              <th>Device</th>
-                              <th>A port</th>
-                              <th>A pin</th>
-                              <th>B port</th>
-                              <th>B pin</th>
-                              <th>prescaler</th>
-                              <th>filter</th>
-                              <th>speed multiplier</th>
-                              <th>attached to jog override</th>
+                              <th>{controlText('WiringSection.text021')}</th>
+                              <th>{controlText('WiringSection.text022')}</th>
+                              <th>{controlText('WiringSection.text023')}</th>
+                              <th>{controlText('WiringSection.text024')}</th>
+                              <th>{controlText('WiringSection.text025')}</th>
+                              <th>{controlText('WiringSection.text026')}</th>
+                              <th>{controlText('WiringSection.text027')}</th>
+                              <th>{controlText('WiringSection.text028')}</th>
+                              <th>{controlText('WiringSection.text029')}</th>
                             </tr>
                           </thead>
                           <tbody>
                             <tr>
-                              <td>Handwheel encoder</td>
+                              <td>{controlText('WiringSection.text030')}</td>
                               {[
                                 'MPG1portA', 'MPG1pinA', 'MPG1portB', 'MPG1pinB',
                                 'MPG1prescaler', 'MPG1filter', 'MPG1speedmultiplier', 'MPG1attachtoJRO',
@@ -373,7 +373,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                             ]))}
                           >
                             <thead>
-                              <tr><th>Override</th><th>channel</th><th>minimum %</th><th>maximum %</th></tr>
+                              <tr><th>{controlText('WiringSection.text031')}</th><th>{controlText('WiringSection.text032')}</th><th>{controlText('WiringSection.text033')}</th><th>{controlText('WiringSection.text034')}</th></tr>
                             </thead>
                             <tbody>
                               {IO_OVERRIDE_ROWS.map(([label, channel, min, max]) => (
@@ -404,7 +404,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                             ]))}
                           >
                             <thead>
-                              <tr><th>Analog signal</th><th>input variable</th><th>output variable</th></tr>
+                              <tr><th>{controlText('WiringSection.text035')}</th><th>{controlText('WiringSection.text036')}</th><th>{controlText('WiringSection.text037')}</th></tr>
                             </thead>
                             <tbody>
                               {IO_ANALOG_ROWS.map(([label, input, output]) => (
@@ -425,7 +425,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                       </div>
                       <div style={{ marginTop: 6 }}>
                         <IoNotSent
-                          label="Spindle PWM analog channel"
+                          label={controlText('WiringSection.text038')}
                           settingKey="SPPWMchannel"
                           settings={unsent}
                         />
@@ -434,7 +434,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                     <div style={{ marginTop: 12 }}>
                       <SectionHead
-                        title="Synchronized outputs"
+                        title={controlText('WiringSection.text039')}
                         summary="10 outputs that switch in step with controller motion"
                         testId="machine-def-panel-io-subhead-sync-outputs"
                       />
@@ -460,7 +460,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                           ]))}
                         >
                           <thead>
-                            <tr><th>Output</th><th>port</th><th>pin</th><th>active low</th></tr>
+                            <tr><th>{controlText('WiringSection.text040')}</th><th>{controlText('WiringSection.text041')}</th><th>{controlText('WiringSection.text042')}</th><th>{controlText('WiringSection.text043')}</th></tr>
                           </thead>
                           <tbody>
                             {IO_DIGITAL_SYNC_ROWS.map((row) => (
@@ -493,7 +493,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                   <div style={{ marginTop: 12 }} data-testid="machine-def-panel-aux-encoders">
                     <SectionHead
-                      title="Auxiliary encoders"
+                      title={controlText('WiringSection.text044')}
                       summary="6 encoder input pairs and their recorded scale"
                       testId="machine-def-panel-head-aux-encoders"
                     />
@@ -524,8 +524,8 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                       >
                         <thead>
                           <tr>
-                            <th>encoder</th><th>A port</th><th>A pin</th>
-                            <th>B port</th><th>B pin</th><th>counts per unit</th>
+                            <th>{controlText('WiringSection.text045')}</th><th>{controlText('WiringSection.text046')}</th><th>{controlText('WiringSection.text047')}</th>
+                            <th>{controlText('WiringSection.text048')}</th><th>{controlText('WiringSection.text049')}</th><th>{controlText('WiringSection.text050')}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -564,18 +564,14 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                   <div style={{ marginTop: 12 }} data-testid="machine-def-panel-triggers">
                     <SectionHead
-                      title="Input and output triggers"
+                      title={controlText('WiringSection.text051')}
                       summary="External signals that can command or reflect controller actions"
                       testId="machine-def-panel-head-triggers"
                     />
                     <div
                       data-testid="machine-def-panel-trigger-safety"
                       style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-                    >
-                      An input trigger can press a controller button without anybody touching the
-                      screen. Editing these boxes changes this machine's record only, and nothing in
-                      this section gates or delays a stop.
-                    </div>
+                    >{controlText('WiringSection.text052')}</div>
                     <div
                       style={{
                         display: 'grid',
@@ -595,7 +591,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
 
                   <div style={{ marginTop: 12 }} data-testid="machine-def-panel-fault-signals">
                     <SectionHead
-                      title="Drive and machine faults"
+                      title={controlText('WiringSection.text053')}
                       summary="15 fault input rows from this machine's profile"
                       testId="machine-def-panel-head-fault-signals"
                     />
@@ -612,7 +608,7 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                     />
                     <div style={{ marginBottom: 6 }}>
                       <NotSent
-                        label="Show a message box on warning"
+                        label={controlText('WiringSection.text054')}
                         settings={unsent}
                         settingKey="FaultSignals.MsgBoxOnWarning"
                       />
@@ -628,11 +624,11 @@ export function WiringSection({ absentAxisRow, def, notAcceptedCount, patchIoPin
                       >
                         <thead>
                           <tr>
-                            <th data-tooltip="Fault input number in the controller profile">#</th>
+                            <th data-tooltip={controlText('WiringSection.text055')}>#</th>
                             {FAULT_SIGNAL_FIELDS.map(([stem, label]) => (
                               <th
                                 key={stem}
-                                data-tooltip={`FaultSignals.${stem}# - ${label}, read from this machine's profile. This software cannot send it to the controller yet.`}
+                                data-tooltip={controlText('WiringSection.text056', { value1: String(stem), value2: String(label) })}
                               >
                                 {label}
                               </th>

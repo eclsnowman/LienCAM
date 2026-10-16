@@ -1,3 +1,7 @@
+import { jsxTextValue } from '../../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../../i18n'
+const probeText = textFor('probing-screens')
+
 import { type SettingSource } from './DefinitionFields'
 import { NotSent } from './DefinitionFields'
 import { SectionHead } from './DefinitionFields'
@@ -21,6 +25,7 @@ export function ProbingNotSent({ label, settingKey, settings }: {
   settingKey: string
   settings: SettingSource
 }) {
+  useText('probing-screens')
   return (
     <NotSent
       label={label}
@@ -31,81 +36,81 @@ export function ProbingNotSent({ label, settingKey, settings }: {
 }
 
 export const PROBING_ROUTINE_FIELDS = [
-  ['active mode', 'Mode'],
-  ['tool setter', 'Tool'],
-  ['single surface', 'Simple'],
-  ['angle', 'Angle'],
-  ['pocket', 'Pocket'],
-  ['outside edge', 'Outer'],
-  ['inside corner', 'InnerCorner'],
-  ['outside corner', 'OuterCorner'],
-  ['inside rectangle', 'RectInner'],
-  ['inside circle', 'CircleInner'],
-  ['outside rectangle', 'RectOuter'],
-  ['outside circle', 'CircleOuter'],
+  [probeText('probingSection1'), 'Mode'],
+  [probeText('probingSection2'), 'Tool'],
+  [probeText('probingSection3'), 'Simple'],
+  [probeText('probingSection4'), 'Angle'],
+  [probeText('probingSection5'), 'Pocket'],
+  [probeText('probingSection6'), 'Outer'],
+  [probeText('probingSection7'), 'InnerCorner'],
+  [probeText('probingSection9'), 'OuterCorner'],
+  [probeText('probingSection11'), 'RectInner'],
+  [probeText('probingSection13'), 'CircleInner'],
+  [probeText('probingSection15'), 'RectOuter'],
+  [probeText('probingSection17'), 'CircleOuter'],
 ] as const
 
 export const PROBING_MOTION_FIELDS = [
-  ['gage height', 'GageHeight'],
-  ['fine distance', 'FineDistance'],
-  ['retract', 'Retract'],
-  ['fast feed', 'FastFeed'],
-  ['fine feed', 'FineFeed'],
+  [probeText('probingSection19'), 'GageHeight'],
+  [probeText('probingSection21'), 'FineDistance'],
+  [probeText('probingSection23'), 'Retract'],
+  [probeText('probingSection24'), 'FastFeed'],
+  [probeText('probingSection26'), 'FineFeed'],
 ] as const
 
 export const PROBING_BEHAVIOR_FIELDS = [
-  ['zero probed axis', 'ZeroProbedAxis'],
-  ['zero all offsets', 'ZeroOnAllOffsets'],
-  ['single-probe mode', 'SingleProbeMode'],
-  ['retract enabled', 'EnableRetract'],
-  ['pause before probe', 'PauseBeforeProbe'],
-  ['manual-probe mode', 'ManualProbeMode'],
+  [probeText('probingSection28'), 'ZeroProbedAxis'],
+  [probeText('probingSection30'), 'ZeroOnAllOffsets'],
+  [probeText('probingSection32'), 'SingleProbeMode'],
+  [probeText('probingSection34'), 'EnableRetract'],
+  [probeText('probingSection36'), 'PauseBeforeProbe'],
+  [probeText('probingSection38'), 'ManualProbeMode'],
 ] as const
 
 export const PROBING_SAVED_MODE_FIELDS = [
-  ['tool setter', 'Set_ToolProbe'],
-  ['single surface', 'Set_SimpleProbe'],
-  ['angle', 'Set_AngleProbe'],
-  ['pocket', 'Set_PocketProbe'],
-  ['outside edge', 'Set_OuterProbe'],
-  ['inside corner', 'Set_InnerCornerProbe'],
-  ['outside corner', 'Set_OuterCornerProbe'],
-  ['inside rectangle', 'Set_RectInnerProbe'],
-  ['inside circle', 'Set_CircleInnerProbe'],
-  ['outside rectangle', 'Set_RectOuterProbe'],
-  ['outside circle', 'Set_CircleOuterProbe'],
+  [probeText('probingSection40'), 'Set_ToolProbe'],
+  [probeText('probingSection42'), 'Set_SimpleProbe'],
+  [probeText('probingSection44'), 'Set_AngleProbe'],
+  [probeText('probingSection46'), 'Set_PocketProbe'],
+  [probeText('probingSection48'), 'Set_OuterProbe'],
+  [probeText('probingSection50'), 'Set_InnerCornerProbe'],
+  [probeText('probingSection52'), 'Set_OuterCornerProbe'],
+  [probeText('probingSection54'), 'Set_RectInnerProbe'],
+  [probeText('probingSection56'), 'Set_CircleInnerProbe'],
+  [probeText('probingSection58'), 'Set_RectOuterProbe'],
+  [probeText('probingSection60'), 'Set_CircleOuterProbe'],
 ] as const
 
 export const PROBING_SAFE_POSITION_FIELDS = [
-  ['safe X', 'SafeX'],
-  ['safe X positive', 'SafeXPositive'],
-  ['safe Y', 'SafeY'],
-  ['safe Y positive', 'SafeYPositive'],
-  ['safe Z', 'SafeZ'],
-  ['safe Z positive', 'SafeZPositive'],
+  [probeText('probingSection62'), 'SafeX'],
+  [probeText('probingSection64'), 'SafeXPositive'],
+  [probeText('probingSection66'), 'SafeY'],
+  [probeText('probingSection68'), 'SafeYPositive'],
+  [probeText('probingSection70'), 'SafeZ'],
+  [probeText('probingSection72'), 'SafeZPositive'],
 ] as const
 
 export const PROBING_STORAGE_FIELDS = [
-  ['save mobile probe position', 'SaveMobileProbePos'],
-  ['save workpiece references', 'SaveWpReferences'],
-  ['override probe diameter', 'OverrideProbeDia'],
-  ['probe diameter override', 'ProbeDiameterOvr'],
-  ['limit traverse speed', 'LimitTraverseSpeed'],
-  ['traverse speed limit', 'TraverseSpeedLimit'],
-  ['separate settings per mode', 'SeparateSettingsPerMode'],
-  ['info window position', 'InfoWindowPos'],
+  [probeText('probingSection74'), 'SaveMobileProbePos'],
+  [probeText('probingSection76'), 'SaveWpReferences'],
+  [probeText('probingSection78'), 'OverrideProbeDia'],
+  [probeText('probingSection80'), 'ProbeDiameterOvr'],
+  [probeText('probingSection82'), 'LimitTraverseSpeed'],
+  [probeText('probingSection84'), 'TraverseSpeedLimit'],
+  [probeText('probingSection86'), 'SeparateSettingsPerMode'],
+  [probeText('probingSection88'), 'InfoWindowPos'],
 ] as const
 
 export const PROBING_BLOWER_FIELDS = [
-  ['command', 'Blower'],
-  ['port', 'BlowerPort'],
-  ['pin', 'BlowerPin'],
-  ['active low', 'BlowerActiveLow'],
+  [probeText('probingSection90'), 'Blower'],
+  [probeText('probingSection91'), 'BlowerPort'],
+  [probeText('probingSection93'), 'BlowerPin'],
+  [probeText('probingSection95'), 'BlowerActiveLow'],
 ] as const
 
 export const PROBING_POSITION_ROWS = [
-  ['Fixed', 'FixedProbePos'],
-  ['Mobile', 'MobileProbePos'],
+  [probeText('probingSection97'), 'FixedProbePos'],
+  [probeText('probingSection99'), 'MobileProbePos'],
 ] as const
 
 export const PROBING_AXIS_COUNT_ROWS = [1, 2] as const
@@ -120,12 +125,13 @@ export const PROBING_AXIS_COUNT_ROWS = [1, 2] as const
  * disagree on what "uncalibrated" or "stale" mean.
  */
 export function ProbeCalibrationStatus({ calibration }: { calibration: ProbeCalibration | undefined }) {
+  useText('probing-screens')
   const summary = describeProbeCalibration(calibration)
   return (
     <div data-testid="machine-def-panel-probing-calibration" style={{ marginTop: 12 }}>
       <SectionHead
-        title="Probe calibration"
-        summary="Tip diameter and runout - stated or measured, never assumed"
+        title={probeText('probingSection101')}
+        summary={probeText('probingSection102')}
         testId="machine-def-panel-head-probing-calibration"
       />
       <div
@@ -141,25 +147,18 @@ export function ProbeCalibrationStatus({ calibration }: { calibration: ProbeCali
         {summary.label}
       </div>
       {summary.tipDiameterMm != null && (
-        <div data-testid="machine-def-panel-probing-calibration-tip-diameter" style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-          Tip diameter: {summary.tipDiameterMm} mm (radius {summary.tipRadiusMm} mm), {summary.tipDiameterProvenance} {summary.tipDiameterDate}
-          {summary.tipDiameterStale ? ' - STALE' : ''}
+        <div data-testid="machine-def-panel-probing-calibration-tip-diameter" style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>{probeText('probingSection107', { value1: jsxTextValue(summary.tipDiameterMm), value2: jsxTextValue(summary.tipRadiusMm), value3: jsxTextValue(summary.tipDiameterProvenance), value4: jsxTextValue(summary.tipDiameterDate), value5: jsxTextValue(summary.tipDiameterStale ? probeText('probingSection106') : '') })}
         </div>
       )}
       {summary.runoutMm != null && (
-        <div data-testid="machine-def-panel-probing-calibration-runout" style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-          Runout: {summary.runoutMm} mm, {summary.runoutProvenance} {summary.runoutDate}
-          {summary.runoutStale ? ' - STALE' : ''}
+        <div data-testid="machine-def-panel-probing-calibration-runout" style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>{probeText('probingSection111', { value1: jsxTextValue(summary.runoutMm), value2: jsxTextValue(summary.runoutProvenance), value3: jsxTextValue(summary.runoutDate), value4: jsxTextValue(summary.runoutStale ? probeText('probingSection110') : '') })}
         </div>
       )}
       {summary.state === 'uncalibrated' && (
         <div
           data-testid="machine-def-panel-probing-calibration-warning"
           style={{ fontSize: 'var(--font-size-sm)', color: 'var(--warning)', marginTop: 4 }}
-        >
-          No tip diameter has been stated or measured for this probe. Bore, boss and corner results carry
-          no tip radius compensation until one is recorded.
-        </div>
+        >{probeText('probingSection113')}</div>
       )}
     </div>
   )
@@ -173,33 +172,31 @@ type ProbingSectionProps = Pick<MachineDefinitionPanelState, 'unsent'> & {
 }
 
 export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps) {
+  useText('probing-screens')
   return (
     <><div data-testid="machine-def-group-probing" style={{ marginTop: 12 }}>
                   <SectionHead
-                    title="Controller probing"
-                    summary="Probe-screen modes, motion, recipes, safe positions and stored locations"
+                    title={probeText('probingSection114')}
+                    summary={probeText('probingSection115')}
                     testId="machine-def-panel-head-probing"
                   />
                   <ProbeCalibrationStatus calibration={probeCalibration} />
                   <div
                     data-testid="machine-def-panel-probing-boundary"
                     style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-                  >
-                    These are this controller profile's probe-screen values. LienCAM's CAM probing
-                    defaults remain the separate machine motion record used by probe routines.
-                  </div>
+                  >{probeText('probingSection117')}</div>
 
                   <div data-testid="machine-def-panel-probing-routines">
                     <SectionHead
-                      title="Modes and geometry"
-                      summary="The active probe mode and each mode's saved geometry"
+                      title={probeText('probingSection118')}
+                      summary={probeText('probingSection119')}
                       testId="machine-def-panel-probing-head-routines"
                     />
                     <SectionNoneSet
                       testId="machine-def-panel-probing-routines-none"
                       settings={unsent}
                       keys={sectionKeys(PROBING_ROUTINE_FIELDS, 'Probing')}
-                      noun="probe mode settings"
+                      noun={probeText('probingSection120')}
                     />
                     <div
                       style={{
@@ -218,8 +215,8 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
 
                   <div data-testid="machine-def-panel-probing-cycle" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Touch cycle"
-                      summary="Controller feeds, distances, zeroing and contact counting"
+                      title={probeText('probingSection121')}
+                      summary={probeText('probingSection122')}
                       testId="machine-def-panel-probing-head-cycle"
                     />
                     <SectionNoneSet
@@ -232,7 +229,7 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
                           ['Gage', 'Dia'].map((kind) => `Probing.Axis${axis}Count${kind}`)
                         )),
                       ]}
-                      noun="touch cycle settings"
+                      noun={probeText('probingSection123')}
                     />
                     <div
                       style={{
@@ -259,7 +256,7 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
                           ['Gage', 'Dia'].map((kind) => `Probing.Axis${axis}Count${kind}`)
                         )))}
                       >
-                        <thead><tr><th>Axis</th><th>count gage</th><th>count diameter</th></tr></thead>
+                        <thead><tr><th>{probeText('probingSection125')}</th><th>{probeText('probingSection127')}</th><th>{probeText('probingSection129')}</th></tr></thead>
                         <tbody>
                           {PROBING_AXIS_COUNT_ROWS.map((axis) => (
                             <tr
@@ -285,15 +282,15 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
 
                   <div data-testid="machine-def-panel-probing-recipes" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Saved mode recipes"
-                      summary="Controller-encoded settings retained verbatim for each probe mode"
+                      title={probeText('probingSection130')}
+                      summary={probeText('probingSection131')}
                       testId="machine-def-panel-probing-head-recipes"
                     />
                     <SectionNoneSet
                       testId="machine-def-panel-probing-recipes-none"
                       settings={unsent}
                       keys={sectionKeys(PROBING_SAVED_MODE_FIELDS, 'Probing')}
-                      noun="saved recipes"
+                      noun={probeText('probingSection132')}
                     />
                     <div
                       style={{ display: 'grid', gap: 5 }}
@@ -309,8 +306,8 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
 
                   <div data-testid="machine-def-panel-probing-positions" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Safe and stored positions"
-                      summary="Safe coordinates, retained probe locations and controller display state"
+                      title={probeText('probingSection133')}
+                      summary={probeText('probingSection134')}
                       testId="machine-def-panel-probing-head-positions"
                     />
                     <SectionNoneSet
@@ -321,7 +318,7 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
                         ...sectionKeys(PROBING_STORAGE_FIELDS, 'Probing'),
                         ...PROBING_POSITION_ROWS.map(([, key]) => `Probing.${key}`),
                       ]}
-                      noun="position settings"
+                      noun={probeText('probingSection135')}
                     />
                     <div
                       style={{
@@ -346,7 +343,7 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
                         style={{ width: 'max-content', minWidth: '100%' }}
                         {...emptyMarked(unsent, PROBING_POSITION_ROWS.map(([, key]) => `Probing.${key}`))}
                       >
-                        <thead><tr><th>Probe location</th><th>controller record</th></tr></thead>
+                        <thead><tr><th>{probeText('probingSection137')}</th><th>{probeText('probingSection139')}</th></tr></thead>
                         <tbody>
                           {PROBING_POSITION_ROWS.map(([label, key]) => (
                             <tr
@@ -369,15 +366,15 @@ export function ProbingSection({ unsent, probeCalibration }: ProbingSectionProps
 
                   <div data-testid="machine-def-panel-probing-blower" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Probe blower"
-                      summary="Cleaning output and its pin assignment"
+                      title={probeText('probingSection140')}
+                      summary={probeText('probingSection141')}
                       testId="machine-def-panel-probing-head-blower"
                     />
                     <SectionNoneSet
                       testId="machine-def-panel-probing-blower-none"
                       settings={unsent}
                       keys={sectionKeys(PROBING_BLOWER_FIELDS, 'Probing')}
-                      noun="blower settings"
+                      noun={probeText('probingSection142')}
                     />
                     <div
                       style={{

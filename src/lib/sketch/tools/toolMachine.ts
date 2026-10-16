@@ -496,6 +496,7 @@ export function endChain(state: ToolState): ToolState {
  *  produced, applied by the store as ONE undo step (history is pushed
  *  once per commit, not per object). */
 export interface ToolCommit {
+  patterns?: import('../patterns').SketchPatternDefinition[]
   entities: SketchEntity[]
   constraints: SketchConstraint[]
   dimensions?: SketchDimension[]

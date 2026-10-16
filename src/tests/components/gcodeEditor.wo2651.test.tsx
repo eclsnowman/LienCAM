@@ -511,8 +511,10 @@ describe('WO-2651: editing at the Post Process screen', () => {
     fireEvent.click(screen.getByTestId('post-preview-edit'))
     const edited = withM0After(first, 5)
     fireEvent.change(editorText(), { target: { value: edited } })
-    if ((document.querySelector('.scope-master input') as HTMLInputElement).checked) fireEvent.click(document.querySelector('.scope-master input')!)
+    // WO-2862: the master box mirrors its setups, so unticking setup A alone
+    // leaves only setup B in scope.
     fireEvent.click(document.querySelectorAll('.scope-setup-cb')[0])
+    expect(Array.from(document.querySelectorAll('.scope-setup-cb')).map((cb) => (cb as HTMLInputElement).checked)).toEqual([false, true])
     fireEvent.click(screen.getByRole('button', { name: /Export/i }))
     await waitFor(() => expect(saved).toHaveLength(1))
     expect(saved[0].name).toMatch(/G55[.]nc$/)

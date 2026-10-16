@@ -15,9 +15,9 @@ export function resolveReferencePlanePick(
   bodyMeshes: readonly THREE.Mesh[],
 ): ReferencePlanePickResult {
   const values = [ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z]
-  if (!values.every(Number.isFinite)) return { kind: 'miss', reason: 'non-finite-ray' }
+  if (!values.every(Number.isFinite)) return { kind: 'miss', reason: "non-finite-ray" }
   const direction = new THREE.Vector3(ray.direction.x, ray.direction.y, ray.direction.z)
-  if (direction.lengthSq() <= 0) return { kind: 'miss', reason: 'zero-direction' }
+  if (direction.lengthSq() <= 0) return { kind: 'miss', reason: "zero-direction" }
 
   const raycaster = new THREE.Raycaster()
   raycaster.set(new THREE.Vector3(ray.origin.x, ray.origin.y, ray.origin.z), direction.normalize())
@@ -36,7 +36,7 @@ export function resolveReferencePlanePick(
   }
   hits.sort((a, b) => a.distance - b.distance || a.nodeId.localeCompare(b.nodeId))
   const nearest = hits[0]
-  if (nearest === undefined) return { kind: 'miss', reason: 'no-hit' }
+  if (nearest === undefined) return { kind: 'miss', reason: "no-hit" }
   if (nearestBody <= nearest.distance + TIE_EPSILON) return { kind: 'blocked' }
   const tied = hits.filter((hit) => Math.abs(hit.distance - nearest.distance) <= TIE_EPSILON)
   if (tied.length > 1) {

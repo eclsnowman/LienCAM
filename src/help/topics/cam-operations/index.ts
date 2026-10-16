@@ -69,9 +69,21 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         kind: 'tip',
         text: 'The Feedrate tab already reads the feeds and speeds saved with the tool in the Tool Library. The Passes tab of the 2D and hole operations also has Shank clearance under Tool assembly: the gap kept between the neck, shank or holder and the part or remaining stock.',
       },
+      {
+        kind: 'paragraph',
+        text: 'For a macro at a particular place in the program, choose Run macro under Machine actions. Pick a shown macro with a program-callable M-code from the active machine, then create the operation. Its Properties panel lets you change the Macro and Name. Drag its tree row to the required place, or switch the row off to omit it. Posting writes the selected M-code once at that place; Control runs the macro when it reaches that line. Choosing M6 also performs the tool change.',
+      },
+      { kind: 'image', slot: 'run-macro-properties' },
       { kind: 'image', slot: 'wizard' },
     ],
     images: [
+      {
+        slot: 'run-macro-properties',
+        file: 'run-macro-properties.webp',
+        alt: 'Run macro Properties with Check fixture (M2101) selected and its operation ordered between two cutting operations',
+        captureNotes: 'Accepted WO-2478 capture at 1c144cb00be1e2a3ef32aff5367280dd4e061263; visible controls unchanged. Reused historical capture, not a new run.',
+        status: 'done',
+      },
       {
         slot: 'wizard',
         file: 'wizard.webp',
@@ -391,8 +403,12 @@ export const topics: HelpTopic[] = localizeHelpTopics([
           'On the Geometry tab, pick the closed loops, or on a modeled body click Pick edges and pick a closed loop of edges. Set each loop to Outside or Inside (holes start as Inside), and choose the Milling direction.',
           'On the Passes tab, set the Chamfer width: the depth of the chamfer below the reference plane. Tip offset takes the tool deeper so it cuts higher up the flute, and moves the path out so the bevel stays the same size.',
           'The line under the fields shows the tool angle, the depth and the total Z drop.',
-          'On the Heights tab, click the Top Height or Bottom Height row open: Reference plane sets where the depth is measured from. On the Linking tab, choose Plunge or Ramp (linear).',
+          'On the Heights tab, click the Top Height or Bottom Height row open: Reference plane sets where the depth is measured from. On the Linking tab, Chamfer entry and exit starts at Authored Linking entry, which keeps your Plunge or Ramp (linear) choice.',
         ],
+      },
+      {
+        kind: 'paragraph',
+        text: 'Choose Clear-space approach and exit to descend away from the edge, feed into the cut, and lead out before retracting. The authored heights stay in use. The strategy checks the tool, shank, available holder and resolved fixtures against a conservative retained-material envelope from loaded stock and represented earlier cuts. Unrepresented removals still count as material. If it cannot prove the complete path, it reports an unsupported result instead of substituting an on-edge Plunge. Read the Console notices for what was checked: without a holder, holder clearance is not established, and the approach before the first programmed position is not established. You can also change Chamfer entry and exit in Properties.',
       },
       { kind: 'image', slot: 'result' },
     ],
@@ -580,7 +596,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     sections: [
       {
         kind: 'paragraph',
-        text: 'The Stay-down section of the Linking tab replaces retract-and-plunge moves with rides along a wall that is already cut. The tool rides only when both ends of the move are on the same wall and the ride is short enough; otherwise it lifts.',
+        text: 'The Stay-down section of the Linking tab replaces retract-and-plunge moves with rides along a wall that is already cut. Repositioning can follow cleared walls in the selected milling direction, including a route between islands. The planner compares eligible stay-down routes with a lift by estimated emitted machining time, using the cut, finish, plunge and traverse feeds and the project machine rapid rate. The comparison includes later wall cleanup affected by the choice; a shorter path is not always faster.',
       },
       {
         kind: 'steps',

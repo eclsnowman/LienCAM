@@ -1,4 +1,5 @@
-(LienCAM 0.36.0-alpha.1 - 03 Soft jaws - generic)
+(LienCAM 0.36.0-alpha.2 - 03 Soft jaws - generic)
+G90 G21
 ( Jaw 1 - G54 )
 G54
 ( Face 1 )

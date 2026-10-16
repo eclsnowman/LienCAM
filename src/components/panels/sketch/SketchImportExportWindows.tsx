@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
@@ -12,9 +13,10 @@ export function SketchImportExportWindows({ window, onClose, importControls, exp
   importControls: ReactNode
   exportControls: ReactNode
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
   if (!window) return null
-  const title = window === 'import' ? 'Import into sketch' : 'Export / Print sketch'
+  const title = window === 'import' ? workbenchText('SketchImportExportWindows.importIntoSketch') : workbenchText('SketchImportExportWindows.exportPrintSketch')
   // Portal out of the scrolling toolbox/rail so the scrim covers the viewport.
   return createPortal(
     <div className="modal-backdrop" data-ui78-sanctioned=""
@@ -30,7 +32,7 @@ export function SketchImportExportWindows({ window, onClose, importControls, exp
         ref={dialogFocusRef} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
-          <button type="button" className="modal-close-btn" aria-label="Close" onClick={onClose}><X size={14} /></button>
+          <button type="button" className="modal-close-btn" aria-label={workbenchText('SketchImportExportWindows.close')} onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body sketch-import-export-controls">
           {window === 'import' ? importControls : exportControls}

@@ -46,6 +46,7 @@ import type {
   MeshEditRecord,
 } from '../types';
 import { facetSoup } from './boundaryCap';
+import { removeWallBlend, wallBlendOf } from './wallBlendEdits';
 
 export const RESTORE_SHARP_EDGE_KIND = 'restore-sharp-edge';
 export const RESTORE_SHARP_EDGE_VERSION = 1;
@@ -81,7 +82,15 @@ export function restoreSharpEdge(
   facets: readonly number[],
   options: { retargetVertices?: boolean } = {},
 ): MeshEditApplyResult {
-  const prepared = prepareEdgeBlend(mesh, facets);
+  let prepared: PreparedEdgeBlend;
+  try {
+    prepared = prepareEdgeBlend(mesh, facets);
+  } catch (err) {
+    // WO-2798: a blend round a wall standing square to its face.
+    const wall = options.retargetVertices === false ? null : wallBlendOf(mesh, facets);
+    if (wall === null) throw err;
+    return removeWallBlend(mesh, wall);
+  }
   const removed = new Set(prepared.band);
   if (removed.size >= facetCount(mesh)) {
     throw new Error(
@@ -233,6 +242,13 @@ function sharpEdgeTargets(prepared: PreparedEdgeBlend): Map<number, Vec3> {
 
 // ------------------------------------------------------- the shared rebuild
 
+/** Where a vertex landed on a closed sharp edge: loop, arc length, loop length. */
+export interface EdgeStation {
+  loop: number;
+  s: number;
+  length: number;
+}
+
 export interface VertexMoveOptions {
   /** facets that go away entirely */
   removedFacets: ReadonlySet<number>;
@@ -246,6 +262,10 @@ export interface VertexMoveOptions {
    *  surviving facet edge that would run past one of them (a T-junction). */
   onEdge?: ReadonlySet<number>;
   edgeLine?: SharpEdgeLine;
+  /** WO-2798: the same repair when the restored edge is a CURVE (a blend
+   *  round a wall): welded vertex id -> which closed loop of the edge it
+   *  landed on, how far along it (mm) and that loop's length. */
+  edgeStations?: ReadonlyMap<number, EdgeStation>;
   /** facets that are MEANT to change shape - the blend's own, when the edit
    *  reshapes it instead of removing it. Every other facet has to stay on its
    *  own plane, and that is what makes "nothing else moved" a proof. */
@@ -294,7 +314,10 @@ export function rebuildWithMovedVertices(
     const pieces =
       options.onEdge && options.edgeLine
         ? splitAlongEdge(corners, ids, options.onEdge, options.moved, options.edgeLine)
-        : [{ corners, ids }];
+        : options.edgeStations
+          ? splitAlongCurve(corners, ids, options.edgeStations, options.moved, (k) =>
+            w.edges[w.facetEdges[f * 3 + k]].facets.some((other) => options.removedFacets.has(other)))
+          : [{ corners, ids }];
     for (const piece of pieces) {
       if (triangleArea(piece.corners) <= DEGENERATE_AREA_MM2) continue;
       triangles.push(piece.corners);
@@ -379,6 +402,66 @@ function splitAlongEdge(
     return out;
   }
   return whole;
+}
+
+/**
+ * WO-2798: `splitAlongEdge` for a restored edge that is a closed curve. Every
+ * facet edge that ran along the removed blend (`onSeam`) and whose two ends
+ * both landed on the curve gets every other landed corner that lies between
+ * them along it (the shorter way round), and the facet is fanned from a corner
+ * that is not on the curve. Both sides of the edge then share every corner on
+ * it, so the part closes. An edge across the face between two rail corners is
+ * not on the seam and is left alone.
+ */
+function splitAlongCurve(
+  corners: [Vec3, Vec3, Vec3],
+  ids: [number, number, number],
+  stations: ReadonlyMap<number, EdgeStation>,
+  moved: ReadonlyMap<number, Vec3>,
+  onSeam: (edge: number) => boolean,
+): Array<{ corners: [Vec3, Vec3, Vec3]; ids: [number, number, number] }> {
+  const ring: Array<{ at: Vec3; id: number }> = [];
+  let split = false;
+  for (let k = 0; k < 3; k++) {
+    const a = ids[k];
+    const b = ids[(k + 1) % 3];
+    ring.push({ at: corners[k], id: a });
+    const sa = stations.get(a);
+    const sb = stations.get(b);
+    if (!sa || !sb || sa.loop !== sb.loop || !onSeam(k)) continue;
+    let forward = sb.s - sa.s;
+    if (forward > sa.length / 2) forward -= sa.length;
+    if (forward < -sa.length / 2) forward += sa.length;
+    if (Math.abs(forward) <= 1e-9) continue;
+    const between: Array<{ along: number; id: number }> = [];
+    const seen = new Set<string>();
+    for (const [id, st] of stations) {
+      if (st.loop !== sa.loop || id === a || id === b) continue;
+      let along = st.s - sa.s;
+      if (forward > 0 && along < 0) along += sa.length;
+      if (forward < 0 && along > 0) along -= sa.length;
+      if (Math.abs(along) <= 1e-9 || Math.abs(along) >= Math.abs(forward) - 1e-9 || Math.sign(along) !== Math.sign(forward)) continue;
+      const p = moved.get(id) as Vec3;
+      const key = `${p[0]},${p[1]},${p[2]}`;
+      if (seen.has(key) || key === `${corners[k].join(',')}` || key === `${corners[(k + 1) % 3].join(',')}`) continue;
+      seen.add(key);
+      between.push({ along: Math.abs(along), id });
+    }
+    between.sort((x, y) => x.along - y.along);
+    for (const point of between) ring.push({ at: moved.get(point.id) as Vec3, id: point.id });
+    if (between.length > 0) split = true;
+  }
+  if (!split) return [{ corners, ids }];
+  let start = ring.findIndex((corner) => !stations.has(corner.id));
+  if (start < 0) start = 0;
+  const out: Array<{ corners: [Vec3, Vec3, Vec3]; ids: [number, number, number] }> = [];
+  for (let i = 1; i + 1 < ring.length; i++) {
+    const p = ring[start];
+    const q = ring[(start + i) % ring.length];
+    const r = ring[(start + i + 1) % ring.length];
+    out.push({ corners: [p.at, q.at, r.at], ids: [p.id, q.id, r.id] });
+  }
+  return out;
 }
 
 const stationOf = (p: Vec3, line: SharpEdgeLine): number =>

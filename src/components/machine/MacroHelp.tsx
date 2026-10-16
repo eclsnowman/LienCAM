@@ -1,3 +1,7 @@
+import { liveCatalog } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // MacroHelp - WO-1714: the macro editor's Help screen and examples library.
 //
 // Operator ruling 2026-09-19: "a help screen that had additional details, not just the
@@ -32,21 +36,21 @@ type ApiName = (typeof MACRO_API)[number]
 
 /** One line per API call - the sandbox's own doc comment
  *  (`lib/machine/macros/macroRuntime.ts`), not a second description of it. */
-export const API_HELP: Record<ApiName, string> = {
-  line: 'line(text) - send one typed line, the same door a typed MDI line uses',
-  lines: 'lines(a, b, ...) - send several lines the way a configured button does (consecutive moves staged as one program)',
-  goTo: 'goTo({x,y,z}, opts) - a G53 rapid; opts.machine:false moves in work coordinates, opts.zFirst:false moves X/Y first',
-  output: 'output(name, on) - switch a definition output on or off, by its own name',
-  wait: 'wait(ms) - pause',
-  hold: 'hold() - wait for CYCLE START',
-  status: 'status() - the live DRO / homed / E-STOP snapshot',
-  say: 'say(text) - print one console row',
-  clampPause: "clampPause() - from a program's M-code: park and open the clamp pause; its Continue runs the rest of the program",
-  toolChange: "toolChange(tool?) - from a program's M-code: the guided tool change an M6 runs (park, fit, probe, resume); the tool is the file's last T unless given. In a macro on M6 it just ends the macro: a program's M6 always runs its own tool change after the macro",
-  confirm: 'confirm(text) - pop up a question with OK / Cancel and wait for it; true for OK, false for Cancel',
-  choose: 'choose(text, [options]) - pop up one button per option and wait; the option picked, or null for Cancel. A decision tree is an if on the answer',
-  ask: 'ask(text, default?) - pop up a field (pre-filled with the default) and wait; what was typed - a number when it reads as one - or null for Cancel',
-}
+export const API_HELP: Record<ApiName, string> = liveCatalog(() => ({
+  line: controlText('MacroHelp.text001'),
+  lines: controlText('MacroHelp.text002'),
+  goTo: controlText('MacroHelp.text003'),
+  output: controlText('MacroHelp.text004'),
+  wait: controlText('MacroHelp.text005'),
+  hold: controlText('MacroHelp.text006'),
+  status: controlText('MacroHelp.text007'),
+  say: controlText('MacroHelp.text008'),
+  clampPause: controlText('MacroHelp.text009'),
+  toolChange: controlText('MacroHelp.text010'),
+  confirm: controlText('MacroHelp.text011'),
+  choose: controlText('MacroHelp.text012'),
+  ask: controlText('MacroHelp.text013'),
+}))
 
 /** A short, runnable line for each call - the same "one source" as
  *  API_HELP, so a new call cannot get a blurb here and no example. */
@@ -73,51 +77,31 @@ export function MacroHelp({
   onInsertExample: (body: string) => void
   onClose: () => void
 }) {
+  useText('control-screens-not-probing')
   return (
     <div className="macro-help-panel" data-testid="macro-help-panel" style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <CircleHelp size={14} />
-        <span className="control-actions-label" style={{ flex: '1 1 auto' }}>Macro help</span>
+        <span className="control-actions-label" style={{ flex: '1 1 auto' }}>{controlText('MacroHelp.text014')}</span>
         <button
           type="button"
           className="modal-close-btn"
           data-testid="macro-help-close"
-          data-tooltip="Close help"
-          aria-label="Close help"
+          data-tooltip={controlText('MacroHelp.text015')}
+          aria-label={controlText('MacroHelp.text016')}
           onClick={onClose}
         >
           <X size={14} />
         </button>
       </div>
 
-      <p style={{ margin: 0 }}>
-        A macro is a short JavaScript program saved on this machine. It moves and checks the machine one call at a
-        time, top to bottom, through the same doors every other control on this page uses - it never reaches the
-        machine any other way.
-      </p>
-      <p style={{ margin: 0 }}>
-        A macro runs two ways: click its button on the Macros panel, or bind it to an M-code and type (or post) that
-        word. A program keeps every built-in M-code's standard meaning (M3, M6, M7, ...) no matter what is bound to
-        it. Of those, only M6 also runs a bound macro on its own - first, as a prelude, with the programmed tool
-        change following however the macro ends. A macro bound to any other built-in code (M3, M7, ...) does not run
-        by itself from a program; it only runs from its button or a typed M-code. A macro bound to a code the
-        dialect gives no meaning of its own does run by itself, when a program's boundary reaches it.
-      </p>
-      <p style={{ margin: 0 }}>
-        hold() pauses the macro exactly where CYCLE START waits in a program - press CYCLE START to continue it, the
-        same button that resumes a held program. Stop, a feed hold then Stop, the E-STOP, a controller reset or a
-        lost connection all end a running macro at once: nothing further is sent, and the console says why.
-      </p>
-      <p style={{ margin: 0 }}>
-        confirm(), choose() and ask() pop up a question and pause the macro the same way hold() does - nothing is
-        sent and the jog keys stay off until the operator answers. Cancel (or Escape, or closing the question) is an
-        answer too: false from confirm(), null from choose() and ask(), and the macro decides what to do with it. The
-        question's own Stop macro button ends the run, the same as Stop on the Macros panel. From a program, a
-        question is asked the one way a program runs a macro at all: bind the macro to an M-code.
-      </p>
+      <p style={{ margin: 0 }}>{controlText('MacroHelp.text017')}</p>
+      <p style={{ margin: 0 }}>{controlText('MacroHelp.text018')}</p>
+      <p style={{ margin: 0 }}>{controlText('MacroHelp.text019')}</p>
+      <p style={{ margin: 0 }}>{controlText('MacroHelp.text020')}</p>
 
       <div>
-        <span className="control-actions-label">Macro API</span>
+        <span className="control-actions-label">{controlText('MacroHelp.text021')}</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           {MACRO_API.map((name) => (
             <div key={name} data-testid={`macro-help-api-${name}`}>
@@ -129,7 +113,7 @@ export function MacroHelp({
       </div>
 
       <div>
-        <span className="control-actions-label">Examples</span>
+        <span className="control-actions-label">{controlText('MacroHelp.text022')}</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           {MACRO_EXAMPLES.map((example) => (
             <div key={example.id} data-testid={`macro-help-example-${example.id}`} className="macro-editor-item" style={{ padding: 8 }}>
@@ -141,9 +125,7 @@ export function MacroHelp({
                 className="modal-btn modal-btn-ghost"
                 data-testid={`macro-help-example-${example.id}-insert`}
                 onClick={() => onInsertExample(example.body)}
-              >
-                Insert into this macro
-              </button>
+              >{controlText('MacroHelp.text023')}</button>
             </div>
           ))}
         </div>

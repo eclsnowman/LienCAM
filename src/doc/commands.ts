@@ -14,6 +14,7 @@
 
 import { markerInsertIndex, type DagNodeInput, type DagNodeSnapshot, type FeatureDag, type RollbackMarker } from './dag'
 import type { TreeFolderStore } from './folders'
+import { BODY_IDENTITY_PAYLOAD_CARRIERS } from './persist/versioning'
 
 export interface Command {
   readonly label: string
@@ -259,6 +260,42 @@ export class ReorderNodeCommand implements Command {
 }
 
 /**
+ * WO-2868 (sweep H2): a feature inserted at the marker that edits a body in
+ * place (a Push/Pull, Fillet, Hole... names it `ownerId`; a Boolean or a
+ * joining Extrude names it `targetFeatureId`) becomes that body's new tip. The
+ * rolled-back features below it that worked on the same body - a Fillet whose
+ * owner was the box - must then work on the new tip, or rolling forward finds
+ * the box already consumed and fails "owner has no live body". Each such
+ * consumer has its `consumes` edge and every body carrier
+ * (BODY_IDENTITY_PAYLOAD_CARRIERS, the same census the v3->v4 push/pull
+ * promotion rewires) that named the body moved onto the new feature. Only
+ * features after the insert point are touched; a consumer naming the body by
+ * no carrier (a face sketch) keeps its edge. Returns the prior state for undo.
+ */
+function rewireRolledBackConsumers(
+  dag: FeatureDag,
+  input: DagNodeInput,
+): Array<{ id: string; consumes: string[]; payload: Record<string, unknown> }> {
+  const payload = input.payload ?? {}
+  const edited = typeof payload.ownerId === 'string' ? payload.ownerId : typeof payload.targetFeatureId === 'string' ? payload.targetFeatureId : undefined
+  if (edited === undefined || !(input.consumes ?? []).includes(edited)) return []
+  const order = dag.featureOrder()
+  const after = order.slice(order.indexOf(input.id) + 1)
+  const prior: Array<{ id: string; consumes: string[]; payload: Record<string, unknown> }> = []
+  for (const id of after) {
+    const node = dag.getNode(id)
+    if (node === undefined || !node.consumes.includes(edited)) continue
+    const carriers = BODY_IDENTITY_PAYLOAD_CARRIERS.filter((carrier) => node.payload[carrier] === edited)
+    if (carriers.length === 0) continue
+    const nextPayload: Record<string, unknown> = { ...node.payload }
+    for (const carrier of carriers) nextPayload[carrier] = input.id
+    const consumes = node.consumes.map((c) => (c === edited ? input.id : c))
+    prior.push({ id, consumes: dag.setConsumes(id, [...new Set(consumes)]), payload: dag.setPayload(id, nextPayload) })
+  }
+  return prior
+}
+
+/**
  * WO UI-7 (BK-40 mission #3): inserts a brand-new node AT the rollback
  * marker's position in featureOrder() (not appended to the end), then moves
  * the marker to sit immediately after it -- the new feature becomes the
@@ -273,6 +310,7 @@ export class InsertAtMarkerCommand implements Command {
   readonly label = 'insertAtMarker'
   private readonly input: DagNodeInput
   private priorMarker: RollbackMarker | undefined
+  private rewired: Array<{ id: string; consumes: string[]; payload: Record<string, unknown> }> = []
 
   constructor(input: DagNodeInput) {
     this.input = input
@@ -281,6 +319,7 @@ export class InsertAtMarkerCommand implements Command {
   do(dag: FeatureDag): void {
     const index = markerInsertIndex(dag.featureOrder(), dag.getRollbackMarker())
     dag.insertNode(this.input, index)
+    this.rewired = rewireRolledBackConsumers(dag, this.input)
     this.priorMarker = dag.setRollbackMarker({ kind: 'after', nodeId: this.input.id })
   }
 
@@ -289,6 +328,11 @@ export class InsertAtMarkerCommand implements Command {
       throw new Error(`InsertAtMarkerCommand.undo: '${this.input.id}' was never inserted (do() has not run yet).`)
     }
     dag.setRollbackMarker(this.priorMarker)
+    for (const prior of [...this.rewired].reverse()) {
+      dag.setPayload(prior.id, prior.payload)
+      dag.setConsumes(prior.id, prior.consumes)
+    }
+    this.rewired = []
     dag.removeNode(this.input.id)
   }
 

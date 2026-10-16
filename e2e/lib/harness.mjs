@@ -128,6 +128,28 @@ export class Journey {
     }
   }
 
+  /**
+   * The next Open dialog the app opens is answered with `filePath` (a person
+   * picks that file; the app's own code reads it). Since WO-2725 (f9019502e5,
+   * 2026-10-10) the desktop Open project goes through the main process's
+   * native dialog, not a renderer file input. Returns a function that resolves
+   * once the app has asked.
+   */
+  async answerNextOpenDialog(filePath) {
+    await this.app.evaluate(({ dialog }, filePath) => {
+      globalThis.__journeyOpened = null
+      dialog.showOpenDialog = async () => {
+        globalThis.__journeyOpened = filePath
+        return { canceled: false, filePaths: [filePath] }
+      }
+    }, filePath)
+    return async () => {
+      const opened = await waitUntil(() => this.app.evaluate(() => globalThis.__journeyOpened), { timeout: 30_000, what: 'the app to open its Open dialog' })
+      this.log(`OPEN-DIALOG answered ${opened}`)
+      return opened
+    }
+  }
+
   async shot(name) {
     const file = path.join(this.outDir, `${name}.png`)
     await this.page.screenshot({ path: file })

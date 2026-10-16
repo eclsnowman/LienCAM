@@ -36,6 +36,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { BridgeCallMessage, BridgeTransportEvents } from '../../lib/machine/bridgeTransport'
 import { typedMock } from '../support/typedMock'
+import { removeWo2665Wrappers } from './support/wo2665Layout'
 
 /** What the bridge claims in its hello - the one variable under test. */
 let gcodeText = false
@@ -307,6 +308,8 @@ describe('WO-1046: a controller that DOES take text is untouched', () => {
     const start = unchanged.querySelector<HTMLElement>('[data-testid="control-probe-run-guided"]')
     // Only the grid span is excused; any other inline style still fails the byte comparison.
     if (start) { start.style.removeProperty('grid-column'); if (!start.getAttribute('style')?.trim()) start.removeAttribute('style') }
+    // WO-2764: WO-2665's center column and identity picture-scale wrappers are excused, nothing else.
+    removeWo2665Wrappers(unchanged)
     const rendered = unchanged.innerHTML
     // WO-2063: 25 + one - the Probing screen now shows Main's own Position
     // panel, whose active work offset chip carries the WO-1042 marker too.

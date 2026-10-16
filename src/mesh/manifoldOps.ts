@@ -341,6 +341,10 @@ export interface MeshBooleanAncestryResult {
    *  `BOOLEAN_TRIANGLE_ADDED` when it is a face the operation introduced
    *  (a wall cut by `right`, a cap, a new intersection facet). */
   leftTriangle: Int32Array;
+  /** Same contract for `right`. Consumers that rebuild an existing feature
+   *  from the cutter can carry its source ancestry through this map. New
+   *  primitive cutters still have no imported source identity. */
+  rightTriangle: Int32Array;
 }
 
 // --- WO-1910: what an operand must be before a boolean can mean anything ----
@@ -399,9 +403,39 @@ export function booleanOperandProblem(mesh: MeshBuffers, name: string): string |
 
 /** How many separate solids `mesh` is, counted on shared corners - an STL is
  *  a triangle soup, so it is welded by exact position first. */
-export function solidShellCount(mesh: MeshBuffers): number {
+export function solidShellCount(mesh: MeshBuffers, minimumVolumeMm3 = 0): number {
   if (mesh.indices.length === 0) return 0;
-  return measureMesh(weldedMesh(mesh)).componentCount;
+  const welded = weldedMesh(mesh);
+  // Existing Boolean consumers keep their exact topology contract. Move may
+  // discount float32 Boolean slivers below its existing volume-error budget.
+  if (!(minimumVolumeMm3 > 0)) return measureMesh(welded).componentCount;
+  const count = welded.indices.length / 3;
+  const parent = Array.from({ length: count }, (_, i) => i);
+  const root = (i: number): number => {
+    while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+    return i;
+  };
+  const edges = new Map<string, number>();
+  for (let f = 0; f < count; f++) for (let k = 0; k < 3; k++) {
+    const a = welded.indices[3 * f + k], b = welded.indices[3 * f + (k + 1) % 3];
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    const previous = edges.get(key);
+    if (previous === undefined) edges.set(key, f);
+    else parent[root(f)] = root(previous);
+  }
+  const volumes = new Map<number, { origin: Vec3; signed: number }>();
+  const point = (i: number): Vec3 => [welded.positions[3 * i], welded.positions[3 * i + 1], welded.positions[3 * i + 2]];
+  for (let f = 0; f < count; f++) {
+    const id = root(f), a = point(welded.indices[3 * f]);
+    let entry = volumes.get(id);
+    if (!entry) { entry = { origin: a, signed: 0 }; volumes.set(id, entry); }
+    // Component-local origin avoids subtracting enormous world-coordinate
+    // tetrahedral volumes when measuring a microscopic far-offset sliver.
+    const local = (p: Vec3) => p.map((v, i) => v - entry.origin[i]) as Vec3;
+    const [u, v, w] = [a, point(welded.indices[3 * f + 1]), point(welded.indices[3 * f + 2])].map(local);
+    entry.signed += (u[0] * (v[1] * w[2] - v[2] * w[1]) + u[1] * (v[2] * w[0] - v[0] * w[2]) + u[2] * (v[0] * w[1] - v[1] * w[0])) / 6;
+  }
+  return [...volumes.values()].filter(v => Math.abs(v.signed) > minimumVolumeMm3).length;
 }
 
 function withIds(
@@ -464,6 +498,7 @@ export function booleanMeshWithAncestry(
     const raw = combined.getMesh();
     const rawTriangles = raw.triVerts.length / 3;
     const fromLeft = new Int32Array(rawTriangles).fill(BOOLEAN_TRIANGLE_ADDED);
+    const fromRight = new Int32Array(rawTriangles).fill(BOOLEAN_TRIANGLE_ADDED);
     const { runIndex, runOriginalID, faceID } = raw;
     if (!runIndex || !runOriginalID || !faceID || faceID.length !== rawTriangles) {
       throw new Error(
@@ -471,13 +506,16 @@ export function booleanMeshWithAncestry(
       );
     }
     const leftTriangleCount = left.indices.length / 3;
+    const rightTriangleCount = right.indices.length / 3;
     for (let run = 0; run < runOriginalID.length; run++) {
-      if (runOriginalID[run] !== a.id) continue;
+      const from = runOriginalID[run] === a.id ? fromLeft : runOriginalID[run] === b.id ? fromRight : null;
+      if (from === null) continue;
+      const triangleCount = from === fromLeft ? leftTriangleCount : rightTriangleCount;
       const first = runIndex[run] / 3;
       const last = (run + 1 < runIndex.length ? runIndex[run + 1] : raw.triVerts.length) / 3;
       for (let tri = first; tri < last && tri < rawTriangles; tri++) {
         const source = faceID[tri];
-        if (source < leftTriangleCount) fromLeft[tri] = source;
+        if (source < triangleCount) from[tri] = source;
       }
     }
 
@@ -491,8 +529,12 @@ export function booleanMeshWithAncestry(
     }
     const canonical = canonicalMeshWithOrder({ positions, indices: new Uint32Array(raw.triVerts) });
     const leftTriangle = new Int32Array(canonical.order.length);
-    for (let tri = 0; tri < canonical.order.length; tri++) leftTriangle[tri] = fromLeft[canonical.order[tri]];
-    return { result: operationResult(canonical.mesh), leftTriangle };
+    const rightTriangle = new Int32Array(canonical.order.length);
+    for (let tri = 0; tri < canonical.order.length; tri++) {
+      leftTriangle[tri] = fromLeft[canonical.order[tri]];
+      rightTriangle[tri] = fromRight[canonical.order[tri]];
+    }
+    return { result: operationResult(canonical.mesh), leftTriangle, rightTriangle };
   } finally {
     releaseAllTracked();
   }

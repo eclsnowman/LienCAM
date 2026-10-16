@@ -1,3 +1,7 @@
+import { catalogChildren } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { X } from 'lucide-react'
 import {
   AXIS_CURRENT_HI_LOW_PROFILE_FIELDS,
@@ -54,28 +58,26 @@ export function AxisDrawer({
   axis, a, h, onClose, patchAxis, patchAxisPin, patchHoming, defineHoming, pinProblem, polarityBoxFor,
   grblPolarityFor, grblHoming, controller, settings,
 }: AxisDrawerProps) {
+  useText('control-screens-not-probing')
   return (
     <div
       className="machine-def-axis-drawer"
       data-testid={`machine-def-axis-drawer-${axis}`}
       role="dialog"
-      aria-label={`${axis} pins and more`}
+      aria-label={controlText('AxisDrawer.text001', { value1: String(axis) })}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <strong style={{ fontSize: 'var(--font-size-sm)' }}>{axis} - pins and more</strong>
+        <strong style={{ fontSize: 'var(--font-size-sm)' }}>{catalogChildren(controlText('AxisDrawer.text002', { value1: '\u0000value1\u0000' }), { value1: axis })}</strong>
         <button
           type="button"
           className="control-chip-btn"
           data-testid={`machine-def-axis-drawer-close-${axis}`}
           onClick={onClose}
         >
-          <X size={12} /> Close
-        </button>
+          <X size={12} />{controlText('AxisDrawer.text003')}</button>
       </div>
 
-      <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>
-        Every pin is port, pin and negate - read straight off the wiring diagram.
-      </div>
+      <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>{controlText('AxisDrawer.text004')}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
         {PIN_FIELDS.map(([label, field]) => {
           const controllerPolarity = grblPolarityFor(axis, field)
@@ -105,10 +107,8 @@ export function AxisDrawer({
         >
           <strong
             style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500 }}
-            data-tooltip={`${axis} drive current hi/low output - port, pin and active polarity`}
-          >
-            Current hi/low
-          </strong>
+            data-tooltip={controlText('AxisDrawer.text005', { value1: String(axis) })}
+          >{controlText('AxisDrawer.text006')}</strong>
           <AxisProfileReadouts
             axis={axis}
             fields={axisCatalogueFields(axis, AXIS_CURRENT_HI_LOW_PROFILE_FIELDS)}
@@ -130,12 +130,12 @@ export function AxisDrawer({
           {!controllerZeroIsHomeSwitch(controller) && (
             <label
               data-wired=""
-              data-tooltip={`${axis} homing value - the machine coordinate set at the switch`}
+              data-tooltip={controlText('AxisDrawer.text007', { value1: String(axis) })}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--font-size-sm)' }}
             >
-              <span>Home value</span>
+              <span>{controlText('AxisDrawer.text008')}</span>
               <NumericInput
-                step={1} value={h.homingValue} ariaLabel={`${axis} homing value`}
+                step={1} value={h.homingValue} ariaLabel={controlText('AxisDrawer.text009', { value1: String(axis) })}
                 className="mform-input mform-input-mono" style={{ flex: 'none', width: 78 }}
                 onChange={(v) => patchHoming(axis, { homingValue: v })}
               />
@@ -143,35 +143,31 @@ export function AxisDrawer({
           )}
           {grblHoming ? (
             <>
-              <span data-testid={`machine-def-grbl-homing-slow-${axis}`}>
-                Slow approach: {grblHoming.slowSpeed}
-              </span>
-              <span data-testid={`machine-def-grbl-homing-backoff-${axis}`}>
-                Back off: {grblHoming.backOff}
-              </span>
+              <span data-testid={`machine-def-grbl-homing-slow-${axis}`}>{catalogChildren(controlText('AxisDrawer.text010', { value1: '\u0000value1\u0000' }), { value1: grblHoming.slowSpeed })}</span>
+              <span data-testid={`machine-def-grbl-homing-backoff-${axis}`}>{catalogChildren(controlText('AxisDrawer.text011', { value1: '\u0000value1\u0000' }), { value1: grblHoming.backOff })}</span>
             </>
           ) : (
             <>
               <label
                 data-wired=""
-                data-tooltip={`${axis} homing slow re-approach speed, units per minute`}
+                data-tooltip={controlText('AxisDrawer.text012', { value1: String(axis) })}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--font-size-sm)' }}
               >
-                <span>Slow approach</span>
+                <span>{controlText('AxisDrawer.text013')}</span>
                 <NumericInput
-                  min={0} step={10} value={h.slowSpeed} ariaLabel={`${axis} homing slow speed`}
+                  min={0} step={10} value={h.slowSpeed} ariaLabel={controlText('AxisDrawer.text014', { value1: String(axis) })}
                   className="mform-input mform-input-mono" style={{ flex: 'none', width: 78 }}
                   onChange={(v) => patchHoming(axis, { slowSpeed: v })}
                 />
               </label>
               <label
                 data-wired=""
-                data-tooltip={`${axis} how far the axis reverses off the switch when the cycle ends`}
+                data-tooltip={controlText('AxisDrawer.text015', { value1: String(axis) })}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--font-size-sm)' }}
               >
-                <span>Back off</span>
+                <span>{controlText('AxisDrawer.text016')}</span>
                 <NumericInput
-                  min={0} step={0.5} value={h.backOff} ariaLabel={`${axis} homing back off`}
+                  min={0} step={0.5} value={h.backOff} ariaLabel={controlText('AxisDrawer.text017', { value1: String(axis) })}
                   className="mform-input mform-input-mono" style={{ flex: 'none', width: 70 }}
                   onChange={(v) => patchHoming(axis, { backOff: v })}
                 />
@@ -180,60 +176,57 @@ export function AxisDrawer({
           )}
           <label
             data-wired=""
-            data-tooltip={`Zero ${axis} automatically when the homing cycle finishes`}
+            data-tooltip={controlText('AxisDrawer.text018', { value1: String(axis) })}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--font-size-sm)' }}
           >
             <input
               type="checkbox"
-              aria-label={`${axis} homing auto zero`}
+              aria-label={controlText('AxisDrawer.text019', { value1: String(axis) })}
               checked={h.autoZero}
               onChange={(e) => patchHoming(axis, { autoZero: e.target.checked })}
               style={{ margin: 0 }}
             />
-            <span>Zero after homing</span>
+            <span>{controlText('AxisDrawer.text020')}</span>
           </label>
         </div>
       ) : (
         <div
           data-testid={`machine-def-axis-drawer-no-homing-${axis}`}
           style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 10 }}
-        >
-          No homing block in this record.
-          <button
+        >{controlText('AxisDrawer.text021')}<button
             type="button"
             className="control-chip-btn"
             data-testid={`machine-def-axis-drawer-homing-define-${axis}`}
-            data-tooltip={`Create a homing block for ${axis} from the safe defaults, then correct it`}
+            data-tooltip={controlText('AxisDrawer.text022', { value1: String(axis) })}
             onClick={() => defineHoming(axis)}
             style={{ marginLeft: 8 }}
           >
-            <Plus size={12} /> Define {axis} homing
-          </button>
+            <Plus size={12} />{controlText('AxisDrawer.text023')}{axis}{controlText('AxisDrawer.text024')}</button>
         </div>
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 16px' }}>
         <label
           data-wired=""
-          data-tooltip={`Compensate ${axis} backlash - only if this machine's backlash has actually been measured`}
+          data-tooltip={controlText('AxisDrawer.text025', { value1: String(axis) })}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--font-size-sm)' }}
         >
           <input
             type="checkbox"
-            aria-label={`${axis} backlash enabled`}
+            aria-label={controlText('AxisDrawer.text026', { value1: String(axis) })}
             checked={a.backlash.enabled}
             onChange={(e) => patchAxis(axis, { backlash: { ...a.backlash, enabled: e.target.checked } })}
             style={{ margin: 0 }}
           />
-          <span>Backlash</span>
+          <span>{controlText('AxisDrawer.text027')}</span>
         </label>
         <DefNumber
-          label="distance" name={`${axis} backlash distance`} width={72}
+          label={controlText('AxisDrawer.text028')} name={`${axis} backlash distance`} width={72}
           value={a.backlash.distance} min={0} step={0.01}
           onChange={(v) => patchAxis(axis, { backlash: { ...a.backlash, distance: v } })}
         />
         <DefNumber
-          label="enable delay (ms)" name={`${axis} enable delay (milliseconds)`} width={66}
+          label={controlText('AxisDrawer.text029')} name={`${axis} enable delay (milliseconds)`} width={66}
           value={a.enableDelayMs} min={0} step={10}
           onChange={(v) => patchAxis(axis, { enableDelayMs: v })}
         />

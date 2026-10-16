@@ -797,7 +797,8 @@ describe("WO-1337: SampleMachine's fusion-liencnc-v2-sample.nc LOADS", () => {
 
     // THE NUMBER THE CORPUS ROW CARRIES.
     expect(result.program.moveCount).toBe(110_615)
-    expect(result.program.frames).toEqual(['G54', 'G54', 'G54', 'G54', 'G54'])
+    // WO-2764: the sixth G54 section is the M9 after the M2001 park macro (WO-2478, 2fe053181).
+    expect(result.program.frames).toEqual(['G54', 'G54', 'G54', 'G54', 'G54', 'G54'])
     expect(result.program.tools).toEqual([19])
 
     // LINE 31 - where it stopped for two rounds of two work orders - is an arc

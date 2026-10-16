@@ -65,6 +65,7 @@ import {
   type CylinderSurface,
   type SurfaceInspection,
 } from './surfaces';
+import { provePlateBosses } from './plateBosses';
 import { corridorObstructions, inspectCylinderEnds, type CylinderEnd } from './ends';
 
 interface Wall {
@@ -90,10 +91,10 @@ type EndContext =
   | { kind: 'cone'; cones: Cone[] }
   | { kind: 'unsupported'; reason: string };
 
-/** How many of a region's own dihedrals are tried as a cut before giving up.
- *  A chamfer seam or a band seam is the sharpest thing inside the region, so
- *  the first cut is almost always the one; three bounds the work on a freeform
- *  patch that will never split into anything provable. */
+/** How many actual partitions of a region are proved before giving up.
+ *  A threshold that leaves the region whole proposes no surface boundary and
+ *  does not spend a proof attempt. Three partitions bound surface fitting on
+ *  a freeform patch that will never split into anything provable. */
 const MAX_SPLIT_CUTS = 3;
 
 const ringKey = (ids: readonly number[]): string => [...ids].sort((a, b) => a - b).join(',');
@@ -163,7 +164,19 @@ export function recognizeMeshFeatures(
   // it at its own sharpest internal dihedral is tried ONLY there, so every
   // region that already proves keeps the facets, the fit and the fit error it
   // had before this order.
-  const regions = grown.flatMap((facets) => shallowTransitionSplit(facets) ?? [facets]);
+  // Proved splits may recover tiny seam fragments excluded by normal-angle
+  // growing. Claim them once, before publishing region ownership; never leave
+  // a recovered facet simultaneously in its old singleton and its new wall.
+  const splitClaims = new Set<number>();
+  const splitRegions = new Map<number, number[][]>();
+  for (const index of grown.map((_,i)=>i).sort((a,b)=>grown[b].length-grown[a].length)) {
+    const facets = grown[index].filter(f=>!splitClaims.has(f));
+    const split = shallowTransitionSplit(facets);
+    if (!split) continue;
+    splitRegions.set(index,split);
+    for (const part of split) for (const f of part) splitClaims.add(f);
+  }
+  const regions = grown.flatMap((facets,i) => splitRegions.get(i) ?? [facets.filter(f=>!splitClaims.has(f))]).filter(part=>part.length);
   const regionOf = new Int32Array(w.facetCount).fill(-1);
   regions.forEach((group, i) => group.forEach((f) => (regionOf[f] = i)));
 
@@ -285,6 +298,19 @@ export function recognizeMeshFeatures(
     return proof.status === 'cone' && coneOpensToFace(proof.cone) ? proof.cone : undefined;
   }
 
+  /** WO-2804: skinny seam triangles can put many high dihedral thresholds
+   * before the first actual partition. Both cone and cylinder/cone searches
+   * spend their bounded proof budget only on cuts that separate facets. */
+  function* candidatePartitions(facets: readonly number[]): Generator<number[][]> {
+    let attempts = 0;
+    for (const cut of internalSlopeCuts(w, facets)) {
+      const parts = splitRegionAtSlope(w, facets, cut);
+      if (parts.length < 2) continue;
+      yield parts;
+      if (++attempts === MAX_SPLIT_CUTS) return;
+    }
+  }
+
   /**
    * WO-1889: the same region as a STACK of coaxial cones.
    *
@@ -298,9 +324,7 @@ export function recognizeMeshFeatures(
    * meet, there is no stack and the feature stays refused.
    */
   function bandedConeStack(band: readonly number[], wall: Wall, innerRingIds: readonly number[]): Cone[] | undefined {
-    for (const cut of internalSlopeCuts(w, band).slice(0, MAX_SPLIT_CUTS)) {
-      const parts = splitRegionAtSlope(w, band, cut);
-      if (parts.length < 2) continue;
+    for (const parts of candidatePartitions(band)) {
       const remaining = [...parts];
       const chain: Cone[] = [];
       let ring: readonly number[] = innerRingIds;
@@ -327,9 +351,9 @@ export function recognizeMeshFeatures(
    * This is the shallow chamfer of the WO: below `maxNormalSlope` off its bore
    * (26.6 degrees by default) the chamfer's facets are smoothly adjacent to the
    * wall's, so the pair arrives as one region and fits nothing. The cut is a
-   * dihedral the mesh itself contains, both halves must then prove - one a
-   * cylinder, the other a cone coaxial with it, on that cylinder's own axis and
-   * material side - and the halves go on to face every end, corridor and
+   * dihedral the mesh itself contains; every part must then prove as a
+   * cylinder or coaxial cone, on a cylinder's own axis and material side.
+   * All parts go on to face every end, corridor and
    * opening check unchanged. A region that proves as a cylinder already is
    * never cut.
    */
@@ -337,24 +361,67 @@ export function recognizeMeshFeatures(
     if (!splitMergedRegions || facets.length < 2 * minRegionFacets) return undefined;
     const direct = inferCylinder(w, facets, toleranceMm, fitSubdivisionLevels);
     if (direct.status === 'candidate' || direct.reason !== 'surface-mismatch') return undefined;
-    for (const cut of internalSlopeCuts(w, facets).slice(0, MAX_SPLIT_CUTS)) {
-      const parts = splitRegionAtSlope(w, facets, cut);
-      if (parts.length !== 2 || parts.some((part) => part.length < minRegionFacets)) continue;
-      for (const [wallPart, conePart] of [[parts[0], parts[1]], [parts[1], parts[0]]]) {
-        const cylinder = inferCylinder(w, wallPart, toleranceMm, fitSubdivisionLevels);
-        if (cylinder.status !== 'candidate') continue;
-        const cone = inferCoaxialCone(
-          w,
-          conePart,
-          cylinder.surface.origin,
-          cylinder.surface.axis,
-          cylinder.surface.materialSide,
-          toleranceMm,
-          fitSubdivisionLevels,
-        );
-        if (cone.status !== 'candidate') continue;
-        return parts;
+    const proveParts = (parts: number[][]): boolean => {
+      if (parts.length < 2 || parts.some(part => part.length < minRegionFacets)) return false;
+      const cylinders = parts.map(part => inferCylinder(w, part, toleranceMm, fitSubdivisionLevels));
+      return cylinders.some(cylinder => {
+        if (cylinder.status !== 'candidate') return false;
+        let hasCone = false;
+        const proven = parts.every((part, index) => {
+          const other = cylinders[index];
+          if (other.status === 'candidate') return other.surface.materialSide === cylinder.surface.materialSide &&
+            collinearAxes(cylinder.surface, other.surface, toleranceMm);
+          const cone = inferCoaxialCone(w, part, cylinder.surface.origin, cylinder.surface.axis,
+            cylinder.surface.materialSide, toleranceMm, fitSubdivisionLevels);
+          if (cone.status !== 'candidate') return false;
+          hasCone = true;
+          return true;
+        });
+        return proven && hasCone;
+      });
+    };
+    for (const parts of candidatePartitions(facets)) {
+      if (proveParts(parts)) return parts;
+      // An adaptive tessellator can use skinny triangles near a taper seam:
+      // total normal angles then vary around the ring. A proved partial
+      // cylinder supplies an AXIS HYPOTHESIS for another connected partition.
+      // Axial normal components separate cylinder/cone slopes independently
+      // of tangential tessellation angles. 0.01 proposes groups only; every
+      // facet in every group still has to prove its surface below, followed
+      // by the same closed-ring, material-side and corridor checks.
+      const seed = parts.map(part => inferCylinder(w, part, toleranceMm, fitSubdivisionLevels))
+        .find(fit => fit.status === 'candidate');
+      if (seed?.status !== 'candidate') continue;
+      const inside = new Set(facets);
+      const projection = (f: number) => dot(facetNormal(w, f), seed.surface.axis);
+      // Tiny float32 seam triangles can have a tangential normal jump and be
+      // stranded by region growing. Recover only adjacent tiny regions with
+      // the same axial component; the complete groups still face full proof.
+      const tiny = new Set(grown.filter(part=>part.length<minRegionFacets).flat().filter(f=>!splitClaims.has(f)));
+      let extended = true;
+      while (extended) {
+        extended = false;
+        for (const edge of w.edges) {
+          if (edge.facets.length !== 2) continue;
+          for (const [a,b] of [edge.facets,[edge.facets[1],edge.facets[0]]]) {
+            if (inside.has(a) && !inside.has(b) && tiny.has(b) && Math.abs(projection(a)-projection(b))<0.01) {
+              inside.add(b); extended = true;
+            }
+          }
+        }
       }
+      const links: number[][] = Array.from({length:w.facetCount},()=>[]);
+      for (const edge of w.edges) {
+        if (edge.facets.length !== 2) continue;
+        const [a,b] = edge.facets;
+        if (inside.has(a) && inside.has(b)) { links[a].push(b); links[b].push(a); }
+      }
+      // Tangential normal jumps do not describe a cylinder/cone transition.
+      // Use all manifold adjacency for this hypothesis, then prove each part.
+      const axialParts = partitionFacets(w.facetCount, f => inside.has(f), links,
+        Array.from({length:w.facetCount},()=>[]),
+        (anchor, candidate) => Math.abs(projection(anchor) - projection(candidate)) < 0.01);
+      if (proveParts(axialParts)) return axialParts;
     }
     return undefined;
   }
@@ -363,27 +430,22 @@ export function recognizeMeshFeatures(
   const features: RecognizedFeature[] = [];
   const consumed = new Set<number>();
 
-  // 3a. counterbores: two coaxial inward walls joined by one flat shoulder.
+  // WO-2804: a stepped hole is ONE connected void, not a pair of walls.
+  // Follow exact ring adjacency through every shoulder and coaxial cone. Do
+  // not group merely collinear holes: a disk floor ends this void, and a host
+  // face with several openings is not a shoulder connecting those openings.
   for (let i = 0; i < walls.length; i++) {
-    if (consumed.has(i)) continue;
-    if (walls[i].surface.materialSide !== 'inward') continue;
-    for (let side = 0 as 0 | 1; side <= 1; side = (side + 1) as 0 | 1) {
-      const context = contexts[i][side];
-      if (context.kind !== 'planar' || context.away) continue;
-      const partner = coaxialPartnerThroughPatch(i, context.patch);
-      if (partner === undefined || consumed.has(partner.wall)) continue;
-      const feature = buildComposite(
-        [i, partner.wall],
-        [],
-        patches[context.patch],
-        'counterbore',
-      );
-      if (!feature) continue;
-      consumed.add(i);
-      consumed.add(partner.wall);
-      features.push(feature);
-      break;
-    }
+    if (consumed.has(i) || walls[i].surface.materialSide !== 'inward') continue;
+    const stack = assembleHoleStack(i);
+    if (!stack) continue;
+    // Classification names the complete proved void; it never limits how
+    // many cones or shoulders that void may contain. Boss proof stays below.
+    const kind = stack.walls.length > 1 ? 'counterbore' : stack.floors > 0 ? 'blind-hole'
+      : stack.cones.length > 0 ? stack.coneOpenings === 2 ? 'chamfered-hole' : 'countersink' : 'through-hole';
+    const feature = buildComposite(stack.walls, stack.cones, stack.support, kind);
+    if (!feature) continue;
+    for (const wall of stack.walls) consumed.add(wall);
+    features.push(feature);
   }
 
   // 3b. chamfered / countersunk holes, then the plain ones.
@@ -478,6 +540,32 @@ export function recognizeMeshFeatures(
     consumed.add(i);
   }
 
+  // WO-2802: a boss may have a foot blend or a spherical cap. Prefer its
+  // complete connected surface over a partial cylinder-only recognition.
+  for (const boss of provePlateBosses(w, toleranceMm)) {
+    // Keep the foot as a separately pickable blend. Removal completes the
+    // selection before recording its witness, so that one boss edit still
+    // includes the entire foot while Fillet/Defeature can edit the foot alone.
+    const foot = new Set(boss.footFacets ?? []);
+    const sourceIds = toSource(boss.facets.filter((f) => !foot.has(f)));
+    if (!sourceIds.length) continue;
+    const ids = new Set(sourceIds);
+    // Keep established plain-cylinder bands when already proved. The plate
+    // proof fills a missing plain boss too (including after foot removal).
+    if (!boss.sphere && !foot.size && features.some((f) => f.kind === 'boss' && f.sourceFacetIds.every((id) => ids.has(id)))) continue;
+    for (let i = features.length - 1; i >= 0; i--) {
+      if (features[i].kind === 'boss' && features[i].sourceFacetIds.every((id) => ids.has(id))) features.splice(i, 1);
+    }
+    features.push({
+      id: `boss-${sourceIds[0]}`, kind: 'boss',
+      axis: { origin: boss.origin, direction: boss.normal },
+      diameterMm: 2 * boss.radiusMm, diametersMm: [2 * boss.radiusMm],
+      depthMm: boss.heightMm, maxDeviationMm: boss.maxDeviationMm,
+      bands: [], sourceFacetIds: sourceIds,
+      ...(boss.sphere ? { profile: 'spherical-cap' as const } : {}),
+    });
+  }
+
   features.sort((a, b) => (a.sourceFacetIds[0] ?? 0) - (b.sourceFacetIds[0] ?? 0));
   // A chamfer cone is tried as a cylinder first and honestly fails; once it
   // has been proved as part of a countersink, saying "could not prove this
@@ -528,19 +616,109 @@ export function recognizeMeshFeatures(
     return patch >= 0 && facets.every((f) => patchOf[f] === patch);
   }
 
-  /** The OTHER inward wall whose end ring is also a boundary loop of `patch`,
-   *  on the same axis line. Exactly one, or nothing. */
-  function coaxialPartnerThroughPatch(wall: number, patch: number): { wall: number; side: 0 | 1 } | undefined {
-    const keys = new Set(patchLoops[patch].map(ringKey));
-    const matches: Array<{ wall: number; side: 0 | 1 }> = [];
-    for (let j = 0; j < walls.length; j++) {
-      if (j === wall || walls[j].surface.materialSide !== 'inward') continue;
-      if (!collinearAxes(walls[wall].surface, walls[j].surface, toleranceMm)) continue;
-      for (const side of [0, 1] as const) {
-        if (keys.has(ringKey(walls[j].ends[side].vertexIds))) matches.push({ wall: j, side });
+  /** Assemble all ring-connected inward walls, with no wall/step-count limit.
+   * Each terminal must be a proved outside opening or a disk floor. Every
+   * shoulder is an annulus with exactly the two rings it actually connects.
+   * Return no partial profile when one transition cannot be proved. */
+  function assembleHoleStack(seedIndex: number): { walls: number[]; cones: Cone[]; support: number[]; floors: number; coneOpenings: number } | undefined {
+    const members = new Set<number>([seedIndex]);
+    const pending = [seedIndex];
+    const cones = new Map<string, Cone>();
+    const support = new Set<number>();
+    let openings = 0, floors = 0, coneOpenings = 0;
+    const partnerAtRing = (wall: number, ring: readonly number[]) => {
+      const key = ringKey(ring);
+      const matches = walls.flatMap((candidate, j) => {
+        if (j === wall || candidate.surface.materialSide !== 'inward' ||
+            !collinearAxes(walls[wall].surface, candidate.surface, toleranceMm)) return [];
+        return candidate.ends.filter(end => ringKey(end.vertexIds) === key).map(() => j);
+      });
+      return matches.length === 1 ? matches[0] : undefined;
+    };
+    const connect = (j: number) => {
+      if (consumed.has(j)) return false;
+      if (!members.has(j)) { members.add(j); pending.push(j); }
+      return true;
+    };
+    const traceEnd = (wallIndex: number, side: 0 | 1): boolean => {
+      const wall = walls[wallIndex];
+      let ring: readonly number[] = wall.ends[side].vertexIds;
+      let previous: readonly number[] = wall.facets;
+      const visited = new Set<number>();
+      const crossCone = (atRing: readonly number[], neighbours: readonly number[]): boolean => {
+        if (!neighbours.length) return false;
+        const region = regionOf[neighbours[0]];
+        if (region < 0 || visited.has(region) || !neighbours.every(f => regionOf[f] === region)) return false;
+        visited.add(region);
+        const band = regions[region];
+        const single = proveCone(band, wall, atRing);
+        let chain = single.status === 'cone' ? [single.cone]
+          : splitMergedRegions ? bandedConeStack(band, wall, atRing) : undefined;
+        // WO-2080's tight-budget small entry chamfer remains a whole-facet
+        // proof, restricted to a cone actually opening onto the host face.
+        if (!chain && single.status === 'no' && single.reason === 'insufficient-radius-change') {
+          const small = proveCone(band, wall, atRing, toleranceMm / 2);
+          if (small.status === 'cone' && coneOpensToFace(small.cone)) chain = [small.cone];
+        }
+        if (!chain) return false;
+        for (const cone of chain) cones.set(ringKey(cone.facets), cone);
+        const last = chain[chain.length - 1];
+        ring = last.outerRing;
+        previous = last.facets;
+        return true;
+      };
+      while (true) {
+        const direct = partnerAtRing(wallIndex, ring);
+        if (direct !== undefined) return connect(direct);
+        const neighbours = neighbourFacets(w, new Set(previous), new Set(ring));
+        if (!neighbours.length) return false;
+        const patch = patchOf[neighbours[0]];
+        if (patch >= 0 && neighbours.every(f => patchOf[f] === patch)) {
+          const station = dot(sub(vertexAt(w, ring[0]), wall.surface.origin), wall.surface.axis);
+          if (!patches[patch].every(f => facetPoints(w, f).every(p =>
+            Math.abs(dot(sub(p, wall.surface.origin), wall.surface.axis) - station) <= toleranceMm))) return false;
+          const signs = neighbours.map(f => dot(facetNormal(w, f), wall.surface.axis));
+          if (signs.some(s => s === 0)) return false;
+          const loops = patchLoops[patch];
+          const key = ringKey(ring);
+          if (!loops.some(loop => ringKey(loop) === key)) return false;
+          if (loops.length === 2) {
+            const other = loops.find(loop => ringKey(loop) !== key);
+            const partner = other && partnerAtRing(wallIndex, other);
+            if (partner !== undefined) {
+              if (!connect(partner)) return false;
+              for (const f of patches[patch]) support.add(f);
+              return true;
+            }
+            // WO-2804: an annular shoulder can meet a cone directly. Trace
+            // its other ring through the SAME whole-facet/coaxial proof as a
+            // wall/cone seam; axis alignment alone never joins two openings.
+            if (other && crossCone(other, neighbourFacets(w, new Set(patches[patch]), new Set(other)))) {
+              for (const f of patches[patch]) support.add(f);
+              continue;
+            }
+          }
+          // Same endpoint/flatness proof as endContext. A shoulder leading to
+          // another bore was consumed above, regardless of its normal sign.
+          const away = signs.every(s => side === 0 ? s < 0 : s > 0);
+          const toward = signs.every(s => side === 0 ? s > 0 : s < 0);
+          if (away) { openings++; if (previous !== wall.facets) coneOpenings++; return true; }
+          if (toward && loops.length === 1) {
+            floors++;
+            for (const f of patches[patch]) support.add(f);
+            return true;
+          }
+          return false;
+        }
+        if (!crossCone(ring, neighbours)) return false;
       }
+    };
+    for (let p = 0; p < pending.length; p++) {
+      const wall = pending[p];
+      if (!traceEnd(wall, 0) || !traceEnd(wall, 1)) return undefined;
     }
-    return matches.length === 1 ? matches[0] : undefined;
+    if (openings < 1 || openings + floors !== 2) return undefined;
+    return { walls: [...members], cones: [...cones.values()], support: [...support], floors, coneOpenings };
   }
 
   /**
@@ -554,7 +732,11 @@ export function recognizeMeshFeatures(
     disk: readonly number[],
     kind: RecognizedFeature['kind'],
   ): RecognizedFeature | undefined {
-    const seed = walls[wallIndices[0]];
+    // Preserve the established counterbore seed/station frame for existing
+    // consumers and serialized recognition baselines. Complete support does
+    // not require changing that frame to whichever pilot was visited first.
+    const seed = walls[kind === 'counterbore' ? wallIndices.reduce((a, b) =>
+      walls[b].surface.radiusMm > walls[a].surface.radiusMm ? b : a) : wallIndices[0]];
     const axis = seed.surface.axis;
     const origin = seed.surface.origin;
     const station = (point: Vec3) => dot(sub(point, origin), axis);
@@ -576,8 +758,13 @@ export function recognizeMeshFeatures(
       const outer = station(ringPoint({ vertexIds: cone.outerRing } as CylinderEnd));
       const lowStation = Math.min(inner, outer);
       const highStation = Math.max(inner, outer);
-      const radiusAt = (s: number) =>
-        cone.surface.radiusMm + cone.surface.radialSlope * (s - cone.surface.referenceStationMm);
+      // Each fitted wall/cone has its OWN origin and possibly reversed axis.
+      // Convert the composite station to that cone's frame before evaluating
+      // its radius; another wall's station is not interchangeable (WO-2804).
+      const radiusAt = (s: number) => {
+        const coneStation = dot(sub(origin, cone.surface.origin), cone.surface.axis) + s * dot(axis, cone.surface.axis);
+        return cone.surface.radiusMm + cone.surface.radialSlope * (coneStation - cone.surface.referenceStationMm);
+      };
       bands.push({
         surface: 'cone',
         diameterMm: Math.abs(radiusAt(lowStation)) * 2,

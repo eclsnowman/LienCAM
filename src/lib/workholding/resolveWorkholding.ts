@@ -70,18 +70,37 @@ export interface ResolvedWorkholdingBody extends ResolvedWorkholdingPlacement {
 export interface ResolvedWorkholdingPlacements {
   readonly placements: readonly ResolvedWorkholdingPlacement[]
   readonly notices: readonly string[]
+  readonly omissions?: readonly WorkholdingOmission[]
+}
+
+/** Structured omissions are opt-in; a console notice alone is not geometry. */
+export interface WorkholdingOmission {
+  readonly instanceId: string
+  readonly geometryId?: string
+  readonly componentId?: string
+  readonly reason: 'missing-definition' | 'missing-component' | 'missing-placement' | 'unreadable-shape'
+}
+
+/** A positive zero-volume fact for a 2D row, not a synonym for failed IO. */
+export function isKnownPlanarWorkholding(row: ImportedGeometry): boolean {
+  const box = row.boundingBox
+  return !isModelOriginGeometry(row) && ['dxf', 'svg', 'sketch'].includes(row.format) && !!box &&
+    [box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].every(Number.isFinite) &&
+    box.max.x >= box.min.x && box.max.y >= box.min.y && box.max.z === box.min.z
 }
 
 export interface ResolvedWorkholding {
   readonly bodies: readonly ResolvedWorkholdingBody[]
   /** Plain sentences for the app console. */
   readonly notices: readonly string[]
+  readonly omissions?: readonly WorkholdingOmission[]
 }
 
 export interface ResolveWorkholdingOptions {
   /** Marked rows the operation itself cuts are not obstacles to it (WO-1572). */
   readonly cutGeometryIds?: Iterable<string>
   readonly reader?: WorkholdingShapeReader
+  readonly includeAvailability?: boolean
 }
 
 // ── Joint ────────────────────────────────────────────────────────────────────
@@ -141,11 +160,12 @@ export function setupScopeIncludes(scope: WorkholdingSetupScope | undefined, set
 export function resolveWorkholdingPlacements(
   project: Pick<Project, 'geometry' | 'modelItemPlacements' | 'workholding'>,
   setupId: string | null | undefined,
-  options: Pick<ResolveWorkholdingOptions, 'cutGeometryIds'> = {},
+  options: Pick<ResolveWorkholdingOptions, 'cutGeometryIds' | 'includeAvailability'> = {},
 ): ResolvedWorkholdingPlacements {
-  const { placements: instancePlacements, notices: instanceNotices } = resolveInstancePlacements(project, setupId)
+  const { placements: instancePlacements, notices: instanceNotices, omissions: instanceOmissions } = resolveInstancePlacements(project, setupId, options)
   const placements: ResolvedWorkholdingPlacement[] = [...instancePlacements]
   const notices: string[] = [...instanceNotices]
+  const omissions: WorkholdingOmission[] = [...(instanceOmissions ?? [])]
 
   // Today's marked rows: one-component instances in every setup. A row used as
   // an assembly component is that definition's shape data, not a body of its own.
@@ -155,6 +175,7 @@ export function resolveWorkholdingPlacements(
     if (row.workholding !== true || componentRows.has(row.id) || cut.has(row.id)) continue
     const worldPose = markedRowWorldPose(row, project.modelItemPlacements ?? [])
     if (!worldPose) {
+      omissions.push({ instanceId: row.id, geometryId: row.id, reason: 'missing-placement' })
       notices.push(`the workholding "${row.name || row.id}" has no Model Item placement, so it could not be placed.`)
       continue
     }
@@ -169,7 +190,7 @@ export function resolveWorkholdingPlacements(
       worldFromComponent: poseToMat4(worldPose),
     })
   }
-  return { placements, notices }
+  return { placements, notices, ...(options.includeAvailability ? { omissions } : {}) }
 }
 
 /**
@@ -181,24 +202,31 @@ export function resolveWorkholdingPlacements(
 export function resolveInstancePlacements(
   project: Pick<Project, 'geometry' | 'workholding'>,
   setupId: string | null | undefined,
+  options: Pick<ResolveWorkholdingOptions, 'cutGeometryIds' | 'includeAvailability'> = {},
 ): ResolvedWorkholdingPlacements {
   const placements: ResolvedWorkholdingPlacement[] = []
   const notices: string[] = []
+  const omissions: WorkholdingOmission[] = []
+  const cut = new Set(options.cutGeometryIds ?? [])
   const rows = new Map(project.geometry.map((g) => [g.id, g]))
   const definitions = new Map((project.workholding?.definitions ?? []).map((d) => [d.id, d]))
   for (const instance of project.workholding?.instances ?? []) {
     if (!setupScopeIncludes(instance.setupScope, setupId)) continue
     const definition = definitions.get(instance.definitionId)
     if (!definition) {
+      omissions.push({ instanceId: instance.id, reason: 'missing-definition' })
       notices.push(`the workholding "${instance.id}" names a definition this project does not have, so it was left out.`)
       continue
     }
     for (const component of definition.components) {
       const placed = placeInstanceComponent(instance, definition, component, rows, notices)
       if (placed) placements.push(placed)
+      else if (!cut.has(component.geometryId)) omissions.push({
+        instanceId: instance.id, componentId: component.id, geometryId: component.geometryId, reason: 'missing-component',
+      })
     }
   }
-  return { placements, notices }
+  return { placements, notices, ...(options.includeAvailability ? { omissions } : {}) }
 }
 
 /** Every geometry row some definition uses as a component (shape data, not a body of its own). */
@@ -277,17 +305,23 @@ export async function resolveWorkholding(
   options: ResolveWorkholdingOptions = {},
 ): Promise<ResolvedWorkholding> {
   const reader = options.reader ?? cachedWorkholdingShapeReader
-  const { placements, notices: placementNotices } = resolveWorkholdingPlacements(project, setupId, options)
+  const { placements, notices: placementNotices, omissions: placementOmissions } = resolveWorkholdingPlacements(project, setupId, options)
   const notices = [...placementNotices]
+  const omissions: WorkholdingOmission[] = [...(placementOmissions ?? [])]
   const rows = new Map(project.geometry.map((g) => [g.id, g]))
   const bodies: ResolvedWorkholdingBody[] = []
   for (const placement of placements) {
     const body = await resolvePlacedBody(placement, rows.get(placement.geometryId)!, reader)
-    if (!body) continue
+    if (!body) {
+      if (!isKnownPlanarWorkholding(rows.get(placement.geometryId)!)) omissions.push({
+        instanceId: placement.instanceId, componentId: placement.componentId,
+        geometryId: placement.geometryId, reason: 'unreadable-shape' })
+      continue
+    }
     bodies.push(body)
     if (body.shape === 'bounding-box') notices.push(boundingBoxNotice(placement.name))
   }
-  return { bodies, notices }
+  return { bodies, notices, ...(options.includeAvailability ? { omissions } : {}) }
 }
 
 /**

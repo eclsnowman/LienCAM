@@ -11,6 +11,8 @@
 //     tests inject a fake that never spawns a real Worker or loads wasm.
 //  2. `createSceneRuntime` -- reused UNCHANGED from src/components/model3d/sceneRuntime.ts (no
 //     section/pick features needed here, just renderer+camera+orbit+frameBox).
+import { useText, textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createDefaultSceneRuntime, type CreateSceneRuntime, type SceneRuntime } from '../model3d/sceneRuntime'
@@ -144,15 +146,15 @@ function buildGeometry(mesh: MeshBuffers): THREE.BufferGeometry {
 }
 
 function healthLine(label: string, slot: MeshSlot | null): string {
-  if (slot === null) return `${label}: (empty)`
+  if (slot === null) return workbenchText('MeshLabPage.empty', { label: String(label) })
   const r = slot.report
   return (
-    `${label}: "${slot.name}" -- ${r.triangleCount.toLocaleString()} tris, ` +
-    `${r.watertight ? 'watertight' : `NOT watertight (${r.holeCount} hole(s), ${r.boundaryEdgeCount} boundary edges)`}` +
-    (r.nonManifoldEdgeCount > 0 ? `, ${r.nonManifoldEdgeCount} non-manifold edges` : '') +
-    (r.degenerateTriangleCount > 0 ? `, ${r.degenerateTriangleCount} degenerate tris` : '') +
-    (r.duplicateTriangleCount > 0 ? `, ${r.duplicateTriangleCount} duplicate tris` : '') +
-    (r.windingConflictEdgeCount > 0 ? `, ${r.windingConflictEdgeCount} winding conflict edges` : '')
+    workbenchText('MeshLabPage.tris', { label: String(label), name: String(slot.name), value3: String(r.triangleCount.toLocaleString()) }) +
+    `${r.watertight ? 'watertight' : workbenchText('MeshLabPage.notWatertightHoleSBoundaryEdges', { holeCount: String(r.holeCount), boundaryEdgeCount: String(r.boundaryEdgeCount) })}` +
+    (r.nonManifoldEdgeCount > 0 ? workbenchText('MeshLabPage.nonManifoldEdges', { nonManifoldEdgeCount: String(r.nonManifoldEdgeCount) }) : '') +
+    (r.degenerateTriangleCount > 0 ? workbenchText('MeshLabPage.degenerateTris', { degenerateTriangleCount: String(r.degenerateTriangleCount) }) : '') +
+    (r.duplicateTriangleCount > 0 ? workbenchText('MeshLabPage.duplicateTris', { duplicateTriangleCount: String(r.duplicateTriangleCount) }) : '') +
+    (r.windingConflictEdgeCount > 0 ? workbenchText('MeshLabPage.windingConflictEdges', { windingConflictEdgeCount: String(r.windingConflictEdgeCount) }) : '')
   )
 }
 
@@ -170,6 +172,7 @@ export function MeshLabPage({
   createSceneRuntime = createDefaultSceneRuntime,
   createGeomOperand = createGeomOperandClient,
 }: MeshLabPageProps = {}) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const clientRef = useRef<MeshClient | null>(null)
@@ -179,7 +182,7 @@ export function MeshLabPage({
   const objectsRef = useRef<Map<SlotKey, THREE.Mesh>>(new Map())
   const mountedRef = useRef(true)
 
-  const [status, setStatus] = useState('initializing mesh kernel...')
+  const [status, setStatus] = useState<string>(workbenchText('MeshLabPage.initializingMeshKernel'))
   const [busy, setBusy] = useState(false)
   const [primary, setPrimary] = useState<MeshSlot | null>(null)
   const [secondary, setSecondary] = useState<MeshSlot | null>(null)
@@ -197,7 +200,7 @@ export function MeshLabPage({
   const [decimateTarget, setDecimateTarget] = useState(2000)
 
   // --- MSH-4: cross-domain boolean (mesh vs tessellated brep) -----------------------------
-  const [geomStatus, setGeomStatus] = useState('brep kernel: not loaded')
+  const [geomStatus, setGeomStatus] = useState<string>(workbenchText('MeshLabPage.brepKernelNotLoaded'))
   const [geomBuilding, setGeomBuilding] = useState(false)
   const [brepShape, setBrepShape] = useState<BrepPrimitiveShape>('box')
   const [brepBoxX, setBrepBoxX] = useState(10)
@@ -231,13 +234,13 @@ export function MeshLabPage({
 
     async function boot(): Promise<void> {
       try {
-        setStatus('initializing manifold-3d kernel...')
+        setStatus(workbenchText('MeshLabPage.initializingManifold3dKernel'))
         const info = await client.init({ requireManifold: true })
         if (cancelled) return
-        setStatus(info.available ? `ready (manifold-3d ${info.version})` : `ready -- WARNING: ${info.warning ?? 'kernel unavailable'}`)
+        setStatus(info.available ? workbenchText('MeshLabPage.readyManifold3d', { version: String(info.version) }) : workbenchText('MeshLabPage.readyWARNING', { value1: String(info.warning ?? workbenchText('MeshLabPage.kernelUnavailable')) }))
       } catch (err) {
         if (cancelled) return
-        setStatus(`FAILED to init mesh kernel: ${err instanceof Error ? err.message : String(err)}`)
+        setStatus(workbenchText('MeshLabPage.failedToInitMeshKernel', { value1: String(err instanceof Error ? err.message : String(err)) }))
       }
     }
     void boot()
@@ -315,7 +318,7 @@ export function MeshLabPage({
     if (client === null) return
     setImportError(null)
     setBusy(true)
-    setStatus(`importing "${file.name}"...`)
+    setStatus(workbenchText('MeshLabPage.importing', { name: String(file.name) }))
     try {
       const bytes = await file.arrayBuffer()
       const t0 = performance.now()
@@ -340,13 +343,13 @@ export function MeshLabPage({
         setSecondary(slot)
       }
       paintSlot(slotKey, welded)
-      setLastOp({ name: `import "${file.name}"`, ms, triangleCount: report.triangleCount })
-      setStatus(`imported "${file.name}": ${report.triangleCount.toLocaleString()} tris in ${ms.toFixed(0)}ms`)
+      setLastOp({ name: workbenchText('MeshLabPage.import', { name: String(file.name) }), ms, triangleCount: report.triangleCount })
+      setStatus(workbenchText('MeshLabPage.importedTrisInMs', { name: String(file.name), value2: String(report.triangleCount.toLocaleString()), value3: String(ms.toFixed(0)) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setImportError(msg)
-      setStatus(`import FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.importFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -375,7 +378,7 @@ export function MeshLabPage({
     if (client === null || primary === null) return
     setBusy(true)
     setOpError(null)
-    setStatus('repairing...')
+    setStatus(workbenchText('MeshLabPage.repairing'))
     try {
       const t0 = performance.now()
       const result = await client.repair(cloneMesh(primary.mesh))
@@ -394,13 +397,13 @@ export function MeshLabPage({
       // R1.1: the primary mesh just changed shape -- any prior export result no longer
       // describes what's currently loaded.
       setExportResult(null)
-      setLastOp({ name: 'repair', ms, triangleCount: result.report.triangleCount })
-      setStatus(`repair: filled ${result.filledHoleCount} hole(s), dropped ${result.droppedDegenerateTriangleCount} degenerate tri(s), re-oriented ${result.flippedTriangleCount} tri(s) in ${ms.toFixed(0)}ms -- ${result.report.watertight ? 'now watertight' : 'still not watertight'}, ${result.report.windingConflictEdgeCount > 0 ? `${result.report.windingConflictEdgeCount} winding conflict(s) remain` : 'winding consistent'}`)
+      setLastOp({ name: workbenchText('MeshLabPage.repair'), ms, triangleCount: result.report.triangleCount })
+      setStatus(workbenchText('MeshLabPage.repairFilledHoleSDroppedDegenerateTriSRe', { filledHoleCount: String(result.filledHoleCount), droppedDegenerateTriangleCount: String(result.droppedDegenerateTriangleCount), flippedTriangleCount: String(result.flippedTriangleCount), value4: String(ms.toFixed(0)), value5: String(result.report.watertight ? workbenchText('MeshLabPage.nowWatertight') : workbenchText('MeshLabPage.stillNotWatertight')), value6: String(result.report.windingConflictEdgeCount > 0 ? workbenchText('MeshLabPage.windingConflictSRemain', { value1: String(result.report.windingConflictEdgeCount) }) : workbenchText('MeshLabPage.windingConsistent')) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`repair FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.repairFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -412,7 +415,7 @@ export function MeshLabPage({
     if (client === null || primary === null || secondary === null) return
     setBusy(true)
     setOpError(null)
-    setStatus(`boolean ${booleanOp}...`)
+    setStatus(workbenchText('MeshLabPage.boolean', { booleanOp: String(booleanOp) }))
     try {
       const t0 = performance.now()
       const result = await client.boolean(cloneMesh(primary.mesh), cloneMesh(secondary.mesh), { operation: booleanOp })
@@ -424,13 +427,13 @@ export function MeshLabPage({
       // R1.1: boolean replaced the primary mesh -- neither result describes it anymore.
       setRepairResult(null)
       setExportResult(null)
-      setLastOp({ name: `boolean ${booleanOp}`, ms, triangleCount: result.report.triangleCount })
-      setStatus(`boolean ${booleanOp}: ${result.report.triangleCount.toLocaleString()} tris, volume ${result.measures.volume.toFixed(3)} in ${ms.toFixed(0)}ms`)
+      setLastOp({ name: workbenchText('MeshLabPage.boolean2', { value1: String(booleanOp) }), ms, triangleCount: result.report.triangleCount })
+      setStatus(workbenchText('MeshLabPage.booleanTrisVolumeInMs', { booleanOp: String(booleanOp), value2: String(result.report.triangleCount.toLocaleString()), value3: String(result.measures.volume.toFixed(3)), value4: String(ms.toFixed(0)) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`boolean ${booleanOp} FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.booleanFAILED', { booleanOp: String(booleanOp), msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -441,13 +444,13 @@ export function MeshLabPage({
     setBusy(true)
     setGeomBuilding(true)
     setBrepError(null)
-    setGeomStatus(geomClientRef.current === null ? 'loading brep kernel (occt-wasm)...' : `building ${brepShape}...`)
+    setGeomStatus(geomClientRef.current === null ? workbenchText('MeshLabPage.loadingBrepKernelOcctWasm') : workbenchText('MeshLabPage.building', { brepShape: String(brepShape) }))
     try {
       if (geomClientRef.current === null) {
         geomClientRef.current = createGeomOperand()
         await geomClientRef.current.init()
       }
-      setGeomStatus(`building ${brepShape}...`)
+      setGeomStatus(workbenchText('MeshLabPage.building', { brepShape: String(brepShape) }))
       const built = await geomClientRef.current.buildPrimitive(
         {
           shape: brepShape,
@@ -461,12 +464,12 @@ export function MeshLabPage({
       setBrepOperandState({ ...built, tolerance: brepTolerance })
       // A fresh operand invalidates any prior cross-domain result -- it described the OLD operand.
       setCrossDomainResult(null)
-      setGeomStatus(`ready -- ${brepShape} tessellated at ${brepTolerance}mm: ${built.triangleCount.toLocaleString()} tris in ${built.ms.toFixed(0)}ms`)
+      setGeomStatus(workbenchText('MeshLabPage.readyTessellatedAtMmTrisInMs', { brepShape: String(brepShape), brepTolerance: String(brepTolerance), value3: String(built.triangleCount.toLocaleString()), value4: String(built.ms.toFixed(0)) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setBrepError(msg)
-      setGeomStatus(`brep build FAILED: ${msg}`)
+      setGeomStatus(workbenchText('MeshLabPage.brepBuildFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) {
         setBusy(false)
@@ -480,7 +483,7 @@ export function MeshLabPage({
     if (client === null || primary === null || brepOperandState === null) return
     setBusy(true)
     setOpError(null)
-    setStatus(`cross-domain boolean ${crossDomainOp} (brep ${brepOperandState.shape})...`)
+    setStatus(workbenchText('MeshLabPage.crossDomainBooleanBrep', { crossDomainOp: String(crossDomainOp), shape: String(brepOperandState.shape) }))
     try {
       const left = meshOperand(cloneMesh(primary.mesh))
       const right = brepOperand(cloneTess(brepOperandState.tess), brepOperandState.tolerance)
@@ -490,7 +493,7 @@ export function MeshLabPage({
       if (!mountedRef.current) return
       const slot: MeshSlot = {
         mesh: result.mesh,
-        name: `${primary.name} X-domain-${crossDomainOp} ${brepOperandState.shape}`,
+        name: workbenchText('MeshLabPage.xDomain', { name: String(primary.name), crossDomainOp: String(crossDomainOp), shape: String(brepOperandState.shape) }),
         report: result.report,
         measures: result.measures,
       }
@@ -511,10 +514,10 @@ export function MeshLabPage({
         ms,
       }
       setCrossDomainResult(summary)
-      setLastOp({ name: `cross-domain boolean ${crossDomainOp} (brep ${brepOperandState.shape})`, ms, triangleCount: result.report.triangleCount })
+      setLastOp({ name: workbenchText('MeshLabPage.crossDomainBooleanBrep2', { crossDomainOp: String(crossDomainOp), shape: String(brepOperandState.shape) }), ms, triangleCount: result.report.triangleCount })
       setStatus(
-        `cross-domain boolean ${crossDomainOp}: ${result.report.triangleCount.toLocaleString()} tris, volume ${result.measures.volume.toFixed(3)} in ${ms.toFixed(0)}ms -- ` +
-          `APPROXIMATE (tessellation tolerance ${result.tessellationTolerance ?? 'n/a'}mm) -- ${result.report.watertight ? 'watertight' : 'NOT watertight'}`,
+        workbenchText('MeshLabPage.crossDomainBooleanTrisVolumeInMs', { crossDomainOp: String(crossDomainOp), value2: String(result.report.triangleCount.toLocaleString()), value3: String(result.measures.volume.toFixed(3)), value4: String(ms.toFixed(0)) }) +
+          workbenchText('MeshLabPage.approximateTessellationToleranceMm', { value1: String(result.tessellationTolerance ?? 'n/a'), value2: String(result.report.watertight ? 'watertight' : workbenchText('MeshLabPage.notWatertight')) }),
       )
     } catch (err) {
       if (!mountedRef.current) return
@@ -522,7 +525,7 @@ export function MeshLabPage({
       // never swallowed or replaced with a generic message.
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`cross-domain boolean ${crossDomainOp} FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.crossDomainBooleanFAILED', { crossDomainOp: String(crossDomainOp), msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -534,7 +537,7 @@ export function MeshLabPage({
     if (client === null || primary === null) return
     setBusy(true)
     setOpError(null)
-    setStatus('plane cut...')
+    setStatus(workbenchText('MeshLabPage.planeCut'))
     try {
       const t0 = performance.now()
       const result = await client.planeCut(cloneMesh(primary.mesh), { normal: AXIS_VECTORS[planeAxis], offset: planeOffset, keep: planeKeep })
@@ -547,18 +550,18 @@ export function MeshLabPage({
       //  - keep both: Primary = positive, Secondary = negative (explicit, not incidental).
       if (planeKeep === 'negative') {
         if (result.negative !== undefined) {
-          const slot: MeshSlot = { mesh: result.negative.mesh, name: `${primary.name} (cut-)`, report: result.negative.report, measures: result.negative.measures }
+          const slot: MeshSlot = { mesh: result.negative.mesh, name: workbenchText('MeshLabPage.cut', { name: String(primary.name) }), report: result.negative.report, measures: result.negative.measures }
           setPrimary(slot)
           paintSlot('primary', result.negative.mesh)
         }
       } else {
         if (result.positive !== undefined) {
-          const slot: MeshSlot = { mesh: result.positive.mesh, name: `${primary.name} (cut+)`, report: result.positive.report, measures: result.positive.measures }
+          const slot: MeshSlot = { mesh: result.positive.mesh, name: workbenchText('MeshLabPage.cut2', { name: String(primary.name) }), report: result.positive.report, measures: result.positive.measures }
           setPrimary(slot)
           paintSlot('primary', result.positive.mesh)
         }
         if (result.negative !== undefined) {
-          const slot: MeshSlot = { mesh: result.negative.mesh, name: `${primary.name} (cut-)`, report: result.negative.report, measures: result.negative.measures }
+          const slot: MeshSlot = { mesh: result.negative.mesh, name: workbenchText('MeshLabPage.cut', { name: String(primary.name) }), report: result.negative.report, measures: result.negative.measures }
           setSecondary(slot)
           paintSlot('secondary', result.negative.mesh)
         }
@@ -568,13 +571,13 @@ export function MeshLabPage({
       setRepairResult(null)
       setExportResult(null)
       const triCount = (result.positive?.report.triangleCount ?? 0) + (result.negative?.report.triangleCount ?? 0)
-      setLastOp({ name: `plane cut (${planeKeep})`, ms, triangleCount: triCount })
-      setStatus(`plane cut (${planeAxis}=${planeOffset}, keep ${planeKeep}) in ${ms.toFixed(0)}ms`)
+      setLastOp({ name: workbenchText('MeshLabPage.planeCut2', { planeKeep: String(planeKeep) }), ms, triangleCount: triCount })
+      setStatus(workbenchText('MeshLabPage.planeCutKeepInMs', { planeAxis: String(planeAxis), planeOffset: String(planeOffset), planeKeep: String(planeKeep), value4: String(ms.toFixed(0)) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`plane cut FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.planeCutFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -587,25 +590,25 @@ export function MeshLabPage({
     if (hollowGuardMessage(primary.report.triangleCount) !== null) return
     setBusy(true)
     setOpError(null)
-    setStatus('hollowing (this can take several seconds)...')
+    setStatus(workbenchText('MeshLabPage.hollowingThisCanTakeSeveralSeconds'))
     try {
       const t0 = performance.now()
       const result = await client.hollow(cloneMesh(primary.mesh), { thickness: hollowThickness })
       const ms = performance.now() - t0
       if (!mountedRef.current) return
-      const slot: MeshSlot = { mesh: result.mesh, name: `${primary.name} (hollow ${hollowThickness})`, report: result.report, measures: result.measures }
+      const slot: MeshSlot = { mesh: result.mesh, name: workbenchText('MeshLabPage.hollow', { name: String(primary.name), hollowThickness: String(hollowThickness) }), report: result.report, measures: result.measures }
       setPrimary(slot)
       paintSlot('primary', result.mesh)
       // R1.1: hollow replaced the primary mesh -- neither result describes it anymore.
       setRepairResult(null)
       setExportResult(null)
-      setLastOp({ name: `hollow (wall ${hollowThickness})`, ms, triangleCount: result.report.triangleCount })
-      setStatus(`hollow wall=${hollowThickness}: ${result.report.triangleCount.toLocaleString()} tris, volume ${result.measures.volume.toFixed(3)} in ${ms.toFixed(0)}ms -- ${result.report.watertight ? 'watertight' : 'NOT watertight (see M3 report: erosion is only exact on convex shapes)'}`)
+      setLastOp({ name: workbenchText('MeshLabPage.hollowWall', { hollowThickness: String(hollowThickness) }), ms, triangleCount: result.report.triangleCount })
+      setStatus(workbenchText('MeshLabPage.hollowWallTrisVolumeInMs', { hollowThickness: String(hollowThickness), value2: String(result.report.triangleCount.toLocaleString()), value3: String(result.measures.volume.toFixed(3)), value4: String(ms.toFixed(0)), value5: String(result.report.watertight ? 'watertight' : workbenchText('MeshLabPage.notWatertightSeeM3ReportErosionIsOnlyExact')) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`hollow FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.hollowFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -617,25 +620,25 @@ export function MeshLabPage({
     if (client === null || primary === null) return
     setBusy(true)
     setOpError(null)
-    setStatus('decimating...')
+    setStatus(workbenchText('MeshLabPage.decimating'))
     try {
       const t0 = performance.now()
       const result = await client.decimate(cloneMesh(primary.mesh), { targetTriangleCount: decimateTarget })
       const ms = performance.now() - t0
       if (!mountedRef.current) return
-      const slot: MeshSlot = { mesh: result.mesh, name: `${primary.name} (decimated)`, report: result.report, measures: result.measures }
+      const slot: MeshSlot = { mesh: result.mesh, name: workbenchText('MeshLabPage.decimated', { name: String(primary.name) }), report: result.report, measures: result.measures }
       setPrimary(slot)
       paintSlot('primary', result.mesh)
       // R1.1: decimate replaced the primary mesh -- neither result describes it anymore.
       setRepairResult(null)
       setExportResult(null)
-      setLastOp({ name: `decimate (target ${decimateTarget})`, ms, triangleCount: result.report.triangleCount })
-      setStatus(`decimate target=${decimateTarget}: ${result.report.triangleCount.toLocaleString()} tris in ${ms.toFixed(0)}ms`)
+      setLastOp({ name: workbenchText('MeshLabPage.decimateTarget', { decimateTarget: String(decimateTarget) }), ms, triangleCount: result.report.triangleCount })
+      setStatus(workbenchText('MeshLabPage.decimateTargetTrisInMs', { decimateTarget: String(decimateTarget), value2: String(result.report.triangleCount.toLocaleString()), value3: String(ms.toFixed(0)) }))
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`decimate FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.decimateFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -647,7 +650,7 @@ export function MeshLabPage({
     if (client === null || primary === null) return
     setBusy(true)
     setOpError(null)
-    setStatus('exporting STL...')
+    setStatus(workbenchText('MeshLabPage.exportingSTL'))
     try {
       const analyzedTriangleCount = primary.report.triangleCount
       const t0 = performance.now()
@@ -658,16 +661,16 @@ export function MeshLabPage({
       triggerDownload(exported.bytes, primary.name.replace(/\.stl$/i, '') + '-export.stl', 'model/stl')
       if (!mountedRef.current) return
       setExportResult({ kind: 'stl', bytes: exported.bytes.byteLength, ms, exportedFaceCount: exported.triangleCount, analyzedTriangleCount, reimportOk })
-      setLastOp({ name: 'export stl', ms, triangleCount: exported.triangleCount })
+      setLastOp({ name: workbenchText('MeshLabPage.exportStl'), ms, triangleCount: exported.triangleCount })
       setStatus(
-        `exported STL: ${exported.bytes.byteLength.toLocaleString()} bytes, ${exported.triangleCount.toLocaleString()} exported faces ` +
-          `(health: ${analyzedTriangleCount.toLocaleString()} analyzed good tris) in ${ms.toFixed(0)}ms, re-import ${reimportOk ? 'OK' : 'MISMATCH'}`,
+        workbenchText('MeshLabPage.exportedSTLBytesExportedFaces', { value1: String(exported.bytes.byteLength.toLocaleString()), value2: String(exported.triangleCount.toLocaleString()) }) +
+          workbenchText('MeshLabPage.healthAnalyzedGoodTrisInMsReImport', { value1: String(analyzedTriangleCount.toLocaleString()), value2: String(ms.toFixed(0)), value3: String(reimportOk ? 'OK' : 'MISMATCH') }),
       )
     } catch (err) {
       if (!mountedRef.current) return
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`export STL FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.exportSTLFAILED', { msg: String(msg) }))
     } finally {
       if (mountedRef.current) setBusy(false)
     }
@@ -685,15 +688,15 @@ export function MeshLabPage({
       const reimportOk = reimported.indices.length / 3 === exported.triangleCount
       triggerDownload(exported.bytes, primary.name.replace(/\.stl$/i, '') + '-export.3mf', 'model/3mf')
       setExportResult({ kind: '3mf', bytes: exported.bytes.byteLength, ms, exportedFaceCount: exported.triangleCount, analyzedTriangleCount, reimportOk })
-      setLastOp({ name: 'export 3mf', ms, triangleCount: exported.triangleCount })
+      setLastOp({ name: workbenchText('MeshLabPage.export3mf'), ms, triangleCount: exported.triangleCount })
       setStatus(
-        `exported 3MF: ${exported.bytes.byteLength.toLocaleString()} bytes, ${exported.triangleCount.toLocaleString()} exported faces ` +
-          `(health: ${analyzedTriangleCount.toLocaleString()} analyzed good tris) in ${ms.toFixed(0)}ms, re-import ${reimportOk ? 'OK' : 'MISMATCH'}`,
+        workbenchText('MeshLabPage.exported3MFBytesExportedFaces', { value1: String(exported.bytes.byteLength.toLocaleString()), value2: String(exported.triangleCount.toLocaleString()) }) +
+          workbenchText('MeshLabPage.healthAnalyzedGoodTrisInMsReImport', { value1: String(analyzedTriangleCount.toLocaleString()), value2: String(ms.toFixed(0)), value3: String(reimportOk ? 'OK' : 'MISMATCH') }),
       )
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       setOpError(msg)
-      setStatus(`export 3MF FAILED: ${msg}`)
+      setStatus(workbenchText('MeshLabPage.export3MFFAILED', { msg: String(msg) }))
     }
   }, [primary])
 
@@ -714,7 +717,7 @@ export function MeshLabPage({
         <canvas ref={canvasRef} data-testid="meshlab-canvas" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
         <div data-testid="meshlab-status" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, padding: '6px 10px', background: 'rgba(16,20,24,0.85)', borderBottom: '1px solid #2a3540', whiteSpace: 'pre' }}>
           {status}
-          {busy ? ' [busy]' : ''}
+          {busy ? workbenchText('MeshLabPage.busy') : ''}
         </div>
         {importError !== null && (
           <div data-testid="meshlab-import-error" style={{ position: 'absolute', top: 32, left: 8, zIndex: 2, color: '#ff6b6b', background: 'rgba(16,20,24,0.9)', padding: '4px 8px' }}>
@@ -728,58 +731,50 @@ export function MeshLabPage({
         )}
         {lastOp !== null && (
           <div data-testid="meshlab-last-op" style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 2, background: 'rgba(16,20,24,0.85)', border: '1px solid #2a3540', padding: '4px 8px' }}>
-            last op: {lastOp.name} -- {lastOp.ms.toFixed(0)}ms -- {lastOp.triangleCount.toLocaleString()} tris
-          </div>
+            {workbenchText('MeshLabPage.lastOpMs', { name: String((lastOp.name) ?? ''), value2: String((lastOp.ms.toFixed(0)) ?? '') })}{lastOp.triangleCount.toLocaleString()}{workbenchText('MeshLabPage.tris2')}</div>
         )}
       </div>
       <div style={{ width: 340, flexShrink: 0, borderLeft: '1px solid #2a3540', padding: 10, overflowY: 'auto', background: '#161b20' }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Primary</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.primary')}</div>
         <label style={{ display: 'block', marginBottom: 4 }}>
-          Import STL:
-          <input type="file" accept=".stl" data-testid="meshlab-import-primary" disabled={busy} onChange={handleImportChange('primary')} />
+          {workbenchText('MeshLabPage.importSTL')}<input type="file" accept=".stl" data-testid="meshlab-import-primary" disabled={busy} onChange={handleImportChange('primary')} />
         </label>
-        <div data-testid="meshlab-primary-health" style={{ marginBottom: 8, opacity: 0.9 }}>{healthLine('Primary', primary)}</div>
+        <div data-testid="meshlab-primary-health" style={{ marginBottom: 8, opacity: 0.9 }}>{healthLine(workbenchText('MeshLabPage.primary'), primary)}</div>
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Secondary</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.secondary')}</div>
         <label style={{ display: 'block', marginBottom: 4 }}>
-          Import STL:
-          <input type="file" accept=".stl" data-testid="meshlab-import-secondary" disabled={busy} onChange={handleImportChange('secondary')} />
+          {workbenchText('MeshLabPage.importSTL')}<input type="file" accept=".stl" data-testid="meshlab-import-secondary" disabled={busy} onChange={handleImportChange('secondary')} />
         </label>
-        <div data-testid="meshlab-secondary-health" style={{ marginBottom: 8, opacity: 0.9 }}>{healthLine('Secondary', secondary)}</div>
+        <div data-testid="meshlab-secondary-health" style={{ marginBottom: 8, opacity: 0.9 }}>{healthLine(workbenchText('MeshLabPage.secondary'), secondary)}</div>
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Repair (Primary)</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.repairPrimary')}</div>
         <button type="button" data-testid="meshlab-repair" disabled={busy || primary === null} onClick={() => void runRepair()}>
-          Repair
-        </button>
+          {workbenchText('MeshLabPage.repair2')}</button>
         {repairResult !== null && (
-          <div data-testid="meshlab-repair-result" style={{ marginTop: 2 }}>
-            filled {repairResult.filledHoleCount} hole(s), dropped {repairResult.droppedDegenerateTriangleCount} degenerate tri(s), re-oriented {repairResult.flippedTriangleCount} tri(s) -- {repairResult.watertightAfter ? 'watertight' : 'still not watertight'}, {repairResult.windingConflictAfter > 0 ? `${repairResult.windingConflictAfter} winding conflict(s) remain` : 'winding consistent'}
-          </div>
+          <div data-testid="meshlab-repair-result" style={{ marginTop: 2 }}>{workbenchText('MeshLabPage.combinedFilledHoleSDroppedDegenerateTriSReOriented', { value1: String((repairResult.filledHoleCount) ?? ''), value2: String((repairResult.droppedDegenerateTriangleCount) ?? ''), value3: String((repairResult.flippedTriangleCount) ?? '') })}{workbenchText('MeshLabPage.triS', { value1: String((repairResult.watertightAfter ? workbenchText('MeshLabPage.watertight') : workbenchText('MeshLabPage.stillNotWatertight'))), value2: String((repairResult.windingConflictAfter > 0 ? workbenchText('MeshLabPage.windingConflictSRemain', { value1: String(repairResult.windingConflictAfter) }) : workbenchText('MeshLabPage.windingConsistent'))) })}</div>
         )}
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Boolean (Primary op Secondary)</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.booleanPrimaryOpSecondary')}</div>
         <select data-testid="meshlab-boolean-op" value={booleanOp} onChange={(ev) => setBooleanOp(ev.target.value as MeshBooleanOperation)}>
-          <option value="union">union</option>
-          <option value="difference">difference (cut)</option>
-          <option value="intersect">intersect</option>
+          <option value="union">{workbenchText('MeshLabPage.union')}</option>
+          <option value="difference">{workbenchText('MeshLabPage.differenceCut')}</option>
+          <option value="intersect">{workbenchText('MeshLabPage.intersect')}</option>
         </select>
         <button type="button" data-testid="meshlab-boolean-run" disabled={busy || primary === null || secondary === null} onClick={() => void runBoolean()}>
-          Run
-        </button>
+          {workbenchText('MeshLabPage.run')}</button>
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Cross-domain boolean (Primary op brep) -- MSH-4</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.crossDomainBooleanPrimaryOpBrepMSH4')}</div>
         <div data-testid="meshlab-geom-status" style={{ marginBottom: 4, opacity: 0.9 }}>{geomStatus}</div>
         <label style={{ display: 'block', marginBottom: 4 }}>
-          brep shape:
-          <select data-testid="meshlab-brep-shape" value={brepShape} onChange={(ev) => setBrepShape(ev.target.value as BrepPrimitiveShape)}>
-            <option value="box">box</option>
-            <option value="cylinder">cylinder</option>
+          {workbenchText('MeshLabPage.brepShape')}<select data-testid="meshlab-brep-shape" value={brepShape} onChange={(ev) => setBrepShape(ev.target.value as BrepPrimitiveShape)}>
+            <option value="box">{workbenchText('MeshLabPage.box')}</option>
+            <option value="cylinder">{workbenchText('MeshLabPage.cylinder')}</option>
           </select>
         </label>
         {brepShape === 'box' ? (
@@ -789,19 +784,18 @@ export function MeshLabPage({
             <input type="number" data-testid="meshlab-brep-box-y" value={brepBoxY} step="1" min="0.1" onChange={(ev) => setBrepBoxY(Number(ev.target.value))} style={{ width: 50 }} />
             {' x '}
             <input type="number" data-testid="meshlab-brep-box-z" value={brepBoxZ} step="1" min="0.1" onChange={(ev) => setBrepBoxZ(Number(ev.target.value))} style={{ width: 50 }} />
-            {' mm'}
+            {workbenchText('MeshLabPage.mm')}
           </div>
         ) : (
           <div style={{ marginBottom: 4 }}>
-            r=<input type="number" data-testid="meshlab-brep-cyl-radius" value={brepCylRadius} step="0.5" min="0.1" onChange={(ev) => setBrepCylRadius(Number(ev.target.value))} style={{ width: 50 }} />
+            {workbenchText('MeshLabPage.r')}<input type="number" data-testid="meshlab-brep-cyl-radius" value={brepCylRadius} step="0.5" min="0.1" onChange={(ev) => setBrepCylRadius(Number(ev.target.value))} style={{ width: 50 }} />
             {' h='}
             <input type="number" data-testid="meshlab-brep-cyl-height" value={brepCylHeight} step="0.5" min="0.1" onChange={(ev) => setBrepCylHeight(Number(ev.target.value))} style={{ width: 50 }} />
-            {' mm'}
+            {workbenchText('MeshLabPage.mm')}
           </div>
         )}
         <label style={{ display: 'block', marginBottom: 4 }}>
-          tessellation tolerance (mm):
-          <input
+          {workbenchText('MeshLabPage.tessellationToleranceMm')}<input
             type="number"
             data-testid="meshlab-brep-tolerance"
             value={brepTolerance}
@@ -812,7 +806,7 @@ export function MeshLabPage({
           />
         </label>
         <button type="button" data-testid="meshlab-brep-build" disabled={busy} onClick={() => void buildBrepOperand()}>
-          {geomBuilding ? 'Building...' : 'Build brep operand'}
+          {geomBuilding ? workbenchText('MeshLabPage.building2') : workbenchText('MeshLabPage.buildBrepOperand')}
         </button>
         {brepError !== null && (
           <div data-testid="meshlab-brep-error" style={{ color: '#ff6b6b', marginTop: 2 }}>
@@ -820,15 +814,13 @@ export function MeshLabPage({
           </div>
         )}
         {brepOperandState !== null && (
-          <div data-testid="meshlab-brep-operand-summary" style={{ marginTop: 2 }}>
-            brep operand: {brepOperandState.shape} @ {brepOperandState.tolerance}mm tolerance -- {brepOperandState.triangleCount.toLocaleString()} tris ({brepOperandState.ms.toFixed(0)}ms)
-          </div>
+          <div data-testid="meshlab-brep-operand-summary" style={{ marginTop: 2 }}>{workbenchText('MeshLabPage.combinedBrepOperandMmTolerance', { value1: String((brepOperandState.shape) ?? ''), value2: String((brepOperandState.tolerance) ?? '') })}{brepOperandState.triangleCount.toLocaleString()}{workbenchText('MeshLabPage.trisMs', { value1: String((brepOperandState.ms.toFixed(0)) ?? '') })}</div>
         )}
         <div style={{ marginTop: 6 }}>
           <select data-testid="meshlab-crossdomain-op" value={crossDomainOp} onChange={(ev) => setCrossDomainOp(ev.target.value as MeshBooleanOperation)}>
-            <option value="union">union</option>
-            <option value="difference">difference (cut)</option>
-            <option value="intersect">intersect</option>
+            <option value="union">{workbenchText('MeshLabPage.union')}</option>
+            <option value="difference">{workbenchText('MeshLabPage.differenceCut')}</option>
+            <option value="intersect">{workbenchText('MeshLabPage.intersect')}</option>
           </select>
           <button
             type="button"
@@ -836,23 +828,19 @@ export function MeshLabPage({
             disabled={busy || primary === null || brepOperandState === null}
             onClick={() => void runCrossDomainBoolean()}
           >
-            Run (Primary {crossDomainOp} brep)
-          </button>
+            {workbenchText('MeshLabPage.runPrimary')}{crossDomainOp}{workbenchText('MeshLabPage.brep')}</button>
         </div>
         {crossDomainResult !== null && (
           <div data-testid="meshlab-crossdomain-result" style={{ marginTop: 4, padding: '4px 6px', border: '1px solid #e0a030', background: 'rgba(224,160,48,0.08)' }}>
-            <strong>APPROXIMATE: {String(crossDomainResult.approximate)}</strong>
-            {' -- tessellation tolerance: '}
+            <strong>{workbenchText('MeshLabPage.approximate', { value1: String(crossDomainResult.approximate) })}</strong>
+            {workbenchText('MeshLabPage.tessellationTolerance')}
             {crossDomainResult.tessellationTolerance === null ? 'n/a' : `${crossDomainResult.tessellationTolerance}mm`}
-            <br />
-            {crossDomainResult.operation} vs brep {crossDomainResult.brepShape}: {crossDomainResult.triangleCount.toLocaleString()} tris, volume{' '}
-            {crossDomainResult.volume.toFixed(3)}, {crossDomainResult.watertight ? 'watertight' : 'NOT watertight'} in {crossDomainResult.ms.toFixed(0)}ms
-          </div>
+            <br />{workbenchText('MeshLabPage.combinedVsBrep', { value1: String((crossDomainResult.operation) ?? ''), value2: String((crossDomainResult.brepShape) ?? '') })}{crossDomainResult.triangleCount.toLocaleString()}{workbenchText('MeshLabPage.trisVolumeInMs', { value1: String((crossDomainResult.volume.toFixed(3)) ?? ''), value2: String((crossDomainResult.watertight ? workbenchText('MeshLabPage.watertight') : workbenchText('MeshLabPage.notWatertight'))), value3: String((crossDomainResult.ms.toFixed(0)) ?? '') })}</div>
         )}
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Plane cut (Primary)</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.planeCutPrimary')}</div>
         <select data-testid="meshlab-planecut-axis" value={planeAxis} onChange={(ev) => setPlaneAxis(ev.target.value as PlaneAxis)}>
           <option value="x">x</option>
           <option value="y">y</option>
@@ -867,20 +855,18 @@ export function MeshLabPage({
           style={{ width: 70 }}
         />
         <select data-testid="meshlab-planecut-keep" value={planeKeep} onChange={(ev) => setPlaneKeep(ev.target.value as MeshPlaneCutKeep)}>
-          <option value="positive">keep +</option>
-          <option value="negative">keep -</option>
-          <option value="both">keep both</option>
+          <option value="positive">{workbenchText('MeshLabPage.keep')}</option>
+          <option value="negative">{workbenchText('MeshLabPage.keep2')}</option>
+          <option value="both">{workbenchText('MeshLabPage.keepBoth')}</option>
         </select>
         <button type="button" data-testid="meshlab-planecut-run" disabled={busy || primary === null} onClick={() => void runPlaneCut()}>
-          Cut
-        </button>
+          {workbenchText('MeshLabPage.cut3')}</button>
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Hollow (Primary)</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.hollowPrimary')}</div>
         <label>
-          wall thickness:
-          <input
+          {workbenchText('MeshLabPage.wallThickness')}<input
             type="number"
             data-testid="meshlab-hollow-thickness"
             value={hollowThickness}
@@ -891,16 +877,14 @@ export function MeshLabPage({
           />
         </label>
         <button type="button" data-testid="meshlab-hollow-run" disabled={busy || primary === null || hollowGuard !== null} onClick={() => void runHollow()}>
-          Hollow
-        </button>
+          {workbenchText('MeshLabPage.hollow2')}</button>
         {hollowGuard !== null && <div data-testid="meshlab-hollow-guard" style={{ color: '#e0a030', marginTop: 2 }}>{hollowGuard}</div>}
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Decimate (Primary)</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.decimatePrimary')}</div>
         <label>
-          target tris:
-          <input
+          {workbenchText('MeshLabPage.targetTris')}<input
             type="number"
             data-testid="meshlab-decimate-target"
             value={decimateTarget}
@@ -911,24 +895,18 @@ export function MeshLabPage({
           />
         </label>
         <button type="button" data-testid="meshlab-decimate-run" disabled={busy || primary === null} onClick={() => void runDecimate()}>
-          Decimate
-        </button>
+          {workbenchText('MeshLabPage.decimate')}</button>
 
         <hr style={{ border: 'none', borderTop: '1px solid #2a3540', margin: '8px 0' }} />
 
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Export (Primary)</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{workbenchText('MeshLabPage.exportPrimary')}</div>
         <button type="button" data-testid="meshlab-export-stl" disabled={busy || primary === null} onClick={() => void runExportStl()}>
-          Export STL
-        </button>
+          {workbenchText('MeshLabPage.exportSTL')}</button>
         <button type="button" data-testid="meshlab-export-3mf" disabled={primary === null} onClick={runExport3mf}>
-          Export 3MF
-        </button>
+          {workbenchText('MeshLabPage.export3MF')}</button>
         {exportResult !== null && (
           <div data-testid="meshlab-export-result" style={{ marginTop: 2 }}>
-            {exportResult.kind.toUpperCase()}: {exportResult.bytes.toLocaleString()} bytes, {exportResult.exportedFaceCount.toLocaleString()} exported faces
-            {exportResult.exportedFaceCount !== exportResult.analyzedTriangleCount ? ` (health: ${exportResult.analyzedTriangleCount.toLocaleString()} analyzed good tris)` : ''} in{' '}
-            {exportResult.ms.toFixed(0)}ms, re-import {exportResult.reimportOk ? 'OK' : 'MISMATCH'}
-          </div>
+            {exportResult.kind.toUpperCase()}{workbenchText('MeshLabPage.value2')}{exportResult.bytes.toLocaleString()}{workbenchText('MeshLabPage.bytes')}{exportResult.exportedFaceCount.toLocaleString()}{workbenchText('MeshLabPage.exportedFacesInMsReImport', { value1: String((exportResult.exportedFaceCount !== exportResult.analyzedTriangleCount ? workbenchText('MeshLabPage.healthAnalyzedGoodTris', { value1: String(exportResult.analyzedTriangleCount.toLocaleString()) }) : '')), value2: String((exportResult.ms.toFixed(0)) ?? ''), value3: String((exportResult.reimportOk ? workbenchText('MeshLabPage.ok') : workbenchText('MeshLabPage.mismatch'))) })}</div>
         )}
       </div>
     </div>

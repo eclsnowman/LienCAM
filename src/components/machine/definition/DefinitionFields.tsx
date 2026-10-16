@@ -1,3 +1,7 @@
+import { catalogChildren } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type AxisName } from '../../../types'
 import { DEFAULT_HOMING_ORDER } from '../../../types'
 import { UCCNC_SETTING_FIELDS } from '../../../lib/machine/uccncProfileImport'
@@ -169,12 +173,13 @@ export function PinField({ label, name, testId, value, onChange, problem, polari
    */
   polarityBox?: string
 }) {
+  useText('control-screens-not-probing')
   const negateElsewhere = polarityBox !== undefined
   return (
     <div
       data-testid={testId}
       data-wired=""
-      data-tooltip={problem ?? `${name} - port, pin, negate`}
+      data-tooltip={problem ?? controlText('DefinitionFields.text001', { value1: String(name) })}
       data-pin-problem={problem === undefined ? undefined : ''}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -184,28 +189,28 @@ export function PinField({ label, name, testId, value, onChange, problem, polari
     >
       {label !== '' && <span style={{ flex: 'none', width: 44 }}>{label}</span>}
       <PinNumberBox
-        value={value.port} ariaLabel={`${name} port`} invalid={problem !== undefined}
+        value={value.port} ariaLabel={controlText('DefinitionFields.text002', { value1: String(name) })} invalid={problem !== undefined}
         onChange={(v) => onChange({ ...value, port: v })}
       />
       <PinNumberBox
-        value={value.pin} ariaLabel={`${name} pin`} invalid={problem !== undefined}
+        value={value.pin} ariaLabel={controlText('DefinitionFields.text003', { value1: String(name) })} invalid={problem !== undefined}
         onChange={(v) => onChange({ ...value, pin: v })}
       />
       <input
         type="checkbox"
-        aria-label={`${name} negate`}
+        aria-label={controlText('DefinitionFields.text004', { value1: String(name) })}
         // A pin nothing is wired to has its polarity in a box of its own, and
         // that box is what the exported file follows. Disabled rather than
         // hidden: the polarity belongs to the wire and is shown with it.
         disabled={negateElsewhere}
         data-negate-elsewhere={negateElsewhere ? '' : undefined}
         data-tooltip={negateElsewhere
-          ? `Negate - this machine states this polarity as ${polarityBox}, `
-            + 'which is the value the exported profile follows. Edit it in that box; '
-            + 'assigning this pin hands the polarity back to this checkbox.'
+          ? controlText('DefinitionFields.text005', { value1: String(polarityBox) })
+            + controlText('DefinitionFields.text006')
+            + controlText('DefinitionFields.text007')
           : value.negate === null
-            ? 'Negate - UNKNOWN. Nobody has said whether this signal is inverted.'
-            : 'Negate - the signal is active low'}
+            ? controlText('DefinitionFields.text008')
+            : controlText('DefinitionFields.text009')}
         // An unknown polarity is shown as the checkbox's INDETERMINATE dash,
         // never as an empty box: an empty box is a confident claim that the
         // pin is not inverted, and that claim about an e-stop is how someone
@@ -654,6 +659,7 @@ export function SettingBox({ label, settingKey, settings }: {
   settingKey: string
   settings: SettingSource
 }) {
+  useText('control-screens-not-probing')
   // NOT THIS MACHINE'S VOCABULARY, so there is no box and no readout - see
   // `SettingSource.catalogued`. Here for the same reason the ownership check
   // below is: one place, ahead of all ~90 call sites.
@@ -679,8 +685,8 @@ export function SettingBox({ label, settingKey, settings }: {
       <span
         data-not-sent=""
         data-testid={`machine-def-setting-${settingKey}`}
-        data-tooltip={`${settingKey} - read from this machine's profile. This software `
-          + 'has no model for it, so it is shown but cannot be edited or sent.'}
+        data-tooltip={controlText('DefinitionFields.text010', { value1: String(settingKey) })
+          + controlText('DefinitionFields.text011')}
         style={{
           display: 'inline-flex', alignItems: 'baseline', gap: 5,
           fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)',
@@ -818,11 +824,11 @@ export function SettingBox({ label, settingKey, settings }: {
       data-setting-unused={settings.unused(settingKey) ? '' : undefined}
       data-testid={`machine-def-setting-${settingKey}`}
       data-tooltip={`${settingKey}${field ? ` - ${field.meaning}` : ''} - ${stated
-        ? 'stored with this machine definition and editable here; '
+        ? controlText('DefinitionFields.text012')
           + (driven
-            ? 'Apply sends it to the bridge and the bridge drives the controller with it.'
-            : 'nothing in this software drives it yet.')
-        : 'not in your profile. This machine has stated no value for it.'}`}
+            ? controlText('DefinitionFields.text013')
+            : controlText('DefinitionFields.text014'))
+        : controlText('DefinitionFields.text015')}`}
       style={{
         display: 'inline-flex', alignItems: 'baseline', gap: 5,
         fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)',
@@ -855,6 +861,7 @@ function TupleParts({ settingKey, settings, field, value, invalid, width, stated
   stated: boolean
   onFocusAbsent: () => void
 }) {
+  useText('control-screens-not-probing')
   const parts = field.parts ?? []
   const pieces = value === null ? parts.map(() => '') : value.split(',')
   if (pieces.length !== parts.length) {
@@ -902,7 +909,7 @@ function TupleParts({ settingKey, settings, field, value, invalid, width, stated
               // scalar boolean branch above (WO-995).
               ref={(el) => { if (el) el.indeterminate = !stated }}
               onFocus={onFocusAbsent}
-              onChange={(e) => writeAt(index, e.target.checked ? 'True' : 'False')}
+              onChange={(e) => writeAt(index, e.target.checked ? controlText('DefinitionFields.text016') : controlText('DefinitionFields.text017'))}
               style={{ margin: 0 }}
             />
           )
@@ -949,8 +956,8 @@ function TupleParts({ settingKey, settings, field, value, invalid, width, stated
           type="text"
           aria-label={settingKey}
           aria-invalid={invalid || undefined}
-          data-tooltip={'unnamed values - the controller\'s own position and type are known, '
-            + 'their meaning is not established (see UnnamedSlot)'}
+          data-tooltip={controlText('DefinitionFields.text018')
+            + controlText('DefinitionFields.text019')}
           value={stated ? unnamedIndexes.map((index) => pieces[index]).join(',') : ''}
           onFocus={onFocusAbsent}
           onChange={(e) => {
@@ -1038,6 +1045,7 @@ export function NotSentLegend({
    *  something to say, and it disappears the moment the text parses or goes. */
   notAccepted?: number
 }) {
+  useText('control-screens-not-probing')
   if (!settings.catalogued) return null
   return (
     <div
@@ -1045,10 +1053,10 @@ export function NotSentLegend({
       style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 6 }}
     >
       {unmodelled
-        ? 'Every value on this page that has a box is editable and is stored with this '
-          + 'machine definition. A value shown without a box is one this software has no '
-          + 'model for, so it is kept as your profile wrote it and cannot be edited.'
-        : 'Every value on this page is editable and is stored with this machine '
+        ? controlText('DefinitionFields.text020')
+          + controlText('DefinitionFields.text021')
+          + controlText('DefinitionFields.text022')
+        : controlText('DefinitionFields.text023')
           + 'definition.'}
       {/* THIS SENTENCE WAS FALSE ON Operator'S OWN MACHINE, 2026-08-29. His
           LienCNCV2.pro states Stopatangle=89, Constantvelocitymode=True,
@@ -1059,11 +1067,8 @@ export function NotSentLegend({
           value, which is a different claim: a record imported before a field
           was modelled has nothing in it no matter what the .pro says. Do not
           put a claim about his file behind a fact about our record. */}
-      {' '}An empty box means this machine record does not carry that value - which
-      may be because your profile did not state it, or because the record was
-      imported before this software read that setting.
-      {includeBoxedApplyClaim && ' Nothing outside the named axis, homing and'
-        + ' pin fields is driven by this software yet - it is kept, not acted on.'}
+      {' '}{controlText('DefinitionFields.text024')}{includeBoxedApplyClaim && controlText('DefinitionFields.text025')
+        + controlText('DefinitionFields.text026')}
       {notAccepted > 0 && (
         <>
           {' '}
@@ -1071,11 +1076,7 @@ export function NotSentLegend({
             data-testid={`${testId}-not-accepted`}
             role="status"
             style={{ color: 'var(--warning)' }}
-          >
-            {notAccepted} value{notAccepted === 1 ? '' : 's'} not accepted -
-            {notAccepted === 1 ? ' it is' : ' they are'} not saved and
-            {notAccepted === 1 ? ' it belongs' : ' they belong'} to this machine only.
-          </span>
+          >{catalogChildren(controlText(notAccepted === 1 ? 'DefinitionFields.notAcceptedSingular' : 'DefinitionFields.notAcceptedPlural', { value1: '\u0000value1\u0000' }), { value1: notAccepted })}</span>
         </>
       )}
     </div>
@@ -1233,6 +1234,7 @@ export function SectionNoneSet({ testId, settings, keys, noun }: {
   keys: readonly string[]
   noun: string
 }) {
+  useText('control-screens-not-probing')
   if (!settings.hideEmpty) return null
   const drawn = drawnKeys(settings, keys)
   if (drawn.length === 0) return null
@@ -1241,11 +1243,9 @@ export function SectionNoneSet({ testId, settings, keys, noun }: {
     <div
       data-testid={testId}
       className="machine-def-none-set"
-      data-tooltip={'The operator classified this catalog group as unused for this '
-        + 'machine. Show everything, or include the group, to restore every box.'}
-    >
-      {drawn.length} unused {noun}
-    </div>
+      data-tooltip={controlText('DefinitionFields.text033')
+        + controlText('DefinitionFields.text034')}
+    >{catalogChildren(controlText('DefinitionFields.text032', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: drawn.length, value2: noun })}</div>
   )
 }
 

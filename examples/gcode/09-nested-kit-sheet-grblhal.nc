@@ -1,4 +1,4 @@
-(LienCAM 0.36.0-alpha.1 - 09 Nested kit sheet - grblhal)
+(LienCAM 0.36.0-alpha.2 - 09 Nested kit sheet - grblhal)
 ( grblHAL )
 G90 G94 G17 G21
 ( Setup 1 )

@@ -21,6 +21,8 @@
 //     sceneRuntime.ts) -- so the component itself never touches
 //     THREE.WebGLRenderer; tests inject a stub that never constructs one.
 
+import { useText, textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createGeomService, tessQualityForTier, type GeomClient } from '../../geom'
@@ -103,8 +105,8 @@ const MEASURE_UNITS: Record<MeasureResult['kind'], string> = {
   distance: 'mm',
   radius: 'mm',
   angle: 'deg',
-  volume: 'mm^3',
-  area: 'mm^2',
+  get volume() { return workbenchText('Lab3DView.mm3') },
+  get area() { return workbenchText('Lab3DView.mm2') },
   length: 'mm',
 }
 
@@ -200,6 +202,7 @@ export function Lab3DView({
   createClient = createGeomService,
   createSceneRuntime = createDefaultSceneRuntime,
 }: Lab3DViewProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const sessionRef = useRef<GeomBridgeSession | null>(null)
@@ -245,7 +248,7 @@ export function Lab3DView({
   const [defeatureBusy, setDefeatureBusy] = useState(false)
   const [defeatureMsg, setDefeatureMsg] = useState<string | null>(null)
   const [filterMode, setFilterMode] = useState<SelectionFilterMode>('body')
-  const [status, setStatus] = useState('initializing...')
+  const [status, setStatus] = useState<string>(workbenchText('Lab3DView.initializing'))
   const [measurement, setMeasurement] = useState<MeasureState | null>(null)
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
@@ -396,10 +399,10 @@ export function Lab3DView({
         // likewise surfaced as a refusal, not printed as NaN.
         const collisionCount = result.aux?.edgeIdCollisionCount ?? 0
         if (collisionCount >= 1 || !Number.isFinite(result.value)) {
-          const named = ids !== undefined && ids.length > 0 ? ids.join(', ') : '(whole body)'
+          const named = ids !== undefined && ids.length > 0 ? ids.join(', ') : workbenchText('Lab3DView.wholeBody')
           const error = collisionCount >= 1
-            ? `picked edge ${named} cannot be resolved to a single physical edge (${collisionCount} ambiguous) -- the stable-id grammar could not disambiguate a shared adjacent-face pair, so this measure is refused rather than reporting the wrong edge.`
-            : `${label} is unavailable for ${named} (no finite value returned).`
+            ? workbenchText('Lab3DView.pickedEdgeCannotBeResolvedToASinglePhysical', { named: String(named), collisionCount: String(collisionCount) })
+            : workbenchText('Lab3DView.isUnavailableForNoFiniteValueReturned', { label: String(label), named: String(named) })
           setMeasurement({ label, kind: result.kind, value: NaN, error })
           return
         }
@@ -424,7 +427,7 @@ export function Lab3DView({
         } else if (hit.kind === 'edge') {
           // Edge length IS id-scoped in the kernel measure API (GEO-2 BK-10b,
           // analytic curveLength) -- real exact value, no fallback needed.
-          void runMeasure(hit.bodyId, 'length', [hit.id], 'Edge length', token)
+          void runMeasure(hit.bodyId, 'length', [hit.id], workbenchText('Lab3DView.edgeLength'), token)
         } else {
           // Face area (WO INT-1-R1.2): show the mesh-derived value INSTANTLY
           // as a labeled-APPROXIMATE preview (cheap, synchronous), then
@@ -439,19 +442,19 @@ export function Lab3DView({
           // fallback.
           const body = session.cache.get(hit.bodyId)
           const previewArea = body === undefined ? 0 : faceAreaFromMesh(body, hit.id)
-          setMeasurement({ label: 'Face area', kind: 'area', value: previewArea, approx: true })
+          setMeasurement({ label: workbenchText('Lab3DView.faceArea'), kind: 'area', value: previewArea, approx: true })
           // BK-20 LANDED (GEO-3 merge, 2026-07-08): measure('area', [faceId]) is
           // id-scoped in the kernel now, so the settled value IS this face's
           // exact area and the label says so. ('Body surface' was the pre-BK-20
           // honesty stopgap; demo script updated to match.)
-          void runMeasure(hit.bodyId, 'area', [hit.id], 'Face area', token)
+          void runMeasure(hit.bodyId, 'area', [hit.id], workbenchText('Lab3DView.faceArea'), token)
         }
       } else if (hit.kind === 'body') {
         if (selectedBodyIdsRef.current.has(hit.bodyId)) selectedBodyIdsRef.current.delete(hit.bodyId)
         else selectedBodyIdsRef.current.add(hit.bodyId)
         repaintAll()
         if (selectedBodyIdsRef.current.has(hit.bodyId)) {
-          void runMeasure(hit.bodyId, 'volume', undefined, 'Body volume', token)
+          void runMeasure(hit.bodyId, 'volume', undefined, workbenchText('Lab3DView.bodyVolume'), token)
         } else {
           setMeasurement(null)
         }
@@ -466,12 +469,12 @@ export function Lab3DView({
           // No numeric MeasureResult kind exists for a vertex in the frozen
           // facade -- report its BridgeVertexRef identity honestly instead
           // of fabricating a measurement (WO INT-1-R1.1).
-          const edgeList = hit.id.adjacentEdgeIds.join(', ') || '(none)'
+          const edgeList = hit.id.adjacentEdgeIds.join(', ') || workbenchText('Lab3DView.none')
           setMeasurement({
-            label: 'Vertex',
+            label: workbenchText('Lab3DView.vertex'),
             kind: 'length',
             value: NaN,
-            text: `Vertex selected -- adjacent edges: ${edgeList}`,
+            text: workbenchText('Lab3DView.vertexSelectedAdjacentEdges', { edgeList: String(edgeList) }),
           })
         }
       }
@@ -540,7 +543,7 @@ export function Lab3DView({
         const { bodies: imported, diagnostics } = await session.importStepFile(importId, bytes)
         const fatal = diagnostics.find((d) => d.severity === 'error')
         if (fatal !== undefined) {
-          throw new Error(`import diagnostic ${fatal.code}: ${JSON.stringify(fatal.params ?? {})}`)
+          throw new Error(workbenchText('Lab3DView.importDiagnostic', { code: String(fatal.code), value2: String(JSON.stringify(fatal.params ?? {})) }))
         }
         if (cancelled) return
         if (imported[0] !== undefined) lastStepBodyIdRef.current = imported[0].bodyId
@@ -562,7 +565,7 @@ export function Lab3DView({
           }
           const t0 = performance.now()
           let framed = false
-          setStatus(`importing "${body.name}": tessellating (coarse)...`)
+          setStatus(workbenchText('Lab3DView.importingTessellatingCoarse', { name: String(body.name) }))
           await session.tessellateProgressiveAtQuality(body.bodyId, qualities, (phase, cachedBody) => {
             if (cancelled) return
             paintBody(body.bodyId, cachedBody, runtime, objectsRef.current, session.selection, colors)
@@ -584,11 +587,11 @@ export function Lab3DView({
               importStatsRef.current = [...importStatsRef.current, stat]
               window.__lab3dImportStats = importStatsRef.current
               setStatus(
-                `imported "${body.name}": coarse tessellation ${ms.toFixed(0)}ms, ` +
-                  `${cachedBody.triFace.length.toLocaleString()} tris -- refining...`,
+                workbenchText('Lab3DView.importedCoarseTessellationMs', { name: String(body.name), value2: String(ms.toFixed(0)) }) +
+                  workbenchText('Lab3DView.trisRefining', { value1: String(cachedBody.triFace.length.toLocaleString()) }),
               )
             } else {
-              setStatus(`imported "${body.name}": ready`)
+              setStatus(workbenchText('Lab3DView.importedReady', { name: String(body.name) }))
             }
           })
         }
@@ -596,7 +599,7 @@ export function Lab3DView({
         if (cancelled) return
         const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
         setImportError(msg)
-        setStatus(`STEP import FAILED: ${msg}`)
+        setStatus(workbenchText('Lab3DView.stepImportFAILED', { msg: String(msg) }))
       } finally {
         if (!cancelled) setImportBusy(false)
       }
@@ -605,13 +608,13 @@ export function Lab3DView({
 
     async function boot(): Promise<void> {
       try {
-        setStatus('initializing geometry kernel...')
+        setStatus(workbenchText('Lab3DView.initializingGeometryKernel'))
         await session.init((pct, phase) => {
           window.LienSplash?.setProgress(pct, phase)
         })
         if (cancelled) return
 
-        setStatus('creating demo cut box...')
+        setStatus(workbenchText('Lab3DView.creatingDemoCutBox'))
         await session.createCutBox(DEMO_BODY_ID, {
           featureId: 'DEMO',
           size: DEMO_BOX_SIZE,
@@ -619,21 +622,21 @@ export function Lab3DView({
           toolSize: DEMO_TOOL_SIZE,
         })
         if (cancelled) return
-        bodyNamesRef.current.set(DEMO_BODY_ID, 'Cut Box')
-        setBodies((prev) => [...prev, { bodyId: DEMO_BODY_ID, name: 'Cut Box', visible: true }])
+        bodyNamesRef.current.set(DEMO_BODY_ID, workbenchText('Lab3DView.cutBox'))
+        setBodies((prev) => [...prev, { bodyId: DEMO_BODY_ID, name: workbenchText('Lab3DView.cutBox'), visible: true }])
         fetchAndSetVolume(DEMO_BODY_ID)
 
-        setStatus('tessellating (coarse)...')
+        setStatus(workbenchText('Lab3DView.tessellatingCoarse'))
         await session.tessellateProgressive(DEMO_BODY_ID, (phase, body) => {
           if (cancelled) return
           paintBody(DEMO_BODY_ID, body, runtime, objectsRef.current, session.selection)
           expandSectionRangeFor(body.geometry)
-          setStatus(phase === 'coarse' ? 'coarse tessellation painted, refining to display tier...' : 'ready')
+          setStatus(phase === 'coarse' ? workbenchText('Lab3DView.coarseTessellationPaintedRefiningToDisplayTier') : 'ready')
         })
       } catch (err) {
         if (cancelled) return
         const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-        setStatus(`FAILED: ${msg}`)
+        setStatus(workbenchText('Lab3DView.failed', { msg: String(msg) }))
       }
     }
     void boot()
@@ -753,33 +756,33 @@ export function Lab3DView({
       const runtime = runtimeRef.current
       const bodyId = lastStepBodyIdRef.current
       if (session === null || client === null || runtime === null || bodyId === null) {
-        setDefeatureMsg('defeature: import a STEP first')
+        setDefeatureMsg(workbenchText('Lab3DView.defeatureImportASTEPFirst'))
         return
       }
       const handle = session.getHandle(bodyId)
       if (handle === undefined || client.recognizeFeatures === undefined || client.defeatureBatch === undefined) {
-        setDefeatureMsg('defeature: no handle / engine method unavailable')
+        setDefeatureMsg(workbenchText('Lab3DView.defeatureNoHandleEngineMethodUnavailable'))
         return
       }
       setDefeatureBusy(true)
-      setDefeatureMsg('recognizing features...')
+      setDefeatureMsg(workbenchText('Lab3DView.recognizingFeatures'))
       try {
         const verdicts = await client.recognizeFeatures(handle)
         if (!mountedRef.current) return
         const holeClasses: FeatureClass[] = ['throughHole', 'blindHole', 'counterboreStack']
         const holes = verdicts.filter((v) => v.removable && holeClasses.includes(v.featureClass))
-        setDefeatureMsg(`removing ${holes.length} hole feature(s)...`)
+        setDefeatureMsg(workbenchText('Lab3DView.removingHoleFeatureS', { length: String(holes.length) }))
         const r = await client.defeatureBatch({ featureId: 'LAB_DEFEATURE', body: handle, query: { classes: holeClasses } })
         if (!mountedRef.current) return
         if (!r.ok || r.body === undefined) {
-          setDefeatureMsg(`defeature FAILED: ${r.diagnostics[0]?.code ?? 'unknown'}`)
+          setDefeatureMsg(workbenchText('Lab3DView.defeatureFAILED', { value1: String(r.diagnostics[0]?.code ?? 'unknown') }))
           return
         }
 
         const oldName = bodyNamesRef.current.get(bodyId) ?? bodyId
         const colors = bodyColorsRef.current.get(bodyId) ?? DEFAULT_HIGHLIGHT_COLORS
         const newBodyId = `${bodyId}:defeatured#${++defeatureCounterRef.current}`
-        const summary = session.adoptBody(newBodyId, r.body, `${oldName} (defeatured)`)
+        const summary = session.adoptBody(newBodyId, r.body, workbenchText('Lab3DView.defeatured', { oldName: String(oldName) }))
 
         // Remove the pre-defeature body from the view (worker handle + cache
         // + scene) -- awaited (unlike handleDispose's own fire-and-forget
@@ -811,7 +814,7 @@ export function Lab3DView({
           coarse: tessQualityForTier(diag, 'coarse'),
           display: tessQualityForTier(diag, 'fine'),
         }
-        setDefeatureMsg('tessellating healed body...')
+        setDefeatureMsg(workbenchText('Lab3DView.tessellatingHealedBody'))
         await session.tessellateProgressiveAtQuality(summary.bodyId, qualities, (phase, cachedBody) => {
           if (!mountedRef.current) return
           paintBody(summary.bodyId, cachedBody, runtime, objectsRef.current, session.selection, colors)
@@ -822,10 +825,10 @@ export function Lab3DView({
           }
         })
         if (!mountedRef.current) return
-        setDefeatureMsg(`defeatured: ${r.report?.healed ?? 0} healed / ${r.report?.failed ?? 0} failed / ${r.report?.refused ?? 0} refused; delta ${(r.report?.totalVolumeDelta ?? 0).toFixed(2)} mm^3`)
+        setDefeatureMsg(workbenchText('Lab3DView.defeaturedHealedFailedRefusedDeltaMm3', { value1: String(r.report?.healed ?? 0), value2: String(r.report?.failed ?? 0), value3: String(r.report?.refused ?? 0), value4: String((r.report?.totalVolumeDelta ?? 0).toFixed(2)) }))
       } catch (err) {
         if (!mountedRef.current) return
-        setDefeatureMsg(`defeature error: ${err instanceof Error ? err.message : String(err)}`)
+        setDefeatureMsg(workbenchText('Lab3DView.defeatureError', { value1: String(err instanceof Error ? err.message : String(err)) }))
       } finally {
         if (mountedRef.current) setDefeatureBusy(false)
       }
@@ -834,13 +837,13 @@ export function Lab3DView({
 
   const measureText =
     measurement === null
-      ? '(nothing selected)'
+      ? workbenchText('Lab3DView.nothingSelected')
       : measurement.text !== undefined
         ? measurement.text
         : measurement.error !== undefined
-          ? `${measurement.label}: FAILED (${measurement.error})`
+          ? workbenchText('Lab3DView.failed2', { label: String(measurement.label), error: String(measurement.error) })
           : `${measurement.label}: ${measurement.value.toFixed(3)} ${MEASURE_UNITS[measurement.kind]}` +
-            (measurement.approx === true ? ' (mesh-derived -- see M1 demo notes)' : '')
+            (measurement.approx === true ? workbenchText('Lab3DView.meshDerivedSeeM1DemoNotes') : '')
 
   return (
     <div
@@ -892,8 +895,7 @@ export function Lab3DView({
           }}
         >
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            Open STEP:
-            <input
+            {workbenchText('Lab3DView.openSTEP')}<input
               type="file"
               accept=".step,.stp"
               data-testid="lab3d-open-step"
@@ -911,14 +913,13 @@ export function Lab3DView({
             data-testid="lab3d-defeature-holes"
             disabled={defeatureBusy}
             onClick={handleDefeatureHoles}
-            data-tooltip="Recognize + batch-remove the drilled/counterbored holes on the imported STEP, healed watertight (GEO-6 defeature)"
+            data-tooltip={workbenchText('Lab3DView.recognizeBatchRemoveTheDrilledCounterboredHolesOnThe')}
             style={{
               background: 'rgba(16,20,24,0.85)', color: '#d8e0e8', border: '1px solid #2a3540',
               borderRadius: 4, padding: '2px 8px', cursor: defeatureBusy ? 'default' : 'pointer',
             }}
           >
-            Defeature holes
-          </button>
+            {workbenchText('Lab3DView.defeatureHoles')}</button>
           {defeatureMsg !== null && (
             <span data-testid="lab3d-defeature-status" style={{ color: '#8fd0a0' }}>
               {defeatureMsg}
@@ -978,7 +979,7 @@ export function Lab3DView({
             padding: '4px 8px',
           }}
         >
-          <span>Section:</span>
+          <span>{workbenchText('Lab3DView.section')}</span>
           {SECTION_AXES.map((axis) => (
             <button
               key={axis}

@@ -33,6 +33,7 @@
 // file's own polyfill must beat the product's imports, and the guard must beat
 // the test file's, and those are two different races.
 import '../support/mockContractGuard'
+import './trackedFileGuard'
 
 function installMemoryLocalStorage(): void {
   if (typeof window === 'undefined') return

@@ -438,10 +438,11 @@ export function planarRegions(w: WeldedMesh, toleranceMm: number, slope: number)
  *
  * Each returned value is a THRESHOLD for `splitRegionAtSlope`, sitting just
  * below one cluster of equal dihedrals so that every edge of that cluster is
- * cut and everything smoother survives. Clustering is relative (1e-6): the same
- * seam of a tessellated part gives 64 slopes that agree to eight digits and
- * differ in the ninth, and cutting at one of them would leave the rest of the
- * seam welded.
+ * cut and everything smoother survives. Clustering is relative (1e-4): the same
+ * seam of a float32 STL has slightly different facet normals around its
+ * ring. Treating that rounding as distinct dihedrals leaves most of a seam
+ * welded and produces tiny fragments. This is only a candidate partition;
+ * recognize.ts still proves every resulting facet against its fitted surface.
  */
 export function internalSlopeCuts(w: WeldedMesh, facets: readonly number[]): number[] {
   const inside = new Set(facets);
@@ -459,13 +460,13 @@ export function internalSlopeCuts(w: WeldedMesh, facets: readonly number[]): num
   const cuts: number[] = [];
   let clusterMin = Infinity;
   for (const s of slopes) {
-    if (clusterMin !== Infinity && s >= clusterMin * (1 - 1e-6)) {
+    if (clusterMin !== Infinity && s >= clusterMin * (1 - 1e-4)) {
       clusterMin = Math.min(clusterMin, s);
-      cuts[cuts.length - 1] = clusterMin * (1 - 1e-6);
+      cuts[cuts.length - 1] = clusterMin * (1 - 1e-4);
       continue;
     }
     clusterMin = s;
-    cuts.push(s * (1 - 1e-6));
+    cuts.push(s * (1 - 1e-4));
   }
   return cuts.filter((cut) => cut > 0);
 }

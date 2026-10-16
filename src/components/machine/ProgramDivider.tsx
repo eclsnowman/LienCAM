@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent } from 'react'
 import { PROGRAM_PREVIEW_DEFAULT_PERCENT, useUiPrefs } from '../../store/uiPrefs'
 
@@ -55,6 +58,7 @@ export function programSplitGridStyle(previewPercent: number): CSSProperties {
 }
 
 export function ProgramDivider({ previewPercent }: { previewPercent: number }) {
+  useText('control-screens-not-probing')
   const removeDragListeners = useRef<(() => void) | null>(null)
 
   useEffect(() => () => removeDragListeners.current?.(), [])
@@ -79,7 +83,7 @@ export function ProgramDivider({ previewPercent }: { previewPercent: number }) {
       className="control-program-divider"
       data-testid="control-program-divider"
       role="separator"
-      aria-label="Resize program preview and G-code list"
+      aria-label={controlText('ProgramDivider.text001')}
       aria-orientation="vertical"
       aria-valuemin={0}
       aria-valuemax={100}

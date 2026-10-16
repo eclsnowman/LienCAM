@@ -59,7 +59,7 @@ const TOOLPATH_BUILDERS = {
   },
   COMPUTE_DRILL: (payload, onProgress) => buildDrillToolpath(payload, onProgress),
   COMPUTE_BORE: (payload, onProgress, notify) => buildBoreToolpath(payload, onProgress, notify),
-  COMPUTE_CHAMFER: (payload, onProgress) => buildChamferToolpath(payload, onProgress),
+  COMPUTE_CHAMFER: (payload, onProgress, notify) => buildChamferToolpath(payload, onProgress, notify),
   COMPUTE_FACE: async (payload, onProgress) => {
     // Face ring patterns (offset/spiral) use clipper2 for robust inward
     // offsetting; load it once before computing. Cheap after the first call.

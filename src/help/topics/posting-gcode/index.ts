@@ -14,7 +14,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'The Post dropdown at the top of the Properties tab picks the post definition. It starts on the post for the controller your machine is set to - UCCNC, GRBL, grblHAL, LinuxCNC, or Generic (linear only; despite its name it writes G2/G3 arcs unless you turn off Emit arcs) - and lists that built-in template under Built-in templates, plus any posts you saved under Saved posts. A badge next to the dropdown marks the selection BUILT-IN or CUSTOM. Edits in this dialog change a working copy, never the built-in template itself.',
+        text: 'The Post dropdown at the top of the Properties tab picks the post definition. It starts on the post for the controller your machine is set to - UCCNC, GRBL, grblHAL, LinuxCNC, or Generic (writes G2/G3 arcs unless you turn off Emit arcs) - and lists that built-in template under Built-in templates, plus any posts you saved under Saved posts. A badge next to the dropdown marks the selection BUILT-IN or CUSTOM. Edits in this dialog change a working copy, never the built-in template itself.',
       },
       {
         kind: 'paragraph',
@@ -26,6 +26,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
           'Choose the scope under Output scope: tick or untick setups and single operations in the tree. Tick "All operations" to export every setup and every enabled operation instead. An operation that has never been generated is left out, and a diagnostics row names it ("... not generated and will not be included. Generate them first.").',
           'Choose the Output: Combined (one file), with a section per setup, or Separate files (one per setup), each named with its work offset, for example My_Part-G54.nc. Combined output can add "Pause between setups (M0)", which inserts an M5 + M0 operator pause between setups.',
           'Check the Export units under Output / Format: mm posts G21, in posts G20. It starts on your global export-units setting; coordinates and feeds are converted for this one export.',
+          'Type the file name beside Export before saving; Separate files gives each file its own name field, and a name without an extension gets the post extension.',
           'Press Export (it reads "Export .nc", or "Export 3 files" for separate files). In the browser the file downloads; in the desktop app a Save dialog asks where to put it. The button stays disabled while any error in the Diagnostics list blocks the program.',
         ],
       },
@@ -76,7 +77,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'An out-of-date operation does not block. The preview shows an OP_OUTDATED row for it, but Export stays enabled: pressing it recomputes every out-of-date operation in scope first, says so in the console ("Recomputed "Pocket 2": it was out of date, so it was recalculated before the program left the app."), and then writes the file. The same happens when you leave an operation out of the scope: later operations that assumed its cut are recomputed for the stock that is really there.',
+        text: 'An out-of-date operation does not block. When Post Process opens, or the scope takes one in, it recomputes the out-of-date operations it is about to post, each after the ones it builds on (the order Regenerate All keeps), says so in one console line ("Post Process recomputed 2 out-of-date operations before posting: "Drill 1", "Contour 2"."), and the preview shows the program. This is what you see after restarting LienCAM: the restored project keeps its operations but not their toolpaths, so they read out of date until Post or Regenerate All recomputes them. An operation that cannot be computed shows its own error instead and blocks Export. An operation that was never generated is not computed here: it stays left out of the program, as the preview says. Export also recomputes anything still out of date before it writes the file. The same happens when you leave an operation out of the scope: later operations that assumed its cut are recomputed for the stock that is really there.',
       },
       {
         kind: 'steps',

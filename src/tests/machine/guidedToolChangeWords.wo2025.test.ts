@@ -35,6 +35,9 @@ const SIM_ID = 'wo2025-simulator'
 const PARK = { id: 'm6-pad', label: 'Fixed tool probe', x: 60, y: 70, z: -20 }
 const SAFE_Z = -2
 const PROGRAM = ['G21', 'G90', 'T1 M6', 'G1 X2 F6000', 'T2 M6', 'G1 X40 F6000', 'M30'].join('\n')
+// WO-2764: WO-2478 runs a macro bound to M6 at every M6, the same-tool T1 M6 too;
+// the M6-macro case preselects T1 so its first held change is still the T2 M6.
+const M6_BOUND_PROGRAM = PROGRAM.replace('T1 M6', 'T1')
 
 async function advance(ms: number): Promise<void> {
   const { act } = await import('@testing-library/react')
@@ -155,7 +158,7 @@ describe('WO-2025: the guided tool change says what it does', () => {
       await advance(50)
     }
     render(createElement(ProgramPanel))
-    expect(loadGcodeTextToolpathProgram('prelude.nc', PROGRAM).ok).toBe(true)
+    expect(loadGcodeTextToolpathProgram('prelude.nc', M6_BOUND_PROGRAM).ok).toBe(true)
     expect(getMachineController().startJob()).toBe(true)
     await advance(4000)
 

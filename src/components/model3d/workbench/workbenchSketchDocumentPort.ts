@@ -41,6 +41,8 @@
 // `after` in place. Result: one command per gesture, `undo()` lands at pre-gesture, `redo()`
 // re-applies the gesture's FINAL state. A gesture that mutates nothing never opens a step and never
 // costs the user a wasted Ctrl+Z.
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { Command, FeatureDag } from '../../../doc'
 import type { PlaneFrame } from '../../../sketch3d/planeMath'
 import type { SketchDocumentPort, SketchNoticeSeverity } from '../../../lib/sketch/sketcher'
@@ -160,7 +162,7 @@ function commitSketch(next: Sketch, opts?: { clearSelection?: boolean }): void {
   const { sketchNodeId, frame } = sketchSessionStore.getState()
   if (d === null || sketchNodeId === null) return
   if (frame === null) {
-    d.notice('Sketch edit refused: the active workbench sketch has no plane frame.', 'error')
+    d.notice(workbenchText('workbenchSketchDocumentPort.sketchEditRefusedTheActiveWorkbenchSketchHasNo'), 'error')
     return
   }
 
@@ -241,7 +243,7 @@ function solved(sketch: Sketch, drag?: DragRequest): Sketch {
     // session down with it. Named, surfaced, geometry preserved as drawn, and
     // the failed verdict replaces any stale successful status (WO-201).
     const failureMessage = err instanceof Error ? err.message : String(err)
-    d.notice(`The constraint solver failed: ${failureMessage}`, 'error')
+    d.notice(workbenchText('workbenchSketchDocumentPort.theConstraintSolverFailed', { failureMessage: String(failureMessage) }), 'error')
     return {
       ...sketch,
       solveStatus: {
@@ -416,7 +418,7 @@ export const workbenchSketchDocumentPort: SketchDocumentPort = {
       ? {
           ok: false,
           reason: 'workbench-project-resolver-unavailable',
-          message: 'Project: workbench model geometry is not ready',
+          message: workbenchText('workbenchSketchDocumentPort.projectWorkbenchModelGeometryIsNotReady'),
         }
       : resolver(context)
   },
@@ -510,7 +512,7 @@ export const workbenchSketchDocumentPort: SketchDocumentPort = {
     openStepNow()
     commitSketch({ ...sketch, entities: flipped })
     // NEVER silent: a flip on a possibly off-screen selection flashes what happened.
-    deps()?.notice(`Toggled construction on ${n} ${n === 1 ? 'entity' : 'entities'}`, 'info')
+    deps()?.notice(workbenchText('workbenchSketchDocumentPort.toggledConstructionOn', { n: String(n), value2: String(n === 1 ? 'entity' : 'entities') }), 'info')
     return true
   },
 
@@ -524,11 +526,11 @@ export const workbenchSketchDocumentPort: SketchDocumentPort = {
     const anchorSelected = selectedIds.some(isInjectedSketchAnchorId)
     const deletableIds = selectedIds.filter((id) => !isInjectedSketchAnchorId(id))
     if (deletableIds.length === 0) {
-      deps()?.notice('Origin/axis anchors cannot be deleted.', 'warning')
+      deps()?.notice(workbenchText('workbenchSketchDocumentPort.originAxisAnchorsCannotBeDeleted'), 'warning')
       return
     }
     if (anchorSelected) {
-      deps()?.notice('Origin/axis anchors were excluded from Delete.', 'info')
+      deps()?.notice(workbenchText('workbenchSketchDocumentPort.originAxisAnchorsWereExcludedFromDelete'), 'info')
     }
     // THE one delete-cascade (src/lib/sketch/deleteSelection.ts) -- removes the entities and every
     // constraint/dimension that references them. Forking it here is exactly the divergence this
@@ -698,7 +700,7 @@ export const workbenchSketchDocumentPort: SketchDocumentPort = {
     sketchSessionStore.beginBlockEditSession(entityId, res.meta, returnSketch)
     sketchSessionStore.setState({ selectedIds: res.memberIds })
     deps()?.notice(
-      `Editing block${res.meta.name ? ` "${res.meta.name}"` : ''} - edit its members, then Finish`,
+      workbenchText('workbenchSketchDocumentPort.editingBlockEditItsMembersThenFinish', { value1: String(res.meta.name ? ` "${res.meta.name}"` : '') }),
       'info',
     )
   },
@@ -747,7 +749,7 @@ export function syncSketchSessionFromDag(): void {
   const { active, sketchNodeId, frame } = sketchSessionStore.getState()
   if (!active || d === null || sketchNodeId === null) return
   if (frame === null) {
-    d.notice('Sketch resync refused: the active workbench sketch has no plane frame.', 'error')
+    d.notice(workbenchText('workbenchSketchDocumentPort.sketchResyncRefusedTheActiveWorkbenchSketchHasNo'), 'error')
     return
   }
   const payload = d.dag.getNode(sketchNodeId)?.payload

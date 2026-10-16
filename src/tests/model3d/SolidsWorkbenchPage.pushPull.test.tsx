@@ -294,6 +294,12 @@ function commitField(testId: string, raw: string): void {
   fireEvent.blur(input)
 }
 
+// WO-2858: the hover readout names the body ("Face on Extrude F1"), never the
+// topology key. The hovered key is the one face the pick highlight paints.
+function hoveredFaceIds(): string[] {
+  return (hooks().getBodyFaceIds('F1') ?? []).filter((id) => hooks().getPickHighlightState(id) === 'hovered')
+}
+
 function hooks(): SolidsWorkbenchHooks {
   const h = window.__solidsWorkbenchHooks
   if (h === undefined) throw new Error('__solidsWorkbenchHooks not installed')
@@ -935,7 +941,7 @@ describe('SolidsWorkbenchPage push/pull face-edit mode (WO UI-5, real occt-wasm 
     expect(screen.queryByTestId('workbench-cancel-pushpull')).toBeTruthy() // gizmo stays mounted
   }, 60_000)
 
-  it('picking a CYLINDER wall refuses at pick time (structured reason) and mounts no gizmo (#4)', async () => {
+  it('WO-2813: picking a CYLINDER wall mounts the offset gizmo', async () => {
     const h = pushPullHarness()
     render(
       <SolidsWorkbenchPage
@@ -966,27 +972,16 @@ describe('SolidsWorkbenchPage push/pull face-edit mode (WO UI-5, real occt-wasm 
 
     await waitFor(() => {
       const hint = screen.getByTestId('solids-workbench-pushpull-hint').textContent ?? ''
-      expect(hint).toMatch(/cylinder/i)
+      expect(hint).toMatch(/Drag the arrow or type a distance/i)
     }, { timeout: 20_000 })
-    expect(screen.queryByTestId('workbench-cancel-pushpull')).toBeTruthy() // still armed (hint block renders in both 'arm' and 'mounted')
-    expect(h.adapter()).toBeNull() // the gizmo was never mounted -- no adapter was ever constructed
-    expect(h.adapterFactoryCalls()).toBe(0)
+    expect(screen.queryByTestId('workbench-cancel-pushpull')).toBeTruthy()
+    expect(h.adapter()).not.toBeNull()
+    expect(h.adapterFactoryCalls()).toBe(1)
   }, 30_000)
 
-  it('picking a CONE face refuses at pick time (structured reason) and mounts no gizmo (#4)', async () => {
-    // WO UI-5-R1 (finding 3): SolidsWorkbenchPage owns no hole/countersink
-    // dialog, so there is no in-scope UI affordance that BUILDS a body with
-    // a real cone face to click -- the suggested fix's "injected-fixture
-    // workbench test" seam. handlePushPullPick's cone/cylinder/sphere/torus
-    // branch is identical (it only ever branches on classifyFace()'s
-    // returned SurfaceType string, see handlePushPullPick's own `if
-    // (surfaceType !== 'plane')` check), so classifyFace is the ONE seam
-    // wrapped here -- everything else (pick raycast, hint rendering, adapter
-    // construction) is the REAL page driven exactly like the cylinder case
-    // above. The kernel's OWN cone classification/refusal is independently
-    // proven by editfeature.test.ts's #fo-refuse-cone fixture (a real
-    // countersink face) -- this test proves the WORKBENCH UI plumbing for
-    // that outcome, which #fo-refuse-cone cannot reach.
+  it('WO-2813: a CONE classification mounts the offset gizmo', async () => {
+    // WO-2813 accepts cone picks. Wrap only classification to pin the page's
+    // pick gate; real cone editing and volume are covered by editfeature.test.ts.
     const h = pushPullHarness()
     const real = createLocalGeomService()
     const client: GeomClient = { ...real, classifyFace: async () => 'cone' }
@@ -1014,11 +1009,11 @@ describe('SolidsWorkbenchPage push/pull face-edit mode (WO UI-5, real occt-wasm 
 
     await waitFor(() => {
       const hint = screen.getByTestId('solids-workbench-pushpull-hint').textContent ?? ''
-      expect(hint).toMatch(/cone/i)
+      expect(hint).toMatch(/Drag the arrow or type a distance/i)
     }, { timeout: 20_000 })
-    expect(screen.queryByTestId('workbench-cancel-pushpull')).toBeTruthy() // still armed (hint block renders in both 'arm' and 'mounted')
-    expect(h.adapter()).toBeNull() // the gizmo was never mounted -- no adapter was ever constructed
-    expect(h.adapterFactoryCalls()).toBe(0)
+    expect(screen.queryByTestId('workbench-cancel-pushpull')).toBeTruthy()
+    expect(h.adapter()).not.toBeNull()
+    expect(h.adapterFactoryCalls()).toBe(1)
   }, 30_000)
 })
 
@@ -2030,11 +2025,12 @@ describe('SolidsWorkbenchPage push/pull hover feedback (WO UI-15 B1)', () => {
 
     await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
     const readoutText = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-    expect(readoutText).toMatch(/^Face \S+ on /)
-    const hoveredFaceId = readoutText.match(/^Face (\S+) on/)?.[1]
-    expect(hoveredFaceId).not.toBeUndefined()
-    // FAILS-IF: removing the hover-paint call (setHover inside handlePickHover) leaves this 'none'.
-    expect(hooks().getPickHighlightState(hoveredFaceId!)).toBe('hovered')
+    expect(readoutText).toBe('Face on Extrude F1')
+    // FAILS-IF: removing the hover-paint call (setHover inside handlePickHover) leaves no face hovered.
+    expect(hoveredFaceIds()).toHaveLength(1)
+    const hoveredFaceId = hoveredFaceIds()[0]
+    expect(readoutText).not.toContain(hoveredFaceId)
+    expect(hooks().getPickHighlightState(hoveredFaceId)).toBe('hovered')
 
     // Leaving the mode (Cancel) clears both the readout and the paint state -- B1.1's "leaving the
     // mode clears it".
@@ -2107,9 +2103,10 @@ describe('SolidsWorkbenchPage push/pull hover feedback (WO UI-15 B1)', () => {
 
     await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
     const readoutText = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-    const hoveredFaceId = readoutText.match(/^Face (\S+) on/)?.[1]
-    expect(hoveredFaceId).not.toBeUndefined()
-    expect(hooks().getPickHighlightState(hoveredFaceId!)).toBe('hovered')
+    expect(readoutText).toBe('Face on Extrude F1')
+    expect(hoveredFaceIds()).toHaveLength(1)
+    const hoveredFaceId = hoveredFaceIds()[0]
+    expect(readoutText).not.toContain(hoveredFaceId)
 
     // BK-114: Measure's own pointer-move dispatch never fired for the push-pull-armed hover.
     expect(pickSpy).not.toHaveBeenCalled()

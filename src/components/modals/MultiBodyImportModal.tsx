@@ -20,12 +20,14 @@
 // currentMode -- 'combined' at import (the historical default), or the row's
 // stored prior pick when the decision is re-opened. Mounted once at the App root;
 // renders nothing when no choice is pending.
+import { useText } from '../../i18n'
 import { useEffect } from 'react'
 import { Boxes, Layers, X } from 'lucide-react'
 import { useCamStore } from '../../store'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 
 export function MultiBodyImportModal() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const choice = useCamStore((s) => s.multiBodyImportChoice)
   const resolve = useCamStore((s) => s.resolveMultiBodyImportChoice)
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
@@ -61,7 +63,7 @@ export function MultiBodyImportModal() {
         className="modal-container multibody-import-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Choose how the imported bodies land"
+        aria-label={workbenchText('MultiBodyImportModal.chooseHowTheImportedBodiesLand')}
         data-testid="multibody-import-dialog"
         style={{ maxWidth: 460, minWidth: 340 }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -69,11 +71,11 @@ export function MultiBodyImportModal() {
       >
         <div className="modal-header">
           <Boxes size={15} className="modal-header-icon" />
-          <span className="modal-title">This file has {bodyCount} separate bodies</span>
+          <span className="modal-title">{workbenchText('MultiBodyImportModal.thisFileHas')}{bodyCount}{workbenchText('MultiBodyImportModal.separateBodies')}</span>
           <button
             className="modal-close-btn"
             onClick={() => resolve(currentMode ?? 'combined')}
-            aria-label="Keep the default"
+            aria-label={workbenchText('MultiBodyImportModal.keepTheDefault')}
           >
             <X size={14} />
           </button>
@@ -85,9 +87,7 @@ export function MultiBodyImportModal() {
           style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}
         >
           <p style={{ margin: '0 0 12px' }}>
-            &ldquo;{name}&rdquo; contains {bodyCount} bodies. How would you like them in the
-            geometry list? You can change this later.
-          </p>
+            {workbenchText('MultiBodyImportModal.contains', { name: String((name) ?? '') })}{bodyCount}{workbenchText('MultiBodyImportModal.bodiesHowWouldYouLikeThemInTheGeometry')}</p>
 
           <div className="multibody-import-options">
             <button
@@ -100,11 +100,9 @@ export function MultiBodyImportModal() {
               <Boxes size={18} className="multibody-import-option-icon" />
               <span>
                 <span className="multibody-import-option-title">
-                  Keep as one item{defaultIsCombined ? ' (default)' : ''}
-                </span>
+                  {workbenchText('MultiBodyImportModal.keepAsOneItem', { value1: String((defaultIsCombined ? workbenchText('MultiBodyImportModal.default') : '')) })}</span>
                 <span className="multibody-import-option-desc">
-                  All {bodyCount} bodies stay together as a single row.
-                </span>
+                  {workbenchText('MultiBodyImportModal.all')}{bodyCount}{workbenchText('MultiBodyImportModal.bodiesStayTogetherAsASingleRow')}</span>
               </span>
             </button>
 
@@ -118,8 +116,7 @@ export function MultiBodyImportModal() {
               <Layers size={18} className="multibody-import-option-icon" />
               <span>
                 <span className="multibody-import-option-title">
-                  One item per body{!defaultIsCombined ? ' (default)' : ''}
-                </span>
+                  {workbenchText('MultiBodyImportModal.oneItemPerBody', { value1: String((!defaultIsCombined ? workbenchText('MultiBodyImportModal.default') : '')) })}</span>
               </span>
             </button>
           </div>

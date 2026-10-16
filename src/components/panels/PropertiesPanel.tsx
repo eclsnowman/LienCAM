@@ -12,10 +12,11 @@ import { describeMeshEdit } from '../../mesh/edit'
 import { NumericInput, OptionalNumericInput } from '../ui/NumericInput'
 import { useSelectAllOnClick } from '../ui/selectAllOnClick'
 import { fmtDim, fmtMachineLength, unitLabel, feedLabel, fmtFeed } from '../../lib/ui/unitFormat'
+import { lengthFieldValue } from '../../lib/format/lengthDisplay'
 import { resolveFeedrates } from '../../lib/cam/feedrates'
 import { collectOperationFolderTreeIds } from '../../lib/tree/operationFolders'
 import type { AdaptiveRoughDiagnostics, AutoStockItem, BrepSelection, FeedrateOverride, FixedStockItem, GeometryFolder, HeightParams, HeightReference, ImportedGeometry, Layer2D, LinkingParams, MachineAction, NestRecord, Operation, OperationFolder, PassParams, SelectedMove, Tool, Units, Vec3 } from '../../types'
-import { machineActionLabel } from '../../types'
+import { callableMachineMacros, machineActionLabel } from '../../types'
 import {
   CONTOUR_ROUGHING_STYLE_LABELS,
   ENGRAVE_STYLE_LABELS,
@@ -818,6 +819,7 @@ function MachineActionProperties({ setupId, action }: { setupId: string; action:
     </div>
   )
   const park = action.kind === 'operator_stop' ? workholdingStopPark(machine, undefined) : null
+  const callableMacros = callableMachineMacros(machine)
   const parkLength = (mm: number) => `${fmtMachineLength(mm, displayUnits)} ${unitLabel(displayUnits)}`
   const parkAxes: Array<[string, number]> = park && Number.isFinite(park.x) && Number.isFinite(park.y)
     ? [['X', park.x], ['Y', park.y], ...(typeof park.z === 'number' && Number.isFinite(park.z) ? [['Z', park.z] as [string, number]] : [])]
@@ -833,6 +835,29 @@ function MachineActionProperties({ setupId, action }: { setupId: string; action:
       </div>
       {textField('Name', 'machine-action-name-input', action.name,
         (name) => updateMachineAction(setupId, action.id, { name }), false)}
+      {action.kind === 'run_macro' && (
+        <>
+        <div className="props-group">
+          <label className="props-label" htmlFor="run-macro-select">Macro</label>
+          <div className="props-value" style={{ flex: 1 }}>
+          <select
+            id="run-macro-select"
+            className="props-text-input"
+            data-testid="run-macro-select"
+            value={action.macroId}
+            onChange={(event) => updateMachineAction(setupId, action.id, { macroId: event.target.value })}
+          >
+            <option value="">Choose a macro</option>
+            {action.macroId && !callableMacros.some((macro) => macro.id === action.macroId) && (
+              <option value={action.macroId}>Selected macro is unavailable</option>
+            )}
+            {callableMacros.map((macro) => <option key={macro.id} value={macro.id}>{macro.name} (M{macro.mCode})</option>)}
+          </select>
+          </div>
+        </div>
+        <p className="mform-help" style={{ margin: '4px 12px 8px' }}>Only shown macros with program-callable M-codes are listed. M6 also changes tools.</p>
+        </>
+      )}
       {action.kind === 'operator_stop' && (
         <>
           {textField('Message', 'operator-stop-message-input', action.message,
@@ -4839,7 +4864,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
             <>
               <NumericInput
                 className="props-number-input"
-                value={row.resolved ?? row.legacy}
+                value={lengthFieldValue(row.resolved ?? row.legacy, displayUnits)}
                 step={0.5}
                 units={displayUnits}
                 kind="dim"
@@ -5107,7 +5132,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                     <div className="props-value">
                       <NumericInput
                         className="props-number-input"
-                        value={adaptive3dHeightDraft.topWcsMm}
+                        value={lengthFieldValue(adaptive3dHeightDraft.topWcsMm, displayUnits)}
                         step={0.1}
                         units={displayUnits}
                         kind="dim"
@@ -5120,7 +5145,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                     <div className="props-value">
                       <NumericInput
                         className="props-number-input"
-                        value={adaptive3dHeightDraft.bottomWcsMm}
+                        value={lengthFieldValue(adaptive3dHeightDraft.bottomWcsMm, displayUnits)}
                         step={0.1}
                         units={displayUnits}
                         kind="dim"
@@ -5821,7 +5846,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                       <div className="props-value" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <NumericInput
                           className="props-number-input"
-                          value={faceSmartPanelState.draft.explicitTargetWcsMm}
+                          value={lengthFieldValue(faceSmartPanelState.draft.explicitTargetWcsMm, displayUnits)}
                           step={0.5}
                           units={displayUnits}
                           kind="dim"
@@ -7185,6 +7210,19 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
             <>
               {op.type === 'chamfer' && (
                 <>
+                  <div className="props-group" data-testid="props-chamfer-entry-policy" style={{ flexDirection: 'column', alignItems: 'stretch', minWidth: 0 }}>
+                    <div className="props-label" style={{ whiteSpace: 'normal', minWidth: 0 }}>{tx('NewOperationModalBody.Chamfer_entry_policy')}</div>
+                    <select
+                      className="props-number-input"
+                      aria-label={tx('NewOperationModalBody.Chamfer_entry_policy')}
+                      value={chamferParams.entryPolicy ?? 'authored'}
+                      onChange={e => commitChamferParams({ entryPolicy: e.target.value as 'authored' | 'clear_space' })}
+                    >
+                      <option value="authored">{tx('NewOperationModalBody.Chamfer_authored_entry')}</option>
+                      <option value="clear_space">{tx('NewOperationModalBody.Chamfer_clear_space_entry')}</option>
+                    </select>
+                    <p className="op-hint" style={{ margin: 0 }}>{tx('NewOperationModalBody.Chamfer_clear_space_description')}</p>
+                  </div>
                   <div className="props-group" data-testid="props-chamfer-width">
                     <div className="props-label">{tx('PropertiesPanel.Chamfer_width')}</div>
                     <div className="props-value" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

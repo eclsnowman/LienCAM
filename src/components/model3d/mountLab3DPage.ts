@@ -11,6 +11,8 @@
 // URL" per the WO's mission statement: no file outside src/components/model3d/**
 // needs to change for it to be reachable.
 
+import { textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Lab3DView } from './Lab3DView'
@@ -54,7 +56,7 @@ export async function resolveInitialDebugScene(): Promise<ReturnType<typeof pars
   const url = new URLSearchParams(window.location.search).get('debugScene')
   if (url === null) return undefined
   const res = await fetch(url)
-  if (!res.ok) throw new DebugSceneFormatError('root', `?debugScene=${url} fetch failed: HTTP ${res.status}`)
+  if (!res.ok) throw new DebugSceneFormatError('root', workbenchText('mountLab3DPage.debugsceneFetchFailedHTTP', { url: String(url), status: String(res.status) }))
   return parseDebugSceneExport(await res.json())
 }
 
@@ -82,7 +84,7 @@ export async function mountLab3DPage(root: HTMLElement): Promise<void> {
       el.setAttribute('data-testid', 'debug-scene-load-error')
       el.setAttribute('data-field', field)
       el.style.cssText = 'padding:24px;font:13px monospace;color:#f0a0a0;white-space:pre-wrap;'
-      el.textContent = `Debug scene refused (${field}): ${message}`
+      el.textContent = workbenchText('mountLab3DPage.debugSceneRefused', { field: String(field), message: String(message) })
       root.appendChild(el)
     }
     return

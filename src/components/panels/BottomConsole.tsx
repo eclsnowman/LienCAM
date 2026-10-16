@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 // WO UI-11A: bottom console shell for the typed session event log
 // (src/store/index.ts consoleEvents slice). Collapsed strip shows the latest
@@ -54,13 +55,14 @@ export function BottomConsole({ defaultExpanded = false }: BottomConsoleProps = 
   const latest = events.length > 0 ? events[events.length - 1] : null
 
   const toggleExpanded = () => {
-    setExpanded(prev => {
-      const next = !prev
-      // "unread since last expand" (mission :19): mark read on the way IN,
-      // so the badge that was visible while collapsed is what the user saw.
-      if (next) markConsoleRead()
-      return next
-    })
+    const next = !expanded
+    // "unread since last expand" (mission :19): mark read on the way IN,
+    // so the badge that was visible while collapsed is what the user saw.
+    // WO-2865: in the click handler, never inside the setExpanded updater -
+    // React runs updaters during render, and a store write there raised
+    // "Cannot update a component while rendering a different component".
+    if (next) markConsoleRead()
+    setExpanded(next)
   }
 
   const filtered = useMemo(
@@ -99,7 +101,7 @@ export function BottomConsole({ defaultExpanded = false }: BottomConsoleProps = 
         {latest ? (
           <span className={`console-strip-msg console-severity-${latest.severity}`}>
             {(() => { const Icon = SEVERITY_ICON[latest.severity]; return <Icon size={12} /> })()}
-            <span className="console-strip-text" title={latest.message}>{latest.message}</span>
+            <span className="console-strip-text" title={readableInternalIds(latest.message)}>{readableInternalIds(latest.message)}</span>
           </span>
         ) : (
           <span className="console-strip-empty">{shellText('BottomConsole.noEventsYet')}</span>
@@ -154,7 +156,7 @@ export function BottomConsole({ defaultExpanded = false }: BottomConsoleProps = 
                     <Icon size={12} />
                     <span className="console-event-time">{formatEventTime(e.at)}</span>
                     <span className="console-event-source">{e.source}</span>
-                    <span className="console-event-message">{e.message}</span>
+                    <span className="console-event-message">{readableInternalIds(e.message)}</span>
                   </div>
                 )
               })

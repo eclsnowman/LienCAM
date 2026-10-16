@@ -38,7 +38,7 @@ Your machine's Controller field ([Set up your machine](Set-Up-Your-Machine)) pic
 - Dwell `G4` in seconds. Work offsets G54 to G59. Home command `G28`.
 - Arcs as `G2`/`G3` with I/J centre offsets.
 
-### Generic (linear only)
+### Generic
 
 - Despite the name, it writes arcs unless you turn them off.
 - File extension `.nc`.

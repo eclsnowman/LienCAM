@@ -7,6 +7,7 @@
 // plain data + callbacks, component never touches the store" discipline
 // every other FeatureTree*Controls interface in this file already follows.
 
+import { useText } from '../../../i18n'
 import { useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Ban, ChevronRight, Download, Eye, EyeOff, ExternalLink, Folder, FolderPlus, FolderX, Pencil, Trash2 } from 'lucide-react'
 import type { FeatureTreeEditEntry } from './FeatureTree'
@@ -62,6 +63,7 @@ export interface TreeContextMenuProps {
  * testable via fireEvent.click, no pointer-hover simulation needed.
  */
 export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDeleteRequest, onToggleHidden, onToggleSuppress, editEntry, onShowInCam, onExport, onClose }: TreeContextMenuProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [folderSubmenuOpen, setFolderSubmenuOpen] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
@@ -124,7 +126,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
               style={itemStyle}
             >
               <Folder size={13} />
-              <span style={{ flex: 1 }}>Move to folder</span>
+              <span style={{ flex: 1 }}>{workbenchText('TreeContextMenu.moveToFolder')}</span>
               <ChevronRight size={12} />
             </button>
             {folderSubmenuOpen && (
@@ -176,7 +178,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
                     style={itemStyle}
                   >
                     <FolderPlus size={12} />
-                    <span>New folder...</span>
+                    <span>{workbenchText('TreeContextMenu.newFolder')}</span>
                   </button>
                 )}
                 {folderMenu.currentFolderId !== null && (
@@ -191,7 +193,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
                     style={itemStyle}
                   >
                     <FolderX size={12} />
-                    <span>Remove from folder</span>
+                    <span>{workbenchText('TreeContextMenu.removeFromFolder')}</span>
                   </button>
                 )}
               </div>
@@ -210,7 +212,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
             style={itemStyle}
           >
             <ExternalLink size={13} />
-            <span>Show in CAM</span>
+            <span>{workbenchText('TreeContextMenu.showInCAM')}</span>
           </button>
         )}
         {onExport !== undefined && (
@@ -225,21 +227,21 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
             style={itemStyle}
           >
             <Download size={13} />
-            <span>Export...</span>
+            <span>{workbenchText('TreeContextMenu.export')}</span>
           </button>
         )}
         {editEntry?.referenceImage?.onCalibrate && <button type="button" role="menuitem" data-testid="tree-context-menu-calibrate" style={itemStyle}
-          onClick={() => { editEntry.referenceImage?.onCalibrate?.(); onClose() }}>Calibrate</button>}
+          onClick={() => { editEntry.referenceImage?.onCalibrate?.(); onClose() }}>{workbenchText('TreeContextMenu.calibrate')}</button>}
         {editEntry?.referenceImage && <button type="button" role="menuitemcheckbox" aria-checked={editEntry.referenceImage.scaleLocked}
           data-testid="tree-context-menu-lock-scale" style={itemStyle}
-          onClick={() => { editEntry.referenceImage?.onToggleLock(); onClose() }}>{editEntry.referenceImage.scaleLocked ? 'Unlock scale' : 'Lock scale'}</button>}
+          onClick={() => { editEntry.referenceImage?.onToggleLock(); onClose() }}>{editEntry.referenceImage.scaleLocked ? workbenchText('TreeContextMenu.unlockScale') : workbenchText('TreeContextMenu.lockScale')}</button>}
         {editEntry !== undefined && (
           <button
             type="button"
             role="menuitem"
             data-testid="tree-context-menu-edit"
             disabled={!('onEdit' in editEntry)}
-            data-tooltip={'reason' in editEntry ? editEntry.reason : undefined}
+            data-tooltip={"reason" in editEntry ? editEntry.reason : undefined}
             onClick={() => {
               if ('onEdit' in editEntry) {
                 editEntry.onEdit()
@@ -249,7 +251,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
             style={{ ...itemStyle, ...('reason' in editEntry ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
           >
             <Pencil size={13} />
-            <span>Edit...</span>
+            <span>{workbenchText('TreeContextMenu.edit')}</span>
           </button>
         )}
         {onDeleteRequest !== undefined && (
@@ -264,7 +266,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
             style={itemStyle}
           >
             <Trash2 size={13} />
-            <span>Delete...</span>
+            <span>{workbenchText('TreeContextMenu.delete')}</span>
           </button>
         )}
         {onToggleHidden !== undefined && (
@@ -279,7 +281,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
             style={itemStyle}
           >
             {hidden === true ? <Eye size={13} /> : <EyeOff size={13} />}
-            <span>{hidden === true ? 'Show' : 'Hide'}</span>
+            <span>{hidden === true ? workbenchText('TreeContextMenu.show') : workbenchText('TreeContextMenu.hide')}</span>
           </button>
         )}
         {onToggleSuppress !== undefined && (
@@ -294,7 +296,7 @@ export function TreeContextMenu({ x, y, suppressed, hidden, folderMenu, onDelete
             style={itemStyle}
           >
             <Ban size={13} />
-            <span>{suppressed === true ? 'Unsuppress' : 'Suppress'}</span>
+            <span>{suppressed === true ? workbenchText('TreeContextMenu.unsuppress') : workbenchText('TreeContextMenu.suppress')}</span>
           </button>
         )}
       </div>
@@ -320,6 +322,7 @@ export interface DeleteConfirmDialogProps {
  * passes in) which copy renders, this component holds no dag knowledge.
  */
 export function DeleteConfirmDialog({ targetName, consumerNames, onCancel, onConfirm }: DeleteConfirmDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const hasConsumers = consumerNames.length > 0
   return (
     <>
@@ -346,13 +349,12 @@ export function DeleteConfirmDialog({ targetName, consumerNames, onCancel, onCon
         }}
       >
         <div data-testid="tree-delete-confirm-title" style={{ fontWeight: 600, marginBottom: 8 }}>
-          {hasConsumers ? `Delete '${targetName}' and ${consumerNames.length} dependent feature(s)?` : `Delete '${targetName}'?`}
+          {hasConsumers ? workbenchText('TreeContextMenu.deleteAndDependentFeatureS', { targetName: String(targetName), length: String(consumerNames.length) }) : workbenchText('TreeContextMenu.delete2', { targetName: String(targetName) })}
         </div>
         {hasConsumers && (
           <div style={{ marginBottom: 12 }}>
             <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>
-              These features consume it and will be removed too:
-            </div>
+              {workbenchText('TreeContextMenu.theseFeaturesConsumeItAndWillBeRemovedToo')}</div>
             <ul data-testid="tree-delete-confirm-consumers" style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
               {consumerNames.map((name, i) => (
                 <li key={i} data-testid={`tree-delete-confirm-consumer-${i}`}>
@@ -364,10 +366,9 @@ export function DeleteConfirmDialog({ targetName, consumerNames, onCancel, onCon
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
           <button type="button" data-testid="tree-delete-confirm-cancel" className="modal-btn modal-btn-ghost" onClick={onCancel}>
-            Cancel
-          </button>
+            {workbenchText('TreeContextMenu.cancel')}</button>
           <button type="button" data-testid="tree-delete-confirm-confirm" className="modal-btn modal-btn-primary" onClick={onConfirm}>
-            {hasConsumers ? 'Delete with dependents' : 'Delete'}
+            {hasConsumers ? workbenchText('TreeContextMenu.deleteWithDependents') : workbenchText('TreeContextMenu.delete3')}
           </button>
         </div>
       </div>

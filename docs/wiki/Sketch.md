@@ -186,7 +186,13 @@ The Modify section holds Smart Dim., Reference, Trim, Split, Extend, Fillet, Cha
 
 Right-click a selection and the menu offers Mirror, Linear Pattern, Circular Pattern, Path Pattern, Fillet, Chamfer, Offset, Move, Rotate and Scale "with selection": the tool starts with those entities already picked.
 
-Delete removes the selection (Del or Backspace does the same), together with any constraints and dimensions that referred to it. Copy (Ctrl+C) and Paste (Ctrl+V) are on the right-click menu.
+Delete removes the selection (Del or Backspace does the same), together with any constraints and dimensions that referred to it. Deleting a source also removes its dependent offsets and pattern copies; deleting a pattern member suppresses that entire instance, which Edit pattern can restore. Use Break pattern, or the Break this offset link button in the Browser, before deleting the source if you want to keep independent copies. Copy (Ctrl+C) and Paste (Ctrl+V) are on the right-click menu.
+
+Linear, circular and path patterns, mirrored copies, and Move, Rotate or Scale with Keep original retain a definition linking the copies to their source. A copy stays driven by that definition instead of becoming a freely draggable entity. Select a member and choose Edit pattern from the right-click menu to reopen its values. Circular patterns show Count, Center X, Center Y and Step angle; linear patterns show Columns, Rows and the two spacing directions. Values accept expressions starting with =. Press Apply to update the copies.
+
+In Edit pattern, uncheck an instance to suppress it and check it again to restore it. Break pattern keeps the currently visible geometry and removes its pattern definition, so the copies can be edited independently; it also removes the constraints created by that definition. The stored definition and suppression choices survive saving and reopening. Offset copies use their separate source link and distance controls; they are not edited in Edit pattern.
+
+![Model sketch circular pattern editor with four circles, Count, centre, Step angle and instance checkboxes](images/sketch-modify-tools/edit-pattern.webp)
 
 ![A dashed offset preview around a rectangle with the Offset strip showing Distance and "side locked - click the sketch to flip"](images/sketch-modify-tools/offset-preview.webp)
 

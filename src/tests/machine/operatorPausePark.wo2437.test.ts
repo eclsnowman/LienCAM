@@ -452,13 +452,24 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
 
   // Rehearsal 2026-10-02 (native kit, same on main): CYCLE START was lit and
   // said "Cycle Start continues", and pressing it did nothing - only the
-  // card's Continue resumed.
-  it('uccnc: at the parked stop CYCLE START runs B', async () => {
+  // card's Continue resumed. The fix round made CYCLE START run B; WO-2773
+  // (Operator 2026-10-13, "A - Continue on both") makes the card's Continue the
+  // one door, as on the guided tool-change card: CYCLE START is dark, says so,
+  // and is refused.
+  it('uccnc: at the parked stop CYCLE START is dark and refused; the card\'s Continue runs B', async () => {
     await uccncHeldAtTheClampPause()
 
-    expect(currentOperatorTransport().cycleStartEnabled).toBe(true)
+    expect(currentOperatorTransport()).toMatchObject({
+      action: 'none',
+      cycleStartEnabled: false,
+      cycleStartDetail: 'The Park + clamp card continues this program, not CYCLE START.',
+    })
+    expect(await executeOperatorCycleStart(), consoleText()).toBe(false)
+    await advance(2_000)
+    atPark()
+    expect(useMachineControl.getState().toolChange?.step).toBe('awaiting-swap')
     const after: Sample[] = []
-    expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
+    expect(continueClampPause(), consoleText()).toBe(true)
     await advance(20_000, 50, sampler(after))
     expect(useMachineControl.getState().job.phase, consoleText()).toBe('complete')
     expect(useMachineControl.getState().toolChange).toBeNull()
@@ -468,7 +479,7 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
 
   // Rehearsal 2026-10-02: jog was locked at the stop ("A program is running -
   // jogging is locked out."). Through the Jog panel's own buttons.
-  it('uccnc: at the parked stop jog and Safe Z move the machine, then CYCLE START runs B', async () => {
+  it('uccnc: at the parked stop jog and Safe Z move the machine, then Continue runs B', async () => {
     useUiPrefs.setState({ machineJogStepMm: 5, machineJogContinuous: false })
     await uccncHeldAtTheClampPause()
 
@@ -488,8 +499,9 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
     expect(useMachineControl.getState().job.phase).toBe('paused')
     expect(useMachineControl.getState().toolChange?.step).toBe('awaiting-swap')
 
+    // WO-2773: the card's Continue is the one door at the clamp pause.
     const after: Sample[] = []
-    expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
+    expect(continueClampPause(), consoleText()).toBe(true)
     await advance(20_000, 50, sampler(after))
     expect(useMachineControl.getState().job.phase, consoleText()).toBe('complete')
     expect(cutB(after)).toBe(true)
@@ -501,8 +513,8 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
   // Rehearsal rounds 2 and 4: MDI was locked at the parked clamp pause ("A
   // program is running - MDI is locked out."). The box's authority row now
   // allows it there, a typed line moves the machine, the program stays held,
-  // and CYCLE START goes back to the park and runs B.
-  it('uccnc: at the parked stop MDI moves the machine, then CYCLE START runs B', async () => {
+  // and Continue (WO-2773) goes back to the park and runs B.
+  it('uccnc: at the parked stop MDI moves the machine, then Continue runs B', async () => {
     await uccncHeldAtTheClampPause()
 
     const s = useMachineControl.getState()
@@ -528,8 +540,9 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
     expect(useMachineControl.getState().job.phase).toBe('paused')
     expect(useMachineControl.getState().toolChange?.step).toBe('awaiting-swap')
 
+    // WO-2773: the card's Continue is the one door at the clamp pause.
     const after: Sample[] = []
-    expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
+    expect(continueClampPause(), consoleText()).toBe(true)
     await advance(20_000, 50, sampler(after))
     expect(useMachineControl.getState().job.phase, consoleText()).toBe('complete')
     expect(cutB(after)).toBe(true)
@@ -561,8 +574,9 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
       expect(useMachineControl.getState().job.phase).toBe('paused')
       expect(useMachineControl.getState().toolChange?.step).toBe('awaiting-swap')
 
+      // WO-2773: the card's Continue is the one door at the clamp pause.
       const after: Sample[] = []
-      expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
+      expect(continueClampPause(), consoleText()).toBe(true)
       await advance(20_000, 50, sampler(after))
       expect(useMachineControl.getState().job.phase, consoleText()).toBe('complete')
       expect(cutB(after)).toBe(true)
@@ -601,8 +615,8 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
       expect(jogZ, consoleText()).not.toHaveBeenCalled()
       expect(jogXY).not.toHaveBeenCalled()
 
-      // The operator moves X; CYCLE START goes back to the park - XY only, Z
-      // stays at the park's Z - and runs B.
+      // The operator moves X; Continue (WO-2773: the card's one door) goes
+      // back to the park - XY only, Z stays at the park's Z - and runs B.
       const jogX = screen.getByTestId('control-jog-x-plus') as HTMLButtonElement
       act(() => { fireEvent.pointerDown(jogX); fireEvent.pointerUp(jogX) })
       await advance(3_000)
@@ -610,7 +624,7 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
       jogZ.mockClear()
       jogXY.mockClear()
       const after: Sample[] = []
-      expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
+      expect(continueClampPause(), consoleText()).toBe(true)
       await advance(20_000, 50, sampler(after))
       expect(jogZ).not.toHaveBeenCalledWith(SAFE_Z, expect.anything())
       expect(jogXY, consoleText()).toHaveBeenCalledTimes(1)
@@ -674,8 +688,9 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
     expect(paused.mpos?.y).toBeCloseTo(SET.y, 1)
     expect(paused.mpos?.z).toBeCloseTo(SET.z, 1)
 
+    // WO-2773: the card's Continue is the one door at the clamp pause.
     const after: Sample[] = []
-    expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
+    expect(continueClampPause(), consoleText()).toBe(true)
     await advance(20_000, 50, sampler(after))
     expect(useMachineControl.getState().job.phase, consoleText()).toBe('complete')
     expect(cutB(after)).toBe(true)

@@ -129,7 +129,8 @@ describe('GEO-UNIFY Stage 1: empty-model placeholder row', () => {
     rerender(<DesignTree />)
 
     expect(screen.queryByTestId('model-item-row-item-a')).toBeNull()
-    expect(screen.getByTestId('tree-name-geometry').textContent).toBe('Bracket')
+    // WO-2858: a modeled body row is qualified by its model's name.
+    expect(screen.getByTestId('tree-name-geometry').textContent).toBe('Item A - Bracket')
   })
 
   it('the Geometry section empty state mentions models when the project is truly empty', () => {

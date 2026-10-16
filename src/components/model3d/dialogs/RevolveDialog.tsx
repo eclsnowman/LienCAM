@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // WO INT-4A: revolve dialog -- same create/edit split as ExtrudeDialog.tsx
 // (see its header). Axis is fixed to the world Z axis through the origin:
 // the workbench only ever creates 'xz'-plane sketch profiles offset from
@@ -22,6 +23,8 @@
 // of this revolve. The payload names the datum (`axisDatumId`) and the node consumes it, so moving the
 // axis re-revolves.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -103,7 +106,9 @@ export interface RevolveDialogProps {
   onApplyGuard?: (intent: RevolvePreviewIntent) => Promise<string | undefined>
 }
 
-const DEFAULT_ANGLE = 270
+// WO-2865: a full turn. 270 came over with the clean-slate import with no
+// recorded reason (sweep 3, H8); a revolve is a full turn unless asked.
+const DEFAULT_ANGLE = 360
 
 // WO-1474: a profile whose plane normal is the revolve axis lies perpendicular
 // to it, so revolving it sweeps no volume -- the kernel cannot build that solid.
@@ -112,7 +117,7 @@ const DEFAULT_ANGLE = 270
 const AXIS_PARALLEL_EPS = 1e-6
 const WORLD_Z: Vec3 = { x: 0, y: 0, z: 1 }
 const axisIncompatibleMessage = (axisWords: string): string =>
-  `Revolve refused: the selected profile lies in a plane whose normal is the revolve axis (${axisWords}), so revolving it sweeps no volume and can produce no solid.`
+  workbenchText('RevolveDialog.revolveRefusedTheSelectedProfileLiesInAPlane', { axisWords: String(axisWords) })
 
 /** True only when the selected profile's plane normal can be read and is
  *  (anti)parallel to the axis direction. Anything unreadable answers false, so the
@@ -166,6 +171,7 @@ function isUpstreamProducer(dag: FeatureDag, featureId: string | undefined, prod
 }
 
 export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, treeSketchPick, onTreePickConsumed, onStartProfilePick, onProfileSelectionChange, onApplied, onClose, previewState, onPreviewIntent, onApplyGuard }: RevolveDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const editing = mode === 'edit'
   const existing = editing && featureId !== undefined ? (dag.getNode(featureId)?.payload as unknown as RevolveFeaturePayload | undefined) : undefined
   const suppliedSketches = sketchOptions ?? dag.nodeIds()
@@ -182,7 +188,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
   const axisOptions = revolveAxisOptions(dag, featureId, editing)
   const [axisDatumId, setAxisDatumId] = useState<string>(existing?.axisDatumId ?? '')
   const axisDir = axisDatumId === '' ? WORLD_Z : axisLineOfNode(dag, axisDatumId)?.dir
-  const axisWords = axisDatumId === '' ? 'world Z' : (axisOptions.find((option) => option.id === axisDatumId)?.label ?? axisDatumId)
+  const axisWords = axisDatumId === '' ? workbenchText('RevolveDialog.worldZ') : (axisOptions.find((option) => option.id === axisDatumId)?.label ?? axisDatumId)
   const [expression, setExpression] = useState<string>(existing?.expression ?? '')
   const [expressionError, setExpressionError] = useState<string | undefined>(undefined)
   const [applyError, setApplyError] = useState<string | undefined>(undefined)
@@ -208,7 +214,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
     if (treeSketchPick === undefined || treeSketchPick.nonce <= handledTreeSketchPickNonceRef.current) return
     handledTreeSketchPickNonceRef.current = treeSketchPick.nonce
     if (isPickingProfile || !treeSketchPickAvailable) {
-      console.info(`Tree pick ignored: ${isPickingProfile ? 'profile pick session is active' : 'sketch is not available'}`)
+      console.info(workbenchText('RevolveDialog.treePickIgnored', { value1: String(isPickingProfile ? workbenchText('RevolveDialog.profilePickSessionIsActive') : workbenchText('RevolveDialog.sketchIsNotAvailable')) }))
       onTreePickConsumed?.(treeSketchPick.nonce)
       return
     }
@@ -274,7 +280,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
     setIsPickingProfile(true)
     const stop = onStartProfilePick({
       allowedIds: sketches.map((option) => option.id),
-      prompt: 'Click a closed sketch region for the revolve profile.',
+      prompt: workbenchText('RevolveDialog.clickAClosedSketchRegionForTheRevolveProfile'),
       maxPicks: 1,
       onDone: ([result]) => {
         if (result !== undefined) {
@@ -316,7 +322,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
     // baseline fingerprint still matches; a refusal never reaches execute.
     if (onApplyGuard !== undefined) {
       if (previewIntent === null) {
-        setApplyError('Revolve Apply refused: the accepted preview is no longer available.')
+        setApplyError(workbenchText('RevolveDialog.revolveApplyRefusedTheAcceptedPreviewIsNoLonger'))
         return
       }
       const refusal = await onApplyGuard(previewIntent)
@@ -356,7 +362,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
         angleDeg,
         ...(bound !== '' ? { expression: bound } : {}),
         ...(axisDatumId !== '' ? { axisDatumId } : {}),
-        name: `Revolve ${id}`,
+        name: workbenchText('RevolveDialog.revolve', { id: String(id) }),
       }
       try {
         history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [sketchId, ...(axisDatumId === '' ? [] : [axisDatumId]), ...paramConsumes], payload }))
@@ -371,10 +377,10 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
 
   return (
     <DialogShell
-      title={editing ? 'Edit revolve' : 'Revolve'}
+      title={editing ? workbenchText('RevolveDialog.editRevolve') : workbenchText('RevolveDialog.revolve2')}
       onApply={() => { void handleApply() }}
       onCancel={isPickingProfile ? cancelProfilePick : onClose}
-      cancelLabel={isPickingProfile ? 'Stop picking' : 'Cancel'}
+      cancelLabel={isPickingProfile ? workbenchText('RevolveDialog.stopPicking') : workbenchText('RevolveDialog.cancel')}
       applyDisabled={applyDisabled || isPickingProfile}
       floatingPalette
     >
@@ -387,27 +393,24 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
           aria-pressed={isPickingProfile}
           onClick={isPickingProfile ? cancelProfilePick : beginProfilePick}
         >
-          {isPickingProfile ? 'Cancel profile pick' : 'Pick profile in viewport'}
+          {isPickingProfile ? workbenchText('RevolveDialog.cancelProfilePick') : workbenchText('RevolveDialog.pickProfileInViewport')}
           <span className="op-pick-count">
-            {(sketches.find((option) => option.id === sketchId)?.label ?? sketchId) || 'none'}
-            {profileSelector?.kind === 'region' ? ' - chosen region' : ''}
+            {(sketches.find((option) => option.id === sketchId)?.label ?? sketchId) || workbenchText('RevolveDialog.none')}
+            {profileSelector?.kind === 'region' ? workbenchText('RevolveDialog.chosenRegion') : ''}
           </span>
         </button>
         {treeSelectionActive && (
           <div data-testid="revolve-tree-sketch-status" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Sketch: {sketches.find((option) => option.id === sketchId)?.label ?? sketchId} (from the design tree) - whole sketch
-          </div>
+            {workbenchText('RevolveDialog.sketch')}{sketches.find((option) => option.id === sketchId)?.label ?? sketchId}{workbenchText('RevolveDialog.fromTheDesignTreeWholeSketch')}</div>
         )}
         {isPickingProfile && (
           <div data-testid="revolve-profile-pick-guidance" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Click a closed sketch profile in the viewport. Hover previews the profile; Escape stops picking.
-          </div>
+            {workbenchText('RevolveDialog.clickAClosedSketchProfileInTheViewportHover')}</div>
         )}
         {profileSelector?.kind === 'region' && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span data-testid="revolve-selected-profile-region" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-              Chosen: one closed region
-            </span>
+              {workbenchText('RevolveDialog.chosenOneClosedRegion')}</span>
             <button
               type="button"
               className="modal-btn"
@@ -417,14 +420,13 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
                 setTreeSelectionActive(false)
               }}
             >
-              Use whole sketch
-            </button>
+              {workbenchText('RevolveDialog.useWholeSketch')}</button>
           </div>
         )}
         <details>
-          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>Choose profile by name fallback</summary>
+          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>{workbenchText('RevolveDialog.chooseProfileByNameFallback')}</summary>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <span style={{ width: 70, color: 'var(--text-muted)' }}>Profile</span>
+            <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('RevolveDialog.profile')}</span>
             <select
               data-testid="revolve-profile-select"
               value={sketchId}
@@ -435,7 +437,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
               }}
               style={{ flex: 1 }}
             >
-              {!profileAvailable && sketchId !== '' && <option value={sketchId}>(unavailable: {sketchId})</option>}
+              {!profileAvailable && sketchId !== '' && <option value={sketchId}>{workbenchText('RevolveDialog.unavailable')}{sketchId}{workbenchText('RevolveDialog.value')}</option>}
               {sketches.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
@@ -446,31 +448,30 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
         </details>
         {!profileAvailable && (
           <div data-testid="revolve-profile-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            Select an available upstream sketch profile.
-          </div>
+            {workbenchText('RevolveDialog.selectAnAvailableUpstreamSketchProfile')}</div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Axis</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('RevolveDialog.axis')}</span>
           <select data-testid="revolve-axis" value={axisDatumId} onChange={(e) => setAxisDatumId(e.target.value)} style={{ flex: 1 }}>
-            <option value="">World Z (through origin)</option>
-            {axisDatumId !== '' && !axisOptions.some((option) => option.id === axisDatumId) && <option value={axisDatumId}>(unavailable: {axisDatumId})</option>}
+            <option value="">{workbenchText('RevolveDialog.worldZThroughOrigin')}</option>
+            {axisDatumId !== '' && !axisOptions.some((option) => option.id === axisDatumId) && <option value={axisDatumId}>{workbenchText('RevolveDialog.unavailable')}{axisDatumId}{workbenchText('RevolveDialog.value')}</option>}
             {axisOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
           </select>
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Angle</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('RevolveDialog.angle')}</span>
           <span data-testid="revolve-angle" style={{ flex: 1 }}>
             <NumericInput value={angleDeg} onChange={setAngleDeg} min={1} max={360} disabled={expression.trim() !== ''} style={{ width: '100%' }} />
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>deg</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('RevolveDialog.deg')}</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>fx</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('RevolveDialog.fx')}</span>
           <input
             data-testid="revolve-angle-expression"
             type="text"
-            placeholder="optional driving expression, e.g. 180+extra"
+            placeholder={workbenchText('RevolveDialog.optionalDrivingExpressionEG180Extra')}
             value={expression}
             onChange={(e) => setExpression(e.target.value)}
             style={{ flex: 1 }}
@@ -478,7 +479,7 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
         </label>
         {expressionError !== undefined && (
           <div data-testid="revolve-angle-expression-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {expressionError}
+            {readableInternalIds(expressionError)}
           </div>
         )}
         {previewControlled && (
@@ -494,15 +495,20 @@ export function RevolveDialog({ dag, history, mode, featureId, sketchOptions, tr
             {previewState?.status === 'refused'
               ? previewState.message
               : previewState?.status === 'pending'
-                ? 'Updating preview...'
+                ? workbenchText('RevolveDialog.updatingPreview')
                 : previewState?.status === 'ready'
-                  ? 'Live preview ready'
+                  ? workbenchText('RevolveDialog.livePreviewReady')
                   : ''}
+          </div>
+        )}
+        {profileAxisIncompatible && (
+          <div data-testid="revolve-apply-blocked-reason" role="status" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
+            {axisIncompatibleMessage(axisWords)}
           </div>
         )}
         {applyError !== undefined && (
           <div data-testid="revolve-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {applyError}
+            {readableInternalIds(applyError)}
           </div>
         )}
       </div>

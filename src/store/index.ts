@@ -10,7 +10,7 @@ import type {
   ImportedGeometry, GeometryFolder, ModelItemRecord, ModelItemPlacementRecord, ViewerState, ShadingMode, PanelId, SceneStock, Vec3, Layer2D, Loop2D, FixedStockItem, AutoStockItem, Workspace, WCS,
   ProjectionPlane, BrepSelection, HoleFeature, CylinderFeature, DetectedFeatureSourceIdentity, PhysicalStock, BoundingBox, AppSettings, NavPresetId, Units,
   NestRecord, BrepTessellationQuality, SimulationEngine, HeightParams, ToolpathMove, SelectedMove,
-  ModelBodyDisplay, OriginBinding, FeatureRef, ResolvedHeightSnapshotV1, HeightIntentV1,
+  ModelBody, ModelBodyDisplay, OriginBinding, FeatureRef, ResolvedHeightSnapshotV1, HeightIntentV1,
   OperationType, WorkholdingDefinition, WorkholdingInstance, WorkholdingModel, OperationOutdatedReason,
 } from '../types'
 import {
@@ -40,6 +40,7 @@ import {
   ModelBodyDeriveError,
 } from '../lib/cam/modelBodyDerive'
 import { readModelBodyFaceFacts, recognizeModelBodyHoles } from '../lib/cam/modelBodyHoleRecognition'
+import { narrowToPickedMeshChainInstances, type MeshChainSources } from '../lib/cam/meshChainInstances'
 import {
   deriveModelBodyEdges, modelEdgeChainBodyMismatch, modelEdgeChainMismatchMessage,
   modelBodyEdgeChainBindingCapability, modelReferenceMatchesSource, MODEL_EDGE_CHAIN_ROLE,
@@ -166,6 +167,8 @@ import { resolveSpindle } from '../lib/post/resolve'
 import { normalizeToolCutHand } from '../lib/tool/cutHand'
 import { validateToolGeometry } from '../lib/tool/toolValidation'
 import { mergeIncomingHolders, resolveIncomingHolder } from '../lib/tool/holderIdentity'
+import { reuseProjectLibraries } from '../lib/tools/projectLibraryIdentity'
+import { postToolNumbersOf } from '../lib/post/toolNumbers'
 import type { Sketch, SketchEntity, SketchConstraint, SketchDimension, SketchTextEntity, TextPathAlign, SolveStatus, Vec2, PointRef } from '../lib/sketch/types'
 import {
   demoteExtraEllipseShapeDims, demoteExtraEllipseShapeDimsInCommit, ellipseShapeEditRefusal,
@@ -353,7 +356,7 @@ import { describePocketTarget, meshFeatureTargets } from '../mesh/recognition/to
 import type { MeshFeatureTargets } from '../mesh/recognition/toolpathTargets'
 // WO-1895: the shared mesh AABB, so a re-derived bounding box uses the same
 // measurement the rest of the mesh code does.
-import { computeBoundingBox } from '../mesh/analysis'
+import { computeBoundingBox, dropZeroAreaTriangles } from '../mesh/analysis'
 // WO-1854: flat faces come through the DOOR itself, never past it - that
 // order's door decision widened `src/mesh/recognition` by this one question so
 // the store, the properties panel and the operations that want a face all ask
@@ -378,7 +381,7 @@ import {
   type BooleanMeshOutcome,
 } from '../lib/cam/booleanMeshModel'
 import { resolveModelReferenceFrame, modelReferenceFrameFingerprint } from '../lib/cam/modelReferenceFrame'
-import { remainingStockBefore, resolveToolReachInputs, trimToToolReachInPartFrame } from './toolReachInputs'
+import { remainingStockBefore, resolveToolReachInputs, trimToToolReachInPartFrame, stockCutterOf } from './toolReachInputs'
 import { clearanceAllowanceMmOf, type OperationReachShortfall } from '../lib/cam/holderClearanceGate'
 import {
   outdateOperationsForWorkholding, resolveWorkholdingObstacles, withWorkholdingModel, workholdingInPartFrame,
@@ -406,6 +409,8 @@ import { collectOperationFolderTreeIds } from '../lib/tree/operationFolders'
 import { createUserSpaceStateStorage, installUserSpaceUnloadJournal } from './userSpaceStorage'
 import { persistRegistered, subscribePersistedLoadFailures } from './persistedKeys'
 import { saveFile } from '../lib/saveFile'
+import { captureProjectThumbnail } from '../lib/projectOpen/thumbnail'
+import { rememberProject } from '../lib/projectOpen/host'
 
 // The live CNCViewport instance, when one is mounted (Viewport.tsx publishes
 // it on window). Store actions that must drive the scene directly (the same
@@ -1164,7 +1169,9 @@ export function meshEdgeChainAdmission(
 ): MeshEdgeChainAdmission {
   // No operation type = no operation filter (raw geometry, e.g. the layer panel).
   if (operationType === undefined || operationType === 'contour_2d') return 'any'
-  if (operationType === 'pocket_2d') return 'closed-only'
+  // WO-2859: adaptive clearing is bounded by a closed region exactly as a
+  // pocket is, so it reads the same closed chains (sweep F4: plate.stl).
+  if (operationType === 'pocket_2d' || operationType === 'adaptive_clearing_2d') return 'closed-only'
   return 'none'
 }
 
@@ -1460,6 +1467,89 @@ const importedGeometryWrapsInFlight = new Set<string>()
 // being drawn as an extra "MODEL (empty)" row beside the STL. A record the
 // user already had before the visit is never touched.
 let stlVisitClaimedModelItem: { projectId: string; itemId: string } | null = null
+// WO-2853 round 4: which STL each visit host record was made to show. Project
+// history snapshots the host record but not the view flag, so a redo that
+// brings the host back reads the STL from here (host ids are fresh uuids).
+const stlVisitHostGeometry = new Map<string, string>()
+
+// WO-2853 round 4: a redo that brings back the host record of an STL open
+// resumes that visit - claims the host again (so Finish and every other exit
+// release it as before) and returns the STL to show. Null when `hostId` is
+// not a visit host or its STL row is gone from `project`.
+function resumeStlVisit(project: Project, hostId: string): string | null {
+  const geoId = stlVisitHostGeometry.get(hostId)
+  if (geoId === undefined || !project.geometry.some((g) => g.id === geoId && g.format === 'stl')) return null
+  stlVisitClaimedModelItem = { projectId: project.id, itemId: hostId }
+  return geoId
+}
+
+// WO-2094: removes the record an STL visit claimed, only while it is still
+// empty, owns no row, has no authored evidence and holds no document.
+function releaseStlVisitScratchItem(
+  set: (partial: Partial<CamStore> | ((st: CamStore) => Partial<CamStore>)) => void,
+  get: () => CamStore,
+  itemId: string,
+): void {
+  const s = get()
+  const item = s.project.modelItems?.find((m) => m.id === itemId)
+  if (
+    !item ||
+    item.documentState !== 'empty' ||
+    s.project.geometry.some((g) => resolveOwningModelItemId(g) === item.id) ||
+    hasModelItemAuthoredEvidence(s.project, item.id)
+  ) return
+  try {
+    if (collectDocumentArchive(item.id) !== undefined) return
+  } catch {
+    return
+  }
+  set((st) => ({
+    project: {
+      ...st.project,
+      modelItems: (st.project.modelItems ?? []).filter((m) => m.id !== item.id),
+    },
+    activeModelItemId: st.activeModelItemId === item.id ? null : st.activeModelItemId,
+  }))
+}
+
+// WO-2853 (the operator 10-15: "New model in the modal opens a new document with the
+// plate in it"): an STL visit belongs to that one visit. Creating a model,
+// opening any other model, opening another STL and every route out of the
+// Model workspace end it here - the view flag goes, and so does the scratch
+// record it claimed while still empty. `keepItemId` is a record the caller is
+// about to open: never removed, it just stops being the visit's.
+function endStlVisit(
+  set: (partial: Partial<CamStore> | ((st: CamStore) => Partial<CamStore>)) => void,
+  get: () => CamStore,
+  keepItemId: string | null = null,
+): void {
+  const claimed = stlVisitClaimedModelItem
+  stlVisitClaimedModelItem = null
+  dropStlVisitLines(set, get)
+  if (get().modelStlGeoId !== null) set({ modelStlGeoId: null })
+  if (claimed === null || claimed.projectId !== get().project.id || claimed.itemId === keepItemId) return
+  releaseStlVisitScratchItem(set, get, claimed.itemId)
+}
+
+// WO-2853 round 3: the Model screen's lines about the STL it has drawn ("is
+// open as a mesh", "its edit list stopped early") describe the open visit, so
+// they go when it ends - the console strip must not keep saying a closed STL
+// is open under a new, empty model. Call while modelStlGeoId still names it.
+const stlVisitLineText = textFor('sketch-and-model-workbench')
+function dropStlVisitLines(
+  set: (partial: Partial<CamStore>) => void,
+  get: () => Pick<CamStore, 'consoleEvents' | 'modelStlGeoId' | 'project'>,
+): void {
+  const s = get()
+  const name = s.project.geometry.find((g) => g.id === s.modelStlGeoId)?.name
+  if (name === undefined) return
+  const cut = '\u0000'
+  const openLine = stlVisitLineText('SolidsWorkbenchPage.isOpenAsAMeshKeptAsAnSTL', { name, length: cut }).split(cut)[0]
+  const stoppedLine = stlVisitLineText('SolidsWorkbenchPage.itsEditListStoppedEarlyTheShapeShownIs', { name })
+  const kept = s.consoleEvents.filter((e) =>
+    e.source !== 'workbench' || !(e.message.startsWith(openLine) || e.message === stoppedLine))
+  if (kept.length !== s.consoleEvents.length) set({ consoleEvents: kept })
+}
 
 // Async document acquisition/storage must never navigate after a newer user
 // intent or project replacement. These epochs are module-owned because the
@@ -7915,6 +8005,36 @@ function markDrillTargetOpsOutdated(
   return any ? next : setups
 }
 
+function sameNumbers(a: readonly (number | string)[] | undefined, b: readonly (number | string)[] | undefined): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/** WO-2866: true when a regen rebuilt a model body exactly as it already
+ *  was - same leaf, same stable ids, same tessellation. Opening a model replays its
+ *  whole history, so every body comes back re-derived (fresh `version`) even when
+ *  nothing was edited; only a body whose shape actually changed may outdate the
+ *  operations that cut it. A row with no prior display (a browser-refresh
+ *  rehydrate strips it) cannot be proved unchanged and counts as changed. */
+export function sameModelBodyShape(a: ModelBody | undefined, b: ModelBody | undefined): boolean {
+  if (a?.display === undefined || b?.display === undefined) return false
+  if (a.ref.bodyId !== b.ref.bodyId || !sameNumbers(a.ref.stableIds, b.ref.stableIds)) return false
+  const da = a.display
+  const db = b.display
+  return sameNumbers(da.positions, db.positions) &&
+    sameNumbers(da.normals, db.normals) &&
+    sameNumbers(da.indices, db.indices) &&
+    sameNumbers(da.edgePositions, db.edgePositions) &&
+    sameNumbers(da.edgeOffsets, db.edgeOffsets) &&
+    sameNumbers(da.bbox.min, db.bbox.min) &&
+    sameNumbers(da.bbox.max, db.bbox.max) &&
+    sameNumbers(da.faceIds, db.faceIds) &&
+    sameNumbers(da.triFace, db.triFace) &&
+    sameNumbers(da.edgeIds, db.edgeIds)
+}
+
 /** MODEL-ROW-CITIZEN batch 1 (defect c): when a modeled body changes (regen or
  *  Placement move), EVERY op whose CUT geometry is a model-origin row on that body
  *  goes amber ('outdated') - not only the drill ops (markDrillTargetOpsOutdated,
@@ -8364,7 +8484,7 @@ export function machineActionsOf(setup: Pick<Setup, 'machineActions'>): MachineA
 
 /** WO-2437: the fields of a machine action the Properties panel and the tree
  *  change - never its id, kind or place. */
-export type MachineActionUpdate = Partial<{ name: string; enabled: boolean; message: string }>
+export type MachineActionUpdate = Partial<{ name: string; enabled: boolean; message: string; macroId: string }>
 
 /** WO-2437: one row of a setup's operation list - an operation or a machine
  *  action - in the order the post runs them. */
@@ -8859,6 +8979,32 @@ const HISTORY_KEEP = PROJECT_UNDO_DEPTH - 1
 //      bookkeeping and has no silent failure mode if a future write path
 //      forgets to touch a flag — the cost is one extra (cheap, debounced-
 //      away-in-practice) solve per undo/redo step.
+// WO-2871 (the operator 2026-10-16, card Q-UNDO-RIGHT-AFTER-FINISH-EMPTIES: "Undo
+// reopens the sketch with everything in it"). Finish is ONE undo step, and
+// Undo reverses it back to the OPEN editor -- not to a closed mode showing the
+// pre-Finish (empty) layer while the restored document sits unseen in
+// activeSketch. Keyed by the pre-Finish snapshot the bake pushed (same
+// reference undo/redo carry between the stacks), holding the session's opened
+// document so a re-Finish judges import provenance against the original open.
+const sketchFinishSteps = new WeakMap<Project, { openedSketch?: Sketch }>()
+// The post-Finish projects an Undo of a Finish step sent to the redo stack:
+// redoing one re-applies Finish, so the editor closes again.
+const sketchFinishResults = new WeakSet<Project>()
+
+function copySketchFinishMarks(from: readonly Project[], to: readonly Project[]): void {
+  from.forEach((project, i) => {
+    const step = sketchFinishSteps.get(project)
+    if (step) sketchFinishSteps.set(to[i], step)
+    if (sketchFinishResults.has(project)) sketchFinishResults.add(to[i])
+  })
+}
+
+function rememberSketchFinishStep(state: CamStore, historyTopBefore: Project | undefined): void {
+  const top = state.projectHistory[state.projectHistory.length - 1]
+  if (top === undefined || top === historyTopBefore) return
+  sketchFinishSteps.set(top, { openedSketch: state.sketchEntrySnapshot?.openedSketch })
+}
+
 function restoreSketchFromHistorySeam(
   set: (partial: Partial<CamStore> | ((st: CamStore) => Partial<CamStore>)) => void,
   get: () => CamStore,
@@ -8888,6 +9034,7 @@ function restoreSketchFromHistorySeam(
   const restoredItemIds = new Set((restoredProject.modelItems ?? []).map((item) => item.id))
   let restoredWorkspace = current.workspace
   let restoredActiveModelItemId = current.activeModelItemId
+  let restoredStlGeoId: string | null = null
   if (
     restoredWorkspace === 'part' &&
     (restoredActiveModelItemId === null || !restoredItemIds.has(restoredActiveModelItemId))
@@ -8900,6 +9047,9 @@ function restoreSketchFromHistorySeam(
     if (restoredItems.length === 1) {
       restoredWorkspace = 'part'
       restoredActiveModelItemId = restoredItems[0].id
+      // WO-2853 round 4: redo of an STL open reopens that visit - the same
+      // host showing the same STL - not an empty model named for it.
+      restoredStlGeoId = resumeStlVisit(restoredProject, restoredItems[0].id)
     }
   }
 
@@ -8983,6 +9133,8 @@ function restoreSketchFromHistorySeam(
     }
   })
 
+  if (restoredWorkspace !== 'part') dropStlVisitLines(set, get)
+  const departingProject = get().project
   set((s) => isUndo
     ? {
         project: restoredProject,
@@ -8995,6 +9147,8 @@ function restoreSketchFromHistorySeam(
         canRedo: true,
         workspace: restoredWorkspace,
         activeModelItemId: restoredActiveModelItemId,
+        // WO-2853: an STL visit ends with the Model workspace.
+        ...(restoredWorkspace === 'part' ? {} : { modelStlGeoId: null }),
         viewportRefreshTrigger: s.viewportRefreshTrigger + (projectChanged ? 1 : 0),
       }
     : {
@@ -9008,8 +9162,34 @@ function restoreSketchFromHistorySeam(
         canRedo: s.projectFuture.length > 1,
         workspace: restoredWorkspace,
         activeModelItemId: restoredActiveModelItemId,
+        // WO-2853: an STL visit ends with the Model workspace; a redone STL
+        // open reopens it (round 4).
+        ...(restoredStlGeoId !== null
+          ? { modelStlGeoId: restoredStlGeoId }
+          : restoredWorkspace === 'part' ? {} : { modelStlGeoId: null }),
         viewportRefreshTrigger: s.viewportRefreshTrigger + (projectChanged ? 1 : 0),
       })
+
+  // WO-2871: Undo of a Finish step reopens the editor on the restored document;
+  // Redo of it closes the editor again (activeSketch is already null from the
+  // stack, so setViewerMode takes the plain navigation path - no re-bake). The
+  // reopened session's Cancel returns to the state this Undo started from: the
+  // sketch Finished as it was, never an emptied layer.
+  const finishStep = isUndo ? sketchFinishSteps.get(restoredProject) : undefined
+  if (finishStep && restoredSketch && current.viewer.mode !== 'sketch' && restoredWorkspace === 'cam') {
+    sketchFinishResults.add(departingProject)
+    const entry: SketchEntrySnapshot = {
+      ...snapshotSketchEntry(current),
+      lastNonSketchMode: current.viewer.mode,
+      ...(finishStep.openedSketch ? { openedSketch: finishStep.openedSketch } : {}),
+    }
+    set({ sketchEntrySnapshot: entry, lastNonSketchMode: current.viewer.mode, sketchSelectedIds: [], sketchDimEditor: null })
+    get().setViewerMode('sketch')
+  } else if (!isUndo && sketchFinishResults.has(restoredProject) &&
+      current.viewer.mode === 'sketch' && get().activeSketch === null) {
+    set({ sketchEntrySnapshot: null })
+    get().setViewerMode(get().lastNonSketchMode)
+  }
 
   // (b) re-solve — see header.
   if (restoredSketch) get().solveSketch()
@@ -12742,6 +12922,11 @@ function snapshotSketchEntry(
     toolSlicesHistory: state.toolSlicesHistory,
     toolSlicesFuture: state.toolSlicesFuture,
   })
+  // WO-2871: the clone drops the identity the Finish-step marks are keyed by;
+  // carry them over so Undo of a Finish still reopens the editor after ANY
+  // session that restores these stacks (open + Cancel, reopen + Cancel).
+  copySketchFinishMarks(state.projectHistory, stacks.projectHistory)
+  copySketchFinishMarks(state.projectFuture, stacks.projectFuture)
   return {
     project: structuredClone(state.project),
     projectHistory: stacks.projectHistory,
@@ -13250,6 +13435,9 @@ export const useCamStore = create<CamStore>()(
         // old project's autosave controller so its pending debounce cannot fire
         // a write against a project that no longer exists.
         resetDocumentHolder()
+        // WO-2853: no STL visit survives into the fresh project.
+        stlVisitClaimedModelItem = null
+        stlVisitHostGeometry.clear()
         // INT-17A-R2 C2: the SAME lifecycle boundary one cache down. New Project
         // closes the document that owned every cached model-body display, so
         // nothing here is reachable any more - reclaim ALL of it (keep set
@@ -13309,6 +13497,10 @@ export const useCamStore = create<CamStore>()(
           canUndo: false,
           canRedo: false,
           sketchEntrySnapshot: null,
+          // WO-2860 (G13): the console belongs to the closed project too - its
+          // last line stayed on the status strip of the new one.
+          consoleEvents: [],
+          consoleReadThroughId: 0,
         })
         // WO-2698: a fresh project has nothing to save until it changes.
         markLiveProjectSaveBaseline(get())
@@ -13382,6 +13574,7 @@ export const useCamStore = create<CamStore>()(
         // so an edit that races the save is not in it and stays unsaved.
         const { project, toolLibrary, toolLibraries, holders } = get()
         const fileSnapshot = buildProjectFileSnapshot(project, toolLibrary, toolLibraries, holders)
+        const thumbnail = await captureProjectThumbnail()
         // Schema v4 (ADR-0027): embed each root STL/STEP part's raw bytes (base64)
         // so the file is self-contained across browsers/machines. Fail loud
         // (ADR-0003): if a part's binary cannot be found, abort the save rather
@@ -13458,6 +13651,7 @@ export const useCamStore = create<CamStore>()(
         // holder-owned halves (binaries, model archives) are added here.
         const snapshot = {
           ...fileSnapshot,
+          thumbnail,
           ...(binaries ? { binaries } : {}),
           ...(modelDocument ? { document: modelDocument } : {}),
           ...(modelItemDocuments ? { modelItemDocuments } : {}),
@@ -13475,6 +13669,10 @@ export const useCamStore = create<CamStore>()(
           : await saveFile(fileName, JSON.stringify(snapshot, null, 2), 'application/json')
         // Cancelled in the Save dialog: nothing was written, so nothing is clean.
         if (savedTo === null) return 'cancelled'
+        if (!bundle) {
+          try { await rememberProject(savedTo, project.name, thumbnail) }
+          catch { get().addConsoleEvent({ source: 'project', severity: 'warning', message: 'Project saved, but its recent entry could not be saved.' }) }
+        }
         // WO-2698: what was just written is now what is on disk - from the
         // snapshot itself, so an edit that raced this save stays unsaved.
         setProjectSaveBaseline(project.id, fileSnapshot, modelEditsSaved)
@@ -13513,6 +13711,8 @@ export const useCamStore = create<CamStore>()(
         setProjectOpenPhase('validating-project')
         try {
           const parsed = JSON.parse(json)
+          // File-only picture: never affects project identity, undo or dirty-state comparisons.
+          delete parsed.thumbnail
           if (
             typeof parsed.id !== 'string' ||
             typeof parsed.name !== 'string' ||
@@ -13844,49 +14044,39 @@ export const useCamStore = create<CamStore>()(
           }
           let reidentifiedHolders: Array<{ name: string }> = []
           let replacedProjectMachine: string | null = null
+          // WO-2853: no STL visit survives into the opened project.
+          stlVisitClaimedModelItem = null
+          stlVisitHostGeometry.clear()
+          dropStlVisitLines(set, get)
           replaceLoadedDocumentArchives(committedHolderArchives, () => set((s) => {
             // WO-1440: a file holder whose id is already in the library with
             // DIFFERENT content keeps its own geometry under its own id; same
             // content is shared exactly as before.
             const holderMerge = mergeIncomingHolders(s.holders, incomingHolders)
             reidentifiedHolders = holderMerge.reidentified
-            // The file's tools follow their holder to its resolved id. A file tool
-            // whose id is already in the library normally defers to the library
-            // copy - but when its holder was re-identified, that copy links the
-            // OTHER geometry, so the file's tool takes an id of its own too (stable
-            // per holder, so reopening the same file again shares it) and the
-            // reopened project's operations follow it.
-            const libraryTools = new Map(s.toolLibrary.map((t) => [t.id, t]))
-            const toolRemap = new Map<string, string>()
-            const newOnes: Tool[] = []
-            for (const incoming of incomingTools) {
-              if (!incoming) continue
-              const holderId = incoming.holderId ? holderMerge.remap.get(incoming.holderId) : undefined
-              const tool = holderId ? { ...incoming, holderId } : incoming
-              const inLibrary = libraryTools.get(tool.id)
-              if (!inLibrary) {
-                newOnes.push(tool)
-                libraryTools.set(tool.id, tool)
-                continue
-              }
-              if (!holderId || inLibrary.holderId === holderId) continue
-              const derivedId = `${tool.id}@${holderId}`
-              const atDerived = libraryTools.get(derivedId)
-              const toolId = !atDerived || atDerived.holderId === holderId ? derivedId : crypto.randomUUID()
-              if (atDerived?.holderId !== holderId) {
-                const relinked = { ...tool, id: toolId }
-                newOnes.push(relinked)
-                libraryTools.set(toolId, relinked)
-              }
-              toolRemap.set(tool.id, toolId)
-            }
+            // WO-2864: project exports carry USED subsets of named libraries.
+            // Reuse identical cutters, append compatible members, and isolate
+            // conflicting cutter versions without editing the shop's records.
+            // Resolve holders first so WO-1440's geometry is part of identity.
+            const resolvedIncomingTools = incomingTools.filter(Boolean).map((tool) => {
+              const holderId = tool.holderId ? holderMerge.remap.get(tool.holderId) : undefined
+              return holderId ? { ...tool, holderId } : tool
+            })
+            const libraryMerge = reuseProjectLibraries(s.toolLibraries, s.toolLibrary, incomingLibraries, resolvedIncomingTools, postToolNumbersOf(p))
+            const toolRemap = libraryMerge.toolRemap
+            const newOnes = libraryMerge.addedTools
             importedCount = newOnes.length
-            const existingLibIds = new Set(s.toolLibraries.map((l) => l.id))
-            const newLibs = incomingLibraries.filter((l) => l && !existingLibIds.has(l.id))
-            const installedProject = holderMerge.remap.size === 0 && toolRemap.size === 0
+            const newLibs = libraryMerge.added
+            const installedProject = holderMerge.remap.size === 0 && toolRemap.size === 0 && libraryMerge.libraryRemap.size === 0
               ? p
               : {
                   ...p,
+                  // WO-2637: a project-specific posted T number follows the
+                  // cutter identity too; opening an example must not alter it.
+                  ...(p.postToolNumbers ? {
+                    postToolNumbers: Object.fromEntries(Object.entries(p.postToolNumbers).map(([id, number]) =>
+                      [toolRemap.get(id) ?? id, number])),
+                  } : {}),
                   setups: p.setups.map((setup) => ({
                     ...setup,
                     operations: setup.operations.map((op) => {
@@ -13894,13 +14084,20 @@ export const useCamStore = create<CamStore>()(
                       return toolId ? { ...op, toolId } : op
                     }),
                   })),
-                  toolLibrary: (p.toolLibrary ?? []).map((t) => {
+                  toolLibrary: [...new Map((p.toolLibrary ?? []).map((t) => {
                     const holderId = t.holderId ? holderMerge.remap.get(t.holderId) : undefined
                     const toolId = toolRemap.get(t.id)
-                    return holderId || toolId
-                      ? { ...t, ...(holderId ? { holderId } : {}), ...(toolId ? { id: toolId } : {}) }
+                    const libraryId = t.libraryId ? libraryMerge.libraryRemap.get(t.libraryId) : undefined
+                    const resolved = holderId || toolId || libraryId
+                      ? { ...t, ...(holderId ? { holderId } : {}), ...(toolId ? { id: toolId } : {}), ...(libraryId ? { libraryId } : {}) }
                       : t
-                  }),
+                    return [resolved.id, resolved] as const
+                  })).values()],
+                  toolLibraries: [...new Map(p.toolLibraries?.map((library) => {
+                    const id = libraryMerge.libraryRemap.get(library.id)
+                    const resolved = id ? { ...library, id } : library
+                    return [resolved.id, resolved] as const
+                  })).values()],
                   holders: p.holders?.map((h) => {
                     const id = holderMerge.remap.get(h.id)
                     return id ? { ...h, id } : h
@@ -15330,7 +15527,33 @@ export const useCamStore = create<CamStore>()(
         // (no motion), so -- like the sync above -- it pushes no undo step:
         // the item's placement history starts clean at the user's first real
         // move (updateModelItemPlacement), not at this bookkeeping seed.
+        // WO-2866: an updated body counts only when its shape changed - opening a
+        // model and pressing Finish with no edit re-derives every body unchanged.
+        // An unchanged body keeps the version it had, so the generation
+        // fingerprint (which hashes the row) still matches the saved results.
+        // Only THIS item's rows are judged: reconcile passes other items' rows
+        // through, and they may carry the same raw body id. Each row is compared
+        // with its own prior self by row id (reconcile keeps the id on UPDATE).
+        // The published version is the row's, not the cache's: a reopened
+        // document's cache counts from 1 again, so a changed row publishes
+        // above its prior version - a real edit never reuses a version an
+        // unchanged replay kept, and the viewport's redraw key always moves.
         const scope = input.modelItemId ?? LEGACY_MODEL_ITEM_ID
+        const priorById = new Map(get().project.geometry.map((g) => [g.id, g]))
+        const updatedIds = new Set(result.updated)
+        const unchangedBodyIds = new Set<string>()
+        const regenGeometry = result.updated.length === 0 ? result.geometry : result.geometry.map((g) => {
+          const bodyId = g.modelBody?.ref.bodyId
+          if (bodyId === undefined || (g.modelItemId ?? LEGACY_MODEL_ITEM_ID) !== scope || !updatedIds.has(bodyId)) return g
+          const prior = priorById.get(g.id)
+          const priorVersion = (prior?.modelItemId ?? LEGACY_MODEL_ITEM_ID) === scope ? prior?.modelBody?.ref.version : undefined
+          if (priorVersion === undefined) return g
+          const unchanged = sameModelBodyShape(prior!.modelBody, g.modelBody)
+          if (unchanged) unchangedBodyIds.add(bodyId)
+          const version = unchanged ? priorVersion : Math.max(priorVersion + 1, g.modelBody!.ref.version)
+          return version === g.modelBody!.ref.version ? g : { ...g, modelBody: { ...g.modelBody!, ref: { ...g.modelBody!.ref, version } } }
+        })
+        const reshaped = result.updated.filter((bodyId) => !unchangedBodyIds.has(bodyId))
         const existingPlacements = get().project.modelItemPlacements ?? []
         const hasResolvablePlacement = existingPlacements.some((p) => p.modelItemId === scope)
         const modelItemPlacements =
@@ -15355,9 +15578,9 @@ export const useCamStore = create<CamStore>()(
             ? (() => {
                 const item = get().project.modelItems?.find((m) => m.id === scope)
                 const seedFolderId = item?.folderId
-                if (seedFolderId == null) return result.geometry
+                if (seedFolderId == null) return regenGeometry
                 const addedBodyIds = new Set(result.added)
-                return result.geometry.map((g) =>
+                return regenGeometry.map((g) =>
                   g.modelBody != null &&
                   addedBodyIds.has(g.modelBody.ref.bodyId) &&
                   resolveOwningModelItemId(g) === scope &&
@@ -15366,7 +15589,7 @@ export const useCamStore = create<CamStore>()(
                     : g,
                 )
               })()
-            : result.geometry
+            : regenGeometry
         // WO-1572: a regen rebuilds each model row; the workholding mark is the
         // operator's, not the kernel's, so it rides the row id through.
         const workholdingIds = new Set(
@@ -15404,7 +15627,7 @@ export const useCamStore = create<CamStore>()(
         // CAM-DRILL-ADAPTER: model regen that updated/added/removed a body
         // ambers every drill op bound via role:'drill-targets' on that body.
         const touchedBodyIds = new Set<string>([
-          ...result.updated,
+          ...reshaped,
           ...result.added,
           ...result.removed,
         ])
@@ -19615,8 +19838,18 @@ export const useCamStore = create<CamStore>()(
         // body one-for-one - '__all__' aggregation of a model source stays
         // refused, unchanged from Stage 1, since deriveModelBodyProfile is
         // only ever called on the single refGeo the guard resolved).
+        // WO-2859: two copies of one STL share their content-derived chain ids;
+        // under All Parts a picked chain is cut only on the part instances its
+        // saved binding names, never on an unticked copy that happens to carry
+        // the same id (meshChainInstances.ts). The vanished-chain refusal below
+        // reads the bound parts, which this keeps whole.
         const geoSources = modelDerivedGeoSources
-          ?? resolveOpGeometrySources(state.project.geometry, geometryId, op.type)
+          ?? narrowToPickedMeshChainInstances(
+            resolveOpGeometrySources(state.project.geometry, geometryId, op.type),
+            geometryId === '__all__' && operationAcceptsMeshEdgeChains(op.type)
+              ? (op.params as { meshChainSources?: MeshChainSources }).meshChainSources
+              : undefined,
+          )
 
         // WO-251: a persisted STL chain selection is the stable WO-244 chain id
         // itself. Check those ids before any "all loops" fallback or stock/
@@ -19810,6 +20043,9 @@ export const useCamStore = create<CamStore>()(
             loopOrigins[l.id] = worldBaked ? { x: 0, y: 0 } : authoredOrigin
             return {
               id:     l.id,
+              // WO-2880: the saved name rides along so operator messages name
+              // the loop as the Geometry list does (operatorLoopRef/Target).
+              ...(l.name?.trim() ? { name: l.name } : {}),
               points: worldBaked
                 ? l.points   // already world XY — use as-is
                 : seedLocal
@@ -20334,7 +20570,11 @@ export const useCamStore = create<CamStore>()(
           })),
           crashStockBlock,
         )
-        const dependsOnRestStock = restStock !== undefined
+        const chamferClearSpace = op.type === 'chamfer' &&
+          (op.params as unknown as ChamferParams).entryPolicy === 'clear_space'
+        // The existing fingerprint covers predecessor inputs, tool, result
+        // presence and order (not move bytes), even when replay is unavailable.
+        const dependsOnRestStock = restStock !== undefined || (chamferClearSpace && precedingOperations.length > 0)
         // WO-1625: nothing precedes this operation at all - the stock as
         // loaded IS the remaining stock, so the reach trim's console line
         // never claims it was not told what earlier operations removed.
@@ -20346,9 +20586,9 @@ export const useCamStore = create<CamStore>()(
         const workholding = state.project.geometry.some(isWorkholdingGeometry) || (state.project.workholding?.instances.length ?? 0) > 0
           ? await resolveWorkholdingObstacles(
               state.project.geometry, state.project.modelItemPlacements, geoSources.map((g) => g.id), undefined,
-              { workholding: state.project.workholding, setupId: setup.id },
+              { workholding: state.project.workholding, setupId: setup.id, ...(chamferClearSpace ? { includeAvailability: true } : {}) },
             )
-          : { meshes: [], notices: [] }
+          : { meshes: [], notices: [], ...(chamferClearSpace ? { availability: { complete: true, omissions: [] } } : {}) }
         const dispatchFingerprint = projectOperationFingerprint(
           state.project, setup, withRestStockDependency(op, dependsOnRestStock), resolvedHeightSnapshot, tool,
           (toolId) => state.toolLibrary.find((candidate) => candidate.id === toolId),
@@ -20538,6 +20778,19 @@ export const useCamStore = create<CamStore>()(
             wcsLabel: setup.wcs.label,
           }),
           ...(workholding.meshes.length > 0 ? { workholding: workholding.meshes } : {}),
+          ...(chamferClearSpace ? { clearSpacePredecessors: precedingOperations.flatMap(candidate => {
+            if (!candidate.enabled || candidate.status !== 'ready' || !candidate.toolpathMoves) return []
+            const priorTool = state.toolLibrary.find(t => t.id === candidate.toolId)
+            const replay = stockCutterOf(priorTool)
+            return priorTool && replay ? [{ tool: structuredClone(priorTool), ...replay,
+              moves: candidate.toolpathMoves.map(move => ({ ...move })) }] : []
+          }), entryEvidence: {
+            frame: 'world' as const,
+            stockSource: restStock ? 'prior-result-envelope' as const
+              : crashStockBlock ? 'loaded-stock-envelope' as const : 'unavailable' as const,
+            dispatch: { opId, setupId },
+            workholding: workholding.availability ?? { complete: false, omissions: [] },
+          } } : {}),
         }
 
         // WO-1819: ONE manifest lookup replaces the ten-arm payload-builder
@@ -20682,6 +20935,7 @@ export const useCamStore = create<CamStore>()(
 
         worker.postMessage(computeRoute.buildRequest({
           op,
+          machineRapidRate: state.project.machine.rapidRate,
           basePayload,
           opHeights,
           resolvedTopPlane,
@@ -20979,6 +21233,8 @@ export const useCamStore = create<CamStore>()(
         // "deliberately cleared", so ask the layer: a cleared existing sketch commits the empty
         // result below instead of silently keeping the geometry the operator just deleted.
         if (!sk || !stripped) return
+        // WO-2871: the history step this bake pushes is the Finish step.
+        const historyTopBefore = get().projectHistory[get().projectHistory.length - 1]
         const clearsExisting = !strippedSketchHasUserContent(stripped)
           && sketchLayerHasCommittedContent(get().project.geometry, sk)
         if (!strippedSketchHasUserContent(stripped) && !clearsExisting) return
@@ -21073,6 +21329,7 @@ export const useCamStore = create<CamStore>()(
               ),
             },
           }))
+          rememberSketchFinishStep(get(), historyTopBefore)
           get().setActiveSketch(null)
           notice(
             operatorText('index535', { value1: String(layerName), value2: String(conflictSuffix) })
@@ -21117,6 +21374,7 @@ export const useCamStore = create<CamStore>()(
           // so the baked loops render on their layer immediately.
           viewportRefreshTrigger: s.viewportRefreshTrigger + 1,
         }))
+        rememberSketchFinishStep(get(), historyTopBefore)
         get().setActiveSketch(null)
         if (clearsExisting) {
           notice(operatorText('index536', { value1: String(layerName), value2: String(conflictSuffix) }))
@@ -21706,14 +21964,15 @@ export const useCamStore = create<CamStore>()(
               operatorText('index561', { value1: String(row.name) }),
             )
           }
-          // Validate the prismatic conversion UP FRONT so a curved /
-          // non-watertight / degenerate mesh is REFUSED with the converter's OWN
-          // typed, region-naming message BEFORE any item is minted (ADR-0003: no
-          // partial solids, no silent fallback). The row stays a plain STL row
-          // on refusal -- nothing breaks. On success the workbench's meshImport
+          // Validate the prismatic conversion UP FRONT so a mesh that cannot
+          // become a solid is caught BEFORE any item is minted (ADR-0003: no
+          // partial solids, no silent fallback): it opens on the mesh route
+          // below, or is refused with the converter's OWN typed message. The
+          // row stays a plain STL row either way -- nothing breaks. On success the workbench's meshImport
           // replay re-runs this same deterministic pipeline against the copied
           // bytes to build the editable body.
-          const conv = convertPrismaticMesh(importStl(bytes).mesh)
+          const parsedMesh = importStl(bytes).mesh
+          const conv = convertPrismaticMesh(parsedMesh)
           if (!conv.ok) {
             // WO-1935 (Operator 2026-09-23): a CURVED mesh - round holes, bosses,
             // fillets - cannot become a prismatic kernel body, but it still
@@ -21721,15 +21980,40 @@ export const useCamStore = create<CamStore>()(
             // CAN show it (LIENCAM rule 11), so it is no longer refused. The
             // row stays format 'stl' with its meshEdits journal: no item is
             // minted, nothing is adopted. The headless import-time split has
-            // no screen to open, and the converter's other refusals (open,
-            // one-sided, degenerate, empty) are outside this order, so those
-            // keep their named refusal.
-            if (conv.kind !== 'refused-curved' || opts?.headless === true) {
+            // no screen to open, so it keeps the named refusal.
+            // WO-2763 (rule 11): a mesh with a few zero-area triangles (an
+            // OpenCascade-meshed dome has one at the sphere pole) or a few open
+            // edges cannot become a solid either, but the mesh screen CAN open
+            // it, so it goes there too and says what it did in one console
+            // line. One-sided and empty meshes keep their refusal.
+            const meshRoute = conv.kind === 'refused-curved' || conv.kind === 'degenerate-input' || conv.kind === 'non-watertight'
+            if (!meshRoute || opts?.headless === true) {
               return refuse(`mesh-${conv.kind}`, conv.message)
             }
-            console.info(
-              operatorText('index562', { value1: String(row.name) }),
-            )
+            if (conv.kind === 'degenerate-input') {
+              // The count is what the mesh route itself leaves out
+              // (resolveEditedStlMesh); a triangle that only collapses once
+              // the converter welds near-coincident corners stays in, and is
+              // named as such.
+              const dropped = dropZeroAreaTriangles(parsedMesh).dropped
+              get().addConsoleEvent({
+                severity: 'info', source: 'import',
+                message: dropped > 0
+                  ? operatorText('stlBadTriangles1', { value1: String(row.name), value2: String(dropped) })
+                  : operatorText('stlBadTriangles3', { value1: String(row.name), value2: String(conv.degenerateTriangleCount) }),
+                entityRef: { kind: 'geometry', id: geoId },
+              })
+            } else if (conv.kind === 'non-watertight') {
+              get().addConsoleEvent({
+                severity: 'info', source: 'import',
+                message: operatorText('stlBadTriangles2', { value1: String(row.name), value2: String(conv.boundaryEdgeCount) }),
+                entityRef: { kind: 'geometry', id: geoId },
+              })
+            } else {
+              console.info(
+                operatorText('index562', { value1: String(row.name) }),
+              )
+            }
             return get().openStlInModelScreen(geoId)
           }
           newKey = crypto.randomUUID()
@@ -21870,17 +22154,39 @@ export const useCamStore = create<CamStore>()(
           set({ brepImportError: msg })
           return { ok: false, reason: row ? 'not-stl' : 'not-found' }
         }
-        const hadLegacyItem = (get().project.modelItems ?? []).some((m) => m.id === LEGACY_MODEL_ITEM_ID)
+        // WO-2853: a new visit ends the one before it.
+        endStlVisit(set, get)
+        const before = get()
         set({ modelStlGeoId: geoId, brepImportError: null })
-        await get().enterModelWorkspace()
-        const after = get()
-        if (!hadLegacyItem && (after.project.modelItems ?? []).some((m) => m.id === LEGACY_MODEL_ITEM_ID)) {
-          stlVisitClaimedModelItem = { projectId: after.project.id, itemId: LEGACY_MODEL_ITEM_ID }
-        }
+        // WO-2853: with 2+ models and none active, enterModelWorkspace asks
+        // which one - the same chooser the STL was just picked from, so the
+        // page only flashed - and with a model active or only one, the STL
+        // opened INSIDE it, drawn with its bodies (the operator 10-15: "opening plate
+        // model opened two models"). No model is the STL's: host every visit
+        // on an empty scratch record of its own and let Finish release it.
+        // Round 3: with no model yet too, and the record carries the STL's
+        // name - the header and its switcher read "Plate", the part the
+        // operator opened, never "Project Model".
+        const hostId = crypto.randomUUID()
+        get().pushHistory()
+        set((s) => {
+          const existing = s.project.modelItems ?? []
+          const record: ModelItemRecord = {
+            id: hostId,
+            name: row.name.trim() !== '' ? row.name : nextModelItemName(existing),
+            documentState: 'empty',
+          }
+          return { project: { ...s.project, modelItems: [...existing, record] } }
+        })
+        // Claimed BEFORE entering, so openModelItem knows its own host.
+        stlVisitClaimedModelItem = { projectId: before.project.id, itemId: hostId }
+        stlVisitHostGeometry.set(hostId, geoId)
+        await get().openModelItem(hostId)
         return { ok: true }
       },
 
       closeStlInModelScreen: () => {
+        dropStlVisitLines(set, get)
         if (get().modelStlGeoId !== null) set({ modelStlGeoId: null })
       },
 
@@ -22656,6 +22962,7 @@ export const useCamStore = create<CamStore>()(
             entities: r.entities,
             constraints: r.constraints,
             dimensions: r.dimensions,
+            patterns: r.patterns ?? st.activeSketch!.patterns,
           },
           sketchSelectedIds: st.sketchSelectedIds.filter((x) => surviving.has(x)),
         }))
@@ -23308,6 +23615,9 @@ export const useCamStore = create<CamStore>()(
       setWorkspace: (w) => {
         modelNavigationEpoch += 1
         set({ workspace: w })
+        // WO-2853: every route out of the Model workspace (a CAM or Control
+        // tab) ends an STL visit, so the next model opened never draws it.
+        if (w !== 'part') endStlVisit(set, get)
       },
 
       recordModelItemDocumentCheckpoint: (id, revision) => {
@@ -23451,6 +23761,8 @@ export const useCamStore = create<CamStore>()(
 
       addModelItem: () => {
         const navigationEpoch = ++modelNavigationEpoch
+        // WO-2853: a new model starts empty - it never inherits an STL visit.
+        endStlVisit(set, get)
         const projectId = get().project.id
         const id = crypto.randomUUID()
         const createItem = (): void => {
@@ -23487,6 +23799,11 @@ export const useCamStore = create<CamStore>()(
       openModelItem: (id) => {
         const navigationEpoch = ++modelNavigationEpoch
         const projectId = get().project.id
+        // WO-2853: opening any model but the STL visit's own host ends it.
+        const visitHost = stlVisitClaimedModelItem
+        if (visitHost === null || visitHost.projectId !== projectId || visitHost.itemId !== id) {
+          endStlVisit(set, get, id)
+        }
         const ownsNavigation = (): boolean =>
           modelNavigationEpoch === navigationEpoch &&
           get().project.id === projectId
@@ -23708,28 +24025,8 @@ export const useCamStore = create<CamStore>()(
           const claimed = stlVisitClaimedModelItem
           if (claimed === null || claimed.projectId !== projectId) return
           stlVisitClaimedModelItem = null
-          const s = get()
-          const item = s.project.modelItems?.find((m) => m.id === claimed.itemId)
-          if (
-            !endsStlVisit ||
-            id !== claimed.itemId ||
-            !item ||
-            item.documentState !== 'empty' ||
-            s.project.geometry.some((g) => resolveOwningModelItemId(g) === item.id) ||
-            hasModelItemAuthoredEvidence(s.project, item.id)
-          ) return
-          try {
-            if (collectDocumentArchive(item.id) !== undefined) return
-          } catch {
-            return
-          }
-          set((st) => ({
-            project: {
-              ...st.project,
-              modelItems: (st.project.modelItems ?? []).filter((m) => m.id !== item.id),
-            },
-            activeModelItemId: st.activeModelItemId === item.id ? null : st.activeModelItemId,
-          }))
+          if (!endsStlVisit || id !== claimed.itemId) return
+          releaseStlVisitScratchItem(set, get, claimed.itemId)
         }
         if (!id || collectDocumentArchive(id) === undefined) {
           if (id) get().markModelItemDocumentDirty(id)
@@ -23737,6 +24034,7 @@ export const useCamStore = create<CamStore>()(
             modelNavigationEpoch === navigationEpoch &&
             get().project.id === projectId
           ) {
+            dropStlVisitLines(set, get)
             set({ workspace: 'cam', modelStlGeoId: null })
             releaseStlVisitItem()
           }
@@ -23748,6 +24046,7 @@ export const useCamStore = create<CamStore>()(
             modelNavigationEpoch === navigationEpoch &&
             get().project.id === projectId
           ) {
+            dropStlVisitLines(set, get)
             set({ workspace: 'cam', modelStlGeoId: null })
             releaseStlVisitItem()
           }
@@ -23832,6 +24131,8 @@ export const useCamStore = create<CamStore>()(
         })
         if (get().activeModelItemId === id) {
           set({ activeModelItemId: null, workspace: get().workspace === 'part' ? 'cam' : get().workspace })
+          // WO-2853: leaving Model this way ends an STL visit too.
+          endStlVisit(set, get)
         }
       },
 
@@ -26109,6 +26410,7 @@ const camSketchDocumentPort: SketchDocumentPort = {
         entities: next.entities,
         constraints: next.constraints,
         dimensions: next.dimensions,
+        patterns: next.patterns ?? st.activeSketch!.patterns,
       },
     }))
     useCamStore.getState().solveSketch()

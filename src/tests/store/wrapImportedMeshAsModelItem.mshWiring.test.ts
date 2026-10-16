@@ -16,6 +16,8 @@
 //     CONVERTER'S OWN typed message; nothing is minted and the row stays a
 //     plain STL row. Also missing cached bytes. A CURVED mesh is no longer
 //     refused (WO-1935): it opens in the Model screen as a mesh, unconverted.
+//     Since WO-2763 an OPEN mesh does the same; only the headless import-time
+//     split still refuses it (WO-2784 RE-PIN).
 //   - undo: one Ctrl+Z restores the pre-wrap STL row (pending cleared) + drops
 //     the item + placement.
 
@@ -155,10 +157,12 @@ describe('MSH-3 wiring: wrapImportedGeometryAsModelItem (STL) — happy path', (
 describe('MSH-3 wiring: wrapImportedGeometryAsModelItem (STL) — named refusals (no mutation, no partial solid)', () => {
   beforeEach(resetStore)
 
-  async function expectRefusal(row: ImportedGeometry, reasonPrefix: string, messageIncludes: string): Promise<void> {
+  async function expectRefusal(
+    row: ImportedGeometry, reasonPrefix: string, messageIncludes: string, opts?: { headless?: boolean },
+  ): Promise<void> {
     useCamStore.setState((s) => ({ project: { ...s.project, geometry: [row] } }))
     const before = JSON.stringify(state().project.geometry)
-    const res = await state().wrapImportedGeometryAsModelItem(row.id)
+    const res = await state().wrapImportedGeometryAsModelItem(row.id, opts)
     expect(res.ok).toBe(false)
     expect(res.reason?.startsWith(reasonPrefix)).toBe(true)
     expect(items()).toHaveLength(0)                                    // nothing minted (no partial solid)
@@ -207,9 +211,18 @@ describe('MSH-3 wiring: wrapImportedGeometryAsModelItem (STL) — named refusals
     }))
   })
 
-  it('refuses a non-watertight mesh (cube missing its top) with the converter message', async () => {
+  // WO-2784 RE-PIN: WO-2763 (87eef7415, landed f8c58e7437; owner 10-13 "File the 4 small/medium
+  // now" - "open STLs with a few bad triangles"; the order's reading: "Degenerate or slightly open
+  // meshes go to the mesh route ... Refuse only a mesh that genuinely cannot be repaired", rule 11)
+  // sends an open mesh to the Model screen as a mesh, the WO-1935 curved-mesh contract. The
+  // converter refusal it pinned survives where there is no screen to open: the headless
+  // import-time split still refuses it with the converter's own message.
+  it('opens a non-watertight mesh (cube missing its top) as a mesh; headless still refuses with the converter message (WO-2763)', async () => {
     cache.set('geo-stl', binaryStlFixture(cubeWithMissingTop()))
-    await expectRefusal(stlRow(), 'mesh-non-watertight', 'watertight')
+    await expectRefusal(stlRow(), 'mesh-non-watertight', 'watertight', { headless: true })
+    resetStore()
+    cache.set('geo-stl', binaryStlFixture(cubeWithMissingTop()))
+    await expectOpenedAsMesh(stlRow())
   })
 
   it('refuses when cached bytes are missing by name', async () => {

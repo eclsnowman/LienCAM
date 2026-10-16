@@ -587,7 +587,10 @@ export const SURFACE_DISPOSITIONS: Record<string, Disposition> = {
     verdict: 'MODAL-GOVERNED',
     reason: 'Modal scrim (app.css:3288, fixed); COHESION-STANDARD.md section 5 governs modality, not this census.',
   },
-  'components/modals/HelpCenterModal.tsx:HelpCenterModal > div.modal-backdrop': {
+  // WO-2784 RE-PIN: WO-2759 (2d220dbd0b) split HelpCenterModal into a wrapper that renders
+  // HelpCenterDialog (this same backdrop, moved verbatim) plus ReportProblemModal; re-keyed to the
+  // new owning component, verdict unchanged.
+  'components/modals/HelpCenterModal.tsx:HelpCenterDialog > div.modal-backdrop': {
     verdict: 'MODAL-GOVERNED',
     reason: 'Modal scrim (app.css:3288, fixed); COHESION-STANDARD.md section 5 governs modality, not this census.',
   },

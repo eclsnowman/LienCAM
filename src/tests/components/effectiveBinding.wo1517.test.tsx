@@ -306,9 +306,11 @@ describe('WO-1517 BUG-466: a picked face outranks a stale saved loop id on Save 
     act(() => {
       capturedPickCallback!({ geoId: MODEL_ID, kind: 'face', index: 0, isModelFace: true }, true)
     })
+    // WO-2858: the readout names the body; the saved reference below carries TOP_FACE.
     await waitFor(() => {
-      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain(TOP_FACE)
+      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('Picked face on Model F1')
     })
+    expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain(TOP_FACE)
     await submitOperation()
     await waitFor(() => { expect(useCamStore.getState().project.setups[0].operations).toHaveLength(1) })
     const opId = currentOp().id
@@ -337,8 +339,9 @@ describe('WO-1517 BUG-466: a picked face outranks a stale saved loop id on Save 
       expect(screen.getByText('Edit Operation', { exact: false })).toBeTruthy()
     })
     fireEvent.click(screen.getByText('Geometry'))
-    // The face boundary is still what the wizard shows as bound.
-    expect(screen.getByTestId('machining-boundary-readout').textContent).toContain(TOP_FACE)
+    // The face boundary is still what the wizard shows as bound (WO-2858: by body name).
+    expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('Picked face on Model F1')
+    expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain(TOP_FACE)
 
     workerRequests = []
     await submitOperation()

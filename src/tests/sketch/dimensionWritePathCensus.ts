@@ -759,9 +759,9 @@ export const DIMENSION_WRITE_PATH_CENSUS: readonly CensusEntry[] = [
     id: 'cam-deleteSketchItems-cascade',
     file: 'src/store/index.ts',
     enclosingFunction: 'deleteSketchItems',
-    text: '{ ...st.activeSketch!, entities: r.entities, constraints: r.constraints, dimensions: r.dimensions, }',
+    text: '{ ...st.activeSketch!, entities: r.entities, constraints: r.constraints, dimensions: r.dimensions, patterns: r.patterns ?? st.activeSketch!.patterns, }',
     class: 'cascade-inert',
-    note: 'deleteSketchItems (deleteSketchSelection delegates here): r comes from deleteFromSketch (pure cascade filter), never a fresh insert.',
+    note: 'deleteSketchItems (deleteSketchSelection delegates here): r comes from deleteFromSketch (pure cascade filter), never a fresh insert. WO-2784 RE-PIN: WO-2616 (4d60c51a8a, landed 5211ea829b, dependent sketch patterns) added the sibling `patterns: r.patterns ?? st.activeSketch!.patterns` field to this object; deleteFromSketch still builds r.dimensions as `sketch.dimensions.filter(...)` (src/lib/sketch/deleteSelection.ts), so the dimensions write is unchanged and the ruling stays cascade-inert.',
   },
   {
     id: 'cam-solve-complete-remeasure',
@@ -799,9 +799,9 @@ export const DIMENSION_WRITE_PATH_CENSUS: readonly CensusEntry[] = [
     id: 'cam-replace-guarded',
     file: 'src/store/index.ts',
     enclosingFunction: 'replace',
-    text: '{ ...st.activeSketch!, entities: next.entities, constraints: next.constraints, dimensions: next.dimensions, }',
+    text: '{ ...st.activeSketch!, entities: next.entities, constraints: next.constraints, dimensions: next.dimensions, patterns: next.patterns ?? st.activeSketch!.patterns, }',
     class: 'replace',
-    note: 'camSketchDocumentPort.replace: MODIFY-tool (trim / fillet / chamfer) results land whole. WO-1858 removed the d1xd2 driving normalization that used to wrap them.',
+    note: 'camSketchDocumentPort.replace: MODIFY-tool (trim / fillet / chamfer) results land whole. WO-1858 removed the d1xd2 driving normalization that used to wrap them. WO-2784 RE-PIN: WO-2616 (4d60c51a8a, landed 5211ea829b, dependent sketch patterns) added the sibling `patterns: next.patterns ?? st.activeSketch!.patterns` field so a modify result carries its pattern definitions; it touches patterns, never dimensions, so `dimensions: next.dimensions` keeps the same whole-result replace ruling.',
   },
 
   // ---- src/components/model3d/workbench/workbenchSketchDocumentPort.ts (workbench) --------------

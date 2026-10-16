@@ -2,10 +2,13 @@ import { textFor, useText } from '../../i18n'
 import { useRef, useEffect, useSyncExternalStore } from 'react'
 import {
   FilePlus, FolderOpen, Save, Download,
-  Settings, Undo2, Redo2, CircleHelp, LoaderCircle,
+  Settings, Undo2, Redo2, CircleHelp, Info, LoaderCircle,
 } from 'lucide-react'
 import { askBeforeReplacingProject, useCamStore } from '../../store'
 import { openExportWindow } from '../../lib/exportCenter'
+import { useUiPrefs } from '../../store/uiPrefs'
+import { useProjectPicker } from '../../lib/projectOpen/picker'
+import { browseProject } from '../../lib/projectOpen/actions'
 import { GIT_COMMIT } from '../../version'
 import {
   getPartWorkspaceHistory,
@@ -22,9 +25,10 @@ interface Props {
    *  (read once from the URL by App.tsx, D3 default-ON) threads through here
    *  to the strip. */
   showPartTab?: boolean
+  onAbout?: () => void
 }
 
-export function TopToolbar({ showPartTab = false }: Props) {
+export function TopToolbar({ showPartTab = false, onAbout }: Props) {
   useText('app-shell-settings-menus')
   const newProject  = useCamStore((s) => s.newProject)
   const saveProject = useCamStore((s) => s.saveProjectToFile)
@@ -219,7 +223,10 @@ export function TopToolbar({ showPartTab = false }: Props) {
         </button>
         <button
           className="tb-btn"
-          onClick={() => projectInputRef.current?.click()}
+          onClick={() => {
+            if (!useUiPrefs.getState().projectOpenDirectly) useProjectPicker.getState().show()
+            else void browseProject().catch((error: unknown) => useCamStore.getState().addConsoleEvent({ source: 'project', severity: 'error', message: String(error) }))
+          }}
           data-tooltip={shellText('TopToolbar.openProject')}
           aria-label={shellText('TopToolbar.openProject')}
         >
@@ -304,6 +311,9 @@ export function TopToolbar({ showPartTab = false }: Props) {
         >
           <CircleHelp size={14} />
           <span>{shellText('TopToolbar.help')}</span>
+        </button>
+        <button className="tb-btn" onClick={onAbout} aria-label="About LienCAM" data-tooltip="About LienCAM">
+          <Info size={14} /><span>About</span>
         </button>
       </div>
 

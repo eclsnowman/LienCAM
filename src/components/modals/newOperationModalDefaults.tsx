@@ -222,6 +222,7 @@ export const defaultThreadMillParams: ThreadMillParams = {
 }
 
 export const defaultChamferParams: ChamferParams = {
+  entryPolicy: 'authored',
   geometryId: '',
   loopIds: [],
   loopSides: {},

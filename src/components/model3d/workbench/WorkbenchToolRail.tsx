@@ -1,3 +1,5 @@
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { ReferenceImageInsertRow } from '../referenceImage/ReferenceImageInsertRow'
 // WO UI-17 (criterion 2, Operator verbatim: "Don't clutter up the tool bar with a
 // dumb string of buttons. Use our sketch toolbar along the right hand side"):
@@ -107,53 +109,53 @@ export interface RailSection {
 export const SKETCH_SECTIONS: Array<{ id: string; title: string; tools: Array<{ id: SketchToolId; label: string; icon: LucideIcon }> }> = [
   {
     id: 'create',
-    title: 'Create',
+    get title() { return workbenchText('WorkbenchToolRail.create') },
     tools: [
-      { id: 'select',        label: 'Select',       icon: MousePointer2 },
-      { id: 'line',          label: 'Line',         icon: Slash },
-      { id: 'rect-corner',   label: 'Rectangle',    icon: Square },
-      { id: 'rect-center',   label: 'Center Rect',  icon: SquareDot },
-      { id: 'circle-center', label: 'Circle',       icon: cadIcon('circle-center') },
-      { id: 'circle-3pt',    label: '3-Pt Circle',  icon: cadIcon('circle-3pt') },
-      { id: 'ellipse',       label: 'Ellipse',      icon: cadIcon('ellipse') },
-      { id: 'arc-3pt',       label: '3-Pt Arc',     icon: cadIcon('arc-3pt') },
-      { id: 'arc-center',    label: 'Center Arc',   icon: Radius },
-      { id: 'arc-tangent',   label: 'Tangent Arc',  icon: Tangent },
-      { id: 'spline',        label: 'Spline',       icon: cadIcon('spline') },
-      { id: 'spline-control', label: 'Control Spline', icon: cadIcon('spline-control') },
-      { id: 'bezier',        label: 'Bezier',       icon: cadIcon('bezier') },
-      { id: 'conic',         label: 'Conic Arc',    icon: cadIcon('conic') },
-      { id: 'gear',          label: 'Gear',         icon: Settings2 },
-      { id: 'polygon',       label: 'Polygon',      icon: Pentagon },
-      { id: 'slot',          label: 'Slot',         icon: cadIcon('slot') },
-      { id: 'point',         label: 'Point',        icon: cadIcon('point') },
+      { id: 'select',        get label() { return workbenchText('WorkbenchToolRail.select') },       icon: MousePointer2 },
+      { id: 'line',          get label() { return workbenchText('WorkbenchToolRail.line') },         icon: Slash },
+      { id: 'rect-corner',   get label() { return workbenchText('WorkbenchToolRail.rectangle') },    icon: Square },
+      { id: 'rect-center',   get label() { return workbenchText('WorkbenchToolRail.centerRect') },  icon: SquareDot },
+      { id: 'circle-center', get label() { return workbenchText('WorkbenchToolRail.circle') },       icon: cadIcon('circle-center') },
+      { id: 'circle-3pt',    get label() { return workbenchText('WorkbenchToolRail.3PtCircle') },  icon: cadIcon('circle-3pt') },
+      { id: 'ellipse',       get label() { return workbenchText('WorkbenchToolRail.ellipse') },      icon: cadIcon('ellipse') },
+      { id: 'arc-3pt',       get label() { return workbenchText('WorkbenchToolRail.3PtArc') },     icon: cadIcon('arc-3pt') },
+      { id: 'arc-center',    get label() { return workbenchText('WorkbenchToolRail.centerArc') },   icon: Radius },
+      { id: 'arc-tangent',   get label() { return workbenchText('WorkbenchToolRail.tangentArc') },  icon: Tangent },
+      { id: 'spline',        get label() { return workbenchText('WorkbenchToolRail.spline') },       icon: cadIcon('spline') },
+      { id: 'spline-control', get label() { return workbenchText('WorkbenchToolRail.controlSpline') }, icon: cadIcon('spline-control') },
+      { id: 'bezier',        get label() { return workbenchText('WorkbenchToolRail.bezier') },       icon: cadIcon('bezier') },
+      { id: 'conic',         get label() { return workbenchText('WorkbenchToolRail.conicArc') },    icon: cadIcon('conic') },
+      { id: 'gear',          get label() { return workbenchText('WorkbenchToolRail.gear') },         icon: Settings2 },
+      { id: 'polygon',       get label() { return workbenchText('WorkbenchToolRail.polygon') },      icon: Pentagon },
+      { id: 'slot',          get label() { return workbenchText('WorkbenchToolRail.slot') },         icon: cadIcon('slot') },
+      { id: 'point',         get label() { return workbenchText('WorkbenchToolRail.point') },        icon: cadIcon('point') },
     ],
   },
   {
     id: 'modify',
-    title: 'Modify',
+    get title() { return workbenchText('WorkbenchToolRail.modify') },
     tools: [
-      { id: 'smart-dimension',  label: 'Smart Dim.',    icon: Ruler },
-      { id: 'trim',             label: 'Trim',          icon: Scissors },
-      { id: 'split',            label: 'Split',         icon: Split },
-      { id: 'extend',           label: 'Extend',        icon: ArrowRightFromLine },
-      { id: 'fillet',           label: 'Fillet',        icon: cadIcon('fillet') },
-      { id: 'chamfer',          label: 'Chamfer',       icon: cadIcon('chamfer') },
-      { id: 'offset',           label: 'Offset',        icon: cadIcon('offset') },
-      { id: 'mirror',           label: 'Mirror',        icon: FlipHorizontal2 },
-      { id: 'pattern-linear',   label: 'Linear Pat.',   icon: Grid3x3 },
-      { id: 'pattern-circular', label: 'Circular Pat.', icon: cadIcon('pattern-circular') },
-      { id: 'pattern-path',     label: 'Path Pat.',     icon: Waypoints },
-      { id: 'move',             label: 'Move',          icon: Move },
-      { id: 'rotate',           label: 'Rotate',        icon: RotateCw },
-      { id: 'scale',            label: 'Scale',         icon: Scaling },
+      { id: 'smart-dimension',  get label() { return workbenchText('WorkbenchToolRail.smartDim') },    icon: Ruler },
+      { id: 'trim',             get label() { return workbenchText('WorkbenchToolRail.trim') },          icon: Scissors },
+      { id: 'split',            get label() { return workbenchText('WorkbenchToolRail.split') },         icon: Split },
+      { id: 'extend',           get label() { return workbenchText('WorkbenchToolRail.extend') },        icon: ArrowRightFromLine },
+      { id: 'fillet',           get label() { return workbenchText('WorkbenchToolRail.fillet') },        icon: cadIcon('fillet') },
+      { id: 'chamfer',          get label() { return workbenchText('WorkbenchToolRail.chamfer') },       icon: cadIcon('chamfer') },
+      { id: 'offset',           get label() { return workbenchText('WorkbenchToolRail.offset') },        icon: cadIcon('offset') },
+      { id: 'mirror',           get label() { return workbenchText('WorkbenchToolRail.mirror') },        icon: FlipHorizontal2 },
+      { id: 'pattern-linear',   get label() { return workbenchText('WorkbenchToolRail.linearPat') },   icon: Grid3x3 },
+      { id: 'pattern-circular', get label() { return workbenchText('WorkbenchToolRail.circularPat') }, icon: cadIcon('pattern-circular') },
+      { id: 'pattern-path',     get label() { return workbenchText('WorkbenchToolRail.pathPat') },     icon: Waypoints },
+      { id: 'move',             get label() { return workbenchText('WorkbenchToolRail.move') },          icon: Move },
+      { id: 'rotate',           get label() { return workbenchText('WorkbenchToolRail.rotate') },        icon: RotateCw },
+      { id: 'scale',            get label() { return workbenchText('WorkbenchToolRail.scale') },         icon: Scaling },
     ],
   },
   {
     id: 'utility',
-    title: 'Utility',
+    get title() { return workbenchText('WorkbenchToolRail.utility') },
     tools: [
-      { id: 'project', label: 'Project / Use', icon: Import },
+      { id: 'project', get label() { return workbenchText('WorkbenchToolRail.projectUse') }, icon: Import },
     ],
   },
 ]
@@ -167,19 +169,19 @@ export const SKETCH_SECTIONS: Array<{ id: string; title: string; tools: Array<{ 
  *  radius, angle) are DIMENSIONS placed by the Smart Dim. tool, not this
  *  section -- they are not part of the CAM constraints set and are not here. */
 const CONSTRAINT_BUTTONS: Array<{ kind: SketchConstraintKind; label: string; icon: LucideIcon }> = [
-  { kind: 'coincident',      label: 'Coincident',    icon: Crosshair },
-  { kind: 'concentric',      label: 'Concentric',    icon: Target },
-  { kind: 'parallel',        label: 'Parallel',      icon: cadIcon('parallel') },
-  { kind: 'perpendicular',   label: 'Perpendicular', icon: cadIcon('perpendicular') },
-  { kind: 'collinear',       label: 'Collinear',     icon: cadIcon('collinear') },
-  { kind: 'horizontal',      label: 'Horizontal',    icon: MoveHorizontal },
-  { kind: 'vertical',        label: 'Vertical',      icon: MoveVertical },
-  { kind: 'tangent',         label: 'Tangent',       icon: Tangent },
-  { kind: 'equal',           label: 'Equal',         icon: Equal },
-  { kind: 'midpoint',        label: 'Midpoint',      icon: cadIcon('midpoint') },
-  { kind: 'symmetric',       label: 'Symmetric',     icon: cadIcon('symmetric') },
-  { kind: 'fix',             label: 'Fix',           icon: Lock },
-  { kind: 'point_on_object', label: 'On Object',     icon: LocateFixed },
+  { kind: 'coincident',      get label() { return workbenchText('WorkbenchToolRail.coincident') },    icon: Crosshair },
+  { kind: 'concentric',      get label() { return workbenchText('WorkbenchToolRail.concentric') },    icon: Target },
+  { kind: 'parallel',        get label() { return workbenchText('WorkbenchToolRail.parallel') },      icon: cadIcon('parallel') },
+  { kind: 'perpendicular',   get label() { return workbenchText('WorkbenchToolRail.perpendicular') }, icon: cadIcon('perpendicular') },
+  { kind: 'collinear',       get label() { return workbenchText('WorkbenchToolRail.collinear') },     icon: cadIcon('collinear') },
+  { kind: 'horizontal',      get label() { return workbenchText('WorkbenchToolRail.horizontal') },    icon: MoveHorizontal },
+  { kind: 'vertical',        get label() { return workbenchText('WorkbenchToolRail.vertical') },      icon: MoveVertical },
+  { kind: 'tangent',         get label() { return workbenchText('WorkbenchToolRail.tangent') },       icon: Tangent },
+  { kind: 'equal',           get label() { return workbenchText('WorkbenchToolRail.equal') },         icon: Equal },
+  { kind: 'midpoint',        get label() { return workbenchText('WorkbenchToolRail.midpoint') },      icon: cadIcon('midpoint') },
+  { kind: 'symmetric',       get label() { return workbenchText('WorkbenchToolRail.symmetric') },     icon: cadIcon('symmetric') },
+  { kind: 'fix',             get label() { return workbenchText('WorkbenchToolRail.fix') },           icon: Lock },
+  { kind: 'point_on_object', get label() { return workbenchText('WorkbenchToolRail.onObject') },     icon: LocateFixed },
 ]
 
 export interface WorkbenchToolRailProps {
@@ -206,6 +208,7 @@ export interface WorkbenchToolRailProps {
  *  workbenchOverlaysPort uses -- a host with no framework subscribing to its own
  *  session store, per-selector Object.is bail-out. Only reads; never a binding. */
 function useSketchSession<T>(f: (s: SketchSessionState) => T): T {
+  useText('sketch-and-model-workbench')
   return useSyncExternalStore(
     sketchSessionStore.subscribe,
     () => f(sketchSessionStore.getState()),
@@ -214,6 +217,7 @@ function useSketchSession<T>(f: (s: SketchSessionState) => T): T {
 }
 
 function RailSectionHeader({ title, right, collapsed, onToggle, sectionId }: { title: string; right?: ReactNode; collapsed?: boolean; onToggle?: () => void; sectionId?: string }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <div className="tree-section-header" style={{ position: 'static' }}>
       {title}
@@ -224,8 +228,8 @@ function RailSectionHeader({ title, right, collapsed, onToggle, sectionId }: { t
           className="rail-collapse-btn"
           data-testid={`workbench-rail-collapse-${sectionId}`}
           aria-expanded={collapsed !== true}
-          aria-label={collapsed === true ? `Show ${title}` : `Hide ${title}`}
-          data-tooltip={collapsed === true ? `Show the ${title} tools` : `Hide the ${title} tools`}
+          aria-label={collapsed === true ? workbenchText('WorkbenchToolRail.show', { title: String(title) }) : workbenchText('WorkbenchToolRail.hide', { title: String(title) })}
+          data-tooltip={collapsed === true ? workbenchText('WorkbenchToolRail.showTheTools', { title: String(title) }) : workbenchText('WorkbenchToolRail.hideTheTools', { title: String(title) })}
           onClick={onToggle}
         >
           {collapsed === true ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
@@ -241,6 +245,7 @@ function RailSectionHeader({ title, right, collapsed, onToggle, sectionId }: { t
  *  session store's `glyphsVisible` (sketchSessionStore.ts) rather than
  *  useCamStore -- the CAM field is untouched by this WO. */
 function GlyphToggle() {
+  useText('sketch-and-model-workbench')
   const glyphsVisible = useSketchSession((s) => s.glyphsVisible)
   return (
     <SketchGlyphToggle
@@ -259,6 +264,7 @@ function GlyphToggle() {
  *  live status -- no separate liveStatus field to fall back from, unlike CAM's
  *  worker-solver split. */
 function SketchDofBadge() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const status: SolveStatus | null = useSketchSession((s) => s.sketch?.solveStatus ?? null)
   const solverAvailability = useSketchSession((s) => s.solverAvailability)
 
@@ -271,11 +277,11 @@ function SketchDofBadge() {
         className="sketch-def-chip sketch-def-chip-idle"
         data-testid="workbench-sketch-dof-chip"
         data-tooltip={unavailable
-          ? 'The sketch solver is unavailable; no definition verdict is available'
-          : 'The sketch solver is not ready; no definition verdict is available'}
+          ? workbenchText('WorkbenchToolRail.theSketchSolverIsUnavailableNoDefinitionVerdictIs')
+          : workbenchText('WorkbenchToolRail.theSketchSolverIsNotReadyNoDefinitionVerdict')}
       >
         {unavailable ? <AlertTriangle size={11} /> : <CircleDashed size={11} />}
-        <span>{unavailable ? 'Solver unavailable' : 'Solver not ready'}</span>
+        <span>{unavailable ? workbenchText('WorkbenchToolRail.solverUnavailable') : workbenchText('WorkbenchToolRail.solverNotReady')}</span>
       </span>
     )
   }
@@ -284,10 +290,10 @@ function SketchDofBadge() {
       <span
         className="sketch-def-chip sketch-def-chip-idle"
         data-testid="workbench-sketch-dof-chip"
-        data-tooltip="The solver is ready but has not produced a definition verdict"
+        data-tooltip={workbenchText('WorkbenchToolRail.theSolverIsReadyButHasNotProducedA')}
       >
         <CircleDashed size={11} />
-        <span>Not solved</span>
+        <span>{workbenchText('WorkbenchToolRail.notSolved')}</span>
       </span>
     )
   }
@@ -296,18 +302,18 @@ function SketchDofBadge() {
       <span
         className="sketch-def-chip sketch-def-chip-failed"
         data-testid="workbench-sketch-dof-chip"
-        data-tooltip={`Solve failed: ${status.failureMessage ?? 'see console for details'}`}
+        data-tooltip={workbenchText('WorkbenchToolRail.solveFailed', { value1: String(status.failureMessage ?? workbenchText('WorkbenchToolRail.seeConsoleForDetails')) })}
       >
         <AlertTriangle size={11} />
-        <span>Solve failed</span>
+        <span>{workbenchText('WorkbenchToolRail.solveFailed2')}</span>
       </span>
     )
   }
   if (status.dof === 0) {
     return (
-      <span className="sketch-def-chip sketch-def-chip-defined" data-testid="workbench-sketch-dof-chip" data-tooltip="Fully defined">
+      <span className="sketch-def-chip sketch-def-chip-defined" data-testid="workbench-sketch-dof-chip" data-tooltip={workbenchText('WorkbenchToolRail.fullyDefined')}>
         <CheckCircle2 size={11} />
-        <span>Fully defined</span>
+        <span>{workbenchText('WorkbenchToolRail.fullyDefined')}</span>
       </span>
     )
   }
@@ -315,10 +321,10 @@ function SketchDofBadge() {
     <span
       className="sketch-def-chip sketch-def-chip-under"
       data-testid="workbench-sketch-dof-chip"
-      data-tooltip={`Under-defined: ${status.dof} degrees of freedom remain`}
+      data-tooltip={workbenchText('WorkbenchToolRail.underDefinedDegreesOfFreedomRemain', { dof: String(status.dof) })}
     >
       <CircleDashed size={11} />
-      <span>{status.dof} DoF</span>
+      <span>{workbenchText('WorkbenchToolRail.dof', { dof: String((status.dof) ?? '') })}</span>
     </span>
   )
 }
@@ -333,6 +339,7 @@ const ConstructionIcon = cadIcon('construction')
 const MeasureIcon = cadIcon('measure')
 
 function ConstructionButton() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const constructionMode = useSketcherTool((s) => s.constructionMode)
   return (
     <button
@@ -340,11 +347,11 @@ function ConstructionButton() {
       data-testid="workbench-package-construction"
       aria-pressed={constructionMode}
       className={constructionMode ? 'sketch-tool-btn sketch-tool-btn-active' : 'sketch-tool-btn'}
-      data-tooltip="Construction (q): toggle selected entities, or draw new entities as construction"
+      data-tooltip={workbenchText('WorkbenchToolRail.constructionQToggleSelectedEntitiesOrDrawNewEntities')}
       onClick={() => sketcherTools.toggleConstruction()}
     >
       <ConstructionIcon size={15} />
-      <span>Construction</span>
+      <span>{workbenchText('WorkbenchToolRail.construction')}</span>
     </button>
   )
 }
@@ -355,17 +362,18 @@ function ConstructionButton() {
  *  package's key handler; this is the discoverable button. Enabled only while
  *  something is selected. */
 function DeleteButton({ hasSelection }: { hasSelection: boolean }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <button
       type="button"
       data-testid="workbench-package-delete"
       className="sketch-tool-btn"
       disabled={!hasSelection}
-      data-tooltip={hasSelection ? 'Delete selected (Del / Backspace)' : 'Delete - select entities first'}
+      data-tooltip={hasSelection ? workbenchText('WorkbenchToolRail.deleteSelectedDelBackspace') : workbenchText('WorkbenchToolRail.deleteSelectEntitiesFirst')}
       onClick={() => workbenchOverlaysPort.deleteSelection()}
     >
       <Trash2 size={15} />
-      <span>Delete</span>
+      <span>{workbenchText('WorkbenchToolRail.delete')}</span>
     </button>
   )
 }
@@ -379,6 +387,7 @@ function OffsetLinkRow({ sketch, selectedIds }: {
   sketch: Sketch | null
   selectedIds: readonly string[]
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const linkIds = sketch ? offsetLinkIdsIn(sketch.entities, selectedIds) : []
   const wanted = new Set(linkIds)
   const linked = sketch
@@ -398,9 +407,9 @@ function OffsetLinkRow({ sketch, selectedIds }: {
     <div className="sketch-snap-settings" data-testid="workbench-offset-link-row">
       <label
         className="sketch-snap-spacing"
-        data-tooltip="This offset follows its source. Change the distance and it re-offsets in place."
+        data-tooltip={workbenchText('WorkbenchToolRail.thisOffsetFollowsItsSourceChangeTheDistanceAnd')}
       >
-        <span>Offset distance</span>
+        <span>{workbenchText('WorkbenchToolRail.offsetDistance')}</span>
         <input
           type="number"
           min={0}
@@ -417,20 +426,21 @@ function OffsetLinkRow({ sketch, selectedIds }: {
         className="sketch-tool-btn"
         data-testid="workbench-offset-break-link"
         data-tooltip={
-          `This offset follows ${linked[0].offsetLink!.source.length} source ` +
-          `entit${linked[0].offsetLink!.source.length === 1 ? 'y' : 'ies'}. ` +
-          `Break the link to leave it exactly where it is.`
+          workbenchText('WorkbenchToolRail.thisOffsetFollowsSource', { value1: String(linked[0].offsetLink!.source.length) }) +
+          workbenchText('WorkbenchToolRail.entit', { value1: String(linked[0].offsetLink!.source.length === 1 ? 'y' : 'ies') }) +
+          workbenchText('WorkbenchToolRail.breakTheLinkToLeaveItExactlyWhereIt')
         }
         onClick={() => sketcherTools.breakOffsetLink()}
       >
         <Unlink size={15} />
-        <span>Break link</span>
+        <span>{workbenchText('WorkbenchToolRail.breakLink')}</span>
       </button>
     </div>
   )
 }
 
 function MeasureButton({ open }: { open: boolean }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const key = SHORTCUT_KEY_BY_UTILITY.measure
   return (
     <button
@@ -440,13 +450,13 @@ function MeasureButton({ open }: { open: boolean }) {
       className={open ? 'sketch-tool-btn sketch-tool-btn-active' : 'sketch-tool-btn'}
       data-tooltip={
         open
-          ? `Measure readout open - click or press ${key ?? 'I'} to close`
-          : `Inspect selected geometry without creating a dimension${key ? ` (${key})` : ''}`
+          ? workbenchText('WorkbenchToolRail.measureReadoutOpenClickOrPressToClose', { value1: String(key ?? 'I') })
+          : workbenchText('WorkbenchToolRail.inspectSelectedGeometryWithoutCreatingADimension', { value1: String(key ? ` (${key})` : '') })
       }
       onClick={() => sketcherTools.toggleMeasure()}
     >
       <MeasureIcon size={15} />
-      <span>Measure</span>
+      <span>{workbenchText('WorkbenchToolRail.measure')}</span>
     </button>
   )
 }
@@ -458,9 +468,10 @@ function PierceButton({ sketch, selectedIds, armed }: {
   selectedIds: readonly string[]
   armed: SketchToolId
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const plan = sketch !== null
     ? piercePointForSelection(sketch, selectedIds)
-    : { ok: false as const, reason: 'no active sketch' }
+    : { ok: false as const, reason: workbenchText('WorkbenchToolRail.noActiveSketch') }
   const waiting = armed === 'project' && sketcherTools.piercePending() !== null
   return (
     <button
@@ -470,12 +481,12 @@ function PierceButton({ sketch, selectedIds, armed }: {
       aria-pressed={waiting}
       disabled={!plan.ok && !waiting}
       data-tooltip={waiting
-        ? 'Pierce: click the model edge that crosses the sketch plane (Esc cancels)'
-        : plan.ok ? 'Pierce: then click the model edge that crosses the sketch plane' : plan.reason}
+        ? workbenchText('WorkbenchToolRail.pierceClickTheModelEdgeThatCrossesTheSketch')
+        : plan.ok ? workbenchText('WorkbenchToolRail.pierceThenClickTheModelEdgeThatCrossesThe') : plan.reason}
       onClick={() => sketcherTools.beginPierce()}
     >
       <Crosshair size={15} />
-      <span>Pierce</span>
+      <span>{workbenchText('WorkbenchToolRail.pierce')}</span>
     </button>
   )
 }
@@ -503,6 +514,7 @@ function railDefaultWidth(): number {
 }
 
 export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistoryTools, onFinishSketch, onCancelSketch, onInsertReferenceImage }: WorkbenchToolRailProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const layout = useToolPaletteLayout('rail')
   // WO-2512: the viewer may drag the rail wider (never narrower than its
   // default); with no stored width the stylesheet's own width stands. The
@@ -559,20 +571,20 @@ export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistor
 
   return (
     <>
-    <PanelEdgeResizer prefKey={RAIL_WIDTH_KEY} testId="workbench-rail-resizer" label="Resize the tool rail"
+    <PanelEdgeResizer prefKey={RAIL_WIDTH_KEY} testId="workbench-rail-resizer" label={workbenchText('WorkbenchToolRail.resizeToolRail')}
       size={railWidth ?? railDefault} defaultSize={railDefault} minSize={railDefault} maxSize={railMax} restMinSize={RAIL_VIEWPORT_MIN} />
     <aside ref={railRef} data-testid="workbench-right-rail" className={layout.compact ? 'panel-right workbench-rail is-compact' : 'panel-right workbench-rail'} data-rail-mode={sketchActive ? 'sketch' : 'modeling'}
       style={railWidth === undefined ? undefined : { width: railWidth, minWidth: railWidth }}>
       <div className="panel-header">
-        <span className="panel-title">{sketchActive ? 'Sketch' : 'Modeling'}</span>
+        <span className="panel-title">{sketchActive ? workbenchText('WorkbenchToolRail.sketch') : workbenchText('WorkbenchToolRail.modeling')}</span>
         {sketchActive && <SketchDofBadge />}
         <button
           type="button"
           className="rail-compact-btn"
           data-testid="workbench-rail-compact"
           aria-pressed={layout.compact}
-          aria-label={layout.compact ? 'Show tool names' : 'Compact tools (icons only)'}
-          data-tooltip={layout.compact ? 'Show the tool names under their icons' : 'Compact: icons only, packed tight (hover a tool for its name)'}
+          aria-label={layout.compact ? workbenchText('WorkbenchToolRail.showToolNames') : workbenchText('WorkbenchToolRail.compactToolsIconsOnly')}
+          data-tooltip={layout.compact ? workbenchText('WorkbenchToolRail.showTheToolNamesUnderTheirIcons') : workbenchText('WorkbenchToolRail.compactIconsOnlyPackedTightHoverAToolFor')}
           onClick={layout.toggleCompact}
         >
           {layout.compact ? <Rows3 size={14} /> : <LayoutGrid size={14} />}
@@ -645,7 +657,7 @@ export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistor
                         data-testid={`workbench-package-tool-${tool.id}`}
                         aria-pressed={isActive}
                         aria-label={tool.label}
-                        data-tooltip={isActive ? `${tool.label} (armed - Esc to disarm)` : idleTooltip}
+                        data-tooltip={isActive ? workbenchText('WorkbenchToolRail.armedEscToDisarm', { label: String(tool.label) }) : idleTooltip}
                         className={isActive ? 'sketch-tool-btn sketch-tool-btn-active' : 'sketch-tool-btn'}
                         onClick={() => sketcherTools.armTool(tool.id)}
                       >
@@ -701,7 +713,7 @@ export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistor
             ))}
             {/* WO SKC-16 (B1): the CONSTRAINTS section. */}
             <div className="tree-section" data-testid="workbench-rail-section-constraints">
-              <RailSectionHeader title="Constraints" right={<GlyphToggle />} sectionId="sketch-constraints" collapsed={layout.isCollapsed('sketch-constraints')} onToggle={() => layout.toggleSection('sketch-constraints')} />
+              <RailSectionHeader title={workbenchText('WorkbenchToolRail.constraints')} right={<GlyphToggle />} sectionId="sketch-constraints" collapsed={layout.isCollapsed('sketch-constraints')} onToggle={() => layout.toggleSection('sketch-constraints')} />
               {!layout.isCollapsed('sketch-constraints') && <>
               <div className="sketch-tool-grid" style={gridStyle}>
                 {CONSTRAINT_BUTTONS.map(({ kind, label, icon: Icon }) => {
@@ -711,7 +723,7 @@ export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistor
                   // the constraint needs (the planner's own reason string).
                   const plan = sketch !== null
                     ? planConstraintForSelection(sketch, selectedIds, kind)
-                    : { ok: false as const, reason: 'no active sketch' }
+                    : { ok: false as const, reason: workbenchText('WorkbenchToolRail.noActiveSketch') }
                   return (
                     <button
                       key={kind}
@@ -719,7 +731,7 @@ export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistor
                       data-testid={`workbench-package-constraint-${kind}`}
                       className="sketch-tool-btn"
                       disabled={!plan.ok}
-                      data-tooltip={plan.ok ? `${label}: apply to selection` : `${label} - ${plan.reason}`}
+                      data-tooltip={plan.ok ? workbenchText('WorkbenchToolRail.applyToSelection', { label: String(label) }) : workbenchText('WorkbenchToolRail.value', { label: String(label), reason: String(plan.reason) })}
                       onClick={() => workbenchOverlaysPort.applyConstraint(kind)}
                     >
                       <Icon size={15} />
@@ -759,7 +771,7 @@ export function WorkbenchToolRail({ sketchActive, modelingSections, sketchHistor
                         data-testid={tool.testId}
                         aria-pressed={tool.active === true}
                         aria-label={tool.label}
-                        data-tooltip={layout.compact && tool.title !== undefined ? `${tool.label}: ${tool.title}` : (tool.title ?? tool.label)}
+                        data-tooltip={layout.compact && tool.title !== undefined ? workbenchText('WorkbenchToolRail.value2', { label: String(tool.label), title: String(tool.title) }) : (tool.title ?? tool.label)}
                         disabled={tool.disabled === true}
                         className={tool.active === true ? 'sketch-tool-btn sketch-tool-btn-active' : 'sketch-tool-btn'}
                         onClick={tool.onClick}

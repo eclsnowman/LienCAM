@@ -117,6 +117,7 @@ afterEach(() => {
 describe('WO-091 geometry kernel boots or the app fixes it itself', () => {
   it('recovers from a HUNG kernel load with a fresh worker and NO user input', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const infos = vi.spyOn(console, 'info').mockImplementation(() => undefined)
     const first = hangingClient()
     const second = createFakeGeomClient()
     const factory = clientFactory([first.client, second])
@@ -137,12 +138,15 @@ describe('WO-091 geometry kernel boots or the app fixes it itself', () => {
     // worker alive for the life of the tab is the other half of this bug.
     expect(factory.terminated).toEqual([first.client])
     expect(second.initCallCount).toBe(1)
-    expect(errors).toHaveBeenCalledWith(
+    // The numbered diagnostic is still written. WO-2865: attempt 2 recovered,
+    // so it is an info line, not an error.
+    expect(infos).toHaveBeenCalledWith(
       expect.stringMatching(
         /^SolidsWorkbenchPage: 3D geometry engine initialization failed \(attempt 1 of 3\); phase=compiling geometry; progress=42%; elapsed=\d+ms$/,
       ),
       expect.objectContaining({ message: 'geometry engine initialization timed out after 25ms' }),
     )
+    expect(errors.mock.calls.filter(([first]) => typeof first === 'string' && first.includes('3D geometry engine initialization failed'))).toEqual([])
   })
 
   it('recovers from a REJECTED kernel load (the documented stale-hash shape) with no user input', async () => {

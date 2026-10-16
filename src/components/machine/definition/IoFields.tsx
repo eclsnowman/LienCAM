@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type SettingSource } from './DefinitionFields'
 import { type FocusEvent as ReactFocusEvent } from 'react'
 import { useState } from 'react'
@@ -6,11 +10,11 @@ import { SectionHead } from './DefinitionFields'
 import { rowEmptyMarked } from './DefinitionFields'
 
 
-export const IO_FIELDS = [
-  ['E-stop',  'estop',  'e-stop'],
-  ['Probe',   'probe',  'probe'],
-  ['Probe 2', 'probe2', 'probe 2'],
-] as const
+export const IO_FIELDS = liveCatalog(() => ([
+  [controlText('IoFields.text001'),  'estop',  'e-stop'],
+  [controlText('IoFields.text002'),   'probe',  'probe'],
+  [controlText('IoFields.text003'), 'probe2', 'probe 2'],
+] as const))
 
 export type IoPinReadoutRow = {
   label: string
@@ -23,76 +27,76 @@ export type IoPinReadoutRow = {
 /** Pin-shaped IO settings nothing drives yet. The row labels say what each
  * signal DOES; UCCNC's spelling remains in the box's tooltip and test id,
  * where a person can still trace the value to its profile. */
-export const IO_CONTROLLER_OUTPUT_ROWS: readonly IoPinReadoutRow[] = [
+export const IO_CONTROLLER_OUTPUT_ROWS: readonly IoPinReadoutRow[] = liveCatalog(() => ([
   {
-    label: 'Primary charge pump',
+    label: controlText('IoFields.text004'),
     port: 'Chargepumpportnumber', pin: 'Chargepumppinnumber', negate: 'Chargepumppinnegate',
     extra: [
-      ['laser mode', 'Chargepumplasermodeon'],
-      ['always on', 'Chargepumpalwayson'],
+      [controlText('IoFields.text005'), 'Chargepumplasermodeon'],
+      [controlText('IoFields.text006'), 'Chargepumpalwayson'],
     ],
   },
   {
-    label: 'Secondary charge pump',
+    label: controlText('IoFields.text007'),
     port: 'Chargepump2portnumber', pin: 'Chargepump2pinnumber', negate: 'Chargepump2pinnegate',
   },
   {
-    label: 'Drive current high/low',
+    label: controlText('IoFields.text008'),
     port: 'CurrentHiLoportnumber', pin: 'CurrentHiLopinnumber', negate: 'CurrentHiLopinnegate',
   },
   {
-    label: 'Laser output',
+    label: controlText('IoFields.text009'),
     port: 'Laseroutputportnumber', pin: 'Laseroutputpinnumber', negate: 'Laseroutputpinnegate',
   },
-]
+]))
 
-export const IO_THC_INPUT_ROWS: readonly IoPinReadoutRow[] = [
-  { label: 'Arc on', port: 'THConport', pin: 'THConpin', negate: 'THConpinnegate' },
-  { label: 'Raise torch', port: 'THCupport', pin: 'THCuppin', negate: 'THCuppinnegate' },
-  { label: 'Lower torch', port: 'THCdownport', pin: 'THCdownpin', negate: 'THCdownpinnegate' },
-]
+export const IO_THC_INPUT_ROWS: readonly IoPinReadoutRow[] = liveCatalog(() => ([
+  { label: controlText('IoFields.text010'), port: 'THConport', pin: 'THConpin', negate: 'THConpinnegate' },
+  { label: controlText('IoFields.text011'), port: 'THCupport', pin: 'THCuppin', negate: 'THCuppinnegate' },
+  { label: controlText('IoFields.text012'), port: 'THCdownport', pin: 'THCdownpin', negate: 'THCdownpinnegate' },
+]))
 
-export const IO_THC_OUTPUT_ROWS: readonly IoPinReadoutRow[] = [
+export const IO_THC_OUTPUT_ROWS: readonly IoPinReadoutRow[] = liveCatalog(() => ([
   {
-    label: 'THC enable',
+    label: controlText('IoFields.text013'),
     port: 'THCenableoutport', pin: 'THCenableoutpin', negate: 'THCenableoutpinnegate',
   },
   {
-    label: 'Anti-dive',
+    label: controlText('IoFields.text014'),
     port: 'THCantidiveoutport', pin: 'THCantidiveoutpin', negate: 'THCantidiveoutpinnegate',
   },
   {
-    label: 'Anti-down',
+    label: controlText('IoFields.text015'),
     port: 'THCantidownoutport', pin: 'THCantidownoutpin', negate: 'THCantidownoutpinnegate',
   },
-]
+]))
 
-export const IO_THC_BEHAVIOR_FIELDS = [
-  ['enabled', 'THCenable'],
-  ['minimum correction', 'THCmin'],
-  ['maximum correction', 'THCmax'],
-  ['correction feed', 'THCfeed'],
-  ['always on', 'THCalwayson'],
-  ['arc-on delay', 'THCondelay'],
-  ['delay enabled', 'THCdelayenable'],
-  ['anti-dive enabled', 'THCantidiveenable'],
-  ['anti-dive threshold', 'THCantidivepercent'],
-  ['pierce height', 'Plasmapierceheight'],
-  ['anti-down enabled', 'THCantidownenable'],
-] as const
+export const IO_THC_BEHAVIOR_FIELDS = liveCatalog(() => ([
+  [controlText('IoFields.text016'), 'THCenable'],
+  [controlText('IoFields.text017'), 'THCmin'],
+  [controlText('IoFields.text018'), 'THCmax'],
+  [controlText('IoFields.text019'), 'THCfeed'],
+  [controlText('IoFields.text020'), 'THCalwayson'],
+  [controlText('IoFields.text021'), 'THCondelay'],
+  [controlText('IoFields.text022'), 'THCdelayenable'],
+  [controlText('IoFields.text023'), 'THCantidiveenable'],
+  [controlText('IoFields.text024'), 'THCantidivepercent'],
+  [controlText('IoFields.text025'), 'Plasmapierceheight'],
+  [controlText('IoFields.text026'), 'THCantidownenable'],
+] as const))
 
-export const IO_OVERRIDE_ROWS = [
-  ['Feed rate', 'FROchannel', 'FROminpercent', 'FROmaxpercent'],
-  ['Spindle speed', 'SROchannel', 'SROminpercent', 'SROmaxpercent'],
-  ['Jog rate', 'JROchannel', 'JROminpercent', 'JROmaxpercent'],
-] as const
+export const IO_OVERRIDE_ROWS = liveCatalog(() => ([
+  [controlText('IoFields.text027'), 'FROchannel', 'FROminpercent', 'FROmaxpercent'],
+  [controlText('IoFields.text028'), 'SROchannel', 'SROminpercent', 'SROmaxpercent'],
+  [controlText('IoFields.text029'), 'JROchannel', 'JROminpercent', 'JROmaxpercent'],
+] as const))
 
-export const IO_ANALOG_ROWS = [
-  ['Analog 1', 'Ana1invarnum', 'Ana1outvarnum'],
-  ['Analog 2', 'Ana2invarnum', 'Ana2outvarnum'],
-  ['Analog 3', 'Ana3invarnum', 'Ana3outvarnum'],
-  ['Analog 4', 'Ana4invarnum', 'Ana4outvarnum'],
-] as const
+export const IO_ANALOG_ROWS = liveCatalog(() => ([
+  [controlText('IoFields.text030'), 'Ana1invarnum', 'Ana1outvarnum'],
+  [controlText('IoFields.text031'), 'Ana2invarnum', 'Ana2outvarnum'],
+  [controlText('IoFields.text032'), 'Ana3invarnum', 'Ana3outvarnum'],
+  [controlText('IoFields.text033'), 'Ana4invarnum', 'Ana4outvarnum'],
+] as const))
 
 export const IO_DIGITAL_SYNC_ROWS = Array.from({ length: 10 }, (_, index) => index + 1)
 
@@ -106,26 +110,26 @@ export const TRIGGER_ROWS = Array.from({ length: 96 }, (_, index) => index + 1)
 
 export type TriggerSection = 'Inputtriggersettings' | 'Outputtriggersettings'
 
-export const TRIGGER_TABLES = [
+export const TRIGGER_TABLES = liveCatalog(() => ([
   {
     section: 'Inputtriggersettings',
-    title: 'Input triggers',
-    summary: 'Physical pins mapped to button presses',
+    title: controlText('IoFields.text034'),
+    summary: controlText('IoFields.text035'),
     codeStem: 'Buttoncode',
-    codeLabel: 'button code',
+    codeLabel: controlText('IoFields.text036'),
     polarityStem: 'Activelow',
-    polarityLabel: 'active low',
-    noun: 'input trigger',
+    polarityLabel: controlText('IoFields.text037'),
+    noun: controlText('IoFields.text038'),
   },
   {
     section: 'Outputtriggersettings',
-    title: 'Output triggers',
-    summary: 'Controller LEDs mapped to physical pins',
+    title: controlText('IoFields.text039'),
+    summary: controlText('IoFields.text040'),
     codeStem: 'LEDcode',
-    codeLabel: 'LED code',
+    codeLabel: controlText('IoFields.text041'),
     polarityStem: 'Invert',
     polarityLabel: 'invert',
-    noun: 'output trigger',
+    noun: controlText('IoFields.text042'),
   },
 ] as const satisfies readonly {
   section: TriggerSection
@@ -136,7 +140,7 @@ export const TRIGGER_TABLES = [
   polarityStem: 'Activelow' | 'Invert'
   polarityLabel: string
   noun: string
-}[]
+}[]))
 
 export function triggerValue(
   settings: SettingSource,
@@ -235,6 +239,7 @@ export function TriggerRowsTable({ spec, rows, settings, testId, drawnConfigured
   drawnConfigured: boolean
   held: ReturnType<typeof useHeldRow>
 }) {
+  useText('control-screens-not-probing')
   return (
     <div style={{ overflowX: 'auto', paddingBottom: 2 }}>
       <table
@@ -245,8 +250,8 @@ export function TriggerRowsTable({ spec, rows, settings, testId, drawnConfigured
         <thead>
           <tr>
             <th>#</th>
-            <th>port</th>
-            <th>pin</th>
+            <th>{controlText('IoFields.text043')}</th>
+            <th>{controlText('IoFields.text044')}</th>
             <th>{spec.codeLabel}</th>
             <th>{spec.polarityLabel}</th>
           </tr>
@@ -262,7 +267,7 @@ export function TriggerRowsTable({ spec, rows, settings, testId, drawnConfigured
               <td className="mform-input-mono" style={{ color: 'var(--text-secondary)' }}>
                 {row}
               </td>
-              {(['Port', 'Pin', spec.codeStem, spec.polarityStem] as const).map((stem) => (
+              {([controlText('IoFields.text045'), controlText('IoFields.text046'), spec.codeStem, spec.polarityStem] as const).map((stem) => (
                 <td key={stem}>
                   <NotSent
                     label=""
@@ -283,6 +288,7 @@ export function TriggerTable({ spec, settings }: {
   spec: (typeof TRIGGER_TABLES)[number]
   settings: SettingSource
 }) {
+  useText('control-screens-not-probing')
   /**
    * A RECORD THAT STATES NOTHING HERE STILL GETS ITS 96 SLOTS (WO-1039).
    *
@@ -335,8 +341,8 @@ export function TriggerTable({ spec, settings }: {
               style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}
             >
               {carriesSection
-                ? `No ${spec.title.toLowerCase()} are configured in this profile.`
-                : `This machine record carries no imported ${spec.title.toLowerCase()} section.`}
+                ? controlText('IoFields.text047', { value1: String(spec.title.toLowerCase()) })
+                : controlText('IoFields.text048', { value1: String(spec.title.toLowerCase()) })}
             </div>
           )}
           {unusedRows.length > 0 && (
@@ -348,9 +354,7 @@ export function TriggerTable({ spec, settings }: {
               <summary
                 className="control-chip-btn"
                 style={{ display: 'inline-flex', width: 'max-content', cursor: 'pointer' }}
-              >
-                Show {unusedRows.length} unused {spec.noun} slots
-              </summary>
+              >{catalogChildren(controlText('IoFields.text049', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: unusedRows.length, value2: spec.noun })}</summary>
               {/* BUILT WHEN IT IS OPENED, not before. A closed disclosure is
                   384 boxes nobody is looking at, x2 sections, and they are
                   built again on every re-render of this page - measured at
@@ -374,10 +378,7 @@ export function TriggerTable({ spec, settings }: {
           <div
             data-testid={`machine-def-panel-${spec.section}-add-path`}
             style={{ marginTop: 6, fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}
-          >
-            To add one, fill in an unused slot above. It is stored with this machine
-            definition; nothing in LienCAM acts on it yet.
-          </div>
+          >{controlText('IoFields.text050')}</div>
         </>
     </div>
   )
@@ -402,15 +403,16 @@ export function IoPinReadoutTable({ testId, rows, settings }: {
   rows: readonly IoPinReadoutRow[]
   settings: SettingSource
 }) {
+  useText('control-screens-not-probing')
   return (
     <table className="mform-axis-table" data-testid={testId} style={{ width: 'max-content', minWidth: '100%' }}>
       <thead>
         <tr>
-          <th>Signal</th>
-          <th>port</th>
-          <th>pin</th>
-          <th>active low</th>
-          <th>behavior</th>
+          <th>{controlText('IoFields.text051')}</th>
+          <th>{controlText('IoFields.text052')}</th>
+          <th>{controlText('IoFields.text053')}</th>
+          <th>{controlText('IoFields.text054')}</th>
+          <th>{controlText('IoFields.text055')}</th>
         </tr>
       </thead>
       <tbody>

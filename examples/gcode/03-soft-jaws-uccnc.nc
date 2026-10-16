@@ -1,4 +1,4 @@
-(LienCAM 0.36.0-alpha.1 - 03 Soft jaws - uccnc)
+(LienCAM 0.36.0-alpha.2 - 03 Soft jaws - uccnc)
 G90 G94 G17 G21 G64
 ( Jaw 1 - G54 )
 G54

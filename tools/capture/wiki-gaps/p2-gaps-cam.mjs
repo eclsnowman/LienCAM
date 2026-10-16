@@ -41,7 +41,7 @@ async function camOperation(h, { gap, project, op, file, zoom = 3, zoomAt = { x:
   if (!/Status\s+ready/i.test(status)) throw new Error(`${gap}: ${opName} is not ready`)
   const full = `${file}-toolpath.png`
   await h.shot(full)
-  h.sidecar(full, { appState: `${appState} Toolpath tab, REGEN ALL pressed and finished; "${opName}" selected in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed ${zoom} wheel steps toward the part. Whole frame.` })
+  h.sidecar(full, { appState: `${appState} Toolpath computation finished; "${opName}" selected on the Toolpath tab in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed ${zoom} wheel steps toward the part. Whole frame.` })
   const view = `${file}-view.png`
   await h.crop(full, view, VIEWPORT_BOX)
   h.sidecar(view, { appState: `${full} cropped to the 3D view.`, crop: VIEWPORT_BOX, wholeFrame: full })
@@ -74,11 +74,104 @@ export const CAM_GAPS = {
       await page.locator('.op-modal-tab').first().waitFor()
       await page.locator('.op-type-card', { has: page.locator('.op-type-name', { hasText: /^Engrave \/ Trace$/ }) }).first().click()
       await page.waitForTimeout(500)
-      for (const t of ['Tool', 'Geometry', 'Passes', 'Heights']) {
-        await tab(t).click()
-        await page.waitForTimeout(800)
-        await h.debug('tab-' + t)
+      await tab('Tool').click()
+      await page.locator('.op-tool-row', { hasText: '6 mm 60 deg V-bit' }).click()
+      await tab('Geometry').click()
+      const source = page.locator('[data-testid="op-modal-panel"] select').filter({ has: page.locator('option', { hasText: 'lettering (8 closed loops)' }) })
+      await source.selectOption({ label: 'lettering (8 closed loops)' })
+      await page.getByRole('button', { name: /^All loops/ }).click()
+      await tab('Passes').click()
+      await page.getByRole('button', { name: /^Depth from line width/ }).click()
+      await tab('Heights').click()
+      await h.debug('configured-heights')
+      await page.getByTestId('op-create').click()
+      await page.getByTestId('op-modal-panel').waitFor({ state: 'detached' })
+      await waitCompute(h, 60_000)
+      await camOperation(h, { gap: 'T-2', op: /Engrave/, file: 'T-2-engrave', zoom: 3, reuse: true,
+        appState: 'Name-sign example; Engrave / Trace added over lettering, 6 mm 60 deg V-bit, depth from line width enabled. Operation created and computed through the UI.' })
+    },
+  },
+
+  // M-1: construct native profiles through the production Model workspace.
+  'M-1': {
+    async run(h) {
+      const { page, tid } = h
+      const orbit = async (reverse = false) => {
+        await page.mouse.move(reverse ? 1120 : 940, reverse ? 620 : 500)
+        await page.mouse.down({ button: 'middle' })
+        await page.mouse.move(reverse ? 940 : 1120, reverse ? 500 : 620, { steps: 16 })
+        await page.mouse.up({ button: 'middle' })
+        await page.waitForTimeout(1000)
       }
+      const shootResult = async (feature) => {
+        const glyphs = page.locator('[data-testid^="genesis-visible-"][aria-label="Hide in viewport"]')
+        const glyphIds = await glyphs.evaluateAll(elements => elements.map(el => el.getAttribute('data-testid')))
+        for (const id of glyphIds) await tid(id).click()
+        await orbit()
+        const file = `M-1-${feature}-result.png`
+        await h.shot(file)
+        h.sidecar(file, { appState: `Native Model workspace: ${feature} constructed from real UI sketches and Apply; one solid body, feature tree and body volume visible. Camera orbited with the mouse. Whole frame. The three result frames are separate stages of the same session, not three simultaneous bodies.` })
+        await h.crop(file, `M-1-${feature}-view.png`, VIEWPORT_BOX)
+        h.sidecar(`M-1-${feature}-view.png`, { appState: `${file} cropped to the Model viewport.`, crop: VIEWPORT_BOX, wholeFrame: file })
+        await orbit(true)
+        for (const id of glyphIds) await tid(id).click()
+      }
+      await h.chooseStarterMachine()
+      await h.page.getByTestId('mode-tab-part').click()
+      await h.page.getByTestId('model-entry-new').click()
+      await h.page.getByTestId('workbench-new-sketch').waitFor({ timeout: 60_000 })
+      await h.page.waitForFunction(() => !document.body.innerText.includes('initializing geometry kernel'), null, { timeout: 30_000 })
+      await h.page.getByTestId('workbench-new-sketch').click()
+      await h.page.mouse.click(1175, 367)
+      await h.page.getByTestId('workbench-package-tool-rect-corner').waitFor()
+      await h.page.waitForTimeout(1200)
+      await h.page.getByTestId('workbench-package-tool-rect-corner').click()
+      await h.page.mouse.click(1070, 450)
+      await h.page.mouse.click(1160, 550)
+      await h.page.keyboard.press('Escape')
+      await h.page.getByTestId('workbench-finish-package-sketch').click()
+      await h.page.getByTestId('workbench-revolve').click()
+      await h.debug('native-revolve-dialog')
+      await h.page.getByTestId('dialog-shell-apply').click()
+      await h.page.getByTestId('dialog-shell-apply').waitFor({ state: 'detached' })
+      await h.page.waitForFunction(() => document.querySelector('[data-testid="workbench-status-bodies"]')?.textContent === '1 bodies')
+      await shootResult('revolve')
+      await tid('workbench-undo').click()
+      await page.waitForFunction(() => document.querySelector('[data-testid="workbench-status-bodies"]')?.textContent === '0 bodies')
+      await tid('workbench-sweep').click()
+      await tid('sweep-path-axis-select').selectOption('y')
+      await tid('sweep-length').locator('input').fill('60')
+      await tid('sweep-length').locator('input').press('Tab')
+      await tid('dialog-shell-apply').click()
+      await tid('dialog-shell-apply').waitFor({ state: 'detached' })
+      await page.waitForFunction(() => document.querySelector('[data-testid="workbench-status-bodies"]')?.textContent === '1 bodies')
+      await shootResult('sweep')
+      await tid('workbench-undo').click()
+      await page.waitForFunction(() => document.querySelector('[data-testid="workbench-status-bodies"]')?.textContent === '0 bodies')
+      await tid('workbench-offset-plane').click()
+      await tid('offset-plane-source').selectOption('datum:XZ')
+      await tid('offset-plane-distance').fill('50')
+      await tid('offset-plane-distance').press('Tab')
+      await tid('dialog-shell-apply').click()
+      await tid('dialog-shell-apply').waitFor({ state: 'detached' })
+      await tid('workbench-new-sketch').click()
+      await page.mouse.click(1175, 250)
+      await tid('workbench-package-tool-rect-corner').waitFor()
+      await page.waitForTimeout(1000)
+      await tid('workbench-package-tool-rect-corner').click()
+      await page.mouse.click(1070, 470)
+      await page.mouse.click(1130, 530)
+      await page.keyboard.press('Escape')
+      await tid('workbench-finish-package-sketch').click()
+      await tid('workbench-loft').click()
+      await page.getByText('Choose sections by name fallback', { exact: true }).click()
+      await tid('loft-section1-select').selectOption('sketch3d:SK1')
+      await tid('loft-section2-select').selectOption('sketch3d:SK2')
+      await h.debug('native-loft-dialog')
+      await tid('dialog-shell-apply').click()
+      await tid('dialog-shell-apply').waitFor({ state: 'detached' })
+      await page.waitForFunction(() => document.querySelector('[data-testid="workbench-status-bodies"]')?.textContent === '1 bodies')
+      await shootResult('loft')
     },
   },
 
@@ -207,11 +300,15 @@ export const CAM_GAPS = {
     async run(h) {
       const { page } = h
       await page.getByText('Try an example', { exact: true }).waitFor({ timeout: 60_000 })
-      await page.waitForTimeout(800)
+      // The picker mounts behind the splash. Visible title alone is not proof
+      // that the operator can see it (WO-2716's rejected first take).
+      await page.locator('#liencam-splash').waitFor({ state: 'detached', timeout: 30_000 })
+      const picker = page.getByRole('dialog', { name: 'Try an example' })
+      await picker.getByRole('button', { name: 'Start with an empty project' }).waitFor()
       const name = 'H-2-try-an-example.png'
       await h.shot(name)
       h.sidecar(name, { appState: 'First start (empty browser storage) of a production build made with VITE_DEMO_BUILD=true, the switch the release browser demo uses; the installed desktop app shows the same picker (offersStartupExamples). "Try an example": Full Suite, the CNC starter kit examples and Start with an empty project. Whole frame.' })
-      const box = await h.box(page.locator('.modal-container').first())
+      const box = await h.box(picker)
       const crop = 'H-2-try-an-example-dialog.png'
       await h.crop(name, crop, box)
       h.sidecar(crop, { appState: `${name} cropped to the Try an example window.`, crop: box, wholeFrame: name })

@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { Crosshair, Upload } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
@@ -142,11 +145,11 @@ export function workOffsetActionRefusal(input: {
   jobPhase: string
   writeBusy: boolean
 }): string | null {
-  if (!input.connected) return 'Connect to a machine to push stored work offsets'
+  if (!input.connected) return controlText('OffsetsWorkspace.text001')
   if (input.jobPhase === 'streaming' || input.jobPhase === 'paused') {
-    return 'Stop the program before changing work offsets'
+    return controlText('OffsetsWorkspace.text002')
   }
-  if (input.machineState !== 'idle') return 'Wait until the machine is idle'
+  if (input.machineState !== 'idle') return controlText('OffsetsWorkspace.text003')
   if (input.writeBusy) return WORK_OFFSET_WRITE_BUSY
   return null
 }
@@ -166,6 +169,7 @@ function WorkspaceOffsetCell({
   state: WorkOffsetSyncState | undefined
   units: Units
 }) {
+  useText('control-screens-not-probing')
   const inputRef = useRef<HTMLInputElement>(null)
   const shown = valueMm === undefined ? '' : fmtMachineLength(valueMm, units)
   const markerAttributes = workOffsetMarkerAttributes(state)
@@ -192,7 +196,7 @@ function WorkspaceOffsetCell({
         type="text"
         inputMode="decimal"
         defaultValue={shown}
-        aria-label={`${wcs} ${axis} offset`}
+        aria-label={controlText('OffsetsWorkspace.text004', { value1: String(wcs), value2: String(axis) })}
         data-testid={`offsets-workspace-${wcs.toLowerCase()}-${axis.toLowerCase()}`}
         onChange={(event) => {
           const mm = parseWorkOffsetValue(event.currentTarget.value, units)
@@ -228,6 +232,7 @@ export function OffsetsWorkspace({
   machineId: string
   machineName: string
 }) {
+  useText('control-screens-not-probing')
   const storedOffsets = useCamStore((s) => s.machineWorkOffsets[machineId])
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const machineState = useMachineControl((s) => s.machineState)
@@ -300,7 +305,7 @@ export function OffsetsWorkspace({
     >
       <div className="panel-header control-offset-workspace-header">
         <div>
-          <span className="panel-title">Work offset setup</span>
+          <span className="panel-title">{controlText('OffsetsWorkspace.text005')}</span>
           <span className="control-offset-workspace-subtitle">
             {machineName} ({unitLabel(units)})
           </span>
@@ -313,34 +318,32 @@ export function OffsetsWorkspace({
           data-tooltip={pushingAll ? WORK_OFFSET_WRITE_BUSY : actionRefusal ?? undefined}
           onClick={() => { void pushAll() }}
         >
-          <Upload size={14} /> Push changed ({differingRows.length})
+          <Upload size={14} />{controlText('OffsetsWorkspace.text006')}{differingRows.length})
         </button>
         <PanelCollapseToggle
           panelKey={OFFSETS_WORKSPACE_PANEL_KEY}
           testId="offsets-workspace-collapse"
-          collapseTip="Collapse the offsets workspace"
-          expandTip="Expand the offsets workspace"
+          collapseTip={controlText('OffsetsWorkspace.text007')}
+          expandTip={controlText('OffsetsWorkspace.text008')}
         />
       </div>
       {!collapsed && <div className="panel-body control-offset-workspace-body">
-        <div className="control-offset-workspace-table" role="table" aria-label="Stored work offsets">
+        <div className="control-offset-workspace-table" role="table" aria-label={controlText('OffsetsWorkspace.text009')}>
           <div className="control-offset-workspace-row control-offset-workspace-table-head offsets-rotation-row" role="row">
-            <span role="columnheader">Fixture location</span>
+            <span role="columnheader">{controlText('OffsetsWorkspace.text010')}</span>
             {WORK_OFFSET_AXES.map((axis) => <span key={axis} role="columnheader">{axis}</span>)}
             <span
               role="columnheader"
-              data-tooltip="Rotation of this work offset in degrees, counter-clockwise seen from above. Held in the controller: typing sends it at once; 0 = square."
-            >
-              Rotation (deg)
-            </span>
-            <span role="columnheader">Actions</span>
+              data-tooltip={controlText('OffsetsWorkspace.text011')}
+            >{controlText('OffsetsWorkspace.text012')}</span>
+            <span role="columnheader">{controlText('OffsetsWorkspace.text013')}</span>
           </div>
           {WCS_LIST.map((wcs) => {
             const stored = storedOffsets?.[wcs]
             const hasStoredAxes = storedAxisCount(stored) > 0
             const rowPushDisabled = actionRefusal !== null || !hasStoredAxes
             const positionRefusal = actionRefusal
-              ?? (!machinePosition ? 'Wait for the machine position before setting this row' : null)
+              ?? (!machinePosition ? controlText('OffsetsWorkspace.text014') : null)
             return (
               <div
                 key={wcs}
@@ -353,8 +356,8 @@ export function OffsetsWorkspace({
                   <input
                     type="text"
                     value={stored?.label ?? ''}
-                    placeholder="Name this fixture"
-                    aria-label={`${wcs} fixture label`}
+                    placeholder={controlText('OffsetsWorkspace.text015')}
+                    aria-label={controlText('OffsetsWorkspace.text016', { value1: String(wcs) })}
                     data-testid={`offsets-workspace-label-${wcs.toLowerCase()}`}
                     onChange={(event) => useCamStore.getState()
                       .setMachineWorkOffsetLabel(machineId, wcs, event.currentTarget.value)}
@@ -389,8 +392,7 @@ export function OffsetsWorkspace({
                     data-tooltip={positionRefusal ?? undefined}
                     onClick={() => setFromPosition(wcs)}
                   >
-                    <Crosshair size={13} /> Set from position
-                  </button>
+                    <Crosshair size={13} />{controlText('OffsetsWorkspace.text017')}</button>
                   <button
                     type="button"
                     className="modal-btn modal-btn-ghost"
@@ -399,8 +401,7 @@ export function OffsetsWorkspace({
                     data-tooltip={actionRefusal ?? undefined}
                     onClick={() => pushStoredWorkOffset(wcs, stored)}
                   >
-                    <Upload size={13} /> Push
-                  </button>
+                    <Upload size={13} />{controlText('OffsetsWorkspace.text018')}</button>
                 </span>
               </div>
             )

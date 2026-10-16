@@ -37,6 +37,8 @@ import { rotationMatrixXYZ } from '../lib/geometry/rotationMatrixXYZ'
 import { cachedWorkholdingShapeReader, type WorkholdingShapeReader } from '../lib/workholding/shapes'
 import {
   boundingBoxNotice, resolveInstancePlacements, resolvePlacedBody, setupScopeIncludes, workholdingComponentGeometryIds,
+  type WorkholdingOmission,
+  isKnownPlanarWorkholding,
 } from '../lib/workholding/resolveWorkholding'
 import { isWorkholdingGeometry } from './dispatchGeo'
 
@@ -48,12 +50,14 @@ export interface WorkholdingObstacles {
   readonly meshes: readonly ClearanceMesh[]
   /** Plain sentences for the app console (a shape read as its bounding box). */
   readonly notices: readonly string[]
+  readonly availability?: { readonly complete: boolean; readonly omissions: readonly WorkholdingOmission[] }
 }
 
 /** WO-2177: the placed vises and clamps, and the setup whose operation is generating. */
 export interface WorkholdingAssemblyScope {
   readonly workholding: WorkholdingModel | undefined
   readonly setupId: string | null
+  readonly includeAvailability?: boolean
 }
 
 const NO_OBSTACLES: WorkholdingObstacles = { meshes: [], notices: [] }
@@ -75,17 +79,28 @@ export async function resolveWorkholdingObstacles(
   const cut = new Set(cutGeometryIds)
   const componentRows = workholdingComponentGeometryIds(assemblies?.workholding)
   const instances = assemblies
-    ? resolveInstancePlacements({ geometry: [...geometry], workholding: assemblies.workholding }, assemblies.setupId)
+    ? resolveInstancePlacements({ geometry: [...geometry], workholding: assemblies.workholding }, assemblies.setupId,
+        { cutGeometryIds: cut, includeAvailability: assemblies.includeAvailability })
     : { placements: [], notices: [] }
   const bodies = geometry.filter((g) => isWorkholdingGeometry(g) && !cut.has(g.id) && !componentRows.has(g.id))
-  if (bodies.length === 0 && instances.placements.length === 0 && instances.notices.length === 0) return NO_OBSTACLES
+  const omissions: WorkholdingOmission[] = [...('omissions' in instances ? instances.omissions ?? [] : [])]
+  const availability = () => assemblies?.includeAvailability
+    ? { availability: { complete: omissions.length === 0, omissions } } : {}
+  if (bodies.length === 0 && instances.placements.length === 0 && instances.notices.length === 0) {
+    return assemblies?.includeAvailability ? { ...NO_OBSTACLES, ...availability() } : NO_OBSTACLES
+  }
   const meshes: ClearanceMesh[] = []
   const notices: string[] = [...instances.notices]
   const rows = new Map(geometry.map((g) => [g.id, g]))
   for (const placement of instances.placements) {
     if (cut.has(placement.geometryId)) continue // a vise body this operation machines (soft jaw), WO-1572
     const body = await resolvePlacedBody(placement, rows.get(placement.geometryId)!, reader)
-    if (!body) continue
+    if (!body) {
+      if (!isKnownPlanarWorkholding(rows.get(placement.geometryId)!)) omissions.push({
+        instanceId: placement.instanceId, componentId: placement.componentId,
+        geometryId: placement.geometryId, reason: 'unreadable-shape' })
+      continue
+    }
     meshes.push(body.mesh)
     if (body.shape === 'bounding-box') notices.push(boundingBoxNotice(placement.name))
   }
@@ -96,11 +111,15 @@ export async function resolveWorkholdingObstacles(
       continue
     }
     const box = boundingBoxWorldMesh(body, placements ?? [])
-    if (!box) continue // a flat sketch has no height to keep clear of
+    if (!box) {
+      // Neither a failed shape read nor a failed placement proves zero volume.
+      if (!isKnownPlanarWorkholding(body)) omissions.push({ instanceId: body.id, geometryId: body.id, reason: 'unreadable-shape' })
+      continue
+    }
     meshes.push(box)
     notices.push(boundingBoxNotice(body.name || body.id))
   }
-  return { meshes, notices }
+  return { meshes, notices, ...availability() }
 }
 
 /**

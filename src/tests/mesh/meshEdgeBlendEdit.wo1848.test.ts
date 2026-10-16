@@ -491,13 +491,16 @@ describe('WO-1848: the fillet becomes a 5 mm fillet', () => {
 })
 
 describe('WO-1848: a blend between a flat face and a round one', () => {
-  // WO-1848 architect audit item 4: this order's method places the sharp edge
-  // where two PLANES meet. On a round bar's top edge there is no second plane,
-  // so there is no edge line to place - and the honest outcome is to change
-  // nothing and say in one sentence what LienCAM could not work out. It does
-  // not tell the operator to go and re-export his file (LIENCAM.md rule 11).
+  // WO-1848 architect audit item 4 pinned a refusal here: this order's method
+  // places the sharp edge where two PLANES meet, and a round bar's top edge
+  // has no second plane. WO-2798 reads a fillet between a flat face and a
+  // wall standing square to it whatever shape the wall runs round (the boss
+  // foot, SFI-1/SDF-3), so LienCAM can do this edit now and does it
+  // (LIENCAM.md rule 11).
   const bytes = filletedDiscBytes()
   const mesh = importStl(bytes).mesh
+  /** the sharp-edged bar: a 48-gon prism, read off the fixture's own ring */
+  const SHARP_PRISM_MM3 = 0.5 * DISC_N * DISC_R * DISC_R * Math.sin((2 * Math.PI) / DISC_N) * DISC_H
 
   it('the disc itself is closed and wound outward, so what follows means something', () => {
     const report = health(mesh)
@@ -506,40 +509,40 @@ describe('WO-1848: a blend between a flat face and a round one', () => {
     expect(measureMesh(welded(mesh)).signedVolume).toBeGreaterThan(0)
   })
 
-  it('it is not listed as a blend this part proves', () => {
+  it('it is listed as a 3 mm convex fillet', () => {
     const listed = recognizeEdgeBlends(mesh).blends
     const band = new Set(DISC_BAND)
-    expect(listed.some((b) => b.sourceFacetIds.some((id) => band.has(id)))).toBe(false)
+    const hits = listed.filter((b) => b.sourceFacetIds.some((id) => band.has(id)))
+    expect(hits.length).toBe(1)
+    expect(hits[0].kind).toBe('fillet')
+    expect(hits[0].shape).toBe('convex')
+    expect(hits[0].radiusMm).toBeCloseTo(FILLET_R, 3)
   })
 
-  it('choosing it anyway says what LienCAM could not work out, in one plain sentence', () => {
-    const refusal = sharpEdgeRestorationRefusal(mesh, DISC_BAND)
-    expect(refusal).not.toBeNull()
-    expect(refusal as string).toMatch(/two flat faces/)
-    expect(refusal as string).toMatch(/Nothing was changed/)
-    expect(refusal as string).not.toMatch(/re-?export|re-?model|simplif|different file|turn off/i)
+  it('removing it applies: the part is the sharp prism, closed', () => {
+    expect(sharpEdgeRestorationRefusal(mesh, DISC_BAND)).toBeNull()
+    const stripped = restoreSharpEdge(mesh, DISC_BAND)
+    const report = health(stripped.mesh)
+    expect(report.watertight).toBe(true)
+    expect(report.boundaryEdgeCount).toBe(0)
+    expect(report.windingConflictEdgeCount).toBe(0)
+    expect(measureMesh(welded(stripped.mesh)).volume).toBeCloseTo(SHARP_PRISM_MM3, 2)
   })
 
-  it('replay STOPS at it and leaves the part exactly as it was', () => {
+  it('replay applies it and the part is the sharp prism', () => {
     const record = createMeshEditRecord(mesh, {
       kind: RESTORE_SHARP_EDGE_KIND,
       facets: DISC_BAND,
       parameters: { blend: 'fillet', sizeMm: FILLET_R },
       id: 'medit-round-support',
     })
-    const errors: string[] = []
-    const spy = console.error
-    console.error = (...args: unknown[]) => { errors.push(String(args[0])) }
-    let replayed
-    try {
-      replayed = replayMeshEdits(mesh, [record])
-    } finally {
-      console.error = spy
-    }
-    expect(replayed.appliedCount).toBe(0)
-    expect(replayed.mesh).toBe(mesh)
-    expect(replayed.stopped?.reason).toMatch(/two flat faces/)
-    expect(errors.join('\n')).toMatch(/could not be replayed/)
+    const replayed = replayMeshEdits(mesh, [record])
+    expect(replayed.stopped).toBeUndefined()
+    expect(replayed.appliedCount).toBe(1)
+    const report = health(replayed.mesh)
+    expect(report.watertight).toBe(true)
+    expect(report.boundaryEdgeCount).toBe(0)
+    expect(measureMesh(welded(replayed.mesh)).volume).toBeCloseTo(SHARP_PRISM_MM3, 2)
   })
 })
 

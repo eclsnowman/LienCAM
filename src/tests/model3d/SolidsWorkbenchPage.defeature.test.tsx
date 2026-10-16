@@ -170,9 +170,11 @@ describe('SolidsWorkbenchPage defeature (WO UI-6X)', () => {
     expect(dispositions.map(([featureClass]) => featureClass).sort()).toEqual([
       'blindHole',
       'boss',
+      'chamferChain',
       'chamferPlanar',
       'counterboreStack',
       'engravedText',
+      'filletChain',
       'filletCurvedCorner',
       'filletPlanar',
       'pocket',
@@ -182,9 +184,11 @@ describe('SolidsWorkbenchPage defeature (WO UI-6X)', () => {
     expect([...DEFEATURE_CLASSES].sort()).toEqual([
       'blindHole',
       'boss',
+      'chamferChain',
       'chamferPlanar',
       'counterboreStack',
       'engravedText',
+      'filletChain',
       'filletCurvedCorner',
       'filletPlanar',
       'pocket',

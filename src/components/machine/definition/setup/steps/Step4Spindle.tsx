@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { SpindleArea } from '../../SpindleArea'
 import type { MachineDefinitionPanelState } from '../../useMachineDefinitionPanel'
 
@@ -10,9 +13,10 @@ type Step4Props = Pick<MachineDefinitionPanelState,
   | 'spindleLink' | 'spindleLinkIsForeign' | 'spindleLinkOtherMachine' | 'spindleStoredIsStated' | 'vfdEdit'>
 
 export function Step4Spindle(props: Step4Props) {
+  useText('control-screens-not-probing')
   return (
     <div data-testid="setup-step-spindle">
-      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>How does this machine spin the spindle?</p>
+      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>{controlText('Step4Spindle.text001')}</p>
       <SpindleArea {...props} />
     </div>
   )

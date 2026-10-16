@@ -36,6 +36,8 @@ If your PC has more than one network (Wi-Fi and Ethernet, or a VPN), a **Phone n
 - **Probing routines.** Bore, boss, single edge, corner, Z surface, rectangular pocket and boss, and angle. After a successful routine you can apply the result as the work zero.
 - **Quick moves.** Raise Z, park and go to XY zero.
 
+Phone feature probing uses the desktop Probing screen's planner, setup values, calibrated tip radius and first-step guidance. Its from-above approach and touch order match the desktop on native UCCNC and the simulator. These parity corrections are simulator/desk proven; they have not been newly verified on hardware. A standalone phone demo that cannot run the shared plan reports that limitation and moves nothing.
+
 The phone pictures below were taken in the pendant's own demo mode (no machine connected). Connected to LienCAM the tabs, labels and controls are the same; the tool name and some override readouts come from the machine, and the theme switch is greyed out.
 
 <img src="images/pendant/phone-jog.png" width="300" alt="The JOG tab on a phone: HOLD and RESET at the top, the position readout, the XY pad with SAFE Z, Z+ and Z-, step and feed choices, and the zero buttons">

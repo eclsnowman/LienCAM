@@ -66,6 +66,10 @@ Each operation cuts from the material that the earlier operations in its setup l
 
 > **Tip:** The Feedrate tab already reads the feeds and speeds saved with the tool in the Tool Library. The Passes tab of the 2D and hole operations also has Shank clearance under Tool assembly: the gap kept between the neck, shank or holder and the part or remaining stock.
 
+For a macro at a particular place in the program, choose Run macro under Machine actions. Pick a shown macro with a program-callable M-code from the active machine, then create the operation. Its Properties panel lets you change the Macro and Name. Drag its tree row to the required place, or switch the row off to omit it. Posting writes the selected M-code once at that place; Control runs the macro when it reaches that line. Choosing M6 also performs the tool change.
+
+![Run macro Properties with Check fixture (M2101) selected and its operation ordered between two cutting operations](images/creating-operations/run-macro-properties.webp)
+
 ![The New Operation dialog on the Type & Name tab with the operation type cards](images/creating-operations/wizard.webp)
 
 See also: [What an operation cuts](Toolpaths-2.5D#operation-sources), [Operation generation failures](Toolpaths-2.5D#generation-failures), [Feeds and speeds hierarchy](Toolpaths-2.5D#feeds-speeds).
@@ -227,7 +231,9 @@ See also: [Drilling](Toolpaths-2.5D#drill), [What an operation cuts](Toolpaths-2
 2. On the Geometry tab, pick the closed loops, or on a modeled body click Pick edges and pick a closed loop of edges. Set each loop to Outside or Inside (holes start as Inside), and choose the Milling direction.
 3. On the Passes tab, set the Chamfer width: the depth of the chamfer below the reference plane. Tip offset takes the tool deeper so it cuts higher up the flute, and moves the path out so the bevel stays the same size.
 4. The line under the fields shows the tool angle, the depth and the total Z drop.
-5. On the Heights tab, click the Top Height or Bottom Height row open: Reference plane sets where the depth is measured from. On the Linking tab, choose Plunge or Ramp (linear).
+5. On the Heights tab, click the Top Height or Bottom Height row open: Reference plane sets where the depth is measured from. On the Linking tab, Chamfer entry and exit starts at Authored Linking entry, which keeps your Plunge or Ramp (linear) choice.
+
+Choose Clear-space approach and exit to descend away from the edge, feed into the cut, and lead out before retracting. The authored heights stay in use. The strategy checks the tool, shank, available holder and resolved fixtures against a conservative retained-material envelope from loaded stock and represented earlier cuts. Unrepresented removals still count as material. If it cannot prove the complete path, it reports an unsupported result instead of substituting an on-edge Plunge. Read the Console notices for what was checked: without a holder, holder clearance is not established, and the approach before the first programmed position is not established. You can also change Chamfer entry and exit in Properties.
 
 ![The 2D Chamfer Passes tab with Chamfer width, Tip offset and the angle, depth and total Z drop line](images/chamfer-op/result.webp)
 
@@ -315,7 +321,7 @@ See also: [Adaptive linking and stay-down](Toolpaths-2.5D#adaptive-linking), [2D
 
 The Stay-down options keep the adaptive cutter down between passes instead of retracting, moving over and plunging again.
 
-The Stay-down section of the Linking tab replaces retract-and-plunge moves with rides along a wall that is already cut. The tool rides only when both ends of the move are on the same wall and the ride is short enough; otherwise it lifts.
+The Stay-down section of the Linking tab replaces retract-and-plunge moves with rides along a wall that is already cut. Repositioning can follow cleared walls in the selected milling direction, including a route between islands. The planner compares eligible stay-down routes with a lift by estimated emitted machining time, using the cut, finish, plunge and traverse feeds and the project machine rapid rate. The comparison includes later wall cleanup affected by the choice; a shorter path is not always faster.
 
 1. Integral wall-follow (on at first) rides the wall at depth instead of retracting.
 2. Maximum direct wall ride sets how long that ride may be, as a percent of the straight-line distance (200% at first).

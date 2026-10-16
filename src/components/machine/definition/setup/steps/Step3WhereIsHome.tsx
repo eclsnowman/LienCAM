@@ -1,3 +1,7 @@
+import { catalogChildren } from '../../catalogText'
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { NumericInput, OptionalNumericInput } from '../../../../ui/NumericInput'
 import { machineSafeZ, withMachineSafeZ, type AxisName } from '../../../../../types'
 import { SkewField } from '../../SkewField'
@@ -18,18 +22,19 @@ export function Step3WhereIsHome({
   def, draft, editDraft, order, setHomingOrderAt, patchHoming, defineHoming, enabledAxes,
   skewTyped, setSkewTyped,
 }: Step3Props) {
+  useText('control-screens-not-probing')
   const safeZ = machineSafeZ(draft)
   return (
     <div data-testid="setup-step-home" style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 480 }}>
-      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Where is home, and in what order?</p>
+      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{controlText('Step3WhereIsHome.text001')}</p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <span className="mform-label">Home order</span>
+        <span className="mform-label">{controlText('Step3WhereIsHome.text002')}</span>
         {order.map((ax, i) => (
           <select
             key={`${ax}-${i}`}
             className="mform-select"
-            aria-label={`Homing order position ${i + 1}`}
+            aria-label={controlText('Step3WhereIsHome.text003', { value1: String(i + 1) })}
             data-testid={`setup-step-home-order-${i}`}
             style={{ flex: 'none', width: 56 }}
             value={ax}
@@ -40,12 +45,12 @@ export function Step3WhereIsHome({
           </select>
         ))}
         {order.length === 0 && (
-          <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>no axes enabled</span>
+          <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('Step3WhereIsHome.text004')}</span>
         )}
       </div>
 
       <table className="mform-axis-table" data-testid="setup-step-home-table" style={{ width: 'auto' }}>
-        <thead><tr><th>Axis</th><th>homes toward</th></tr></thead>
+        <thead><tr><th>{controlText('Step3WhereIsHome.text005')}</th><th>{controlText('Step3WhereIsHome.text006')}</th></tr></thead>
         <tbody>
           {enabledAxes.map((a) => {
             const h = def.homing.perAxis[a.axis]
@@ -56,14 +61,14 @@ export function Step3WhereIsHome({
                   {h ? (
                     <select
                       className="mform-select"
-                      aria-label={`${a.axis} homing direction`}
+                      aria-label={controlText('Step3WhereIsHome.text007', { value1: String(a.axis) })}
                       data-testid={`setup-step-home-direction-${a.axis}`}
                       style={{ width: 80 }}
                       value={h.direction}
                       onChange={(e) => patchHoming(a.axis, { direction: e.target.value as 'negative' | 'positive' })}
                     >
-                      <option value="negative">At min</option>
-                      <option value="positive">At max</option>
+                      <option value="negative">{controlText('Step3WhereIsHome.text008')}</option>
+                      <option value="positive">{controlText('Step3WhereIsHome.text009')}</option>
                     </select>
                   ) : (
                     <button
@@ -71,9 +76,7 @@ export function Step3WhereIsHome({
                       className="control-chip-btn"
                       data-testid={`setup-step-home-define-${a.axis}`}
                       onClick={() => defineHoming(a.axis)}
-                    >
-                      Define {a.axis} homing
-                    </button>
+                    >{catalogChildren(controlText('Step3WhereIsHome.text010', { value1: '\u0000value1\u0000' }), { value1: a.axis })}</button>
                   )}
                 </td>
               </tr>
@@ -88,11 +91,11 @@ export function Step3WhereIsHome({
         className="mform-label"
         style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
       >
-        <span>Safe Z</span>
+        <span>{controlText('Step3WhereIsHome.text011')}</span>
         {safeZ?.from === 'profile' ? (
           <NumericInput
             value={safeZ.z}
-            ariaLabel="Safe Z"
+            ariaLabel={controlText('Step3WhereIsHome.text012')}
             className="mform-input mform-input-mono"
             style={{ flex: 'none', width: 78 }}
             onChange={(v) => editDraft((m) => withMachineSafeZ(m, v))}
@@ -100,14 +103,14 @@ export function Step3WhereIsHome({
         ) : (
           <OptionalNumericInput
             value={safeZ?.z}
-            ariaLabel="Safe Z"
+            ariaLabel={controlText('Step3WhereIsHome.text013')}
             className="mform-input mform-input-mono"
             style={{ flex: 'none', width: 78 }}
             onChange={(v) => editDraft((m) => withMachineSafeZ(m, v ?? null))}
           />
         )}
         {safeZ === null && (
-          <span data-testid="setup-step-home-safe-z-unset" style={{ color: 'var(--text-muted)' }}>not stated</span>
+          <span data-testid="setup-step-home-safe-z-unset" style={{ color: 'var(--text-muted)' }}>{controlText('Step3WhereIsHome.text014')}</span>
         )}
       </label>
     </div>

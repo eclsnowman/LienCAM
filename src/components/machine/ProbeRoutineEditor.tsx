@@ -1,3 +1,8 @@
+import { catalogChildren } from './probing/catalogText'
+import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-411 slice 4 - the probe routine EDITOR in the Probing tab: the Routines
 // list (factory / user / imported / quarantined), the editor for one routine
 // (inputs, steps, outputs as readable forms, validated on every change with the
@@ -101,9 +106,9 @@ function asToolSetterDraft(draft: ProbeRoutine | null): ProbeRoutine | null {
 }
 
 const START_REASON: Record<Exclude<EnvelopeStatus, 'homed'>, string> = {
-  unknown: 'connect the machine and read its settings first',
-  'not-homed': 'home the machine ($H) first - until then its position is not a fact about the table',
-  'no-datum': 'this machine has no homing switches, so there is no machine datum to place a routine on',
+  unknown: probeText('probeRoutineEditor1'),
+  'not-homed': probeText('probeRoutineEditor2'),
+  'no-datum': probeText('probeRoutineEditor3'),
 }
 
 // --- small immutable helpers ----------------------------------------------------
@@ -195,7 +200,7 @@ function newRoutine(existingIds: ReadonlySet<string>): ProbeRoutine {
   return {
     schemaVersion: PROBE_ROUTINE_SCHEMA_VERSION,
     id,
-    name: 'New routine',
+    name: probeText('probeRoutineEditor4'),
     version: '1.0.0',
     provenance: { kind: 'user' },
     description: '',
@@ -217,7 +222,7 @@ function newStep(kind: ProbeRoutineStep['kind'], existingNames: ReadonlySet<stri
     case 'move': return { kind: 'move', to: { x: '0', y: '0' } }
     case 'touch': return { kind: 'touch', name: fresh('touch'), axis: 'X', direction: '-', searchMm: '10' }
     case 'calc': return { kind: 'calc', name: fresh('value'), unit: 'mm', expr: '0' }
-    case 'check': return { kind: 'check', condition: { cmp: '>', left: '1', right: '0' }, message: 'Stopped by a check.' }
+    case 'check': return { kind: 'check', condition: { cmp: '>', left: '1', right: '0' }, message: probeText('probeRoutineEditor5') }
     case 'branch': return { kind: 'branch', condition: { cmp: '>', left: '1', right: '0' }, then: [], else: [] }
   }
 }
@@ -227,18 +232,18 @@ function newInput(type: ProbeRoutineInput['type'], existingNames: ReadonlySet<st
   let n = 2
   while (existingNames.has(name)) name = `${type}${n++}`
   switch (type) {
-    case 'length': return { name, label: 'Length', type: 'length', unit: 'mm', min: 0, max: 100, default: 10 }
-    case 'angle': return { name, label: 'Angle', type: 'angle', unit: 'deg', min: -90, max: 90, default: 0 }
-    case 'count': return { name, label: 'Count', type: 'count', min: 1, max: 10, default: 2 }
-    case 'enum': return { name, label: 'Choice', type: 'enum', options: ['a', 'b'], default: 'a' }
+    case 'length': return { name, label: probeText('probeRoutineEditor6'), type: 'length', unit: 'mm', min: 0, max: 100, default: 10 }
+    case 'angle': return { name, label: probeText('probeRoutineEditor7'), type: 'angle', unit: 'deg', min: -90, max: 90, default: 0 }
+    case 'count': return { name, label: probeText('probeRoutineEditor8'), type: 'count', min: 1, max: 10, default: 2 }
+    case 'enum': return { name, label: probeText('probeRoutineEditor9'), type: 'enum', options: ['a', 'b'], default: 'a' }
   }
 }
 
 function newOutput(kind: ProbeRoutineOutput['kind']): ProbeRoutineOutput {
   switch (kind) {
-    case 'workOffset': return { kind: 'workOffset', wcs: 'active', axes: { X: '0' }, label: 'Set X' }
-    case 'toolLength': return { kind: 'toolLength', tool: 'active', machineZ: '0', label: 'Tool length' }
-    case 'report': return { kind: 'report', items: [{ label: 'Value', expr: '0', unit: 'mm' }] }
+    case 'workOffset': return { kind: 'workOffset', wcs: 'active', axes: { X: '0' }, label: probeText('probeRoutineEditor10') }
+    case 'toolLength': return { kind: 'toolLength', tool: 'active', machineZ: '0', label: probeText('probeRoutineEditor11') }
+    case 'report': return { kind: 'report', items: [{ label: probeText('probeRoutineEditor12'), expr: '0', unit: 'mm' }] }
   }
 }
 
@@ -265,27 +270,27 @@ function stepSentence(step: ProbeRoutineStep): string {
     case 'move': {
       const to = step.to && typeof step.to === 'object' ? step.to : {}
       const parts = (['x', 'y', 'z'] as const).filter((a) => to[a] !== undefined).map((a) => `${a.toUpperCase()} ${exprText(to[a])}`)
-      const frame = step.frame === 'machine' ? 'machine' : 'start-relative'
-      return `${step.feed === 'rapid' ? 'Rapid' : 'Move'} to ${parts.join(', ') || '(nowhere)'} (${frame})${step.safeZ !== undefined ? `, safe Z at machine Z ${exprText(step.safeZ)}` : ''}`
+      const frame = step.frame === 'machine' ? probeText('probeRoutineEditor13') : probeText('probeRoutineEditor14')
+      return probeText('probeRoutineEditor19', { value1: String(step.feed === 'rapid' ? probeText('probeRoutineEditor15') : probeText('probeRoutineEditor16')), value2: String(parts.join(', ') || probeText('probeRoutineEditor17')), value3: String(frame), value4: String(step.safeZ !== undefined ? probeText('probeRoutineEditor18', { value1: String(exprText(step.safeZ)) }) : '') })
     }
     case 'touch':
-      return `Probe toward ${exprText(step.axis)}${exprText(step.direction)} up to ${exprText(step.searchMm)} mm`
+      return probeText('probeRoutineEditor20', { value1: String(exprText(step.axis)), value2: String(exprText(step.direction)), value3: String(exprText(step.searchMm)) })
     case 'calc':
       return `${exprText(step.name)} = ${exprText(step.expr)} (${exprText(step.unit)})`
     case 'check': {
       const { mode, items } = conditionList(step.condition)
-      return `Check ${items.map((c) => `${exprText(c.left)} ${c.cmp} ${exprText(c.right)}`).join(mode === 'any' ? ' or ' : ' and ')}; otherwise stop: ${exprText(step.message)}`
+      return probeText('probeRoutineEditor23', { value1: String(items.map((c) => `${exprText(c.left)} ${c.cmp} ${exprText(c.right)}`).join(mode === 'any' ? probeText('probeRoutineEditor21') : probeText('probeRoutineEditor22'))), value2: String(exprText(step.message)) })
     }
     case 'branch': {
       const { mode, items } = conditionList(step.condition)
-      return `If ${items.map((c) => `${exprText(c.left)} ${c.cmp} ${exprText(c.right)}`).join(mode === 'any' ? ' or ' : ' and ')}`
+      return probeText('editorIf', { conditions: String(items.map((c) => `${exprText(c.left)} ${c.cmp} ${exprText(c.right)}`).join(mode === 'any' ? probeText('probeRoutineEditor24') : probeText('probeRoutineEditor25'))) })
     }
     default:
-      return `Unknown step kind '${String((step as { kind?: unknown }).kind)}'`
+      return probeText('probeRoutineEditor26', { value1: String(String((step as { kind?: unknown }).kind)) })
   }
 }
 
-const PROVENANCE_LABEL = { factory: 'FACTORY', user: 'USER', imported: 'IMPORTED' } as const
+const PROVENANCE_LABEL = { factory: probeText('probeRoutineEditor27'), user: probeText('probeRoutineEditor28'), imported: probeText('probeRoutineEditor29') } as const
 
 function downloadText(fileName: string, text: string): boolean {
   if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof document === 'undefined') return false
@@ -311,6 +316,7 @@ export function ProbeRoutineEditor({
   bossCrossOverZ = null,
   workZeroMachineZ = null,
 }: ProbeRoutineEditorProps) {
+  useText('probing-screens')
   // The factory setter routine shows (and a copy of it keeps) this machine's
   // setter, crossing height and search depth - read through a ref so select()
   // stays stable while the live context ticks.
@@ -467,8 +473,8 @@ export function ProbeRoutineEditor({
       return
     }
     if (!start || envelopeStatus !== 'homed') {
-      const reason = envelopeStatus === 'homed' ? 'the machine position is not known' : START_REASON[envelopeStatus]
-      setPreview({ kind: 'blocked', sentence: `Check needs the live machine position to place "${draft.name}" on the table: ${reason}.` })
+      const reason = envelopeStatus === 'homed' ? probeText('probeRoutineEditor30') : START_REASON[envelopeStatus]
+      setPreview({ kind: 'blocked', sentence: probeText('probeRoutineEditor31', { value1: String(draft.name), value2: String(reason) }) })
       setPreviewStale(false)
       return
     }
@@ -511,7 +517,7 @@ export function ProbeRoutineEditor({
     setIsNew(false)
     setDirty(false)
     setDraft(store().getRoutine(draft.id))
-    setStatus({ kind: 'ok', lines: [`Saved "${draft.name}".`] })
+    setStatus({ kind: 'ok', lines: [probeText('probeRoutineEditor32', { value1: String(draft.name) })] })
   }
 
   const revert = () => {
@@ -542,7 +548,7 @@ export function ProbeRoutineEditor({
       if (source && copy) store().saveRoutine({ ...forMachine(source), id: copy.id, name: copy.name, provenance: { kind: 'user' } })
     }
     select(result.id)
-    setStatus({ kind: 'ok', lines: [`Duplicated as '${result.id}' - this copy is yours to edit.`] })
+    setStatus({ kind: 'ok', lines: [probeText('probeRoutineEditor33', { value1: String(result.id) })] })
   }
 
   const remove = () => {
@@ -551,18 +557,18 @@ export function ProbeRoutineEditor({
     const result = store().deleteRoutine(selectedId)
     if (!result.ok) { setStatus({ kind: 'error', lines: result.errors }); return }
     select(null)
-    setStatus({ kind: 'ok', lines: [`Deleted "${name}".`] })
+    setStatus({ kind: 'ok', lines: [probeText('probeRoutineEditor34', { value1: String(name) })] })
   }
 
   const hide = () => {
     if (!selectedId) return
     const result = store().hideFactoryRoutine(selectedId)
-    setStatus(result.ok ? { kind: 'ok', lines: ['Hidden from the list. "Restore factory routines" brings it back.'] } : { kind: 'error', lines: result.errors })
+    setStatus(result.ok ? { kind: 'ok', lines: [probeText('probeRoutineEditor35')] } : { kind: 'error', lines: result.errors })
   }
 
   const restoreFactory = () => {
     store().restoreFactoryRoutines()
-    setStatus({ kind: 'ok', lines: ['Factory routines restored: every one visible and at its shipped content; your routines were not touched.'] })
+    setStatus({ kind: 'ok', lines: [probeText('probeRoutineEditor36')] })
   }
 
   const startNew = () => {
@@ -585,7 +591,7 @@ export function ProbeRoutineEditor({
     const downloaded = downloadText(result.fileName, result.text)
     setStatus({
       kind: downloaded ? 'ok' : 'error',
-      lines: [downloaded ? `Exported "${draft?.name ?? selectedId}" as ${result.fileName}.` : 'This browser could not offer the file for download.'],
+      lines: [downloaded ? probeText('probeRoutineEditor37', { value1: String(draft?.name ?? selectedId), value2: String(result.fileName) }) : probeText('probeRoutineEditor38')],
     })
   }
 
@@ -595,7 +601,7 @@ export function ProbeRoutineEditor({
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => importText(typeof reader.result === 'string' ? reader.result : '', file.name)
-    reader.onerror = () => setStatus({ kind: 'error', lines: [`Could not read ${file.name}.`] })
+    reader.onerror = () => setStatus({ kind: 'error', lines: [probeText('probeRoutineEditor39', { value1: String(file.name) })] })
     reader.readAsText(file)
   }
 
@@ -631,8 +637,8 @@ export function ProbeRoutineEditor({
   }), [entries])
   const optionLabel = (entry: ProbeRoutineLibraryEntry): string => {
     const notes: string[] = []
-    if (entry.kind === 'imported') notes.push(typeof entry.routine.provenance.reviewedHash === 'string' ? 'reviewed once' : 'not yet reviewed')
-    if (entry.hidden) notes.push('hidden')
+    if (entry.kind === 'imported') notes.push(typeof entry.routine.provenance.reviewedHash === 'string' ? probeText('probeRoutineEditor40') : probeText('probeRoutineEditor41'))
+    if (entry.hidden) notes.push(probeText('probeRoutineEditor42'))
     return notes.length > 0 ? `${entry.routine.name} (${notes.join(', ')})` : entry.routine.name
   }
   const renderOption = (entry: ProbeRoutineLibraryEntry) => (
@@ -651,18 +657,18 @@ export function ProbeRoutineEditor({
   const pickerRow = (
     <div className="probe-routine-picker-row" data-testid="probe-routine-picker-row">
       <label className="probe-routine-picker" data-testid="probe-routine-list">
-        <span>Routine</span>
+        <span>{probeText('probeRoutineEditor44')}</span>
         <select
           className="mform-input"
           data-testid="probe-routine-select"
-          aria-label="Probe routines"
+          aria-label={probeText('probeRoutineEditor45')}
           value={selectValue}
           onChange={(e) => select(e.target.value === '' ? null : e.target.value)}
         >
-          <option value="">{isNew ? 'New routine (unsaved)' : entries.length === 0 ? 'No routines - press New or Import' : 'Pick a routine...'}</option>
-          {grouped.factory.length > 0 && <optgroup label="Factory" data-testid="probe-routine-group-factory">{grouped.factory.map(renderOption)}</optgroup>}
-          {grouped.user.length > 0 && <optgroup label="Yours" data-testid="probe-routine-group-user">{grouped.user.map(renderOption)}</optgroup>}
-          {grouped.imported.length > 0 && <optgroup label="Imported" data-testid="probe-routine-group-imported">{grouped.imported.map(renderOption)}</optgroup>}
+          <option value="">{isNew ? probeText('probeRoutineEditor46') : entries.length === 0 ? probeText('probeRoutineEditor47') : probeText('probeRoutineEditor48')}</option>
+          {grouped.factory.length > 0 && <optgroup label={probeText('probeRoutineEditor49')} data-testid="probe-routine-group-factory">{grouped.factory.map(renderOption)}</optgroup>}
+          {grouped.user.length > 0 && <optgroup label={probeText('probeRoutineEditor50')} data-testid="probe-routine-group-user">{grouped.user.map(renderOption)}</optgroup>}
+          {grouped.imported.length > 0 && <optgroup label={probeText('probeRoutineEditor51')} data-testid="probe-routine-group-imported">{grouped.imported.map(renderOption)}</optgroup>}
         </select>
       </label>
       {selectedEntry && !isNew && (
@@ -674,15 +680,15 @@ export function ProbeRoutineEditor({
               data-kind={typeof selectedEntry.routine.provenance.reviewedHash === 'string' ? 'reviewed' : 'unreviewed'}
               data-testid={`probe-routine-reviewed-${selectedEntry.routine.id}`}
             >
-              {typeof selectedEntry.routine.provenance.reviewedHash === 'string' ? 'reviewed once' : 'not yet reviewed'}
+              {typeof selectedEntry.routine.provenance.reviewedHash === 'string' ? probeText('probeRoutineEditor52') : probeText('probeRoutineEditor53')}
             </span>
           )}
-          {selectedEntry.hidden && <span className="probe-routine-badge" data-kind="hidden">hidden</span>}
+          {selectedEntry.hidden && <span className="probe-routine-badge" data-kind="hidden">{probeText('probeRoutineEditor55')}</span>}
         </span>
       )}
       <div className="probe-routine-toolbar">
-        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-new" onClick={startNew}>New</button>
-        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-import" onClick={() => fileInputRef.current?.click()}>Import</button>
+        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-new" onClick={startNew}>{probeText('probeRoutineEditor57')}</button>
+        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-import" onClick={() => fileInputRef.current?.click()}>{probeText('probeRoutineEditor59')}</button>
         <input
           ref={fileInputRef}
           type="file"
@@ -691,7 +697,7 @@ export function ProbeRoutineEditor({
           data-testid="probe-routine-import-input"
           onChange={onImportFile}
         />
-        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-restore" onClick={restoreFactory}>Restore factory routines</button>
+        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-restore" onClick={restoreFactory}>{probeText('probeRoutineEditor61')}</button>
       </div>
       {headerExtra}
     </div>
@@ -706,14 +712,10 @@ export function ProbeRoutineEditor({
       {!standalone && (
         <div className="probe-routine-station-head">
           <div className="control-probe-zone-head probe-routine-station-title">
-            <strong>
-              Routines
-              <HelpLink topic="probe-routines" label="Help" testId="probe-routine-help" />
+            <strong>{probeText('probeRoutineEditor64')}<HelpLink topic="probe-routines" label={probeText('probeRoutineEditor63')} testId="probe-routine-help" />
             </strong>
             <span>
-              {entries.length} routine{entries.length === 1 ? '' : 's'} - factory ones are read-only (duplicate to edit);
-              yours and imported ones can be edited here. Check previews a routine on this machine before anything runs.
-            </span>
+              {probeText('probeRoutineEditor67', { value1: jsxTextValue(entries.length), value2: jsxTextValue(entries.length === 1 ? '' : 's') })}</span>
           </div>
           <button
             className="modal-btn modal-btn-ghost"
@@ -721,7 +723,7 @@ export function ProbeRoutineEditor({
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
-            {open ? 'Hide routines' : 'Show routines'}
+            {open ? probeText('probeRoutineEditor68') : probeText('probeRoutineEditor69')}
           </button>
         </div>
       )}
@@ -730,7 +732,7 @@ export function ProbeRoutineEditor({
         <>
           {pickerRow}
           {quarantinedIds.length > 0 && (
-            <ul className="probe-routine-items probe-routine-quarantine-list" aria-label="Quarantined routines" data-testid="probe-routine-quarantine-list">
+            <ul className="probe-routine-items probe-routine-quarantine-list" aria-label={probeText('probeRoutineEditor70')} data-testid="probe-routine-quarantine-list">
               {quarantinedIds.map((id) => {
                 const q = quarantined[id]
                 const json = q.json as { name?: unknown } | null
@@ -740,7 +742,7 @@ export function ProbeRoutineEditor({
                     <div className="probe-routine-item probe-routine-item-quarantined">
                       <span className="probe-routine-item-name">{name}</span>
                       <span className="probe-routine-item-meta">
-                        <span className="probe-routine-badge" data-kind="quarantined">QUARANTINED</span>
+                        <span className="probe-routine-badge" data-kind="quarantined">{probeText('probeRoutineEditor72')}</span>
                       </span>
                       <ul className="probe-routine-quarantine-reasons">
                         {q.errors.map((e, i) => <li key={i}>{e}</li>)}
@@ -750,11 +752,9 @@ export function ProbeRoutineEditor({
                         data-testid={`probe-routine-quarantined-delete-${id}`}
                         onClick={() => {
                           const r = store().deleteRoutine(id)
-                          setStatus(r.ok ? { kind: 'ok', lines: [`Removed the quarantined routine '${id}'.`] } : { kind: 'error', lines: r.errors })
+                          setStatus(r.ok ? { kind: 'ok', lines: [probeText('probeRoutineEditor73', { value1: String(id) })] } : { kind: 'error', lines: r.errors })
                         }}
-                      >
-                        Delete
-                      </button>
+                      >{probeText('probeRoutineEditor75')}</button>
                     </div>
                   </li>
                 )
@@ -763,15 +763,14 @@ export function ProbeRoutineEditor({
           )}
           {importReport && (
             <div className="probe-routine-import-report" data-testid="probe-routine-import-report">
-              <strong>{importReport.ok ? 'Import' : 'Import refused'}</strong>
+              <strong>{importReport.ok ? probeText('probeRoutineEditor76') : probeText('probeRoutineEditor77')}</strong>
               {importReport.fileErrors.map((e, i) => <div key={`f${i}`} className="control-probe-status-error">{e}</div>)}
               {importReport.accepted.length > 0 && (
-                <div>Accepted: {importReport.accepted.map((r) => `"${r.name}" (${r.id})`).join(', ')}.</div>
+                <div>{probeText('probeRoutineEditor79', { value1: jsxTextValue(importReport.accepted.map((r) => `"${r.name}" (${r.id})`).join(', ')) })}</div>
               )}
               {importReport.renamed.map((r, i) => <div key={`r${i}`}>{r.sentence}</div>)}
               {importReport.refused.map((r, i) => (
-                <div key={`x${i}`} className="control-probe-status-error">
-                  Refused #{r.index}{r.name ? ` "${r.name}"` : ''}: {r.sentences.join(' ')}
+                <div key={`x${i}`} className="control-probe-status-error">{probeText('probeRoutineEditor81', { value1: jsxTextValue(r.index), value2: jsxTextValue(r.name ? ` "${r.name}"` : ''), value3: jsxTextValue(r.sentences.join(' ')) })}
                 </div>
               ))}
               {importReport.notes.map((n, i) => <div key={`n${i}`}>{n}</div>)}
@@ -779,13 +778,13 @@ export function ProbeRoutineEditor({
                 <div key={c.id} className="probe-routine-collision" data-testid={`probe-routine-collision-${c.id}`}>
                   <span>{c.sentence}</span>
                   <span className="probe-routine-toolbar">
-                    <button className="modal-btn modal-btn-ghost" onClick={() => settleCollision(c, 'replace')}>Replace</button>
-                    <button className="modal-btn modal-btn-ghost" onClick={() => settleCollision(c, 'keep-both')}>Keep both</button>
-                    <button className="modal-btn modal-btn-ghost" onClick={() => settleCollision(c, 'skip')}>Skip</button>
+                    <button className="modal-btn modal-btn-ghost" onClick={() => settleCollision(c, 'replace')}>{probeText('probeRoutineEditor83')}</button>
+                    <button className="modal-btn modal-btn-ghost" onClick={() => settleCollision(c, 'keep-both')}>{probeText('probeRoutineEditor85')}</button>
+                    <button className="modal-btn modal-btn-ghost" onClick={() => settleCollision(c, 'skip')}>{probeText('probeRoutineEditor87')}</button>
                   </span>
                 </div>
               ))}
-              <button className="modal-btn modal-btn-ghost" onClick={() => { setImportReport(null); setPendingCollisions([]) }}>Dismiss</button>
+              <button className="modal-btn modal-btn-ghost" onClick={() => { setImportReport(null); setPendingCollisions([]) }}>{probeText('probeRoutineEditor89')}</button>
             </div>
           )}
 
@@ -793,42 +792,38 @@ export function ProbeRoutineEditor({
             {/* ---- column 1: the editor ---- */}
             <div className="probe-routine-editor-col" data-testid="probe-routine-editor">
               {draft === null ? (
-                <div className="control-probe-plan" data-testid="probe-routine-editor-empty">
-                  Pick a routine from the dropdown above to read or edit it, or press New to write one.
-                </div>
+                <div className="control-probe-plan" data-testid="probe-routine-editor-empty">{probeText('probeRoutineEditor91')}</div>
               ) : (
                 <>
                   <div className="probe-routine-editor-head">
                     <span className="probe-routine-badge" data-kind={provenanceKind ?? 'user'} data-testid="probe-routine-badge">
-                      {provenanceKind ? PROVENANCE_LABEL[provenanceKind] : 'USER'}
-                      {isNew ? ' (unsaved)' : dirty ? ' (edited, unsaved)' : ''}
+                      {provenanceKind ? PROVENANCE_LABEL[provenanceKind] : probeText('probeRoutineEditor92')}
+                      {isNew ? ' (unsaved)' : dirty ? probeText('probeRoutineEditor93') : ''}
                     </span>
                     {storedImported && (
                       <span className="probe-routine-badge" data-kind={storedImported.provenance.reviewedHash ? 'reviewed' : 'unreviewed'} data-testid="probe-routine-editor-reviewed">
-                        {storedImported.provenance.reviewedHash ? 'reviewed once' : 'not yet reviewed - Check it before it can ever run'}
+                        {storedImported.provenance.reviewedHash ? probeText('probeRoutineEditor94') : probeText('probeRoutineEditor95')}
                       </span>
                     )}
                     {readOnly && (
-                      <span className="control-offsets-meta" data-testid="probe-routine-readonly-note">
-                        Factory routine - read-only. Duplicate to edit a copy.
-                      </span>
+                      <span className="control-offsets-meta" data-testid="probe-routine-readonly-note">{probeText('probeRoutineEditor97')}</span>
                     )}
-                    <span className="probe-routine-id" title="Routine id">{draft.id}</span>
+                    <span className="probe-routine-id" title={probeText('probeRoutineEditor98')}>{draft.id}</span>
                   </div>
                   <div className="probe-routine-toolbar" data-testid="probe-routine-actions">
-                    {!setterDraft && <button className="modal-btn modal-btn-primary" data-testid="probe-routine-check" onClick={runCheck}>Check</button>}
+                    {!setterDraft && <button className="modal-btn modal-btn-primary" data-testid="probe-routine-check" onClick={runCheck}>{probeText('probeRoutineEditor100')}</button>}
                     {canEditThis && (
                       <>
-                        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-save" disabled={!dirty || errors.length > 0} onClick={save}>Save</button>
-                        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-revert" disabled={!dirty} onClick={revert}>Revert</button>
+                        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-save" disabled={!dirty || errors.length > 0} onClick={save}>{probeText('probeRoutineEditor102')}</button>
+                        <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-revert" disabled={!dirty} onClick={revert}>{probeText('probeRoutineEditor104')}</button>
                       </>
                     )}
-                    {!isNew && <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-duplicate" onClick={duplicate}>Duplicate</button>}
-                    {!isNew && <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-export" onClick={exportSelected}>Export</button>}
-                    {!isNew && readOnly && <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-hide" onClick={hide}>Hide</button>}
-                    {!isNew && !readOnly && <button className="modal-btn modal-btn-danger" data-testid="probe-routine-delete" onClick={remove}>Delete</button>}
+                    {!isNew && <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-duplicate" onClick={duplicate}>{probeText('probeRoutineEditor106')}</button>}
+                    {!isNew && <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-export" onClick={exportSelected}>{probeText('probeRoutineEditor108')}</button>}
+                    {!isNew && readOnly && <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-hide" onClick={hide}>{probeText('probeRoutineEditor110')}</button>}
+                    {!isNew && !readOnly && <button className="modal-btn modal-btn-danger" data-testid="probe-routine-delete" onClick={remove}>{probeText('probeRoutineEditor112')}</button>}
                     <button className="modal-btn modal-btn-ghost" data-testid="probe-routine-source-toggle" aria-pressed={sourceOpen} onClick={() => setSourceOpen((v) => !v)}>
-                      {sourceOpen ? 'Hide source' : 'Source'}
+                      {sourceOpen ? probeText('probeRoutineEditor113') : probeText('probeRoutineEditor114')}
                     </button>
                   </div>
                   {status && (
@@ -838,12 +833,12 @@ export function ProbeRoutineEditor({
                   )}
                   {errors.length > 0 && (
                     <div className="probe-routine-error-list" data-testid="probe-routine-errors">
-                      <strong className="control-probe-status-error">{errors.length} problem{errors.length === 1 ? '' : 's'} - each is also shown where it lives:</strong>
+                      <strong className="control-probe-status-error">{probeText('probeRoutineEditor117', { value1: jsxTextValue(errors.length), value2: jsxTextValue(errors.length === 1 ? '' : 's') })}</strong>
                       <ul>
                         {errors.map((e, i) => (
                           <li key={`${e.code}-${i}`} data-testid="probe-routine-error" data-code={e.code}>
                             {e.sentence}
-                            <HelpLink topic="probe-routines" anchor={errorCodeAnchor(e.code)} title={`What ${e.code} means`} testId={`probe-routine-error-help-${i}`} />
+                            <HelpLink topic="probe-routines" anchor={errorCodeAnchor(e.code)} title={probeText('probeRoutineEditor118', { value1: String(e.code) })} testId={`probe-routine-error-help-${i}`} />
                           </li>
                         ))}
                       </ul>
@@ -857,36 +852,24 @@ export function ProbeRoutineEditor({
                       {/* identity */}
                       <div className="probe-routine-fields probe-routine-fields-identity">
                         {isNew && (
-                          <label>
-                            Id (letters, digits, dots, dashes; not starting with factory.)
-                            <input className="mform-input mform-input-mono" data-testid="probe-routine-id-input" value={draft.id} onChange={(e) => setField(['id'], e.target.value)} />
+                          <label>{probeText('probeRoutineEditor120')}<input className="mform-input mform-input-mono" data-testid="probe-routine-id-input" value={draft.id} onChange={(e) => setField(['id'], e.target.value)} />
                           </label>
                         )}
-                        <label>
-                          Name
-                          <input className="mform-input" data-testid="probe-routine-name" value={draft.name ?? ''} readOnly={readOnly} onChange={(e) => setField(['name'], e.target.value)} />
+                        <label>{probeText('probeRoutineEditor122')}<input className="mform-input" data-testid="probe-routine-name" value={draft.name ?? ''} readOnly={readOnly} onChange={(e) => setField(['name'], e.target.value)} />
                         </label>
-                        <label>
-                          Version
-                          <input className="mform-input mform-input-mono" data-testid="probe-routine-version" value={draft.version ?? ''} readOnly={readOnly} onChange={(e) => setField(['version'], e.target.value)} />
+                        <label>{probeText('probeRoutineEditor124')}<input className="mform-input mform-input-mono" data-testid="probe-routine-version" value={draft.version ?? ''} readOnly={readOnly} onChange={(e) => setField(['version'], e.target.value)} />
                         </label>
-                        <label>
-                          Needs homing
-                          <select className="mform-input" data-testid="probe-routine-requires-homed" value={draft.requires?.homed ? 'yes' : 'no'} disabled={readOnly} onChange={(e) => setField(['requires', 'homed'], e.target.value === 'yes')}>
-                            <option value="yes">yes - full envelope known</option>
-                            <option value="no">no</option>
+                        <label>{probeText('probeRoutineEditor130')}<select className="mform-input" data-testid="probe-routine-requires-homed" value={draft.requires?.homed ? 'yes' : 'no'} disabled={readOnly} onChange={(e) => setField(['requires', 'homed'], e.target.value === 'yes')}>
+                            <option value="yes">{probeText('probeRoutineEditor127')}</option>
+                            <option value="no">{probeText('probeRoutineEditor129')}</option>
                           </select>
                         </label>
-                        <label>
-                          Probe
-                          <select className="mform-input" value={draft.requires?.probe ?? 'touch'} disabled={readOnly} onChange={(e) => setField(['requires', 'probe'], e.target.value)}>
-                            <option value="touch">touch probe</option>
-                            <option value="toolSetter">tool setter</option>
+                        <label>{probeText('probeRoutineEditor136')}<select className="mform-input" value={draft.requires?.probe ?? 'touch'} disabled={readOnly} onChange={(e) => setField(['requires', 'probe'], e.target.value)}>
+                            <option value="touch">{probeText('probeRoutineEditor133')}</option>
+                            <option value="toolSetter">{probeText('probeRoutineEditor135')}</option>
                           </select>
                         </label>
-                        <label className="probe-routine-field-wide">
-                          Description
-                          <textarea className="mform-input" data-testid="probe-routine-description" rows={1} value={draft.description ?? ''} readOnly={readOnly} onChange={(e) => setField(['description'], e.target.value)} />
+                        <label className="probe-routine-field-wide">{probeText('probeRoutineEditor138')}<textarea className="mform-input" data-testid="probe-routine-description" rows={1} value={draft.description ?? ''} readOnly={readOnly} onChange={(e) => setField(['description'], e.target.value)} />
                         </label>
                       </div>
                       {routineErrors.length > 0 && (
@@ -910,8 +893,8 @@ export function ProbeRoutineEditor({
                       {/* steps */}
                       <div className="probe-routine-block" data-testid="probe-routine-steps">
                         <div className="probe-routine-block-head">
-                          <strong>Steps</strong>
-                          <span>{stepNumbers.size} step{stepNumbers.size === 1 ? '' : 's'}</span>
+                          <strong>{probeText('probeRoutineEditor140')}</strong>
+                          <span>{catalogChildren(probeText('probeRoutineEditor142', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: stepNumbers.size, value2: stepNumbers.size === 1 ? '' : 's' })}</span>
                         </div>
                         <StepList
                           steps={Array.isArray(draft.steps) ? draft.steps : []}
@@ -949,12 +932,10 @@ export function ProbeRoutineEditor({
               {setterDraft ? (
                 <div className="control-probe-plan probe-routine-setter-preview" data-testid="probe-routine-setter-preview">
                   <div className="control-probe-plan-title">
-                    <strong>What Measure tool does with this routine</strong>
+                    <strong>{probeText('probeRoutineEditor144')}</strong>
                   </div>
                   {setterPlan === null ? (
-                    <div data-testid="probe-routine-setter-preview-unavailable">
-                      The preview needs the machine connection's live facts.
-                    </div>
+                    <div data-testid="probe-routine-setter-preview-unavailable">{probeText('probeRoutineEditor146')}</div>
                   ) : setterPlan.ok ? (
                     <ol className="probe-routine-setter-moves" data-testid="probe-routine-setter-moves" style={{ paddingLeft: '1.8em', margin: '4px 0 8px' }}>
                       {describeToolSetterPlan(setterPlan.plan, displayUnits).map((line, i) => (
@@ -964,10 +945,7 @@ export function ProbeRoutineEditor({
                   ) : (
                     <div className="control-probe-status-error" data-testid="probe-routine-setter-preview-error">{setterPlan.reason}</div>
                   )}
-                  <div className="control-offsets-meta">
-                    The Measure tool button on the Probing tab runs this routine - your own copy before the factory one.
-                    Nothing on this tab moves the machine.
-                  </div>
+                  <div className="control-offsets-meta">{probeText('probeRoutineEditor148')}</div>
                 </div>
               ) : (
                 <ProbeRoutinePreview
@@ -1000,13 +978,14 @@ interface InputsSectionProps {
 }
 
 function InputsSection({ draft, readOnly, values, onValue, setField, removeField, touchDraft, errorsFor }: InputsSectionProps) {
+  useText('probing-screens')
   const [addType, setAddType] = useState<ProbeRoutineInput['type']>('length')
   const inputs = Array.isArray(draft.inputs) ? draft.inputs : []
   return (
     <div className="probe-routine-block" data-testid="probe-routine-inputs">
       <div className="probe-routine-block-head">
-        <strong>Inputs</strong>
-        <span>{inputs.length === 0 ? 'none - this routine takes no inputs' : 'declared by the routine; the value column is what Check uses'}</span>
+        <strong>{probeText('probeRoutineEditor150')}</strong>
+        <span>{inputs.length === 0 ? probeText('probeRoutineEditor151') : probeText('probeRoutineEditor152')}</span>
       </div>
       {inputs.map((input, i) => {
         const p: Path = ['inputs', i]
@@ -1017,53 +996,37 @@ function InputsSection({ draft, readOnly, values, onValue, setField, removeField
             <div className="probe-routine-row-head">
               <strong>{input.label || name}</strong>
               <span className="probe-routine-kind">{input.type}{'unit' in input && input.unit ? ` (${input.unit})` : ''}</span>
-              {!readOnly && <button className="probe-routine-mini" data-testid={`probe-routine-input-${name}-remove`} onClick={() => removeField(p)} aria-label={`Remove input ${name}`}>remove</button>}
+              {!readOnly && <button className="probe-routine-mini" data-testid={`probe-routine-input-${name}-remove`} onClick={() => removeField(p)} aria-label={probeText('probeRoutineEditor153', { value1: String(name) })}>{probeText('probeRoutineEditor155')}</button>}
             </div>
             <div className="probe-routine-fields probe-routine-fields-5">
-              <label>
-                name
-                <input className="mform-input mform-input-mono" value={name} readOnly={readOnly} data-testid={`probe-routine-input-${name}-name`} onChange={(e) => setField([...p, 'name'], e.target.value)} />
+              <label>{probeText('probeRoutineEditor157')}<input className="mform-input mform-input-mono" value={name} readOnly={readOnly} data-testid={`probe-routine-input-${name}-name`} onChange={(e) => setField([...p, 'name'], e.target.value)} />
               </label>
-              <label>
-                label
-                <input className="mform-input" value={input.label ?? ''} readOnly={readOnly} onChange={(e) => setField([...p, 'label'], e.target.value)} />
+              <label>{probeText('probeRoutineEditor159')}<input className="mform-input" value={input.label ?? ''} readOnly={readOnly} onChange={(e) => setField([...p, 'label'], e.target.value)} />
               </label>
               {input.type === 'enum' ? (
                 <>
-                  <label>
-                    options (comma separated)
-                    <input className="mform-input" value={Array.isArray(input.options) ? input.options.join(', ') : ''} readOnly={readOnly} data-testid={`probe-routine-input-${name}-options`} onChange={(e) => setField([...p, 'options'], e.target.value.split(',').map((s) => s.trim()).filter((s) => s.length > 0))} />
+                  <label>{probeText('probeRoutineEditor161')}<input className="mform-input" value={Array.isArray(input.options) ? input.options.join(', ') : ''} readOnly={readOnly} data-testid={`probe-routine-input-${name}-options`} onChange={(e) => setField([...p, 'options'], e.target.value.split(',').map((s) => s.trim()).filter((s) => s.length > 0))} />
                   </label>
-                  <label>
-                    default
-                    <input className="mform-input" value={String(input.default ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-default`} onChange={(e) => setField([...p, 'default'], e.target.value)} />
+                  <label>{probeText('probeRoutineEditor163')}<input className="mform-input" value={String(input.default ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-default`} onChange={(e) => setField([...p, 'default'], e.target.value)} />
                   </label>
                 </>
               ) : (
                 <>
-                  <label>
-                    min
-                    <input className="mform-input" inputMode="decimal" value={String(input.min ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-min`} onChange={(e) => setField([...p, 'min'], numberOrText(e.target.value))} />
+                  <label>{probeText('probeRoutineEditor165')}<input className="mform-input" inputMode="decimal" value={String(input.min ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-min`} onChange={(e) => setField([...p, 'min'], numberOrText(e.target.value))} />
                   </label>
-                  <label>
-                    max
-                    <input className="mform-input" inputMode="decimal" value={String(input.max ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-max`} onChange={(e) => setField([...p, 'max'], numberOrText(e.target.value))} />
+                  <label>{probeText('probeRoutineEditor167')}<input className="mform-input" inputMode="decimal" value={String(input.max ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-max`} onChange={(e) => setField([...p, 'max'], numberOrText(e.target.value))} />
                   </label>
-                  <label>
-                    default
-                    <input className="mform-input" inputMode="decimal" value={String(input.default ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-default`} onChange={(e) => setField([...p, 'default'], numberOrText(e.target.value))} />
+                  <label>{probeText('probeRoutineEditor169')}<input className="mform-input" inputMode="decimal" value={String(input.default ?? '')} readOnly={readOnly} data-testid={`probe-routine-input-${name}-default`} onChange={(e) => setField([...p, 'default'], numberOrText(e.target.value))} />
                   </label>
                 </>
               )}
-              <label className="probe-routine-value-field">
-                value for Check
-                {input.type === 'enum' ? (
+              <label className="probe-routine-value-field">{probeText('probeRoutineEditor174')}{input.type === 'enum' ? (
                   <select className="mform-input" value={values[name] ?? ''} data-testid={`probe-routine-input-value-${name}`} onChange={(e) => onValue(name, e.target.value)}>
-                    <option value="">default ({String(input.default)})</option>
+                    <option value="">{probeText('probeRoutineEditor172', { value1: jsxTextValue(String(input.default)) })}</option>
                     {(Array.isArray(input.options) ? input.options : []).map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                 ) : (
-                  <input className="mform-input" inputMode="decimal" placeholder={`default ${String(input.default)}`} value={values[name] ?? ''} data-testid={`probe-routine-input-value-${name}`} onChange={(e) => onValue(name, e.target.value)} />
+                  <input className="mform-input" inputMode="decimal" placeholder={probeText('probeRoutineEditor173', { value1: String(String(input.default)) })} value={values[name] ?? ''} data-testid={`probe-routine-input-value-${name}`} onChange={(e) => onValue(name, e.target.value)} />
                 )}
               </label>
             </div>
@@ -1079,10 +1042,10 @@ function InputsSection({ draft, readOnly, values, onValue, setField, removeField
       {!readOnly && (
         <div className="probe-routine-add-row">
           <select className="mform-input" value={addType} data-testid="probe-routine-add-input-kind" onChange={(e) => setAddType(e.target.value as ProbeRoutineInput['type'])}>
-            <option value="length">length</option>
-            <option value="angle">angle</option>
-            <option value="count">count</option>
-            <option value="enum">choice</option>
+            <option value="length">{probeText('probeRoutineEditor176')}</option>
+            <option value="angle">{probeText('probeRoutineEditor178')}</option>
+            <option value="count">{probeText('probeRoutineEditor180')}</option>
+            <option value="enum">{probeText('probeRoutineEditor182')}</option>
           </select>
           <button
             className="modal-btn modal-btn-ghost"
@@ -1091,9 +1054,7 @@ function InputsSection({ draft, readOnly, values, onValue, setField, removeField
               const names = new Set((Array.isArray(prev.inputs) ? prev.inputs : []).map((x) => x.name))
               return { ...prev, inputs: [...(Array.isArray(prev.inputs) ? prev.inputs : []), newInput(addType, names)] }
             })}
-          >
-            Add input
-          </button>
+          >{probeText('probeRoutineEditor184')}</button>
         </div>
       )}
     </div>
@@ -1132,6 +1093,7 @@ function allStepNames(steps: unknown, out: Set<string>): Set<string> {
 }
 
 function StepList(props: StepListProps) {
+  useText('probing-screens')
   const { steps, path, readOnly, numbers, errorsByStep, setField, removeField, setOptionalExpr, touchDraft, addKind, onAddKind } = props
   const move = (index: number, delta: number) => {
     touchDraft((prev) => {
@@ -1155,7 +1117,7 @@ function StepList(props: StepListProps) {
   }
   return (
     <div className="probe-routine-steps">
-      {steps.length === 0 && <div className="control-offsets-meta">No steps{path.length > 1 ? ' in this arm' : ''}.</div>}
+      {steps.length === 0 && <div className="control-offsets-meta">{probeText('probeRoutineEditor187', { value1: jsxTextValue(path.length > 1 ? probeText('probeRoutineEditor186') : '') })}</div>}
       {steps.map((step, i) => {
         const p: Path = [...path, i]
         const number = numbers.get(pathKey(p)) ?? 0
@@ -1175,9 +1137,9 @@ function StepList(props: StepListProps) {
               </strong>
               {!readOnly && (
                 <span className="probe-routine-step-tools">
-                  <button className="probe-routine-mini" aria-label={`Move step ${number} up`} disabled={i === 0} onClick={() => move(i, -1)}>up</button>
-                  <button className="probe-routine-mini" aria-label={`Move step ${number} down`} disabled={i === steps.length - 1} onClick={() => move(i, 1)}>down</button>
-                  <button className="probe-routine-mini" aria-label={`Remove step ${number}`} data-testid={`probe-routine-step-${number}-remove`} onClick={() => removeField(p)}>remove</button>
+                  <button className="probe-routine-mini" aria-label={probeText('probeRoutineEditor188', { value1: String(number) })} disabled={i === 0} onClick={() => move(i, -1)}>{probeText('probeRoutineEditor190')}</button>
+                  <button className="probe-routine-mini" aria-label={probeText('probeRoutineEditor191', { value1: String(number) })} disabled={i === steps.length - 1} onClick={() => move(i, 1)}>{probeText('probeRoutineEditor193')}</button>
+                  <button className="probe-routine-mini" aria-label={probeText('probeRoutineEditor194', { value1: String(number) })} data-testid={`probe-routine-step-${number}-remove`} onClick={() => removeField(p)}>{probeText('probeRoutineEditor196')}</button>
                 </span>
               )}
             </div>
@@ -1193,11 +1155,11 @@ function StepList(props: StepListProps) {
             {step?.kind === 'branch' && (
               <div className="probe-routine-arms">
                 <div className="probe-routine-arm">
-                  <span className="probe-routine-arm-label">then</span>
+                  <span className="probe-routine-arm-label">{probeText('probeRoutineEditor198')}</span>
                   <StepList {...props} steps={Array.isArray(step.then) ? step.then : []} path={[...p, 'then']} />
                 </div>
                 <div className="probe-routine-arm">
-                  <span className="probe-routine-arm-label">else</span>
+                  <span className="probe-routine-arm-label">{probeText('probeRoutineEditor200')}</span>
                   <StepList {...props} steps={Array.isArray(step.else) ? step.else : []} path={[...p, 'else']} />
                 </div>
               </div>
@@ -1207,7 +1169,7 @@ function StepList(props: StepListProps) {
                 {stepErrors.map((e, k) => (
                   <li key={k} data-testid="probe-routine-step-error" data-code={e.code}>
                     {e.sentence}
-                    <HelpLink topic="probe-routines" anchor={errorCodeAnchor(e.code)} title={`What ${e.code} means`} testId={`probe-routine-step-${number}-error-help-${k}`} />
+                    <HelpLink topic="probe-routines" anchor={errorCodeAnchor(e.code)} title={probeText('probeRoutineEditor201', { value1: String(e.code) })} testId={`probe-routine-step-${number}-error-help-${k}`} />
                   </li>
                 ))}
               </ul>
@@ -1220,8 +1182,7 @@ function StepList(props: StepListProps) {
           <select className="mform-input" value={addKind} data-testid={`probe-routine-add-step-kind${path.length > 1 ? `-${pathKey(path)}` : ''}`} onChange={(e) => onAddKind(e.target.value as ProbeRoutineStep['kind'])}>
             {PROBE_ROUTINE_STEP_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
-          <button className="modal-btn modal-btn-ghost" data-testid={`probe-routine-add-step${path.length > 1 ? `-${pathKey(path)}` : ''}`} onClick={add}>
-            Add step{path.length > 1 ? ' here' : ''}
+          <button className="modal-btn modal-btn-ghost" data-testid={`probe-routine-add-step${path.length > 1 ? `-${pathKey(path)}` : ''}`} onClick={add}>{probeText('probeRoutineEditor204', { value1: jsxTextValue(path.length > 1 ? probeText('probeRoutineEditor203') : '') })}
           </button>
         </div>
       )}
@@ -1240,6 +1201,7 @@ interface StepFormProps {
 }
 
 function StepForm({ step, path, number, readOnly, setField, setOptionalExpr, touchDraft }: StepFormProps) {
+  useText('probing-screens')
   const tid = (field: string) => `probe-routine-step-${number}-${field}`
   const ro = readOnly
   const text = (label: string, field: Path, value: unknown, opts: { optional?: boolean; mono?: boolean; testId?: string } = {}) => (
@@ -1283,41 +1245,41 @@ function StepForm({ step, path, number, readOnly, setField, setOptionalExpr, tou
     case 'move':
       return (
         <div className="probe-routine-fields probe-routine-fields-4">
-          {text('name (optional)', [...path, 'name'], step.name, { optional: true })}
-          {select('frame', [...path, 'frame'], step.frame ?? 'start', ['start', 'machine'])}
-          {select('feed', [...path, 'feed'], step.feed ?? 'position', ['position', 'rapid'])}
-          {text('safe Z (first move only)', [...path, 'safeZ'], step.safeZ, { optional: true })}
-          {text('to X', [...path, 'to', 'x'], step.to?.x, { optional: true })}
-          {text('to Y', [...path, 'to', 'y'], step.to?.y, { optional: true })}
-          {text('to Z', [...path, 'to', 'z'], step.to?.z, { optional: true })}
+          {text(probeText('probeRoutineEditor205'), [...path, 'name'], step.name, { optional: true })}
+          {select(probeText('probeRoutineEditor206'), [...path, 'frame'], step.frame ?? 'start', ['start', 'machine'])}
+          {select(probeText('probeRoutineEditor207'), [...path, 'feed'], step.feed ?? 'position', ['position', 'rapid'])}
+          {text(probeText('probeRoutineEditor208'), [...path, 'safeZ'], step.safeZ, { optional: true })}
+          {text(probeText('probeRoutineEditor209'), [...path, 'to', 'x'], step.to?.x, { optional: true })}
+          {text(probeText('probeRoutineEditor210'), [...path, 'to', 'y'], step.to?.y, { optional: true })}
+          {text(probeText('probeRoutineEditor211'), [...path, 'to', 'z'], step.to?.z, { optional: true })}
         </div>
       )
     case 'touch':
       return (
         <div className="probe-routine-fields probe-routine-fields-4">
-          {text('name', [...path, 'name'], step.name)}
-          {text('axis (X, Y, Z or $input.<name>)', [...path, 'axis'], step.axis)}
-          {text('direction (+, - or $input.<name>)', [...path, 'direction'], step.direction)}
-          {text('search (mm)', [...path, 'searchMm'], step.searchMm)}
-          {text('retract (mm, optional)', [...path, 'retractMm'], step.retractMm, { optional: true })}
-          {text('back-off (mm, optional)', [...path, 'backoffMm'], step.backoffMm, { optional: true })}
-          {numField('search feed factor (<= 1)', [...path, 'searchFeedFactor'], step.searchFeedFactor)}
-          {numField('final feed factor (<= 1)', [...path, 'finalFeedFactor'], step.finalFeedFactor)}
+          {text(probeText('probeRoutineEditor212'), [...path, 'name'], step.name)}
+          {text(probeText('probeRoutineEditor213'), [...path, 'axis'], step.axis)}
+          {text(probeText('probeRoutineEditor214'), [...path, 'direction'], step.direction)}
+          {text(probeText('probeRoutineEditor215'), [...path, 'searchMm'], step.searchMm)}
+          {text(probeText('probeRoutineEditor216'), [...path, 'retractMm'], step.retractMm, { optional: true })}
+          {text(probeText('probeRoutineEditor217'), [...path, 'backoffMm'], step.backoffMm, { optional: true })}
+          {numField(probeText('probeRoutineEditor218'), [...path, 'searchFeedFactor'], step.searchFeedFactor)}
+          {numField(probeText('probeRoutineEditor219'), [...path, 'finalFeedFactor'], step.finalFeedFactor)}
         </div>
       )
     case 'calc':
       return (
         <div className="probe-routine-fields probe-routine-fields-4 probe-routine-fields-calc">
-          {text('name', [...path, 'name'], step.name)}
-          {select('unit', [...path, 'unit'], step.unit, ['mm', 'deg', 'count', 'ratio'])}
-          <span className="probe-routine-field-wide probe-routine-field-expr">{text('expression', [...path, 'expr'], step.expr)}</span>
+          {text(probeText('probeRoutineEditor220'), [...path, 'name'], step.name)}
+          {select(probeText('probeRoutineEditor221'), [...path, 'unit'], step.unit, ['mm', 'deg', 'count', 'ratio'])}
+          <span className="probe-routine-field-wide probe-routine-field-expr">{text(probeText('probeRoutineEditor222'), [...path, 'expr'], step.expr)}</span>
         </div>
       )
     case 'check':
     case 'branch':
       return (
         <div className="probe-routine-fields probe-routine-fields-1">
-          {text('name (optional)', [...path, 'name'], step.name, { optional: true })}
+          {text(probeText('probeRoutineEditor223'), [...path, 'name'], step.name, { optional: true })}
           <ConditionForm
             condition={step.condition}
             path={[...path, 'condition']}
@@ -1326,14 +1288,12 @@ function StepForm({ step, path, number, readOnly, setField, setOptionalExpr, tou
             setField={setField}
             touchDraft={touchDraft}
           />
-          {step.kind === 'check' && text('message when it stops', [...path, 'message'], step.message, { mono: false })}
+          {step.kind === 'check' && text(probeText('probeRoutineEditor224'), [...path, 'message'], step.message, { mono: false })}
         </div>
       )
     default:
       return (
-        <div className="control-probe-status-error" data-testid={tid('unknown')}>
-          This step kind is not in the vocabulary; remove it or change the source.
-        </div>
+        <div className="control-probe-status-error" data-testid={tid('unknown')}>{probeText('probeRoutineEditor226')}</div>
       )
   }
 }
@@ -1348,6 +1308,7 @@ interface ConditionFormProps {
 }
 
 function ConditionForm({ condition, path, number, readOnly, setField, touchDraft }: ConditionFormProps) {
+  useText('probing-screens')
   const { mode, items } = conditionList(condition)
   const itemPath = (i: number): Path => (mode === 'one' ? path : [...path, mode, i])
   const setMode = (next: 'one' | 'all' | 'any') => {
@@ -1359,12 +1320,10 @@ function ConditionForm({ condition, path, number, readOnly, setField, touchDraft
   }
   return (
     <div className="probe-routine-condition" data-testid={`probe-routine-step-${number}-condition`}>
-      <label>
-        condition
-        <select className="mform-input" value={mode} disabled={readOnly} data-testid={`probe-routine-step-${number}-condition-mode`} onChange={(e) => setMode(e.target.value as 'one' | 'all' | 'any')}>
-          <option value="one">one comparison</option>
-          <option value="all">all of these</option>
-          <option value="any">any of these</option>
+      <label>{probeText('probeRoutineEditor234')}<select className="mform-input" value={mode} disabled={readOnly} data-testid={`probe-routine-step-${number}-condition-mode`} onChange={(e) => setMode(e.target.value as 'one' | 'all' | 'any')}>
+          <option value="one">{probeText('probeRoutineEditor229')}</option>
+          <option value="all">{probeText('probeRoutineEditor231')}</option>
+          <option value="any">{probeText('probeRoutineEditor233')}</option>
         </select>
       </label>
       {items.map((c, i) => (
@@ -1375,12 +1334,12 @@ function ConditionForm({ condition, path, number, readOnly, setField, touchDraft
           </select>
           <input className="mform-input mform-input-mono" value={exprText(c.right)} readOnly={readOnly} data-testid={`probe-routine-step-${number}-cmp-${i}-right`} onChange={(e) => setField([...itemPath(i), 'right'], e.target.value)} />
           {!readOnly && mode !== 'one' && (
-            <button className="probe-routine-mini" aria-label="Remove comparison" onClick={() => touchDraft((prev) => setIn(prev, [...path, mode], items.filter((_, k) => k !== i)))}>remove</button>
+            <button className="probe-routine-mini" aria-label={probeText('probeRoutineEditor235')} onClick={() => touchDraft((prev) => setIn(prev, [...path, mode], items.filter((_, k) => k !== i)))}>{probeText('probeRoutineEditor237')}</button>
           )}
         </div>
       ))}
       {!readOnly && mode !== 'one' && (
-        <button className="modal-btn modal-btn-ghost" onClick={() => touchDraft((prev) => setIn(prev, [...path, mode], [...items, newComparison()]))}>Add comparison</button>
+        <button className="modal-btn modal-btn-ghost" onClick={() => touchDraft((prev) => setIn(prev, [...path, mode], [...items, newComparison()]))}>{probeText('probeRoutineEditor239')}</button>
       )}
     </div>
   )
@@ -1399,13 +1358,14 @@ interface OutputsSectionProps {
 }
 
 function OutputsSection({ draft, readOnly, setField, removeField, setOptionalExpr, touchDraft, errorsFor }: OutputsSectionProps) {
+  useText('probing-screens')
   const [addKind, setAddKind] = useState<ProbeRoutineOutput['kind']>('workOffset')
   const outputs = Array.isArray(draft.outputs) ? draft.outputs : []
   return (
     <div className="probe-routine-block" data-testid="probe-routine-outputs">
       <div className="probe-routine-block-head">
-        <strong>Outputs (proposals)</strong>
-        <span>what the routine would propose when it finishes; nothing is ever written without your confirmation</span>
+        <strong>{probeText('probeRoutineEditor241')}</strong>
+        <span>{probeText('probeRoutineEditor243')}</span>
       </div>
       {outputs.map((output, i) => {
         const p: Path = ['outputs', i]
@@ -1415,12 +1375,12 @@ function OutputsSection({ draft, readOnly, setField, removeField, setOptionalExp
           <div key={i} className="probe-routine-row" data-testid={`probe-routine-output-${i + 1}`}>
             <div className="probe-routine-row-head">
               <span className="probe-routine-kind">{String(output?.kind)}</span>
-              {!readOnly && <button className="probe-routine-mini" aria-label={`Remove output ${i + 1}`} onClick={() => removeField(p)}>remove</button>}
+              {!readOnly && <button className="probe-routine-mini" aria-label={probeText('probeRoutineEditor244', { value1: String(i + 1) })} onClick={() => removeField(p)}>{probeText('probeRoutineEditor246')}</button>}
             </div>
             {output?.kind === 'workOffset' && (
               <div className="probe-routine-fields probe-routine-fields-4">
                 <label>
-                  {"work offset (active, G54..G59 or $input.<name>)"}
+                  {probeText('probeRoutineEditor247')}
                   <input className="mform-input mform-input-mono" value={exprText(output.wcs)} readOnly={readOnly} data-testid={tid('wcs')} onChange={(e) => setField([...p, 'wcs'], e.target.value)} />
                 </label>
                 {(['X', 'Y', 'Z'] as const).map((a) => (
@@ -1429,29 +1389,19 @@ function OutputsSection({ draft, readOnly, setField, removeField, setOptionalExp
                     <input className="mform-input mform-input-mono" value={exprText(output.axes?.[a])} readOnly={readOnly} data-testid={tid(`axis-${a}`)} onChange={(e) => setOptionalExpr([...p, 'axes', a], e.target.value)} />
                   </label>
                 ))}
-                <label className="probe-routine-field-wide">
-                  label
-                  <input className="mform-input" value={output.label ?? ''} readOnly={readOnly} data-testid={tid('label')} onChange={(e) => setField([...p, 'label'], e.target.value)} />
+                <label className="probe-routine-field-wide">{probeText('probeRoutineEditor249')}<input className="mform-input" value={output.label ?? ''} readOnly={readOnly} data-testid={tid('label')} onChange={(e) => setField([...p, 'label'], e.target.value)} />
                 </label>
-                <label className="probe-routine-field-wide">
-                  compensation note (optional)
-                  <input className="mform-input" value={output.compensationNote ?? ''} readOnly={readOnly} onChange={(e) => setOptionalExpr([...p, 'compensationNote'], e.target.value)} />
+                <label className="probe-routine-field-wide">{probeText('probeRoutineEditor251')}<input className="mform-input" value={output.compensationNote ?? ''} readOnly={readOnly} onChange={(e) => setOptionalExpr([...p, 'compensationNote'], e.target.value)} />
                 </label>
               </div>
             )}
             {output?.kind === 'toolLength' && (
               <div className="probe-routine-fields probe-routine-fields-4">
-                <label>
-                  tool (active or a number)
-                  <input className="mform-input mform-input-mono" value={exprText(output.tool)} readOnly={readOnly} data-testid={tid('tool')} onChange={(e) => setField([...p, 'tool'], e.target.value === 'active' ? 'active' : numberOrText(e.target.value))} />
+                <label>{probeText('probeRoutineEditor253')}<input className="mform-input mform-input-mono" value={exprText(output.tool)} readOnly={readOnly} data-testid={tid('tool')} onChange={(e) => setField([...p, 'tool'], e.target.value === 'active' ? 'active' : numberOrText(e.target.value))} />
                 </label>
-                <label>
-                  machine Z =
-                  <input className="mform-input mform-input-mono" value={exprText(output.machineZ)} readOnly={readOnly} data-testid={tid('machineZ')} onChange={(e) => setField([...p, 'machineZ'], e.target.value)} />
+                <label>{probeText('probeRoutineEditor255')}<input className="mform-input mform-input-mono" value={exprText(output.machineZ)} readOnly={readOnly} data-testid={tid('machineZ')} onChange={(e) => setField([...p, 'machineZ'], e.target.value)} />
                 </label>
-                <label className="probe-routine-field-wide">
-                  label
-                  <input className="mform-input" value={output.label ?? ''} readOnly={readOnly} data-testid={tid('label')} onChange={(e) => setField([...p, 'label'], e.target.value)} />
+                <label className="probe-routine-field-wide">{probeText('probeRoutineEditor257')}<input className="mform-input" value={output.label ?? ''} readOnly={readOnly} data-testid={tid('label')} onChange={(e) => setField([...p, 'label'], e.target.value)} />
                 </label>
               </div>
             )}
@@ -1459,27 +1409,19 @@ function OutputsSection({ draft, readOnly, setField, removeField, setOptionalExp
               <div className="probe-routine-report-items">
                 {(Array.isArray(output.items) ? output.items : []).map((item, k) => (
                   <div key={k} className="probe-routine-fields probe-routine-fields-4">
-                    <label>
-                      label
-                      <input className="mform-input" value={item.label ?? ''} readOnly={readOnly} onChange={(e) => setField([...p, 'items', k, 'label'], e.target.value)} />
+                    <label>{probeText('probeRoutineEditor259')}<input className="mform-input" value={item.label ?? ''} readOnly={readOnly} onChange={(e) => setField([...p, 'items', k, 'label'], e.target.value)} />
                     </label>
-                    <label>
-                      expression
-                      <input className="mform-input mform-input-mono" value={exprText(item.expr)} readOnly={readOnly} data-testid={tid(`item-${k + 1}-expr`)} onChange={(e) => setField([...p, 'items', k, 'expr'], e.target.value)} />
+                    <label>{probeText('probeRoutineEditor261')}<input className="mform-input mform-input-mono" value={exprText(item.expr)} readOnly={readOnly} data-testid={tid(`item-${k + 1}-expr`)} onChange={(e) => setField([...p, 'items', k, 'expr'], e.target.value)} />
                     </label>
-                    <label>
-                      unit
-                      <select className="mform-input" value={item.unit ?? 'mm'} disabled={readOnly} onChange={(e) => setField([...p, 'items', k, 'unit'], e.target.value)}>
+                    <label>{probeText('probeRoutineEditor263')}<select className="mform-input" value={item.unit ?? 'mm'} disabled={readOnly} onChange={(e) => setField([...p, 'items', k, 'unit'], e.target.value)}>
                         {['mm', 'deg', 'count', 'ratio'].map((u) => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </label>
-                    {!readOnly && <button className="probe-routine-mini" aria-label={`Remove report item ${k + 1}`} onClick={() => removeField([...p, 'items', k])}>remove</button>}
+                    {!readOnly && <button className="probe-routine-mini" aria-label={probeText('probeRoutineEditor264', { value1: String(k + 1) })} onClick={() => removeField([...p, 'items', k])}>{probeText('probeRoutineEditor266')}</button>}
                   </div>
                 ))}
                 {!readOnly && (
-                  <button className="modal-btn modal-btn-ghost" onClick={() => touchDraft((prev) => setIn(prev, [...p, 'items'], [...(Array.isArray(output.items) ? output.items : []), { label: 'Value', expr: '0', unit: 'mm' }]))}>
-                    Add report item
-                  </button>
+                  <button className="modal-btn modal-btn-ghost" onClick={() => touchDraft((prev) => setIn(prev, [...p, 'items'], [...(Array.isArray(output.items) ? output.items : []), { label: probeText('probeRoutineEditor267'), expr: '0', unit: 'mm' }]))}>{probeText('probeRoutineEditor269')}</button>
                 )}
               </div>
             )}
@@ -1494,17 +1436,15 @@ function OutputsSection({ draft, readOnly, setField, removeField, setOptionalExp
       {!readOnly && (
         <div className="probe-routine-add-row">
           <select className="mform-input" value={addKind} data-testid="probe-routine-add-output-kind" onChange={(e) => setAddKind(e.target.value as ProbeRoutineOutput['kind'])}>
-            <option value="workOffset">work offset</option>
-            <option value="toolLength">tool length</option>
-            <option value="report">report</option>
+            <option value="workOffset">{probeText('probeRoutineEditor271')}</option>
+            <option value="toolLength">{probeText('probeRoutineEditor273')}</option>
+            <option value="report">{probeText('probeRoutineEditor275')}</option>
           </select>
           <button
             className="modal-btn modal-btn-ghost"
             data-testid="probe-routine-add-output"
             onClick={() => touchDraft((prev) => ({ ...prev, outputs: [...(Array.isArray(prev.outputs) ? prev.outputs : []), newOutput(addKind)] }))}
-          >
-            Add output
-          </button>
+          >{probeText('probeRoutineEditor277')}</button>
         </div>
       )}
     </div>

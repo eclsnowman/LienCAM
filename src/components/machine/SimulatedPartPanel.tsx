@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { fmtMachineLength, unitLabel } from '../../lib/ui/unitFormat'
 import { useDisplayUnits } from './useDisplayUnits'
 // SimulatedPartPanel - WO-416: a small read-only card on the Diagnostics
@@ -20,6 +24,7 @@ import {
 } from '../../lib/machine/machineSession'
 
 export function SimulatedPartPanel() {
+  useText('control-screens-not-probing')
   const units = useDisplayUnits()
   const fmt = (mm: number): string => Number.isFinite(mm) ? `${fmtMachineLength(mm, units)} ${unitLabel(units)}` : '-'
   const connectionKind = useMachineControl((s) => s.connectionKind)
@@ -70,29 +75,21 @@ export function SimulatedPartPanel() {
   return (
     <section className="panel control-panel" data-testid="simulated-part-panel">
       <div className="panel-header">
-        <span className="panel-title">Simulated part</span>
+        <span className="panel-title">{controlText('SimulatedPartPanel.text001')}</span>
       </div>
       <div className="panel-body" data-testid="simulated-part-body">
         {!part ? (
-          <div className="panel-empty">No part placed.</div>
+          <div className="panel-empty">{controlText('SimulatedPartPanel.text002')}</div>
         ) : (
           <>
-            <div data-testid="simulated-part-position">
-              Position (machine): X {fmt(part.origin.x)}, Y {fmt(part.origin.y)}, top Z {fmt(part.topZ)}
-            </div>
-            <div data-testid="simulated-part-size">
-              Size: {fmt(part.sizeX)} (X) x {fmt(part.sizeY)} (Y) x {fmt(part.height)} (height)
-            </div>
-            <div data-testid="simulated-part-bow">Surface bow: {fmt(part.bowMm ?? 0.3)}</div>
+            <div data-testid="simulated-part-position">{catalogChildren(controlText('SimulatedPartPanel.text003', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: fmt(part.origin.x), value2: fmt(part.origin.y), value3: fmt(part.topZ) })}</div>
+            <div data-testid="simulated-part-size">{catalogChildren(controlText('SimulatedPartPanel.text004', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: fmt(part.sizeX), value2: fmt(part.sizeY), value3: fmt(part.height) })}</div>
+            <div data-testid="simulated-part-bow">{catalogChildren(controlText('SimulatedPartPanel.text005', { value1: '\u0000value1\u0000' }), { value1: fmt(part.bowMm ?? 0.3) })}</div>
             {part.bore && (
-              <div data-testid="simulated-part-bore">
-                Bore: {fmt(part.bore.diameter)} diameter, {fmt(part.bore.depth)} deep, centre X {fmt(part.bore.cx)} Y {fmt(part.bore.cy)}
-              </div>
+              <div data-testid="simulated-part-bore">{catalogChildren(controlText('SimulatedPartPanel.text006', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000' }), { value1: fmt(part.bore.diameter), value2: fmt(part.bore.depth), value3: fmt(part.bore.cx), value4: fmt(part.bore.cy) })}</div>
             )}
             {part.boss && (
-              <div data-testid="simulated-part-boss">
-                Boss: {fmt(part.boss.diameter)} diameter, {fmt(part.boss.height)} tall, centre X {fmt(part.boss.cx)} Y {fmt(part.boss.cy)}
-              </div>
+              <div data-testid="simulated-part-boss">{catalogChildren(controlText('SimulatedPartPanel.text007', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000' }), { value1: fmt(part.boss.diameter), value2: fmt(part.boss.height), value3: fmt(part.boss.cx), value4: fmt(part.boss.cy) })}</div>
             )}
           </>
         )}
@@ -103,19 +100,15 @@ export function SimulatedPartPanel() {
             data-testid="simulated-part-place-under-probe"
             disabled={!part || !mpos}
             onClick={placeUnderProbe}
-            data-tooltip="Move the part so the probe's current position sits over the bore centre, at the part's top"
-          >
-            Place under probe
-          </button>
+            data-tooltip={controlText('SimulatedPartPanel.text008')}
+          >{controlText('SimulatedPartPanel.text009')}</button>
           <button
             type="button"
             className="panel-action-btn"
             data-testid="simulated-part-reset"
             onClick={reset}
-            data-tooltip="Put the part back at its default position and size"
-          >
-            Reset
-          </button>
+            data-tooltip={controlText('SimulatedPartPanel.text010')}
+          >{controlText('SimulatedPartPanel.text011')}</button>
         </div>
       </div>
     </section>

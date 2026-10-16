@@ -505,7 +505,6 @@ describe('WO-251: STL edge chains in the Contour geometry dialog', () => {
     expect(params.loopIds).toEqual([selected.id])
     expect(params.meshChainSources[selected.id]).toEqual([
       { geometryId: GEO_ID, geometryName: 'Operator plate STL' },
-      { geometryId: duplicateGeoId, geometryName: 'Duplicate plate STL' },
     ])
     act(() => {
       useCamStore.setState((state) => ({

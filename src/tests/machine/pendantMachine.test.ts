@@ -68,6 +68,9 @@ describe('production pendant machine adapter', () => {
   })
 
   it('requires an explicit clear-path confirmation before any probe plan runs', async () => {
+    // WO-2809: the missing-position refusal now comes first (both move nothing); give the
+    // fixture a live position so this case still tests the confirmation it is named for.
+    useMachineControl.setState({ mpos: { x: 100, y: 100, z: 50 } } as never)
     const result = await execute({
       kind: 'probe-start',
       routineId: 'bore',

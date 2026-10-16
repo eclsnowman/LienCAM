@@ -87,6 +87,7 @@ import type { PostConfig } from '../post/types'
 import { findTool, resolveProbeConfig, validateZProbeConfig, type MachineToolTable, type ZProbeConfig } from './toolTable'
 import {
   keepSpindleOffForProbe,
+  libraryToolForActive,
   lineIsEmptyCode,
   lineStartsSpindle,
   loadedProbeTool,
@@ -371,7 +372,7 @@ import {
   type GcodeStage,
   type GcodeWcs,
 } from '../gcode'
-import type { GcodeReaderMove, GcodeReaderPoint, GcodeReaderWorkOffset } from '../gcode/reader'
+import { type GcodeListedOutputCommand, type GcodeReaderMove, type GcodeReaderPoint, type GcodeReaderWorkOffset } from '../gcode/reader'
 import { formatPosition as framedPosition, movedAxes, positionNumber, type FramedPosition, type PositionAxisKey, type PositionPoint } from './positionFrames'
 import { fmtMachineLength, fmtMachineDiagnostic, unitLabel } from '../ui/unitFormat'
 import { GRBL_CONFIG } from '../post/dialects/grbl'
@@ -714,6 +715,9 @@ interface GcodeSpindleWord {
  *  the machine has no output for it. */
 interface GcodeCoolantWord extends GcodeCoolantState {
   line: number
+  /** A preserved explicit standard command after an opaque macro. */
+  standardCode?: 7 | 8 | 9
+  listedCommand?: GcodeListedOutputCommand
 }
 
 interface ProgramPartsRun {
@@ -815,6 +819,19 @@ interface ToolpathProgramReload {
 }
 let toolpathProgramReload: ToolpathProgramReload | null = null
 
+/**
+ * WO-2772: THE FILE HIS LOAD NAMED, REFUSED FOR A REASON OUTSIDE THE FILE.
+ * The machine's travel, a work offset, the position, a tool length, a G28/G30
+ * point, the rapid rate, the declared controller - each fixed on the machine,
+ * the Tools tab or the Definition page, never by another file. Kept only when
+ * nothing else is loaded; the header names it, and CYCLE START reads it again
+ * against the machine as it stands (`loadedFileFitRefusal`) and arms it from
+ * line 1 the moment it fits. It is the file, never a remembered verdict. A
+ * file the reader refuses is not kept: only a different file cures that.
+ */
+type FileRefusedAtLoad = Pick<ToolpathProgramReload, 'name' | 'text' | 'context' | 'runThroughOffsetChanges' | 'runFrom'>
+let fileRefusedAtLoad: FileRefusedAtLoad | null = null
+
 /** The file the file door staged and still names as the loaded program, or
  *  null (a text-door program, another controller, another load). An MDI line
  *  staged over the file leaves it the loaded program - `fileUnderMdiLine`. */
@@ -855,13 +872,14 @@ function currentFileDoorProgram(): ToolpathProgramReload | null {
  * state comes back. A line a held program's own macro sends keeps the old
  * WO-2141 record only.
  */
-let programUnderMdiLine: {
+type ProgramUnderMdiLine = {
   controller: MachineController
   label: string
   /** The loaded program's name, which the job keeps. */
   name: string
   /** The file door's record of it; null for a file waiting for its work
-   *  offsets (WO-1980), which is not on the board to begin with. */
+   *  offsets (WO-1980), or (WO-2826) a file a Load refused for a reason
+   *  outside it - neither is on the board to begin with. */
   reload: ToolpathProgramReload | null
   keepsFile: boolean
   ended: boolean
@@ -871,11 +889,19 @@ let programUnderMdiLine: {
   restored: boolean
   /** The loaded program as it stood before the first MDI line over it. */
   before: { job: ReturnType<typeof store>['job']; readiness: ReturnType<typeof store>['programReadiness']; armed: boolean } | null
-} | null = null
+  /** WO-2833 round 8: his Load, requested while the line moved, retired this
+   *  program (`beginCandidateLoad`): nothing of it is put back - the line
+   *  stays an MDI line over it until it ends, then the screen names nothing. */
+  retired?: true
+  /** WO-2833 round 9: `before` as it stood when his waiting Load retired it -
+   *  what a cancel of that Load puts back (`putBackProgramRetiredByWaitingLoad`). */
+  beforeRetired?: ProgramUnderMdiLine['before']
+}
+let programUnderMdiLine: ProgramUnderMdiLine | null = null
 
 function fileUnderMdiLine(): ToolpathProgramReload | null {
   const under = programUnderMdiLine
-  if (!under || under.reload === null) return null
+  if (!under || under.reload === null || under.retired) return null
   if (under.keepsFile) return mdiLineOverLoadedProgram(controller) ? under.reload : null
   const s = store()
   if (toolpathProgramReload !== null || under.reload.controller !== controller || s.programText !== null) return null
@@ -892,7 +918,8 @@ function mdiLineOverLoadedProgram(ctrl: MachineController | null): boolean {
   if (s.programText !== null || s.job.name !== under.name) return false
   return under.reload !== null
     ? toolpathProgramReload === null
-    : programAwaitingOffsets?.controller === ctrl && programAwaitingOffsets.name === under.name
+    : (programAwaitingOffsets?.controller === ctrl && programAwaitingOffsets.name === under.name)
+      || fileRefusedAtLoad?.name === under.name
 }
 
 /** WO-2234: the MDI line over the loaded program has ended (or will never
@@ -925,6 +952,9 @@ function settleProgramAfterMdiLine(
   release?: () => boolean,
 ): boolean | null {
   const under = programUnderMdiLine
+  // The operator already chose a replacement; do not restage the old file first.
+  if (loadAwaitingMdi?.controller === ctrl
+    || (mdiLoadBeingReleased && mdiLoadBeingReleased.under === under)) return null
   if (!under || !under.keepsFile || !under.ended || under.controller !== ctrl) return null
   // Another load since the line owns the screen (including this file's own
   // re-stage, once it is on the board).
@@ -938,6 +968,14 @@ function settleProgramAfterMdiLine(
     && !ctrl.resetInProgress()
     && ctrl.machineState() === 'idle'
     && !estopNeedsReset()
+  // WO-2833 round 8: a program his Load retired while the line moved (the
+  // Load refused leaving its name on screen): nothing goes back - the screen
+  // names nothing once the board has settled. Round 9: a canceled Load put
+  // it back first (`putBackProgramRetiredByWaitingLoad`), so it is staged.
+  if (under.retired) {
+    if (settled) retireProgramBeforeLoad()
+    return null
+  }
   const reload = under.reload
   if (!under.before?.armed || reload === null) {
     if (settled && !under.restored && under.before) {
@@ -1586,8 +1624,8 @@ function takeOperatorStop(target: MachineController): void {
 let programClampPause: {
   run: ProgramPartsRun
   boundaryIndex: number
-  /** Where it parked (WO-2437 fix round): CYCLE START or Continue goes back
-   *  here first when the operator moved the machine at the stop. */
+  /** Where it parked (WO-2437 fix round): Continue goes back here first
+   *  when the operator moved the machine at the stop. */
   park?: { park: ParkPosition; safeZMachine: number | null }
 } | null = null
 
@@ -1669,8 +1707,10 @@ function programBoundaryMacroBlocksCycleStart(ctrl: MachineController): boolean 
 }
 
 /** The clamp card owns release of its held boundary: CYCLE START never
- * reaches either multipart resume door past it. WO-2437 fix round: once it has
- * parked, CYCLE START is the card's Continue (`continueClampPauseByCycleStart`). */
+ * reaches either multipart resume door past it. WO-2773 (Operator 2026-10-13,
+ * "A - Continue on both"): the card's Continue is its one door, as the guided
+ * tool change's is - CYCLE START and the step are refused
+ * (`refuseCycleStartAtClampPause`). */
 function programClampPauseBlocksCycleStart(ctrl: MachineController): boolean {
   return programClampPause?.run === programPartsRun
     && programClampPause.run.controller === ctrl
@@ -1684,8 +1724,8 @@ function programGuidedToolChangeBlocksCycleStart(ctrl: MachineController): boole
 /** WO-2031: who owns the held program's release, as `cycleResume` and
  * `stepJob` decide it below - the same checks in the same order, so the
  * transport header and CYCLE START show the door the session opens:
- * - 'clamp-card': the clamp card's Continue releases it, and once it has
- *   parked CYCLE START and the step do the same (WO-2437 fix round).
+ * - 'clamp-card': both refused; the clamp card's Continue releases it
+ *   (WO-2773, as the guided tool change below).
  * - 'boundary-macro': the step is refused; CYCLE START continues the macro
  *   only while it waits at hold() (`continueHeldMacro`).
  * - 'tool-change-card': both refused; the guided card's Continue releases it.
@@ -2129,6 +2169,203 @@ export function installLiveSpindleOverrideRouting(target: MachineController): vo
     if (activeSpindleCommand?.controller === target) activeSpindleCommand = null
     spindleOff()
   }
+}
+
+/**
+ * WO-2669: A RAPID OVERRIDE ON A CONTROLLER THAT HAS NONE.
+ *
+ * The owner, 2026-10-07: "Really we have no way to override the rapid speed?" The
+ * AXBB-E bridge declares `overrides.rapid: false`, and the board agrees: JRO
+ * does nothing to program G0, and FRO scales G0 and G1 alike (board run
+ * 2026-10-13, src/tests/evidence/WO-2669/hardware-characterization.md). The owner
+ * chose route A (card, 2026-10-13 9:09 PM CT): the app sends each G0 at the
+ * machine rapid x Rapid %. Cutting moves keep their feed; Feed % still applies
+ * on top on the board, as it always did.
+ *
+ * So for a program controller that declares no rapid override, the session
+ * owns the percentage: the Rapid control sets it, every program handed to the
+ * controller carries it on the lines its builder marked `rapid`, and status
+ * reports it where the controller reports null. It reaches every G0 not yet
+ * sent: a part of a running program handed over at its boundary, a re-stage,
+ * every later load. Moves already sent keep the speed they went out at - a
+ * running stream is never swapped under it (the surface mesh's rule). A
+ * program staged but not started is handed over again at once, so the
+ * operator's Cycle Start runs it at the Rapid % the panel shows.
+ *
+ * Every other controller keeps what it does today: GRBL and LinuxCNC have
+ * their own rapid override, and the simulator declares no `overrides` at all.
+ */
+interface AppRapidOverride {
+  controller: MachineController
+  /** The Rapid % on the panel: what the next program handed over goes out at. */
+  percent: number
+  /** The program as the session handed it over, before the percentage, that
+   *  the BOARD last took - never one it refused or has not answered yet. */
+  lastSent: MachineProgram | null
+  /** The Rapid % `lastSent` went out at: what the board runs on Cycle Start. */
+  boardPercent: number
+  /** The newest load handed over whose board answer is still awaited. */
+  pending: { seq: number; program: MachineProgram; percent: number } | null
+  sentSeq: number
+  heldSeq: number
+  /** Hand `program` over at `percent`; `refused` hears the board's refusal,
+   *  and whether that load was still the newest one handed over. */
+  handOver: ((program: MachineProgram, refused?: (reason: string, newest: boolean) => void) => { ok: boolean; reason: string | null }) | null
+}
+let appRapidOverride: AppRapidOverride | null = null
+
+function appOwnsRapidOverride(target: MachineController | null): boolean {
+  if (!target || target.capabilities.machineProgram !== true) return false
+  const declared = (target.capabilities as ControllerCapabilities & { overrides?: { rapid?: unknown } }).overrides
+  return declared?.rapid === false
+}
+
+/** `program` as it goes out at `percent` of the machine rapid. Only lines the
+ *  builder marked as rapids change; their feed is the resolved machine rapid. */
+function programAtRapidPercent(program: MachineProgram, percent: number): MachineProgram {
+  if (percent === 100) return program
+  return {
+    ...program,
+    steps: program.steps.map((step) => (
+      step.kind === 'line' && step.rapid === true ? { ...step, feedMmMin: step.feedMmMin * percent / 100 } : step
+    )),
+  }
+}
+
+function requestedRapidPercent(current: number, change: OverrideChange): number {
+  const asked = change.to === 'reset' ? 100
+    : change.to === 'percent' ? change.percent
+      : current + change.direction * (change.coarse ? 10 : 1)
+  // Never faster than the machine rapid, never a zero feed.
+  return Number.isFinite(asked) ? Math.min(100, Math.max(1, Math.round(asked))) : current
+}
+
+/** The machine rapid at `percent`, and the rapid itself, as the operator reads
+ *  them - null when the machine record names no usable rapid. */
+function appRapidSpeeds(percent: number): { at: string; of: string } | null {
+  const rapidRate = controlMachine(useCamStore.getState()).rapidRate
+  if (typeof rapidRate !== 'number' || !Number.isFinite(rapidRate) || rapidRate <= 0) return null
+  const mm = (value: number) => String(Number(value.toFixed(1)))
+  return { at: mm(rapidRate * percent / 100), of: mm(rapidRate) }
+}
+
+function showAppRapidPercent(state: AppRapidOverride, percent: number): void {
+  state.percent = percent
+  useMachineControl.setState((s) => ({
+    overrides: { ...s.overrides, rapid: percent },
+    overrideAvailability: { ...s.overrideAvailability, rapid: 'supported' },
+  }))
+}
+
+function setAppRapidPercent(state: AppRapidOverride, change: OverrideChange): void {
+  const target = state.controller
+  const previous = state.percent
+  const percent = requestedRapidPercent(previous, change)
+  showAppRapidPercent(state, percent)
+  if (percent === previous) return
+  const speeds = appRapidSpeeds(percent)
+  const speed = speeds
+    ? `goes out at ${speeds.at} mm/min (${percent}% of ${speeds.of})`
+    : `goes out at ${percent}% of the machine rapid`
+  // The board refused the program staged again at `percent`. The panel shows
+  // what the board will run - the newest load still awaiting its answer, else
+  // the rapid of the last program the board TOOK (never the percent on screen
+  // at the press: two refused changes inside one round trip would leave the
+  // second showing the first's rapid, which the board never held) - unless the
+  // operator moved on since.
+  const boardBound = () => state.pending?.percent ?? state.boardPercent
+  const keptBoards = () => {
+    if (state.percent === percent) showAppRapidPercent(state, boardBound())
+  }
+  // The newest program handed over, else the one the board holds: a program the
+  // board refused is never staged again.
+  const program = state.pending?.program ?? state.lastSent
+  let tail = ''
+  if (hasActiveProgramJob(target)) {
+    tail = ' Moves already sent keep the speed they went out at.'
+  } else if (
+    program !== null && !probeCycleActive && state.handOver
+    && target.jobProgress().phase === 'ready'
+  ) {
+    const resent = state.handOver(program, (reason, newest) => {
+      // An older re-stage's refusal leaves the newer one to decide.
+      if (newest) keptBoards()
+      store().pushConsole('rx', `Rapid ${percent}%: the board kept the loaded program at ${state.boardPercent}% - ${reason}`, 'warn')
+    })
+    if (resent.ok) {
+      tail = ' The loaded program was staged again at this rapid.'
+    } else {
+      keptBoards()
+      tail = ` The loaded program keeps ${boardBound()}%: ${resent.reason ?? 'the controller did not take it again.'}`
+    }
+  }
+  store().pushConsole('tx', `Rapid ${percent}%: every G0 not yet sent to the board ${speed}; cutting moves keep their feed.${tail}`, 'info')
+}
+
+function installAppRapidOverrideRouting(target: MachineController): void {
+  const state: AppRapidOverride = {
+    controller: target, percent: 100, lastSent: null, boardPercent: 100,
+    pending: null, sentSeq: 0, heldSeq: 0, handOver: null,
+  }
+  appRapidOverride = state
+  const setOverride = target.setOverride.bind(target)
+  target.setOverride = (change) => {
+    if (change.kind !== 'rapid' || !appOwnsRapidOverride(target)) {
+      setOverride(change)
+      return
+    }
+    setAppRapidPercent(state, change)
+  }
+  if (!target.loadProgram) return
+  const loadProgram = target.loadProgram.bind(target)
+  state.handOver = (program, refused) => {
+    const percent = state.percent
+    const result = loadProgram(programAtRapidPercent(program, percent))
+    if (!result.ok) return result
+    const load = { seq: ++state.sentSeq, program, percent }
+    state.pending = load
+    // What the board holds moves only on its own "took it": "accepted for
+    // sending" is not that, and a refusal leaves it holding what it held.
+    const answered = (answer: { ok: boolean; reason: string | null }) => {
+      if (state.pending === load) state.pending = null
+      if (answer.ok) {
+        if (load.seq > state.heldSeq) {
+          state.heldSeq = load.seq
+          state.lastSent = program
+          state.boardPercent = percent
+        }
+        return
+      }
+      refused?.(answer.reason ?? 'the controller refused this program without giving a reason.', load.seq === state.sentSeq)
+    }
+    const verdict = boardLoadVerdict(target)
+    if (verdict === null) {
+      answered({ ok: true, reason: null })
+      return result
+    }
+    const receiptToken = captureBackendReceipt(target)
+    void verdict.then((answer) => { if (receiptIsCurrent(receiptToken)) answered(answer) })
+    return result
+  }
+  target.loadProgram = (program) => (
+    appOwnsRapidOverride(target) && state.handOver ? state.handOver(program) : loadProgram(program)
+  )
+}
+
+/** WO-2669: the Overrides panel's one line on what Rapid does where the session
+ *  owns it; null where the controller has its own rapid override. */
+export function appRapidOverrideNote(): string | null {
+  const owned = appRapidOverride
+  if (!owned || owned.controller !== controller || !appOwnsRapidOverride(controller)) return null
+  const speeds = appRapidSpeeds(owned.percent)
+  return `G0 at ${speeds ? `${speeds.at} mm/min` : `${owned.percent}% of rapid`}, from next moves sent`
+}
+
+/** The controller's overrides with the session's Rapid % where it owns it. */
+function overridesWithAppRapid(overrides: MachineStatus['overrides']): MachineStatus['overrides'] {
+  const owned = appRapidOverride
+  if (!overrides || overrides.rapid !== null || !owned || owned.controller !== controller) return overrides
+  return appOwnsRapidOverride(controller) ? { ...overrides, rapid: owned.percent } : overrides
 }
 
 function stopGeometryProgramSpindle(target: MachineController): void {
@@ -3296,6 +3533,9 @@ export function currentResolvedMachineMotion(): ResolvedMachineMotion {
 type JobLifecycleEvent = 'started' | 'paused' | 'resumed' | 'stopped' | 'completed' | 'failed'
 
 function applyJobLifecycleEvent(event: JobLifecycleEvent, fault: JobFault | null): void {
+  if (event === 'completed' && loadAwaitingMdi) loadAwaitingMdi.completed = true
+  if (event === 'stopped' || event === 'failed') cancelLoadAwaitingMdi(`the MDI line ${event}`)
+  scheduleLoadAwaitingMdi()
   // WO-1275: a job that paused, stopped, failed or finished has no staged
   // motion left worth releasing. Dropping the pending release first means the
   // gate can never start a cut on the far side of a terminal edge.
@@ -4392,7 +4632,7 @@ function beginProgramClampPause(
     safeZMachine,
     awaitingMessage:
       `Parked at "${park.label}". Screw down the material without moving its zero, then press `
-      + 'CYCLE START or Continue to run the rest.',
+      + 'Continue to run the rest.',
   })
 }
 
@@ -4668,14 +4908,19 @@ async function returnToClampParkThenContinue(
   return continueProgramClampPause(pending, startMode)
 }
 
-/** WO-2437 fix round (rehearsal 2026-10-02): CYCLE START at a program's clamp
- * pause. Parked and waiting, it is the card's Continue - the operator stop's
- * own words are "press Cycle Start" - and the card's Continue stays. While the
- * park still moves, or after it failed, the card answers as before. */
-function continueClampPauseByCycleStart(startMode: 'continuous' | 'single-block'): boolean {
-  const tc = store().toolChange
-  if (tc?.mode !== 'clampPause' || tc.step !== 'awaiting-swap') return false
-  return continueClampPause(startMode)
+/** WO-2773 (Operator 2026-10-13, "A - Continue on both"): CYCLE START at a
+ * program's clamp pause. The card's Continue is the one door, as on the guided
+ * tool-change card (WO-2031: the operator explicitly starts the resume after
+ * the hands were in the machine). The press is refused and says so; the card,
+ * the park and the held program stay as they were. Before this the press was
+ * the card's Continue once parked (WO-2437 fix round, rehearsal 2026-10-02). */
+function refuseCycleStartAtClampPause(door: 'Cycle Start' | 'Single block step'): false {
+  store().pushConsole(
+    'tx',
+    `${door}: the Park + clamp card continues this program - screw down the material, then press Continue on the card.`,
+    'error',
+  )
+  return false
 }
 
 /** WO-2437 fix round (rehearsal 2026-10-02): the operator's Stop/Reset at a
@@ -4960,11 +5205,29 @@ function loadAndStartCurrentPart(
   if (spindleWord !== undefined) applyGcodeSpindleWord(run, spindleWord)
   const coolantWord = run.coolantWords?.get(run.partIndex)
   if (coolantWord !== undefined) {
-    const previous = run.coolantApplied ?? { flood: false, mist: false }
-    run.coolantApplied = coolantWord.outputs === undefined
-      ? { flood: coolantWord.flood, mist: coolantWord.mist }
-      : { flood: coolantWord.flood, mist: coolantWord.mist, outputs: coolantWord.outputs }
-    applyGcodeCoolantWord(coolantWord, previous, run.spindleIntent?.rpm ?? 0)
+    const previous = { ...(run.coolantApplied ?? { flood: false, mist: false }) }
+    let effective = coolantWord
+    if (coolantWord.standardCode === 7 || coolantWord.standardCode === 8) {
+      const channel = coolantWord.standardCode === 7 ? 'mist' : 'flood'
+      // Assert only the explicitly named channel. Neither inherited channel
+      // state nor cached listed outputs authorize replaying a macro's effects.
+      effective = { ...previous, line: coolantWord.line, [channel]: true }
+      previous[channel] = false
+    } else if (coolantWord.standardCode === 9) {
+      effective = { line: coolantWord.line, flood: false, mist: false, outputs: [], standardCode: 9 }
+      // An explicit all-off still commands the existing text-controller path
+      // when the opaque macro switched outputs on behind a false cache.
+      previous.flood = previous.mist = true
+    } else if (coolantWord.listedCommand !== undefined) {
+      const outputs = new Set(previous.outputs ?? [])
+      for (const code of coolantWord.listedCommand.on) outputs.add(code)
+      for (const code of coolantWord.listedCommand.off) outputs.delete(code)
+      effective = { ...previous, line: coolantWord.line, outputs: [...outputs].sort((a, b) => a - b), listedCommand: coolantWord.listedCommand }
+    }
+    run.coolantApplied = effective.outputs === undefined
+      ? { flood: effective.flood, mist: effective.mist }
+      : { flood: effective.flood, mist: effective.mist, outputs: effective.outputs }
+    applyGcodeCoolantWord(effective, previous, run.spindleIntent?.rpm ?? 0)
   }
   const outcome = run.controller.loadProgram?.(next)
   if (!outcome?.ok) {
@@ -5139,6 +5402,13 @@ function applyGcodeCoolantWord(
   previous: GcodeCoolantState,
   rpm: number,
 ): void {
+  const machine = controlMachine(useCamStore.getState())
+  if (word.listedCommand !== undefined) {
+    // The file's exact word owns its targets. A shared off word still sends
+    // once; neither stale aggregate state nor aliases reconstruct the command.
+    applyProgramListedOutputs(word.line, machine, word.listedCommand.on, word.listedCommand.off, word.listedCommand.code)
+    return
+  }
   const asked = describeCoolantAsk(word)
   const outputsNow = word.outputs ?? []
   const outputsBefore = previous.outputs ?? []
@@ -5147,7 +5417,6 @@ function applyGcodeCoolantWord(
   // commands nothing a second time; an `M9` stops the channels that were on.
   const changed = COOLANT_WORD_ACTIONS.filter(([channel]) =>
     (off ? previous[channel] : word[channel] && !previous[channel]))
-  const machine = controlMachine(useCamStore.getState())
   // WO-1650: THE MACHINE'S OWN LISTED OUTPUTS (a pump on M10, air on M11) go
   // out by their own words, through the one resolver the typed word uses. The
   // shared off word below stops them with everything else.
@@ -5169,7 +5438,8 @@ function applyGcodeCoolantWord(
   if (switchProgramOutputWord(word, off, changed.map(([channel]) => channel))) return
   const stated = changed.filter(([channel]) => statedCoolantCapability(machine, channel) === true)
   // An M9 that stops only listed outputs still goes out as the shared stop.
-  const stopsListedOutputs = off && outputsBefore.length > 0
+  const stopsListedOutputs = off && (outputsBefore.length > 0
+    || (word.standardCode === 9 && (machine?.controllerDefinition?.outputs?.length ?? 0) > 0))
   if (stated.length === 0 && !stopsListedOutputs) {
     store().pushConsole(
       'rx',
@@ -5229,6 +5499,7 @@ function applyProgramListedOutputs(
   machine: MachineConfig | null | undefined,
   turnedOn: readonly number[],
   turnedOff: readonly number[],
+  exactCode?: number,
 ): void {
   const outputs = machine?.controllerDefinition?.outputs ?? []
   const offWordOf = (onCode: number): number | null => {
@@ -5236,10 +5507,10 @@ function applyProgramListedOutputs(
     const code = listed ? Number(listed.offCode!.slice(1)) : NaN
     return Number.isInteger(code) ? code : null
   }
-  const codes = [
+  const codes = exactCode === undefined ? [
     ...turnedOn,
     ...turnedOff.map(offWordOf).filter((code): code is number => code !== null),
-  ]
+  ] : [exactCode]
   if (codes.length === 0) return
   const ctrl = getMachineController()
   if (!ctrl.capabilities.gcodeText && typeof ctrl.setOutput === 'function') {
@@ -6361,7 +6632,7 @@ function runMdiWords(text: string, words: readonly GcodeWord[], ctrl: MachineCon
   if (mdiWordsStageAProgram(words)) {
     const between = programOwnActionBetweenParts(text)
     if (between !== null) return between
-    return stageMdiMotion(text, text)
+    return stageMdiMotion(text, text, true)
   }
 
   // EVERY CHARACTER THE OPERATOR TYPED IS READ, NOT ONLY THE WORDS.
@@ -6559,7 +6830,7 @@ function runMdiOutputWords(
  * confirmed)" while the Vacuum button stayed dark, because the button lit from
  * its own remembered press. The button, MDI, a macro, a program line and a
  * spindle relay all switch through this, so whoever switched the pin, the
- * state is the board's answer: confirmed is the requested state; unconfirmed is
+ * state is the board's raw level, interpreted by each output's polarity; it is
  * whatever the board last read (unknown when it could not say); superseded
  * leaves it to the newer command; a refused write changed nothing we know.
  */
@@ -6573,7 +6844,7 @@ function switchOutputPin(ctrl: MachineController, sw: MachineOutputSwitch): Prom
   const token = captureBackendReceipt(ctrl)
   void receipt.then((r) => {
     if (!receiptIsCurrent(token) || !r.ok || r.confirmation === 'superseded') return
-    store().setOutputPin(key, r.confirmation === 'confirmed' ? sw.on : r.readback?.on ?? null)
+    store().setOutputPin(key, r.readback?.level ?? null)
   })
   return receipt
 }
@@ -6610,7 +6881,7 @@ function readOutputPins(pins: readonly PinRef[]): void {
     const pending = ctrl.readOutput({ port: pin.port, pin: pin.pin, negate: pin.negate ?? false })
     void pending?.then((readback) => {
       if (!receiptIsCurrent(token) || (outputPinWrites.get(key) ?? 0) !== writes) return
-      store().setOutputPin(key, readback?.on ?? null)
+      store().setOutputPin(key, readback?.level ?? null)
     })
   }
 }
@@ -7193,7 +7464,12 @@ function resetMdiHeldFeed(ctrl: MachineController): void {
   mdiHeldFeedMmMin.delete(ctrl)
 }
 
-function stageMdiMotion(label: string, text: string): boolean {
+let machineActionSending = false
+
+function stageMdiMotion(label: string, text: string, singleLine = false): boolean {
+  // Macro/action programs share this loader but do not lend their job to Load.
+  const typedLine = singleLine && !machineActionSending && !text.includes('\n') && !programBoundaryMacroSending
+    && !programOwnActionInFlight && activeMacroRun() === null && !probeCycleActive
   const loaded = store().job.name
   const replaced = loaded !== null && loaded !== mdiStagedLine
   // THE PROGRAM END THE TYPED LINE DOES NOT CARRY. The shared reader requires
@@ -7241,7 +7517,10 @@ function stageMdiMotion(label: string, text: string): boolean {
     && s.programText === null && s.job.name === programAwaitingOffsets.name
     ? programAwaitingOffsets
     : null
-  const keepsFile = (fileUnder !== null || waiting !== null) && !hasActiveProgramJob(ctrl)
+  // WO-2826 (desk kit s4): and WO-2772's file a Load refused for a reason
+  // outside it - the T7 M6 typed to fix that reason leaves it the loaded file.
+  const refusedHeld = fileUnder === null && waiting === null && loadedFileRefusedAtLoad()
+  const keepsFile = (fileUnder !== null || waiting !== null || refusedHeld) && !hasActiveProgramJob(ctrl)
   // The program as it stood before the FIRST line typed over it: a second line
   // before the first was put back keeps that first picture.
   const previous = programUnderMdiLine
@@ -7260,6 +7539,7 @@ function stageMdiMotion(label: string, text: string): boolean {
     },
     onStaged: () => {
       mdiStagedLine = label
+      mdiLineForLoad = typedLine ? { controller: ctrl, label, revision: geometryProgramLoadRevision } : null
       mdiRowAwaitingStart = null
       programUnderMdiLine = keepsFile
         ? {
@@ -7987,7 +8267,11 @@ function handleConnectionPhase(
     || (phase === 'connected' && previousPhase === 'disconnected')
   const endsSession = phase === 'disconnected'
   const sessionBoundary = beginsSession || endsSession
-  if (sessionBoundary) connectionRevision++
+  if (sessionBoundary) {
+    cancelLoadAwaitingMdi('the machine connection changed')
+    mdiLineForLoad = null
+    connectionRevision++
+  }
   // A waiting macro belongs to the session it started in, and EVERY session
   // boundary ends it - not just a disconnect. A SWAP (connecting a bridge over
   // a live simulator) publishes no `disconnected` at all: it goes connected ->
@@ -9106,6 +9390,8 @@ export function buildContractEvents(scope?: BackendEventScope): ControllerEvents
       watchProbeInput(scope?.controller ?? null, status)
       followOperatorMotionStop(scope?.controller ?? null, status.state)
       applyContractStatus(status)
+      if (status.state === 'alarm' || status.inputs?.estop === true) cancelLoadAwaitingMdi('the machine entered alarm or E-STOP')
+      scheduleLoadAwaitingMdi()
       const announcement = scope?.homeAnnouncement
       if (announcement) {
         if (status.state === 'home') announcement.sawHome = true
@@ -9215,6 +9501,7 @@ export function buildContractEvents(scope?: BackendEventScope): ControllerEvents
         // boundary used by disconnect/connect, discard a not-yet-sent intent,
         // and let this reopen own the slot immediately.
         const machineId = controlMachineId()
+        cancelLoadAwaitingMdi('the controller reopened')
         connectionRevision++
         if (openWorkOffsetWrite?.machineId === machineId) openWorkOffsetWrite = null
         setWorkOffsetWriteInFlight(machineId, false)
@@ -9318,7 +9605,15 @@ export function buildContractEvents(scope?: BackendEventScope): ControllerEvents
       if (event === 'stopped' || event === 'completed' || event === 'failed') terminalJobEventsSeen += 1
       // WO-2153: the board's answer to a typed line's start, written before the
       // run's own lifecycle rows so the line reads first.
-      if (event === 'started') jobStartedEvents += 1
+      if (event === 'started') {
+        jobStartedEvents += 1
+        // A long typed arc can span board-sized parts; their starts still
+        // belong to the same line and must not cancel its waiting Load.
+        if (loadAwaitingMdi && programPartsRun && programPartsRun.controller === scope?.controller
+          && programPartsRun.started && programPartsRun.partIndex > 0) {
+          loadAwaitingMdi.starts = jobStartedEvents
+        }
+      }
       // WO-2651 item 11: a new job's first frames may still name the last one's move.
       if (event === 'started') retainedMoveIdUnproven = lastProgramMoveIdReported
       settleMdiRowAwaitingStart(scope?.controller ?? null, event === 'started')
@@ -9467,8 +9762,9 @@ function applyContractStatus(status: MachineStatus): void {
   // WHOLE object to null if any single channel was null, and the store then
   // kept its previous value - so on a controller with no rapid override (the
   // AXBB-E) the feed and spindle overrides it DOES report were discarded and
-  // the panel sat frozen at 100%.
-  const overrides = status.overrides
+  // the panel sat frozen at 100%. WO-2669: where the session owns the rapid
+  // override, its Rapid % stands in for that null.
+  const overrides = overridesWithAppRapid(status.overrides)
   store().applyStatus(
     status.state,
     status.subState,
@@ -10492,6 +10788,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
   scope.phase = next.connectionPhase()
   beginBackendGeneration(scope)
   installLiveSpindleOverrideRouting(next)
+  installAppRapidOverrideRouting(next)
   // WO-1349: homing is motion too. JogPanel calls these controller methods
   // directly, so enforce the session E-STOP latch here at the common backend
   // boundary. A clean idle status does not clear this latch; only the
@@ -10692,7 +10989,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     if (refuseUnderEstopLatch('Resume')) return false
     // WO-2259: a held tool-change park owns this press, whichever door it came by.
     if (guidedParkPausedByOperator(next)) return carryOnGuidedPark(next, cycleResume)
-    if (programClampPauseBlocksCycleStart(next)) return continueClampPauseByCycleStart('continuous')
+    if (programClampPauseBlocksCycleStart(next)) return refuseCycleStartAtClampPause('Cycle Start')
     return releaseThroughToolChange(() => runWithGeometryProgramSpindle(next, resumeJob))
   }
   const feedHold = next.feedHold.bind(next)
@@ -10720,8 +11017,8 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     // WO-2259: so does a guided flow's park held by Feed Hold - the park
     // carries on and nothing of the program is released.
     if (guidedParkPausedByOperator(next)) return carryOnGuidedPark(next, cycleResume)
-    // WO-2437 fix round: at a parked clamp pause CYCLE START is its Continue.
-    if (programClampPauseBlocksCycleStart(next)) return continueClampPauseByCycleStart('continuous')
+    // WO-2773: the clamp card's Continue is its one door; CYCLE START is refused.
+    if (programClampPauseBlocksCycleStart(next)) return refuseCycleStartAtClampPause('Cycle Start')
     // WO-1652: the boundary's macro is still running - CYCLE START continues
     // it at a hold() and never releases the program from under it.
     if (programBoundaryMacroBlocksCycleStart(next)) return continueHeldMacro()
@@ -10747,7 +11044,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     const kept = startingKeptStopResume ? null : liveKeptStop(next)
     if (kept !== null && kept.resumed === null) return startFromKeptStop(next, kept, () => next.stepJob())
     restateSetupContinuation(next)
-    if (programClampPauseBlocksCycleStart(next)) return continueClampPauseByCycleStart('single-block')
+    if (programClampPauseBlocksCycleStart(next)) return refuseCycleStartAtClampPause('Single block step')
     if (programBoundaryMacroBlocksCycleStart(next)) return false
     const releaseStep = (): boolean => releaseThroughToolChange(() => runWithGeometryProgramSpindle(next, () => {
       const run = programPartsRun
@@ -10764,6 +11061,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
   recordWatchedMoves(next)
   const stopJob = next.stopJob.bind(next)
   next.stopJob = () => {
+    cancelLoadAwaitingMdi('Stop was pressed')
     scope.homeAnnouncement = undefined
     const staleRun = runReadsOverIdleController(next)
     const releaseHold = !sessionStopInProgress && stopEndsBoardHold(next)
@@ -10798,6 +11096,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     }
   }
   next.reset = () => {
+    cancelLoadAwaitingMdi('Reset was pressed')
     scope.homeAnnouncement = undefined
     const staleRun = runReadsOverIdleController(next)
     stopRunningProbeCycle()
@@ -10820,6 +11119,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
   }
   const emergencyStop = next.emergencyStop.bind(next)
   next.emergencyStop = () => {
+    cancelLoadAwaitingMdi('E-STOP was pressed')
     noteMotionStop('estop')
     cancelSpindleSpeedWait()
     forgetKeptStopOnOperatorStop(next)
@@ -12427,6 +12727,19 @@ export function simulatedToolSetterTopZ(statedZ: number, table: MachineToolTable
   return typeof measured === 'number' && Number.isFinite(measured) && measured < statedZ ? measured : statedZ
 }
 
+/** WO-2779: the radius the simulated probe touches with - the tool in the
+ *  spindle, as the Probing screen's Tip radius starts from it (its library
+ *  entry's diameter, settled by `machineId`'s tool table, else that table's
+ *  diameter for the T) / 2. 0, a point, when no diameter is known. Simulator
+ *  only; read on every touch, so a tool change applies to the next one. */
+export function simulatedProbeTipRadiusMm(machineId: string, activeTool: number | null = store().activeTool): number {
+  if (activeTool === null) return 0
+  const tableDiaMm = findTool(useMachineToolTable.getState().tableFor(machineId), activeTool)?.dia ?? null
+  const entry = libraryToolForActive(activeTool, useCamStore.getState().toolLibrary ?? [], tableDiaMm)
+  const diaMm = entry && entry.diameter > 0 ? entry.diameter : tableDiaMm
+  return diaMm !== null && Number.isFinite(diaMm) && diaMm > 0 ? diaMm / 2 : 0
+}
+
 async function connectSimulatorRegistryBackend(context: BackendConnectContext): Promise<MachineController> {
   const cam = useCamStore.getState()
   const sessionMachine = context.machine
@@ -12452,6 +12765,7 @@ async function connectSimulatorRegistryBackend(context: BackendConnectContext): 
     settings: {},
     datumKnown: false,
   })
+  let defaultG54: Partial<MachinePosition> | null = null
   const installed = context.install((events) => new SimulatedController(events, {
     dialect: declaredController.ok ? declaredController.dialect : undefined,
     cutTimeMotion: machineCutTimeMotion(sessionMachine),
@@ -12480,15 +12794,26 @@ async function connectSimulatorRegistryBackend(context: BackendConnectContext): 
     workOffsets: Object.fromEntries(WCS_SLOTS.map((wcs) => {
       const stored = cam.machineWorkOffsets[sessionMachine.id]?.[wcs]?.offset
       const fresh = wcs === 'G54' ? defaultSimulatorG54(sessionMachine.id, stored, simulatorMotion.envelope) : null
+      if (fresh) defaultG54 = fresh
       return [wcs, fresh ?? stored ?? {}]
     })),
     toolSetter: setter && setterTopZ !== null
       ? { x: setter.x, y: setter.y, topZ: setterTopZ, diameter: SIMULATED_TOOL_SETTER_DIAMETER_MM }
       : null,
+    // WO-2779: the probe touches with the tool in the spindle's radius, so a
+    // side touch stops one radius short of the wall as on the machine.
+    probeTipRadiusMm: () => simulatedProbeTipRadiusMm(sessionMachine.id),
   }))
   simulatedController = installed.controller
   await installed.controller.connect({ kind: 'none' })
-  if (installed.isCurrent()) runTransferCheck()
+  if (!installed.isCurrent()) return installed.controller
+  // WO-2775: the default G54 is the zero this simulated controller HOLDS from
+  // the moment it connects, so it is recorded exactly as a board's G54 report
+  // at connect - this session's stamp, never the durable record. Load's travel
+  // check, the tool-change confirmation and the file-door re-read then judge
+  // it like any reported zero. A stored G54 gets no default and no stamp.
+  if (defaultG54) markReportedWorkOffsetAxes('G54', defaultG54)
+  runTransferCheck()
   return installed.controller
 }
 
@@ -14888,6 +15213,161 @@ export type GcodeFileLoadOutcome =
   | { door: 'text'; load: LoadResult }
   | { door: 'program'; ok: boolean; reason: string | null }
 
+/** WO-2659: one Load intent, owned by one typed line on one connection.
+ * The board's completed edge is required; sent/acked moves and a stale Idle
+ * never prove that its queue can be replaced. Loading never starts the file. */
+type MdiLineForLoad = { controller: MachineController; label: string; revision: number }
+let mdiLineForLoad: MdiLineForLoad | null = null
+type DeferredLoadResult = { ok: boolean; reason: string | null }
+// A preparation result may be consumed only by its original Load and session.
+// `prepared` hands accepted synchronous loading back to its existing receipt fence.
+type DeferredSetupGuard = (prepared?: boolean) => DeferredLoadResult | null
+type PendingMdiLoad = {
+  controller: MachineController
+  receipt: ReturnType<typeof captureBackendReceipt>
+  line: MdiLineForLoad
+  revision: number
+  starts: number
+  name: string
+  completed: boolean
+  timer: ReturnType<typeof setTimeout>
+  load: (guard: DeferredSetupGuard) => void | Promise<void>
+  cancel: (reason: string) => void
+  preparesSetup: boolean
+}
+let loadAwaitingMdi: PendingMdiLoad | null = null
+
+// Hold old-file restoration through setup preparation as well as a file's
+// synchronous validation. Accepted staging retires that restoration below.
+type ReleasedMdiLoad = {
+  under: ProgramUnderMdiLine | null
+  waiting: PendingMdiLoad
+  preparing: boolean
+  canceledReason: string | null
+  finish: () => void
+}
+let mdiLoadBeingReleased: ReleasedMdiLoad | null = null
+
+function retireMdiForReplacementLoad(): void {
+  if (mdiLoadBeingReleased && mdiLoadBeingReleased.under === programUnderMdiLine) programUnderMdiLine = null
+}
+
+/** `replaced`: his newer Load (or Apply) ends the waiting one - it owns what
+ *  happens to the program beneath the line. Any other cancel puts back the
+ *  program the waiting Load retired (WO-2833 round 9). */
+function cancelLoadAwaitingMdi(why: string, replaced = false): void {
+  const released = mdiLoadBeingReleased
+  const waiting = loadAwaitingMdi ?? (released?.preparing && !released.canceledReason ? released.waiting : null)
+  if (!waiting) return
+  if (loadAwaitingMdi === waiting) loadAwaitingMdi = null
+  clearTimeout(waiting.timer)
+  if (!replaced) putBackProgramRetiredByWaitingLoad()
+  const reason = `Load of "${waiting.name}" canceled: ${why}. No replacement program was sent.`
+  if (released?.waiting === waiting) {
+    released.canceledReason = reason
+    // Cancellation settles the promise immediately. Release restoration after
+    // the canceling action has had its synchronous opportunity to replace it.
+    queueMicrotask(released.finish)
+  }
+  store().pushConsole('rx', reason, 'info')
+  waiting.cancel(reason)
+}
+
+function deferLoadAfterMdi(
+  name: string,
+  load: (guard: DeferredSetupGuard) => void | Promise<void>,
+  cancel: (reason: string) => void = () => {},
+  preparesSetup = false,
+  replaces = true,
+): boolean {
+  cancelLoadAwaitingMdi('another Load replaced the waiting request', replaces)
+  const ctrl = getMachineController()
+  const line = mdiLineForLoad
+  if (!line || line.controller !== ctrl || line.label !== mdiStagedLine || line.revision !== geometryProgramLoadRevision
+    || !(standaloneMdiJob() || mdiLineOverLoadedProgram(ctrl))
+    || !hasActiveProgramJob(ctrl) || ctrl.connectionPhase() !== 'connected'
+    || ctrl.machineState() === 'alarm' || ctrl.resetInProgress() || estopNeedsReset()
+    || probeCycleActive || activeMacroRun() !== null) return false
+  loadAwaitingMdi = {
+    controller: ctrl, receipt: captureBackendReceipt(ctrl), line,
+    revision: geometryProgramLoadRevision, starts: jobStartedEvents,
+    name, completed: false, load, cancel, preparesSetup,
+    // Same 30-second prior-motion settle budget as waitForProbePositioningIdle.
+    // Expiry cancels only Load, never the running motion.
+    timer: setTimeout(() => cancelLoadAwaitingMdi('the MDI line did not finish within 30 seconds'), 30_000),
+  }
+  store().pushConsole('rx', `Load of "${name}" waits for the MDI line to finish.`, 'info')
+  return true
+}
+
+function scheduleLoadAwaitingMdi(): void {
+  if (!loadAwaitingMdi) return
+  queueMicrotask(() => {
+    const waiting = loadAwaitingMdi
+    if (!waiting) return
+    const ctrl = waiting.controller
+    if (!receiptIsCurrent(waiting.receipt) || mdiLineForLoad !== waiting.line
+      || geometryProgramLoadRevision !== waiting.revision || jobStartedEvents !== waiting.starts) {
+      cancelLoadAwaitingMdi('the machine session or program changed')
+      return
+    }
+    if (ctrl.machineState() === 'alarm' || ctrl.resetInProgress() || estopNeedsReset()) {
+      cancelLoadAwaitingMdi('the controller is no longer ready')
+      return
+    }
+    if (!waiting.completed || ctrl.hasActiveJob() || ctrl.machineState() !== 'idle') return
+    loadAwaitingMdi = null
+    clearTimeout(waiting.timer)
+    store().pushConsole('rx', `The MDI line finished; loading "${waiting.name}".`, 'info')
+    const releasing: ReleasedMdiLoad = {
+      under: programUnderMdiLine, waiting, preparing: waiting.preparesSetup,
+      canceledReason: null, finish: () => {},
+    }
+    mdiLoadBeingReleased = releasing
+    const finish = () => {
+      if (mdiLoadBeingReleased !== releasing) return
+      mdiLoadBeingReleased = null
+      // WO-2833 round 9: a setup refused (or failed) while it was prepared
+      // retires the program beneath the line now; a canceled one does not.
+      if (releasing.preparing && !releasing.canceledReason) beginCandidateLoad()
+      // A candidate refused before staging still owes the original file its
+      // normal restoration. Never restore it across a connection boundary.
+      if (receiptIsCurrent(waiting.receipt)) settleProgramAfterMdiLine(ctrl)
+    }
+    releasing.finish = finish
+    const guard: DeferredSetupGuard = (prepared = false) => {
+      if (releasing.canceledReason) return { ok: false, reason: releasing.canceledReason }
+      if (mdiLoadBeingReleased !== releasing || !receiptIsCurrent(waiting.receipt)
+        || geometryProgramLoadRevision !== waiting.revision || jobStartedEvents !== waiting.starts) {
+        cancelLoadAwaitingMdi('the machine session or program changed')
+        return { ok: false, reason: releasing.canceledReason ?? 'Load canceled: the machine session or program changed.' }
+      }
+      if (prepared) {
+        releasing.preparing = false
+        // WO-2833 round 9: prepared, so B is attempted - A is retired now.
+        beginCandidateLoad()
+      }
+      return null
+    }
+    try {
+      const result = waiting.load(guard)
+      if (result) void result.finally(finish)
+      else finish()
+    } catch (error) { finish(); throw error }
+  })
+}
+
+function deferredSetupLoad(name: string, load: (guard?: DeferredSetupGuard) => Promise<DeferredLoadResult>): Promise<DeferredLoadResult> | null {
+  let finish!: (result: DeferredLoadResult) => void
+  let fail!: (reason: unknown) => void
+  const result = new Promise<DeferredLoadResult>((resolve, reject) => { finish = resolve; fail = reject })
+  if (!deferLoadAfterMdi(name, (guard) => load(guard).then(finish, fail), (reason) => finish({ ok: false, reason }), true)) return null
+  // WO-2833 round 8: his setup Load, requested while the line moves, retires
+  // the program beneath it now (`loadGcodeFile` does the same).
+  beginCandidateLoad(true)
+  return result
+}
+
 /**
  * THE OPERATOR'S FILE DOOR (WO-1335, WO-1977).
  *
@@ -14908,9 +15388,19 @@ export function loadGcodeFile(
   name: string,
   text: string,
   context: ProgramContextV1 | null,
-  /** WO-2651: an edited program keeps the run-through choice it was loaded with. */
-  options: { runThroughOffsetChanges?: boolean } = {},
+  /** WO-2651: an edited program keeps the run-through choice it was loaded
+   *  with. WO-2833: `editsLoadedProgram` - the editor's Apply of the loaded
+   *  program is not another Load: it retires nothing, and a refusal leaves
+   *  the loaded program as it was (WO-2686 fix round 6). */
+  options: { runThroughOffsetChanges?: boolean; editsLoadedProgram?: boolean } = {},
 ): GcodeFileLoadOutcome {
+  const candidateLoad = options.editsLoadedProgram !== true
+  if (deferLoadAfterMdi(name, () => { loadGcodeFile(name, text, context, options) }, undefined, false, candidateLoad)) {
+    // WO-2833 round 8: requested while the line moves - the program beneath
+    // it is retired now, so the line's put-back has nothing of it to stage.
+    if (candidateLoad) beginCandidateLoad(true)
+    return { door: 'program', ok: true, reason: null }
+  }
   const outcome = ((): GcodeFileLoadOutcome => {
     if (!controllerNeedsToolpathProgram()) {
       // WO-2237: the operator's Load - the same file too - replaces a kept
@@ -14921,6 +15411,9 @@ export function loadGcodeFile(
     }
     // WO-2686 fix round 6: the program door forgets the kept stop only when it
     // accepts the file (`candidate`); a refused Load replaced nothing.
+    // WO-2833 round 8: except the program before it, which his Load retires
+    // at its entry, whatever becomes of the file.
+    if (candidateLoad) beginCandidateLoad()
     return {
       door: 'program',
       ...loadGcodeTextToolpathProgram(name, text, {
@@ -15079,6 +15572,7 @@ function loadTextProgram(
   handOnRefusedFile: boolean,
   sayRefusal = true,
 ): LoadResult | null {
+  cancelLoadAwaitingMdi('another program was loaded', true)
   publishNonProgramActionStatus(null)
   clearOperatorStop()
   // Validate explicit context before changing the controller's prepared job.
@@ -15370,6 +15864,7 @@ export function loadGeometryProgram(
   moves: readonly ToolpathMove[],
   trace: ProgramTrace,
 ): { ok: boolean; reason: string | null } {
+  if (deferLoadAfterMdi(name, () => { loadGeometryProgram(name, moves, trace) })) return { ok: true, reason: null }
   clearOperatorStop()
   const state = useCamStore.getState()
   const setup = state.project.setups.find((candidate) => candidate.id === trace.setupId)
@@ -15752,6 +16247,8 @@ function loadToolpathProgram(
   // wait for the bridge's reply before staging even the approach. A later load
   // supersedes an older receipt, so two quick operator choices cannot let the
   // first reply stage the wrong program after the second one.
+  // An accepted replacement owns staging before its asynchronous WCS receipt.
+  retireMdiForReplacementLoad()
   const loadRevision = ++geometryProgramLoadRevision
   if (typeof ctrl.selectWcsAwait === 'function') {
     const reportedOffset = currentWorkOffsets().byWcs[programWcs]
@@ -15883,9 +16380,12 @@ export function controllerCanRunToolpathProgram(): boolean {
  */
 async function stageSetupToolpathProgram(
   setupId: string,
+  guard?: DeferredSetupGuard,
 ): Promise<{ ok: boolean; reason: string | null }> {
   forgetKeptStop()
   const collected = await collectSetupProgramSections(setupId)
+  const canceled = guard?.(true)
+  if (canceled) return canceled
   if (!collected.ok) {
     return collected.toolChange === true
       ? loadSetupPostedProgram(setupId)
@@ -15894,7 +16394,7 @@ async function stageSetupToolpathProgram(
   // WO-2437: an operator stop (retract, park, message, wait) is written by the
   // post, so a setup with one loads as its posted file - the same door a setup
   // that changes tools takes - and never runs without its stop.
-  if (setupHasOperatorStops(collected.value.setup)) return loadSetupPostedProgram(setupId)
+  if (setupHasPostedMachineActions(collected.value.setup)) return loadSetupPostedProgram(setupId)
   return loadToolpathProgram(
     `${collected.value.setup.name} (toolpath)`,
     collected.value.sections,
@@ -15905,13 +16405,18 @@ async function stageSetupToolpathProgram(
 }
 
 /** The operator's Load of a setup - `stageSetupToolpathProgram`, then the 3D
- *  view frames what it staged (WO-2675). */
+ *  view frames what it staged (WO-2675). WO-2833 round 8: a Load - it
+ *  retires the program before it at its entry (`beginCandidateLoad`). */
 export async function loadSetupToolpathProgram(
   setupId: string,
 ): Promise<{ ok: boolean; reason: string | null }> {
-  const loaded = await stageSetupToolpathProgram(setupId)
-  if (loaded.ok) bumpProgramLoadEpoch()
-  return loaded
+  const load = async (guard?: DeferredSetupGuard): Promise<DeferredLoadResult> => {
+    beginCandidateLoad()
+    const loaded = await stageSetupToolpathProgram(setupId, guard)
+    if (loaded.ok) bumpProgramLoadEpoch()
+    return loaded
+  }
+  return deferredSetupLoad('setup', load) ?? load()
 }
 
 /** WO-2047: a one-tool setup staged as a toolpath program has no text of its
@@ -15950,10 +16455,10 @@ function setupToolpathContext(setupId: string): { context: ProgramContextV1; tex
  * file door owns every tool-change behaviour (WO-1335 boundary, WO-1997 one
  * stop per M6); nothing about it is re-decided here.
  */
-/** WO-2437: does this setup carry an operator stop the post writes? */
-function setupHasOperatorStops(setup: Setup): boolean {
+/** Operator stops and Run macro actions use the existing posted-file route. */
+function setupHasPostedMachineActions(setup: Setup): boolean {
   return Array.isArray(setup.machineActions)
-    && setup.machineActions.some((action) => action.kind === 'operator_stop' && action.enabled !== false)
+    && setup.machineActions.some((action) => (action.kind === 'operator_stop' || action.kind === 'run_macro') && action.enabled !== false)
 }
 
 /** WO-2437: SETUPS WITH AN OPERATOR STOP, AS ONE POSTED FILE. The stop is the
@@ -15966,13 +16471,18 @@ function setupHasOperatorStops(setup: Setup): boolean {
 async function loadSetupsPostedProgram(
   setupIds: readonly string[],
   runThrough: boolean,
+  guard?: DeferredSetupGuard,
 ): Promise<{ ok: boolean; reason: string | null }> {
   // The recompute every Control load and Post stage before they read the
   // moves (WO-1653), for each chosen setup - so a recoverable edit is
   // regenerated here, not refused - and the project read after it.
   for (const setupId of setupIds) {
     await useCamStore.getState().stageOperationsForEmission(setupId, undefined)
+    const canceled = guard?.()
+    if (canceled) return canceled
   }
+  const canceled = guard?.(true)
+  if (canceled) return canceled
   const state = useCamStore.getState()
   const project = { ...state.project, toolLibrary: state.toolLibrary }
   const setups = setupIds.map((id) => project.setups.find((candidate) => candidate.id === id))
@@ -16103,6 +16613,7 @@ function loadSetupPostedProgram(setupId: string): { ok: boolean; reason: string 
 async function stageSetupsToolpathProgram(
   setupIds: readonly string[],
   options: { runThrough?: boolean },
+  guard?: DeferredSetupGuard,
 ): Promise<{ ok: boolean; reason: string | null }> {
   forgetKeptStop()
   if (setupIds.length === 0) {
@@ -16110,7 +16621,7 @@ async function stageSetupsToolpathProgram(
   }
   // ONE SETUP IS THE SINGLE-SETUP DOOR, BYTE FOR BYTE. Item 5.5 runs 1 and 2
   // are that door's measured behaviour and this order does not touch them.
-  if (setupIds.length === 1) return stageSetupToolpathProgram(setupIds[0])
+  if (setupIds.length === 1) return stageSetupToolpathProgram(setupIds[0], guard)
 
   // ON UNLESS THE OPERATOR TURNED IT OFF. A caller that says nothing gets the
   // continuous run, which is what Operator asked the default to be.
@@ -16118,7 +16629,7 @@ async function stageSetupsToolpathProgram(
 
   // WO-2437: any setup with an operator stop - the program is the posted file.
   const chosen = useCamStore.getState().project.setups.filter((setup) => setupIds.includes(setup.id))
-  if (chosen.some(setupHasOperatorStops)) return loadSetupsPostedProgram(setupIds, runThrough)
+  if (chosen.some(setupHasPostedMachineActions)) return loadSetupsPostedProgram(setupIds, runThrough, guard)
 
   const ctrl = getMachineController()
   if (controllerJobReallyRuns(ctrl)) {
@@ -16161,6 +16672,8 @@ async function stageSetupsToolpathProgram(
   }[] = []
   for (const setupId of setupIds) {
     const collected = await collectSetupProgramSections(setupId)
+    const canceled = guard?.()
+    if (canceled) return canceled
     if (!collected.ok) return refuseProgramLoad(collected.reason)
     const { setup, sections, toolIds, spindle } = collected.value
 
@@ -16222,6 +16735,9 @@ async function stageSetupsToolpathProgram(
       })),
     })
   }
+
+  const canceled = guard?.(true)
+  if (canceled) return canceled
 
   // EVERY FRAME, ASKED BEFORE THE FIRST MOVE. A program that discovered an
   // unset G55 at the boundary would already have cut setup 1 and moved the
@@ -16437,6 +16953,8 @@ async function stageSetupsToolpathProgram(
   // THE FIRST STAGE'S FRAME, SELECTED AND CONFIRMED BEFORE ANYTHING IS STAGED -
   // WO-1312's rule, unchanged, applied to stage one. Every later stage's frame
   // is selected at its boundary by `crossSetupBoundary`.
+  // An accepted replacement owns staging before its asynchronous WCS receipt.
+  retireMdiForReplacementLoad()
   const loadRevision = ++geometryProgramLoadRevision
   const firstWcs = frames[0]
   if (typeof ctrl.selectWcsAwait === 'function') {
@@ -16480,14 +16998,19 @@ async function stageSetupsToolpathProgram(
 }
 
 /** The operator's Load of several setups - `stageSetupsToolpathProgram`, then
- *  the 3D view frames what it staged (WO-2675). */
+ *  the 3D view frames what it staged (WO-2675). WO-2833 round 8: a Load - it
+ *  retires the program before it at its entry (`beginCandidateLoad`). */
 export async function loadSetupsToolpathProgram(
   setupIds: readonly string[],
   options: { runThrough?: boolean } = {},
 ): Promise<{ ok: boolean; reason: string | null }> {
-  const loaded = await stageSetupsToolpathProgram(setupIds, options)
-  if (loaded.ok) bumpProgramLoadEpoch()
-  return loaded
+  const load = async (guard?: DeferredSetupGuard): Promise<DeferredLoadResult> => {
+    beginCandidateLoad()
+    const loaded = await stageSetupsToolpathProgram(setupIds, options, guard)
+    if (loaded.ok) bumpProgramLoadEpoch()
+    return loaded
+  }
+  return deferredSetupLoad('setups', load) ?? load()
 }
 
 /**
@@ -16584,8 +17107,15 @@ interface GcodeTextLoadOptions {
   /** WO-2686 fix round 6: the operator's Load of a file (`loadGcodeFile`), a
    *  candidate for the program before it. Over a loaded program, refused, it
    *  writes one console line and changes nothing else; accepted, it replaces
-   *  that program's kept stop, stop report and file waiting for offsets. */
+   *  that program's kept stop, stop report and file waiting for offsets.
+   *  WO-2833 round 8: his Load retired an armed program at its entry
+   *  (`beginCandidateLoad`), so the program kept here is a held or running
+   *  job, or the one the editor's Apply edits. */
   candidate?: boolean
+  /** WO-2772: the file a Load kept for its offsets (WO-1980), read now that
+   *  they are set - still his Load: refused for a reason outside the file, it
+   *  stays the loaded file, as a `candidate` refused that way does. */
+  awaitedFile?: boolean
 }
 
 /** WO-2256: how a program staged as the rest of the loaded file reads as it. */
@@ -16818,12 +17348,14 @@ function resolveProgramAwaitingOffsets(): 'staged' | 'refused' | 'waiting' | 'go
     publishListing: waiting.publishListing,
     context: waiting.context,
     runThroughOffsetChanges: waiting.runThroughOffsetChanges,
+    awaitedFile: true,
   })
   if (programAwaitingOffsets !== null) return 'waiting'
   if (!outcome.ok) {
     // Its refusal is on the console; the panel stops naming a file that is
-    // not on the controller.
-    store().setProgram(null, null, [], null)
+    // not on the controller - unless (WO-2772) the refusal is one fixed
+    // outside the file, which keeps it the loaded file CYCLE START reads.
+    if (!loadedFileRefusedAtLoad()) store().setProgram(null, null, [], null)
     store().applyJobProgress(waiting.controller.jobProgress())
     store().setProgramReadiness({ ready: false, reason: outcome.reason ?? 'Load a program.' })
     return 'refused'
@@ -16851,6 +17383,15 @@ useMachineControl.subscribe((state, previous) => {
 /** WO-1677: the length `G43 H<n>` shifts Z by in frame `wcs` - see `fileReaderOptions`. */
 function readerToolLengthMm(ctrl: MachineController, h: number, wcs: string): number {
   return resolveG43ToolLengthMm(h).deltaMm - toolLengthInForceMm(ctrl, wcs)
+}
+
+/** The file door's refusals for the Definition page's rapid rate and declared
+ *  controller - the Load's and the derived fit's (`loadedFileFitRefusal`). */
+const NO_RAPID_RATE_FILE_REFUSAL = "This machine declares no rapid rate, so a G0 in this file has no feed to run at - "
+  + "set the machine's rapid traverse rate. A feed is never invented here."
+function noReaderDialectRefusal(declared: unknown): string {
+  return `This machine's declared controller "${String(declared)}" has no G-code reader dialect, so `
+    + 'the file was not loaded.'
 }
 
 /** What the file door's reader reads a file against: one set, shared by the
@@ -16902,18 +17443,69 @@ export function loadGcodeTextToolpathProgram(
   text: string,
   options: GcodeTextLoadOptions = {},
 ): { ok: boolean; reason: string | null } {
+  if (options.publishListing && !options.onStaged && !options.fileReread && !options.keepsLoadedProgram
+    && deferLoadAfterMdi(name,
+    () => { loadGcodeTextToolpathProgram(name, text, options) },
+    (reason) => options.onStageResult?.({ ok: false, reason }))) return { ok: true, reason: null }
   // WO-2686 fix round 6: a candidate refused over a loaded program leaves that
   // program - its readiness, arm epoch, chosen start, kept stop, stop report,
   // file waiting for offsets - exactly as it was: one console line, nothing
   // else. Until `accept` runs; past it the controller is being changed.
   let keepsProgramBefore = options.candidate === true && programIsLoaded()
-  const refuse = (reason: string) => {
+  // WO-2772: his Load of a file, or CYCLE START reading it again from line 1.
+  const operatorFileLoad = options.publishListing === true && !options.keepsLoadedProgram
+    && (options.candidate === true || options.fileReread === true || options.awaitedFile === true)
+  const refusedBefore = fileRefusedAtLoad
+  /** `outsideFile`: a reason fixed on the machine, never by another file. */
+  const refuse = (reason: string, outsideFile = false) => {
     const outcome = keepsProgramBefore ? refuseCandidateProgramLoad(reason) : refuseProgramLoad(reason)
+    if (!keepsProgramBefore && operatorFileLoad) keepFileRefusedAtLoad(outsideFile)
     options.onStageResult?.(outcome)
     return outcome
   }
+  /** WO-2772: with nothing else loaded, a file refused for a reason outside it
+   *  is the loaded file; one refused for its own text ends a file kept before. */
+  const keepFileRefusedAtLoad = (outsideFile: boolean) => {
+    const s = store()
+    // Never over a program the controller holds (its phase is ready, running
+    // or held): the header must not name one file over another's staging.
+    // WO-2826: except a program whose run on this controller is over - a file
+    // (one an MDI line was typed over since, too) or a text-door program,
+    // completed or failed: it is replaced, so CYCLE START never runs it after
+    // his Load of another. A file a reconnect left named, staged on no
+    // controller, is kept (WO-2686 fix round 7): it stays the file CYCLE
+    // START reads.
+    // Fix round 1: the FILE's phase - an MDI line typed over it ending is not
+    // its run ending (a deferred Load released after that line).
+    const phaseBefore = loadedProgramPhase()
+    const runOver = (phaseBefore === 'complete' || phaseBefore === 'failed')
+      && (currentFileDoorProgram() !== null || s.programText !== null)
+    if ((!runOver && (s.programText !== null || fileDoorProgramForLine1() !== null))
+      || !(phaseBefore === 'empty' || phaseBefore === 'complete' || phaseBefore === 'failed')) return
+    if (runOver) forgetProgramReplacedAtLoad()
+    // A run that is over stays over on screen ("Cycle complete."): a board
+    // that keeps its finished job (the UCCNC bridge) reports it 'ready' again,
+    // and that job is not the file named now.
+    // WO-2833: nor is the job the board still holds staged when nothing is
+    // armed - his Load retired it (`beginCandidateLoad`); it reads 'ready'.
+    const showJob = () => {
+      const progress = getMachineController().jobProgress()
+      s.applyJobProgress(phaseBefore !== 'empty' ? { ...progress, phase: phaseBefore }
+        : progress.phase === 'ready' ? ARMED_PROGRAM_DISARMED : progress)
+    }
+    if (outsideFile) {
+      fileRefusedAtLoad = { name, text, context: options.context ?? null, runThroughOffsetChanges: options.runThroughOffsetChanges === true }
+      s.setProgram(name, null, [], null)
+      showJob()
+    } else if (runOver || (refusedBefore !== null && s.job.name === refusedBefore.name)) {
+      s.setProgram(null, null, [], null)
+      showJob()
+    }
+  }
   const accept = () => {
     keepsProgramBefore = false
+    // WO-2772: whatever this load does, the refused file is no longer it.
+    if (!options.keepsLoadedProgram) fileRefusedAtLoad = null
     // WO-2237: the operator's Load replaces a kept stop's place.
     if (options.candidate) forgetKeptStop()
     // WO-2234: an MDI line over the loaded program leaves the operator's stop
@@ -16926,6 +17518,8 @@ export function loadGcodeTextToolpathProgram(
   if (!keepsProgramBefore) accept()
   const ctrl = getMachineController()
   if (controllerJobReallyRuns(ctrl)) {
+    // WO-2772: a Load refused as busy replaced nothing, a refused file neither.
+    fileRefusedAtLoad = refusedBefore
     const outcome = refuseActiveProgramLoad()
     options.onStageResult?.(outcome)
     return outcome
@@ -16946,7 +17540,9 @@ export function loadGcodeTextToolpathProgram(
     : { text, sourceLineOf: null, compensatedBlocks: null, refusal: null }
   if (meshed.refusal !== null) {
     const reason = `Mesh compensation refused: ${meshed.refusal}`
-    if (keepsProgramBefore) return refuse(reason)
+    // WO-2833: his Load's refusal says why on the console, as every other
+    // refusal of his Load does.
+    if (keepsProgramBefore || options.candidate === true) return refuse(reason)
     // The text door's words and shape (readiness only, no console line):
     // this door had no such refusal before WO-2283.
     store().setProgramReadiness({ ready: false, reason })
@@ -16959,10 +17555,7 @@ export function loadGcodeTextToolpathProgram(
   const activeMachine = controlMachine(state)
   const rapidFeedMmMin = activeMachine.rapidRate
   if (!(typeof rapidFeedMmMin === 'number' && Number.isFinite(rapidFeedMmMin) && rapidFeedMmMin > 0)) {
-    return refuse(
-      "This machine declares no rapid rate, so a G0 in this file has no feed to run at - "
-      + "set the machine's rapid traverse rate. A feed is never invented here.",
-    )
+    return refuse(NO_RAPID_RATE_FILE_REFUSAL, true)
   }
 
   // THE DIALECT IS THE MACHINE'S DECLARED CONTROLLER, never a guess. It reaches
@@ -16973,10 +17566,7 @@ export function loadGcodeTextToolpathProgram(
   const declared = state.project.machine?.controller
   const dialect: GcodeDialect | null = gcodeTableDialectOf(declared)
   if (dialect === null) {
-    return refuse(
-      `This machine's declared controller "${String(declared)}" has no G-code reader dialect, so `
-      + 'the file was not loaded.',
-    )
+    return refuse(noReaderDialectRefusal(declared), true)
   }
 
   const sessionWcs = store().activeWcs
@@ -17202,6 +17792,7 @@ export function loadGcodeTextToolpathProgram(
     if (stepsForStage.some((step) => step.kind === 'arc') && (!envelope.x || !envelope.y)) {
       return refuse(
         arcsNeedTravelMessage(`"${name}"`),
+        true,
       )
     }
     // WO-2219: turned by the rotation the controller reports for that offset.
@@ -17213,6 +17804,7 @@ export function loadGcodeTextToolpathProgram(
       const line = stagedLine === undefined ? stage.firstLine : fileLine(stagedLine)
       return refuse(
         `"${name}", line ${line}: ${describeTravelOffence(offence, stageProgram)}`,
+        true,
       )
     }
 
@@ -17291,7 +17883,8 @@ export function loadGcodeTextToolpathProgram(
           // left by the latest geometric move, not an assumed move on the
           // immediately previous stage.
           clearMachineZ: lastMachineZBeforeStage(stageIndex),
-          holdMessage: describeGcodeBoundaryHold(name, previous, stage, drivesSpindle, state.toolLibrary),
+          holdMessage: describeGcodeBoundaryHold(name, previous, stage, drivesSpindle, state.toolLibrary,
+            interpreted.program.stages.slice(0, stageIndex).some((before) => before.moves.some((move) => move.type !== 'rapid'))),
           ...(macro === null
             ? {}
             : {
@@ -17337,10 +17930,14 @@ export function loadGcodeTextToolpathProgram(
       }
       // THE FILE'S OWN M7/M8/M9, the same way.
       // WO-1650: and every listed output the file switches (a pump on M10).
-      if (!sameGcodeCoolantState(stage.coolant, previous.coolant)) {
+      const standardCode = stage.coolantBefore?.standardCode
+      const listedCommand = stage.coolantBefore?.listedCommand
+      if (standardCode !== undefined || listedCommand !== undefined || !sameGcodeCoolantState(stage.coolant, previous.coolant)) {
         coolantWords.set(parts.length, {
-          line: previous.ends.kind === 'coolant' ? previous.ends.line : stage.firstLine,
+          line: stage.coolantBefore?.line ?? (previous.ends.kind === 'coolant' ? previous.ends.line : stage.firstLine),
           ...stage.coolant,
+          ...(standardCode === undefined ? {} : { standardCode }),
+          ...(listedCommand === undefined ? {} : { listedCommand }),
         })
       }
     }
@@ -17610,6 +18207,8 @@ export function loadGcodeTextToolpathProgram(
   // boundary by `crossSetupBoundary`. WO-2686: the file is read and fits; from
   // here the controller is changed, so it replaces the program before it.
   accept()
+  // Retire the ended line's old-file restoration before awaiting the new WCS.
+  if (!options.keepsLoadedProgram) retireMdiForReplacementLoad()
   const loadRevision = ++geometryProgramLoadRevision
   if (typeof ctrl.selectWcsAwait === 'function') {
     const receiptToken = captureBackendReceipt(ctrl)
@@ -17952,6 +18551,7 @@ function describeGcodeBoundaryHold(
   next: GcodeStage,
   drivesSpindle: boolean,
   library: readonly Tool[],
+  cutBefore: boolean,
 ): string {
   // The interpreter gives each file pause its own boundary, before or after
   // a tool change or macro. Name only the action at this boundary.
@@ -17963,8 +18563,14 @@ function describeGcodeBoundaryHold(
     // change and the `G55` at the same boundary, and an operator told to fit a
     // cutter still has to know the next section runs at a different zero.
     const frame = next.wcs === finished.wcs ? '' : ` The rest runs in ${next.wcs}.`
-    return `"${name}" has finished everything it cuts with ${from} and asks for ${to} on line `
-      + `${change.line}. The spindle is stopped and the tool is where the file left it: fit `
+    // WO-2769: the program's first change has cut nothing, and a same-tool
+    // change has not finished with that tool - neither says it finished.
+    const asks = !cutBefore
+      ? `asks for ${to} on line ${change.line} before it starts cutting`
+      : change.from === change.to
+        ? `asks for ${to} again on line ${change.line}`
+        : `has finished everything it cuts with ${from} and asks for ${to} on line ${change.line}`
+    return `"${name}" ${asks}. The spindle is stopped and the tool is where the file left it: fit `
       + `${to}, set its Z zero, then press CYCLE START to run the rest.${frame}`
   }
   // WO-1652: a code one of this machine's macros carries runs that macro here.
@@ -18049,10 +18655,143 @@ function refuseCandidateProgramLoad(reason: string): { ok: false; reason: string
  *  destroyed), or a file waiting for its offsets. Fix round 7: a file merely
  *  retained across a reconnect is not staged anywhere ("Reconnect and reload
  *  the program."), so a refusal takes readiness there as on main; CYCLE START
- *  still reads that file's fit for itself. */
+ *  still reads that file's fit for itself.
+ *  WO-2826 (desk kit s3/s4, 10-14): a run that is over - a completed or failed
+ *  program, or a typed MDI line that ran before the Load - leaves the load's
+ *  readiness reading ready, but nothing is armed (CYCLE START arms from line
+ *  1 again), so it is not a program a refused Load must keep. */
 function programIsLoaded(): boolean {
-  return store().programReadiness.ready || store().job.phase === 'paused'
+  const { programReadiness, job } = store()
+  const phase = loadedProgramPhase()
+  const runOver = phase === 'complete' || phase === 'failed'
+  return (programReadiness.ready && !runOver) || job.phase === 'paused'
     || operatorHasChosenStart() || operatorChosenStartLost() || programAwaitingOffsets !== null
+}
+
+/** WO-2833: the loaded file is the one his Stop/Reset ended (WO-1663's stop
+ *  report names it) and the file door staged again from line 1 - armed, as a
+ *  freshly loaded file is. */
+function loadedRunStoppedByOperator(): boolean {
+  const stop = operatorStopState()
+  const s = store()
+  return stop !== null && stop.name === s.job.name && s.programText === null
+    && currentFileDoorProgram() !== null && !operatorHasChosenStart() && !operatorChosenStartLost()
+}
+
+/** WO-2833: the job shown when nothing is armed though the board still holds
+ *  a retired program staged (it reports 'ready'). */
+const ARMED_PROGRAM_DISARMED = {
+  phase: 'empty', totalLines: 0, sentLines: 0, ackedLines: 0, ackedSourceLine: 0, sentSourceLine: 0, bytesInFlight: 0,
+} as const
+
+/**
+ * WO-2833 round 8: HIS LOAD RETIRES THE PROGRAM BEFORE IT AT ITS ENTRY.
+ *
+ * The operator, 10-15, card "Refused Load while an old file is still armed":
+ * "a refused Load disarms A too - Cycle Start greyed until a file is armed".
+ * Accepted, B replaces A; refused, A is disarmed: A is gone either way, so
+ * nothing here waits on B's outcome. Rounds 1-7 retired A where B was
+ * refused, and each round found one more refusal - the mesh compiler, a
+ * setup, a frame receipt settling after the setup door returned - that left
+ * A's reload record for an MDI line's put-back or a re-stage to arm again
+ * (the operator, 10-15: "7 rounds to me is an indicator that something else is
+ * truly the problem"). So the refusals carry no retirement at all.
+ *
+ * Called once by each door of his Load as it starts: the file door
+ * (`loadGcodeFile`) and the setup doors (`loadSetupToolpathProgram`,
+ * `loadSetupsToolpathProgram`), at once or released after a moving MDI line.
+ * Never by a re-stage of the loaded program (CYCLE START's line 1 or new
+ * offsets, Stop's or an alarm's re-stage, the mesh, an MDI put-back, a
+ * reconnect, a file waiting for its offsets) nor the editor's Apply of it.
+ *
+ * Retired: an armed program - fresh, staged again after his Stop/Reset,
+ * armed from a line he chose, a kept stop, beneath an MDI line - and a run
+ * that is over (WO-2826). Not: a held or running job (his Load is refused as
+ * busy and changes nothing), nor a file a reconnect left named and staged
+ * nowhere (WO-2686 fix round 7). `whileLineRuns`: requested while his MDI
+ * line moves - the line keeps the screen until it ends, so the program
+ * beneath it is marked retired (nothing of it is put back), and the released
+ * Load or the line's end clears it.
+ */
+function beginCandidateLoad(whileLineRuns = false): void {
+  const ctrl = getMachineController()
+  const under = programUnderMdiLine
+  if (whileLineRuns) {
+    if (under?.keepsFile && under.before && mdiLineOverLoadedProgram(ctrl)) {
+      if (!under.retired) under.beforeRetired = under.before
+      under.retired = true
+      under.before = { ...under.before, job: { ...under.before.job, phase: 'empty' }, armed: false }
+    }
+    return
+  }
+  // WO-2833 round 9: a setup Load released after the line is not attempted
+  // until it is prepared; a cancel before then puts A back (as main does), so
+  // A is retired once it is prepared, or when it settles uncanceled.
+  const released = mdiLoadBeingReleased
+  if (released?.preparing && !released.canceledReason) return
+  const s = store()
+  if (s.job.phase === 'paused' || controllerJobReallyRuns(ctrl)) return
+  const phase = loadedProgramPhase()
+  const runOver = (phase === 'complete' || phase === 'failed')
+    && (currentFileDoorProgram() !== null || s.programText !== null)
+  if (programIsLoaded() || loadedRunStoppedByOperator() || runOver
+    || (under?.retired === true && mdiLineOverLoadedProgram(ctrl))) {
+    retireProgramBeforeLoad(runOver ? phase : null)
+  }
+}
+
+/** WO-2833 round 9 (astra round-8 audit): HIS WAITING LOAD WAS CANCELED, NOT
+ *  REFUSED. The operator's words disarm A when Load B is refused; a Load canceled
+ *  before B is attempted (Stop, Reset, E-STOP, an alarm, the line stopping or
+ *  failing, the 30 s expiry, a connection change) puts A back exactly as main
+ *  does: the line's put-back stages it again once the board settles. A newer
+ *  Load that replaced the waiting one does not come here - it owns A. */
+function putBackProgramRetiredByWaitingLoad(): void {
+  const under = programUnderMdiLine
+  if (!under?.retired || under.beforeRetired === undefined) return
+  under.before = under.beforeRetired
+  delete under.retired
+  delete under.beforeRetired
+}
+
+/** WO-2833 round 8: the program before his Load and every record that could
+ *  arm it again - the file door's reload (CYCLE START's line 1, Stop's and
+ *  the mesh's re-stage), the MDI line's put-back, his stop report, a kept
+ *  stop, a start he chose (the arm epoch moves), a file waiting for its
+ *  offsets. The board may still hold its job staged; nothing names or arms
+ *  it. A run that is over stays over on screen (WO-2826: "Cycle complete."). */
+function retireProgramBeforeLoad(runOver: 'complete' | 'failed' | null = null): void {
+  forgetProgramReplacedAtLoad()
+  forgetKeptStop()
+  clearOperatorStop()
+  programAwaitingOffsets = null
+  const s = store()
+  s.setProgram(null, null, [], null)
+  if (runOver !== null) s.applyJobProgress({ ...getMachineController().jobProgress(), phase: runOver })
+  bumpArmEpoch()
+}
+
+/** WO-2826 fix round 1 (astra audit, 10-14): THE LOADED PROGRAM'S PHASE, NOT
+ *  AN MDI LINE'S. While a file sits beneath the operator's MDI line (WO-2234)
+ *  the job's phase is the line's: the line completing is not the file's run
+ *  completing. Until the file is put back (a deferred Load is released before
+ *  that, WO-2659) its own phase is the one it had before the first line - a
+ *  file armed then is still armed, and its put-back re-stages it. */
+function loadedProgramPhase(): ReturnType<typeof store>['job']['phase'] {
+  const under = programUnderMdiLine
+  if (under?.keepsFile && under.before && mdiLineOverLoadedProgram(controller)) {
+    return under.before.armed ? 'ready' : under.before.job.phase
+  }
+  return store().job.phase
+}
+
+/** WO-2826: the file door's record of a program whose run is over, ended by
+ *  his Load of another file that was refused - so no door (CYCLE START's line
+ *  1, Stop's re-stage, an MDI line's put-back) finds the old file again, even
+ *  under the same name. The board's finished job is left as it is. */
+function forgetProgramReplacedAtLoad(): void {
+  toolpathProgramReload = null
+  programUnderMdiLine = null
 }
 
 /** Refuse a replacement load without rewriting the running program's
@@ -18372,7 +19111,66 @@ export async function armProgramFromTop(
 type ArmFromLineResult =
   | { ok: true; from: 'line'; plan: RunFromLinePlan }
   | { ok: true; from: 'top' }
+  /** WO-2810: the text door's tool change runs first; its card re-arms the line. */
+  | { ok: true; from: 'toolChange'; tool: number; startLine: number }
   | { ok: false; reason: string }
+
+/** WO-2810 (Operator 10-14): "on run from line we should run from the line" - the
+ *  operator's answer to the tool pop-up. Nothing fits a tool without it. */
+export type RunFromLineToolChoice = 'start-now' | 'tool-change-first'
+
+/** WO-2810: what the run-from-line tool pop-up names - the tool the program has
+ *  in the spindle where the chosen line starts (`toolWordsBefore`, as the file
+ *  reader reads it) and the tool last known in the machine's spindle (null:
+ *  not known). Null when they match, the program names no tool before the line,
+ *  or the line does not plan (Arm says why) - no pop-up then. */
+export function runFromLineToolCheck(requestedLine: number): {
+  startLine: number
+  expects: number
+  lastKnown: number | null
+} | null {
+  const text = store().programText ?? currentFileDoorProgram()?.text ?? null
+  if (text === null) return null
+  const planned = buildRunFromLinePlan(text, requestedLine, runFromLineMachineOptions())
+  if (!planned.ok) return null
+  const expects = toolWordsBefore(text, planned.plan.startLine).inSpindle
+  // WO-2016: T0 is a controller's "no tool reported", not a tool in the spindle.
+  const reported = store().activeTool
+  const lastKnown = reported !== null && reported > 0 ? reported : null
+  if (expects === null || expects === lastKnown) return null
+  return { startLine: planned.plan.startLine, expects, lastKnown }
+}
+
+/** WO-2810: the text door runs the tool change the program would have run at
+ *  its M6 - the guided change (park, swap, measure) - and its card re-arms the
+ *  chosen line, ready for CYCLE START. What it cannot run is said; nothing moves. */
+function runToolChangeBeforeLine(check: NonNullable<ReturnType<typeof runFromLineToolCheck>>): ArmFromLineResult {
+  const ctrl = getMachineController()
+  const cannot = (why: string): ArmFromLineResult => ({
+    ok: false,
+    reason: `The tool change for T${check.expects} cannot run: ${why} Nothing moved.`,
+  })
+  const park = configuredToolChangePark()
+  if (park === null) return cannot('this machine has no macro marked for tool change (Macros panel).')
+  if (!guidedChangeHasReference()) return cannot('no reference tool has been measured.')
+  const safeZMachine = machineSafeZValue(
+    parkCarrierMachine(useCamStore.getState()),
+    useMachineActions.getState().configFor(controlMachine(useCamStore.getState()).id),
+  )
+  if (safeZMachine === null) return cannot('this machine has no safe Z (Machine tab of its definition).')
+  const unhomed = homingRefusal(ctrl, undefined, 'the tool change parks at a machine coordinate.')
+  if (unhomed !== null) return cannot(unhomed)
+  if (store().toolChange && store().toolChange!.step !== 'failed') return cannot('a guided stop is already in progress.')
+  forgetKeptStop()
+  void beginGuidedToolChange({ tool: check.expects, resumeLine: check.startLine, park, safeZMachine })
+  store().pushConsole(
+    'rx',
+    `Run from line ${check.startLine}: moving to "${park.label}" for the T${check.expects} change. Fit T${check.expects}; `
+      + `Continue measures it and arms line ${check.startLine}.`,
+    'info',
+  )
+  return { ok: true, from: 'toolChange', tool: check.expects, startLine: check.startLine }
+}
 
 /**
  * The OPERATOR's "start at line N" entry point (WO-082). A request that lands
@@ -18387,11 +19185,18 @@ type ArmFromLineResult =
  * and clamp-pause flows re-arm at a computed resume line and must keep getting
  * the planner's literal verdict.
  */
-export async function armProgramFromLine(requestedLine: number): Promise<ArmFromLineResult> {
+export async function armProgramFromLine(
+  requestedLine: number,
+  toolChoice: RunFromLineToolChoice = 'start-now',
+): Promise<ArmFromLineResult> {
   // WO-2609 kit: opened files need no CAM context to plan their own lines.
   // The file-door record checks controller and loaded-program identity.
   if (store().programText === null && currentFileDoorProgram() !== null) {
-    return armPostedProgramFromLine(requestedLine)
+    return armPostedProgramFromLine(requestedLine, false, toolChoice)
+  }
+  if (toolChoice === 'tool-change-first') {
+    const check = runFromLineToolCheck(requestedLine)
+    if (check !== null) return runToolChangeBeforeLine(check)
   }
   const planned = armRunFromLine(requestedLine)
   if (planned.ok) {
@@ -18429,11 +19234,14 @@ export async function armLoadedProgramFromLine1(): Promise<ArmFromTopResult> {
  * whichever controller staged it, while the session still names it and
  * nothing else is loaded. Every other door keeps asking for the live file.
  */
-function fileDoorProgramForLine1(): ToolpathProgramReload | null {
+function fileDoorProgramForLine1(): ToolpathProgramReload | FileRefusedAtLoad | null {
   const live = currentFileDoorProgram()
   if (live) return live
-  const reload = toolpathProgramReload
   const s = store()
+  // WO-2772: the file a Load refused for a reason outside it, while it is named.
+  const refused = fileRefusedAtLoad
+  if (refused && s.programText === null && s.job.name === refused.name) return refused
+  const reload = toolpathProgramReload
   if (!reload || !reload.publishListing || reload.controller === controller) return null
   if (s.programText !== null || s.job.name !== reload.name) return null
   return reload
@@ -18447,9 +19255,11 @@ function fileDoorProgramForLine1(): ToolpathProgramReload | null {
  * again here, with the file door's own reader and inputs (offsets, position,
  * G28/G30 points, tool lengths, definition, travel), and refuses with the
  * Load's own sentence exactly while that reading refuses it: the reader, arcs
- * with no declared travel, a move outside the travel. Every other refusal
- * (no rapid rate, an unset frame, the controller's own) stays the staging's
- * at the press, with its own sentence. Null when it fits, or nothing is loaded.
+ * with no declared travel, a move outside the travel - and (WO-2772) no rapid
+ * rate or no reader dialect for the declared controller, the Definition
+ * page's to fix. Every other refusal (an unset frame, no position report yet,
+ * the controller's own) stays the staging's at the press, with its own
+ * sentence. Null when it fits, or nothing is loaded.
  *
  * Memoized on every input it read, so a verdict re-render costs a comparison.
  * It has no session effects: it reads, it never stages, publishes or ends anything.
@@ -18461,11 +19271,15 @@ export function loadedFileFitRefusal(): string | null {
   const state = useCamStore.getState()
   const activeMachine = controlMachine(state)
   const rapidFeedMmMin = activeMachine.rapidRate
-  const dialect = gcodeTableDialectOf(state.project.machine?.controller)
+  const declared = state.project.machine?.controller
+  const dialect = gcodeTableDialectOf(declared)
   const sessionWcs = store().activeWcs
   const startedAt = readerPosition(ctrl, activeMachine)
-  if (!(typeof rapidFeedMmMin === 'number' && Number.isFinite(rapidFeedMmMin) && rapidFeedMmMin > 0)
-    || dialect === null || !sessionWcs || startedAt === null) return null
+  if (!(typeof rapidFeedMmMin === 'number' && Number.isFinite(rapidFeedMmMin) && rapidFeedMmMin > 0)) {
+    return NO_RAPID_RATE_FILE_REFUSAL
+  }
+  if (dialect === null) return noReaderDialectRefusal(declared)
+  if (!sessionWcs || startedAt === null) return null
   // Under an applied surface mesh the file is compiled at staging, which also
   // ends a re-zeroed mesh - session effects a verdict must not have. The
   // press's staging reads it there and refuses in its own words.
@@ -18558,10 +19372,21 @@ export function loadedFileArmableFromLine1(): boolean {
   return fileDoorProgramForLine1() !== null
 }
 
+/** WO-2772: whether the file CYCLE START would arm from line 1 is one a Load
+ *  refused for a reason outside it - named, never staged, so no listing. */
+export function loadedFileRefusedAtLoad(): boolean {
+  const file = fileDoorProgramForLine1()
+  return file !== null && file === fileRefusedAtLoad
+}
+
 /** WO-2598: one planner, staged through the same file door as a kept return.
  * The full listing/text remain the authority for another line, Cancel and Stop.
  * `fromTop` (WO-2686) stages the whole file: no plan, so no planner refusal. */
-async function armPostedProgramFromLine(requestedLine: number, fromTop = false): Promise<ArmFromLineResult> {
+async function armPostedProgramFromLine(
+  requestedLine: number,
+  fromTop = false,
+  toolChoice: RunFromLineToolChoice = 'start-now',
+): Promise<ArmFromLineResult> {
   clearRunFromReview()
   const s = store()
   const ctrl = getMachineController()
@@ -18584,18 +19409,28 @@ async function armPostedProgramFromLine(requestedLine: number, fromTop = false):
   }
   const program = planned.ok ? toolWordsBefore(file.text, planned.plan.startLine) : null
   // A file's prefix names the tool it NEEDS, never proof that it is fitted.
-  // Seed the reader with the reported spindle tool, then run the missing M6
-  // through its existing fence/boundary/guided setter flow before the prelude.
+  // WO-2810 (Operator 10-14): "They're running from a line. They are taking
+  // ownership that the machine is ready to run from that line" - the missing
+  // M6 runs only when the operator chose it at the tool pop-up: seed the
+  // reader with the reported spindle tool, then run that M6 through its
+  // existing fence/boundary/guided setter flow before the prelude.
   const fitted = s.activeTool ?? 0
-  const needsFit = program?.inSpindle !== null && program?.inSpindle !== undefined
+  const needsFit = toolChoice === 'tool-change-first'
+    && program?.inSpindle !== null && program?.inSpindle !== undefined
     && program.inSpindle !== fitted
+  // Start now leaves the reported tool fitted (T0: not known, WO-2016): the
+  // reader starts on it, so the remainder's own M6 to the program's tool still
+  // changes (WO-2810 audit: seeding the program's tool skipped that M6).
+  const inSpindle = needsFit || program?.inSpindle === null || program?.inSpindle === undefined
+    ? program?.inSpindle ?? null
+    : fitted
   const plan = planned.ok ? {
     ...planned.plan,
     // The file reader must know the fitted tool and any pending preselect,
     // otherwise a later bare M6 can be mistaken for the file's first tool.
     prelude: [
       ...(needsFit ? [`T${fitted}`, 'G4 P0', `T${program!.inSpindle} M6`] : []),
-      ...fileReturnToolWords(program!, program!.inSpindle), ...planned.plan.prelude,
+      ...fileReturnToolWords(program!, inSpindle), ...planned.plan.prelude,
     ],
   } : null
   const numbering = plan ? returnFileNumbering({ controller: ctrl, sourceLineOf: (line) => line }, plan) : undefined
@@ -18616,7 +19451,9 @@ async function armPostedProgramFromLine(requestedLine: number, fromTop = false):
   // staging; a refusal or superseding load must settle this caller too.
   const staged = await new Promise<{ ok: boolean; reason: string | null }>((resolve) => {
     const outcome = loadGcodeTextToolpathProgram(file.name, text, {
-      ...(plan ? { keepsLoadedProgram: true, runFromFile: file, fileNumbering: numbering } : {
+      // A plan is built only off `currentFileDoorProgram`'s staged record, never
+      // from the top - so never off a file a Load refused (WO-2772).
+      ...(plan ? { keepsLoadedProgram: true, runFromFile: file as ToolpathProgramReload, fileNumbering: numbering } : {
         publishListing: true, context: file.context,
       }),
       fileReread: true,
@@ -20110,6 +20947,11 @@ function noteKeptStopToolTyped(
   const tool = typed.kind === 'm61' ? typed.tool : typed.tool ?? selectedToolWordOf(ctrl)
   if (typed.kind !== 'm61') selectToolWord(ctrl, typed.tool)
   if (kept !== null && typed.kind !== 'select' && tool !== null) keepStopTool(kept, tool)
+  // WO-2878: a tool line the controller took changes what its $G reports as
+  // T; ask now, so the TOOL readouts follow the typed T5 instead of waiting
+  // for an unrelated refresh. A query, not motion. In a kept stop the run's
+  // stream names the tool, so nothing is asked there.
+  if (kept === null) ctrl.refreshState()
   return sent
 }
 
@@ -20785,7 +21627,11 @@ export function runMachineAction(
     if (unit.some((line) => mdiLineRefusedByAlarm(line, ctrl))) {
       return { ok: false, sent, reason: ACTION_REFUSAL.alarm }
     }
-    const ok = unit.length === 1 ? sendMdiLine(unit[0]) : sendMdiProgram(unit)
+    const actionBefore = machineActionSending
+    machineActionSending = true
+    let ok: boolean
+    try { ok = unit.length === 1 ? sendMdiLine(unit[0]) : sendMdiProgram(unit) }
+    finally { machineActionSending = actionBefore }
     if (!ok) {
       return { ok: false, sent, reason: ACTION_REFUSAL.notSent }
     }
@@ -21182,6 +22028,11 @@ export function subscribeProbeCycleActive(listener: () => void): () => void {
 // and it ends as stopped with one console line naming the routine and step.
 
 interface ProbeCycleRun {
+  /** WO-2800 fix round 3: the run is over - its routine is unwinding or has
+   *  returned, or it stopped waiting for a controller the E-STOP left silent.
+   *  Set before the probe lock is released; nothing of this run moves the
+   *  machine once it is set. */
+  ended: boolean
   stopSource: 'Stop' | 'Stop/Reset'
   paused: boolean
   pauseEpoch: number
@@ -21241,6 +22092,7 @@ function claimProbeCycleRun(routine: string): ProbeCycleRun {
   let release: () => void = () => {}
   const stop = new Promise<null>((resolve) => { release = () => resolve(null) })
   const run: ProbeCycleRun = {
+    ended: false,
     stopSource: 'Stop/Reset',
     paused: false,
     pauseEpoch: 0,
@@ -21266,7 +22118,37 @@ function claimProbeCycleRun(routine: string): ProbeCycleRun {
   return run
 }
 
+/** WO-2800 fix round 3: ONE END PER RUN. Every way a run ends - its routine
+ *  returning, refusing or throwing (each routine's finally, before the probe
+ *  lock is released), and the wait for a controller the E-STOP left silent
+ *  (untilProbeStop) - comes through here. Its waits settle, and every delayed
+ *  continuation of it re-checks probeRunEnded(run) before it sends anything.
+ *  Stop/Reset and a contact end it through run.stopped, as before. */
+function endProbeCycleRun(run: ProbeCycleRun | null): void {
+  if (run === null || run.ended) return
+  run.ended = true
+  run.release()
+}
+
+/** WO-2800 fix round 3: the run a continuation belongs to has ended. Captured
+ *  when the continuation started, never read from the active cycle afterwards:
+ *  a run whose routine has returned is no longer active, and "no active cycle"
+ *  is not "not stopped". A continuation started outside any run reads the
+ *  active cycle, as it always has. */
+function probeRunEnded(run: ProbeCycleRun | null): boolean {
+  return run === null ? probeCycleStopped() : run.stopped || run.ended
+}
+
+/** WO-2800 fix round 3: a line of a run that stopped waiting for a controller
+ *  the E-STOP left silent settles as the E-STOP - never as a refusal, or as a
+ *  probe that ran and missed. Null otherwise. */
+function probeRunAbandonedOutcome(run: ProbeCycleRun | null): AppCommandOutcome | null {
+  if (run === null || !run.ended || run.stopped) return null
+  return { ok: false, sent: false, translated: null, modal: null, message: ESTOP_BLOCKS_MOTION }
+}
+
 function releaseProbeCycleRun(run: ProbeCycleRun | null): void {
+  endProbeCycleRun(run)
   if (run !== null && activeProbeCycle === run) activeProbeCycle = null
   for (const listener of probeCycleActiveListeners) listener()
 }
@@ -21521,8 +22403,9 @@ function probeCycleHeldByOperator(ctrl: MachineController): boolean {
  *  the E-STOP or the connection ends the wait. The caller re-checks its gates. */
 async function waitOutProbeCycleHold(ctrl: MachineController): Promise<void> {
   const receiptToken = captureBackendReceipt(ctrl)
+  const run = activeProbeCycle
   while (probeCycleHeldByOperator(ctrl)) {
-    if (!receiptIsCurrent(receiptToken) || probeCycleStopped() || estopNeedsReset()) return
+    if (!receiptIsCurrent(receiptToken) || probeRunEnded(run) || estopNeedsReset()) return
     if (ctrl.connectionPhase() !== 'connected') return
     ctrl.queryStatus()
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -21543,14 +22426,48 @@ function noteProbePhase(phase: string): void {
  *  replaces it with the stopped sentence. */
 const PROBE_CYCLE_STOPPED = 'Stop/Reset ended the probe cycle.'
 
-/** `pending`, unless Stop/Reset ends the running cycle first: then null. */
+/** WO-2800 fix round 2: how long a controller has to answer a probe call or
+ *  line itself once the E-STOP or a connection change latched; after that the
+ *  routine stops waiting for it. */
+const PROBE_REPLY_AFTER_ESTOP_WAIT_MS = 3000
+
+/** Settles null once the E-STOP latch (a trip, or a connection change) has
+ *  been set for PROBE_REPLY_AFTER_ESTOP_WAIT_MS. `cancel` drops the watch. */
+function probeReplyAbandoned(): { gaveUp: Promise<null>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let unsubscribe: (() => void) | null = null
+  const cancel = () => {
+    if (timer !== null) clearTimeout(timer)
+    unsubscribe?.()
+    timer = null
+    unsubscribe = null
+  }
+  const gaveUp = new Promise<null>((resolve) => {
+    const watch = () => {
+      if (timer !== null || !estopNeedsReset()) return
+      timer = setTimeout(() => { cancel(); resolve(null) }, PROBE_REPLY_AFTER_ESTOP_WAIT_MS)
+    }
+    unsubscribe = subscribeEstopNeedsReset(watch)
+    watch()
+  })
+  return { gaveUp, cancel }
+}
+
+/** `pending`, unless Stop/Reset ends the running cycle first: then null.
+ *  WO-2800 fix round 2: also null when the E-STOP or a connection change
+ *  latched and the controller never answered, so the routine always ends. */
 function untilProbeStop<T>(pending: Promise<T>): Promise<T | null> {
   const run = activeProbeCycle
   if (run === null) return pending
   if (run.stopped) return Promise.resolve(null)
+  const abandoned = probeReplyAbandoned()
+  // WO-2800 fix round 3: giving up on the controller ends the run itself, not
+  // only this wait - whatever of it still waits behind this reply never sends.
+  const gaveUp = abandoned.gaveUp.then(() => { endProbeCycleRun(run); return null })
   // A reply the reset itself produced (an alarm, a dropped line) is the Stop's,
   // never a probe that ran and missed.
-  return Promise.race([pending, run.stop]).then(async (value) => {
+  return Promise.race([pending, run.stop, gaveUp]).then(async (value) => {
+    abandoned.cancel()
     if (!run.stopped) return value
     // The routine's modal restore must not send MDI during GRBL's controlled
     // reset settle; that newer activity would correctly make it refuse reset.
@@ -21572,15 +22489,16 @@ function untilProbeStop<T>(pending: Promise<T>): Promise<T | null> {
  *  line still awaited when it does settles as not sent (null). WO-2138: held
  *  between moves, the line waits for CYCLE START. */
 function probeCycleSend(line: string, ctrl: MachineController): Promise<AppCommandOutcome | null> | null {
-  if (probeCycleStopped()) return null
+  const run = activeProbeCycle
+  if (probeRunEnded(run)) return null
+  const settle = (outcome: AppCommandOutcome | null) => outcome ?? probeRunAbandonedOutcome(run)
   if (probeCycleHeldByOperator(ctrl)) {
-    const run = activeProbeCycle
     return untilProbeStop(waitOutProbeCycleHold(ctrl).then(() => (
-      run?.stopped || probeCycleStopped() || estopNeedsReset() ? null : sendProbeCycleLine(line, ctrl)
-    )))
+      probeRunEnded(run) || estopNeedsReset() ? null : sendProbeCycleLine(line, ctrl)
+    ))).then(settle)
   }
   const pending = sendProbeCycleLine(line, ctrl)
-  return pending === null ? null : untilProbeStop(pending)
+  return pending === null ? null : untilProbeStop(pending).then(settle)
 }
 
 /** A G38.2-G38.5 probe move: a touch, where the probe input may come on. */
@@ -21601,7 +22519,7 @@ function sendProbeCycleLine(line: string, ctrl: MachineController): Promise<AppC
       return waitForProbePositioningIdle(ctrl).then((settled) => (
         // The Stop race can release the active lock before this wait wakes.
         // Its owning run still forbids the delayed touch after that release.
-        settled && !run.stopped ? sendProbeTouchLine(line, ctrl) : null
+        settled && !probeRunEnded(run) ? sendProbeTouchLine(line, ctrl) : null
       ))
     }
     return sendProbeTouchLine(line, ctrl)
@@ -21622,10 +22540,10 @@ async function sendProbeTouchLine(line: string, ctrl: MachineController): Promis
   const delta = { x: xy.x, y: xy.y, z: words.get('Z') ?? 0 }
   const target = from ? { x: from.x + delta.x, y: from.y + delta.y, z: from.z + delta.z } : null
   let replay = line
-  while (!probeCycleStopped() && receiptIsCurrent(receipt) && !estopNeedsReset()) {
+  while (!probeRunEnded(run) && receiptIsCurrent(receipt) && !estopNeedsReset()) {
     await run?.cancelMotion
     await waitOutProbeCycleHold(ctrl)
-    if (probeCycleStopped() || !receiptIsCurrent(receipt) || estopNeedsReset()) return null
+    if (probeRunEnded(run) || !receiptIsCurrent(receipt) || estopNeedsReset()) return null
     if (!openProbeTouch(ctrl, `the line "${replay}"`)) return null
     const epoch = run?.pauseEpoch
     const pending = sendAppCommandAwait(replay, ctrl)
@@ -21635,11 +22553,11 @@ async function sendProbeTouchLine(line: string, ctrl: MachineController): Promis
     closeProbeTouch(ctrl, touched)
     // A real contact wins a simultaneous Pause. A cancelled seek stays on
     // this step until Resume, with exactly the remaining travel to its bound.
-    if (touched || run?.pauseEpoch === epoch || probeCycleStopped()) return outcome
+    if (touched || run?.pauseEpoch === epoch || probeRunEnded(run)) return outcome
     await run?.cancelMotion
     await waitOutProbeCycleHold(ctrl)
     const now = ctrl.status().machinePos
-    if (probeCycleStopped() || !receiptIsCurrent(receipt) || estopNeedsReset()) return null
+    if (probeRunEnded(run) || !receiptIsCurrent(receipt) || estopNeedsReset()) return null
     if (!target || !now) return outcome
     const remaining = { x: target.x - now.x, y: target.y - now.y, z: target.z - now.z }
     const along = remaining.x * delta.x + remaining.y * delta.y + remaining.z * delta.z
@@ -21668,18 +22586,22 @@ async function probeCallAsTouch(
 ): Promise<Awaited<ReturnType<MachineController['probe']>> | null> {
   const run = activeProbeCycle
   const receipt = captureBackendReceipt(ctrl)
-  while (!probeCycleStopped() && receiptIsCurrent(receipt) && !estopNeedsReset()) {
+  while (!probeRunEnded(run) && receiptIsCurrent(receipt) && !estopNeedsReset()) {
     await waitOutProbeCycleHold(ctrl)
     await run?.cancelMotion
-    if (probeCycleStopped() || !receiptIsCurrent(receipt) || estopNeedsReset()) return null
+    if (probeRunEnded(run) || !receiptIsCurrent(receipt) || estopNeedsReset()) return null
     if (!openProbeTouch(ctrl, `the probe move toward ${machinePositionText({ [axis.toLowerCase()]: targetMm })}`)) return null
     const epoch = run?.pauseEpoch
     try {
       const touch = await untilProbeStop(ctrl.probe(axis, targetMm, feedMmMin))
       closeProbeTouch(ctrl, touch !== null && touch.ok && touch.at !== null)
+      // WO-2800 fix round 2: an E-STOP the controller never answered ends it.
+      if (touch === null && !(run === null ? probeCycleStopped() : run.stopped) && estopNeedsReset()) {
+        return { ok: false, at: null, reason: ESTOP_BLOCKS_MOTION }
+      }
       // A successful contact wins a simultaneous Pause; hold before the next
       // move. A cancelled seek repeats toward the SAME endpoint, never farther.
-      if (touch?.ok || run?.pauseEpoch === epoch || probeCycleStopped()) return touch
+      if (touch?.ok || run?.pauseEpoch === epoch || probeRunEnded(run)) return touch
     } catch (error) {
       closeProbeTouch(ctrl, false)
       if (run?.pauseEpoch === epoch) throw error
@@ -21698,10 +22620,11 @@ function probeCallUnlessStopped(
   targetMm: number,
   feedMmMin: number,
 ): Promise<Awaited<ReturnType<MachineController['probe']>> | null> {
-  if (probeCycleStopped()) return Promise.resolve(null)
+  const run = activeProbeCycle
+  if (probeRunEnded(run)) return Promise.resolve(null)
   if (probeCycleHeldByOperator(ctrl)) {
     return waitOutProbeCycleHold(ctrl).then(() => {
-      if (probeCycleStopped()) return null
+      if (probeRunEnded(run)) return null
       // The E-STOP pressed while it waited: nothing is sent.
       if (estopNeedsReset()) return { ok: false, at: null, reason: ESTOP_BLOCKS_MOTION }
       return probeCallAsTouch(ctrl, axis, targetMm, feedMmMin)
@@ -21921,7 +22844,34 @@ function missRiseSentence(ctrl: MachineController, startZ: number, failure: stri
 
 /** True when probing on this controller runs through its native probe call. */
 function nativeProbeRoute(ctrl: MachineController): boolean {
-  return !ctrl.capabilities.gcodeText && typeof ctrl.probe === 'function'
+  return typeof ctrl.probe === 'function' && (!ctrl.capabilities.gcodeText || ctrl === nativeProbeStandIn)
+}
+
+/** WO-2800 (Operator 10-14): the simulator, while it runs a feature routine, Tool Z
+ *  (WO-2811) or a custom probe routine (WO-2811) for a UCCNC machine definition.
+ *  That board has no interpreter, so the routine runs there on the native route
+ *  he proved at the machine; the simulator runs the same route, so its motion
+ *  is the machine's - never another method. */
+let nativeProbeStandIn: SimulatedController | null = null
+
+/** WO-2811: the simulator connected for a UCCNC machine definition - the
+ *  controller that runs its probing as that board's native route. */
+function simulatorStandsInForNativeBoard(ctrl: MachineController): boolean {
+  return simulatedController !== null && ctrl === simulatedController
+    && controlMachine(useCamStore.getState()).controller === 'uccnc'
+}
+
+async function asTheNativeBoard<T>(run: () => Promise<T>): Promise<T> {
+  const sim = simulatedController
+  if (sim === null || nativeProbeStandIn !== null || !simulatorStandsInForNativeBoard(getMachineController())) return run()
+  nativeProbeStandIn = sim
+  sim.setNativeBoardStandIn(true)
+  try {
+    return await run()
+  } finally {
+    nativeProbeStandIn = null
+    sim.setNativeBoardStandIn(false)
+  }
 }
 
 /**
@@ -22786,6 +23736,8 @@ async function executeDirectionalProbeTouch(
       },
     }
   } finally {
+    // WO-2800 fix round 3: the run ends before the lock is released.
+    endProbeCycleRun(ownRun)
     // WO-2615: positioning waits also stop; modal restore must wait for the
     // controlled cancellation, or GRBL sees new activity and refuses it.
     await ownRun?.cancelMotion
@@ -22901,10 +23853,10 @@ async function waitForProbePositioningIdle(
     await new Promise((resolve) => setTimeout(resolve, 50))
     if (!receiptIsCurrent(receiptToken)) return false
     // WO-2071: Stop/Reset ended the cycle this wait belongs to.
-    if (probeCycleStopped()) return false
+    if (probeRunEnded(run)) return false
     // WO-2517: the frame this wait reads is watched like any other.
     watchProbeInput(ctrl, ctrl.status())
-    if (probeCycleStopped()) return false
+    if (probeRunEnded(run)) return false
     // WO-2103: time the operator holds the machine is not time the move took.
     if (probeCycleHeldByOperator(ctrl)) {
       deadline += sessionElapsedNowMs() - before
@@ -22918,7 +23870,7 @@ async function waitForProbePositioningIdle(
     }
     if (ctrl.verifiedIdle() || (acceptReportedIdle && ctrl.machineState() === 'idle')) {
       noteProbeMotionSettled(ctrl)
-      return !probeCycleStopped()
+      return !probeRunEnded(run)
     }
     if (ctrl.connectionPhase() !== 'connected' || ctrl.machineState() === 'alarm') return false
   }
@@ -23141,6 +24093,7 @@ export async function runSurfaceMeshProbeCycle(
       mesh: { ...mesh, active: false },
     }
   } finally {
+    endProbeCycleRun(run)
     await run?.cancelMotion
     setProbeCycleActive(false)
     releaseProbeCycleRun(run)
@@ -23310,7 +24263,7 @@ export async function runFeatureProbeCycle(
 ): Promise<FeatureProbeCycleResult> {
   const programOwned = store().toolChange !== null || programPartsRun !== null || loadedProgramText() !== null
   const receipt = captureBackendReceipt(getMachineController())
-  const result = await runFeatureProbeCycleOnce(plan, config, pathClearConfirmed, onTouch)
+  const result = await asTheNativeBoard(() => runFeatureProbeCycleOnce(plan, config, pathClearConfirmed, onTouch))
   if (!programOwned && receiptIsCurrent(receipt)) publishProbeActionResult(result, `${FEATURE_PROBE_NAMES[plan.kind]} probe`)
   return result
 }
@@ -23355,21 +24308,17 @@ async function runFeatureProbeCycleOnce(
     `G21 G91 G38.2 Z-${Number(effective.maxTravel.toFixed(4))} F${Number(effective.fastFeed.toFixed(4))}`,
   )
   if (touchUnsent) return fail(touchUnsent)
-  // WO-2055 (architect 09-27): the descent to probing depth must stop on
-  // contact. A text controller does that only with G38.3, never a plain move,
-  // so without it Edge and Angle run the older plan - every touch from the
-  // height where the probe stands, no top touch and no descent - and say so.
-  let cycle = plan
-  if (plan.fromTop && !nativeProbeRoute(ctrl) && !textSetterApproachWordStated()) {
-    const beside = plan.fromTop.besideTheFace
-    if (!beside.ok) return fail(beside.reason)
-    cycle = beside.plan
-    store().pushConsole(
-      'rx',
-      `${FEATURE_PROBE_NAMES[plan.kind]} probe: this controller has no G38.3 probe move that stops on contact, `
-        + `so it probes from the height where the probe stands now - ${plan.fromTop.topTouch ? 'no top touch, ' : ''}no descent.`,
-      'info',
-    )
+  // WO-2800 (Operator 10-14): every route runs the approved plan. Its descent to
+  // probing depth stops on contact - on a text controller only G38.3 does - so
+  // a controller without it says so in one line and nothing moves. It never
+  // runs another method (the 09-27 beside-the-face swap is gone).
+  const cycle = plan
+  const descends = plan.steps.some((step) => step.kind === 'descend' || (step.kind === 'touch' && step.descendFromTop))
+  if (descends && !nativeProbeRoute(ctrl) && !textSetterApproachWordStated()) {
+    const cannot = `${FEATURE_PROBE_NAMES[plan.kind]} probe: this controller has no G38.3 probe move that stops on contact, `
+      + 'which the descent to probing depth needs - nothing moved.'
+    store().pushConsole('rx', cannot, 'warn')
+    return fail(cannot)
   }
 
   const previousUnitsInch = store().parserModal?.units === 'inch'
@@ -23591,6 +24540,7 @@ async function runFeatureProbeCycleOnce(
       topMachineZ,
     }
   } finally {
+    endProbeCycleRun(run)
     await run?.cancelMotion
     setProbeCycleActive(false)
     releaseProbeCycleRun(run)
@@ -23709,7 +24659,8 @@ export function probeRoutineExecutionRefusal(
         // controller that takes text it is one G38.3 line along the straight
         // path (GRBL and LinuxCNC probe along any X/Y/Z line). The native probe
         // call is UC100 ProbeStart(Axis, ...): one axis per call.
-        if (nativeProbeRoute(ctrl) && step.axes.length > 1) {
+        // WO-2811: the simulator for a UCCNC definition says what that board says.
+        if ((nativeProbeRoute(ctrl) || simulatorStandsInForNativeBoard(ctrl)) && step.axes.length > 1) {
           return `${step.label}: this controller's probe call moves one axis at a time, so it cannot make one straight `
             + `${step.axes.join(' ')} move that stops on contact.`
         }
@@ -23773,10 +24724,10 @@ async function waitForProbeRoutineMove(
     const before = sessionElapsedNowMs()
     await new Promise((resolve) => setTimeout(resolve, 50))
     if (!receiptIsCurrent(receiptToken)) return false
-    if (probeCycleStopped()) return false
+    if (probeRunEnded(run)) return false
     // WO-2517: the frame this wait reads is watched like any other.
     watchProbeInput(ctrl, ctrl.status())
-    if (probeCycleStopped()) return false
+    if (probeRunEnded(run)) return false
     if (ctrl.connectionPhase() !== 'connected' || ctrl.machineState() === 'alarm') return false
     // WO-2103: time the operator holds the machine is not time the move took.
     if (probeCycleHeldByOperator(ctrl)) {
@@ -23804,7 +24755,7 @@ async function waitForProbeRoutineMove(
     previous = position
     if (stableFrames >= 2) {
       noteProbeMotionSettled(ctrl)
-      return !probeCycleStopped()
+      return !probeRunEnded(run)
     }
   }
   return false
@@ -23831,7 +24782,9 @@ export async function runProbeRoutine(
 ): Promise<ProbeRoutineRunResult> {
   const programOwned = store().toolChange !== null || programPartsRun !== null || loadedProgramText() !== null
   const receipt = captureBackendReceipt(getMachineController())
-  const result = await runProbeRoutineOnce(expanded, config, pathClearConfirmed, previewHash, options)
+  // WO-2811: on the simulator for a UCCNC definition the guarded steps run as
+  // that board runs them (the native probe call), never skipped.
+  const result = await asTheNativeBoard(() => runProbeRoutineOnce(expanded, config, pathClearConfirmed, previewHash, options))
   if (!programOwned && receiptIsCurrent(receipt)) publishProbeActionResult(result, 'Probe routine')
   return result
 }
@@ -24354,6 +25307,7 @@ async function runProbeRoutineOnce(
       proposals,
     }
   } finally {
+    endProbeCycleRun(cycleRun)
     await cycleRun?.cancelMotion
     setProbeCycleActive(false)
     releaseProbeCycleRun(cycleRun)
@@ -24425,7 +25379,11 @@ export async function runZProbeCycle(
 ): Promise<ZProbeResult> {
   const programOwned = store().toolChange !== null || programPartsRun !== null || loadedProgramText() !== null
   const receipt = captureBackendReceipt(getMachineController())
-  const result = await runZProbeCycleOnce(mode, config, setterRoutineChoice)
+  // WO-2811: Tool Z on the simulator for a UCCNC definition runs that board's
+  // route - the setter's guarded approach included. Work Z0 is not this order's.
+  const result = mode === 'measureTool'
+    ? await asTheNativeBoard(() => runZProbeCycleOnce(mode, config, setterRoutineChoice))
+    : await runZProbeCycleOnce(mode, config, setterRoutineChoice)
   if (!programOwned && receiptIsCurrent(receipt)) publishProbeActionResult(result, 'Z probe')
   // WO-2146: A MEASURE NEVER GOES SILENT. Pin rehearsal 2026-09-28: Tools >
   // Measure T19 ended "not recorded" and the console said nothing - that

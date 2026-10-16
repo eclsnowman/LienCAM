@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type SettingSource } from './DefinitionFields'
 import { NotSent } from './DefinitionFields'
 import { SectionHead } from './DefinitionFields'
@@ -29,110 +33,107 @@ export function ModbusNotSent({ label, section, settingKey, settings }: {
   )
 }
 
-export const MODBUS_EZ_GROUPS = [
+export const MODBUS_EZ_GROUPS = liveCatalog(() => ([
   {
-    title: 'Plugin mode',
-    summary: 'Command and telemetry modes selected in UCCNC',
+    title: controlText('ModbusSection.text001'),
+    summary: controlText('ModbusSection.text002'),
     fields: [
-      ['multi-byte mode', 'MultiBM'],
-      ['RPM only', 'RpmONLY'],
-      ['multiple registers', 'MultipleRegs'],
-      ['multiple coils', 'MultiCoil'],
-      ['single coil', 'SingCoil'],
-      ['frequency is Hz range', 'HZ Range'],
-      ['single holding register', 'SingHold'],
-      ['amperage enabled', 'Amp Enable'],
+      [controlText('ModbusSection.text003'), 'MultiBM'],
+      [controlText('ModbusSection.text004'), 'RpmONLY'],
+      [controlText('ModbusSection.text005'), 'MultipleRegs'],
+      [controlText('ModbusSection.text006'), 'MultiCoil'],
+      [controlText('ModbusSection.text007'), 'SingCoil'],
+      [controlText('ModbusSection.text008'), 'HZ Range'],
+      [controlText('ModbusSection.text009'), 'SingHold'],
+      [controlText('ModbusSection.text010'), 'Amp Enable'],
     ],
   },
   {
-    title: 'Serial selection',
-    summary: 'Port and framing stored by the plugin',
+    title: controlText('ModbusSection.text011'),
+    summary: controlText('ModbusSection.text012'),
     fields: [
-      ['port', 'Selectedport'],
-      ['baud rate', 'SelectedBaud'],
-      ['stop bits', 'StopBit'],
+      [controlText('ModbusSection.text013'), 'Selectedport'],
+      [controlText('ModbusSection.text014'), 'SelectedBaud'],
+      [controlText('ModbusSection.text015'), 'StopBit'],
     ],
   },
   {
-    title: 'Commands and registers',
-    summary: 'Addresses and command frames stored verbatim',
+    title: controlText('ModbusSection.text016'),
+    summary: controlText('ModbusSection.text017'),
     fields: [
-      ['command address', 'CaDD'],
-      ['frequency address', 'FrqADD'],
-      ['clockwise command', 'ONCW'],
-      ['stop command', 'STOP'],
-      ['counterclockwise command', 'ONCCW'],
-      ['write function', 'Function'],
-      ['display field', 'DisplayField'],
-      ['stop frame', 'SpindleStop'],
-      ['clockwise frame', 'SendCwOn'],
-      ['counterclockwise frame', 'SendCwwOn'],
-      ['amperage address', 'Amp Address'],
-      ['amperage divisor', 'Amp Divideby'],
-      ['amperage send value', 'Amp Send'],
+      [controlText('ModbusSection.text018'), 'CaDD'],
+      [controlText('ModbusSection.text019'), 'FrqADD'],
+      [controlText('ModbusSection.text020'), 'ONCW'],
+      [controlText('ModbusSection.text021'), 'STOP'],
+      [controlText('ModbusSection.text022'), 'ONCCW'],
+      [controlText('ModbusSection.text023'), 'Function'],
+      [controlText('ModbusSection.text024'), 'DisplayField'],
+      [controlText('ModbusSection.text025'), 'SpindleStop'],
+      [controlText('ModbusSection.text026'), 'SendCwOn'],
+      [controlText('ModbusSection.text027'), 'SendCwwOn'],
+      [controlText('ModbusSection.text028'), 'Amp Address'],
+      [controlText('ModbusSection.text029'), 'Amp Divideby'],
+      [controlText('ModbusSection.text030'), 'Amp Send'],
     ],
   },
   {
-    title: 'Speed range',
-    summary: 'Frequency and spindle range stored by the plugin',
+    title: controlText('ModbusSection.text031'),
+    summary: controlText('ModbusSection.text032'),
     fields: [
-      ['maximum frequency', 'SelectedFreq'],
-      ['minimum RPM', 'Selectedminrpm'],
-      ['maximum RPM', 'Selectedmaxrpm'],
+      [controlText('ModbusSection.text033'), 'SelectedFreq'],
+      [controlText('ModbusSection.text034'), 'Selectedminrpm'],
+      [controlText('ModbusSection.text035'), 'Selectedmaxrpm'],
     ],
   },
-] as const
+] as const))
 
-export const MODBUS_CONNECTION_FIELDS = [
-  ['description', 'Description'],
-  ['connection ID', 'ID'],
-  ['enabled', 'Enabled'],
-  ['loop interval', 'Loopinterval'],
-  ['retry count', 'Retrycount'],
-  ['timeout', 'Timeout'],
-  ['transport', 'Type'],
-  ['baud rate', 'Serial_Baudrate'],
-  ['COM port', 'Serial_Comport'],
-  ['data bits', 'Serial_Databits'],
-  ['parity', 'Serial_Parity'],
-  ['RS485 mode', 'Serial_RS485mode'],
-  ['stop bits', 'Serial_Stopbits'],
-] as const
+export const MODBUS_CONNECTION_FIELDS = liveCatalog(() => ([
+  [controlText('ModbusSection.text036'), 'Description'],
+  [controlText('ModbusSection.text037'), 'ID'],
+  [controlText('ModbusSection.text038'), 'Enabled'],
+  [controlText('ModbusSection.text039'), 'Loopinterval'],
+  [controlText('ModbusSection.text040'), 'Retrycount'],
+  [controlText('ModbusSection.text041'), 'Timeout'],
+  [controlText('ModbusSection.text042'), 'Type'],
+  [controlText('ModbusSection.text043'), 'Serial_Baudrate'],
+  [controlText('ModbusSection.text044'), 'Serial_Comport'],
+  [controlText('ModbusSection.text045'), 'Serial_Databits'],
+  [controlText('ModbusSection.text046'), 'Serial_Parity'],
+  [controlText('ModbusSection.text047'), 'Serial_RS485mode'],
+  [controlText('ModbusSection.text048'), 'Serial_Stopbits'],
+] as const))
 
-export const MODBUS_FUNCTION_FIELDS = [
-  ['Name', 'name'],
-  ['Enabled', 'enabled'],
-  ['Type', 'operation'],
-  ['Registercount', 'register count'],
-  ['Slaveaddress', 'slave'],
-  ['Startregister', 'device register'],
-  ['UCCNCstartregister', 'UCCNC register'],
-] as const
+export const MODBUS_FUNCTION_FIELDS = liveCatalog(() => ([
+  ['Name', controlText('ModbusSection.text049')],
+  ['Enabled', controlText('ModbusSection.text050')],
+  ['Type', controlText('ModbusSection.text051')],
+  ['Registercount', controlText('ModbusSection.text052')],
+  ['Slaveaddress', controlText('ModbusSection.text053')],
+  ['Startregister', controlText('ModbusSection.text054')],
+  ['UCCNCstartregister', controlText('ModbusSection.text055')],
+] as const))
 
 export const MODBUS_FUNCTION_ROWS = [0, 1, 2, 3] as const
 
 type ModbusSectionProps = Pick<MachineDefinitionPanelState, 'unsent'>
 
 export function ModbusSection({ unsent }: ModbusSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div data-testid="machine-def-panel-modbus-vfd" style={{ marginTop: 12 }}>
                   <SectionHead
-                    title="Modbus and VFD profile"
+                    title={controlText('ModbusSection.text056')}
                     summary="UCCNC plugin, serial connection and four function records"
                     testId="machine-def-panel-modbus-vfd-head"
                   />
                   <div
                     data-testid="machine-def-panel-modbus-vfd-boundary"
                     style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', marginBottom: 8 }}
-                  >
-                    This is the imported definition record only. Nothing here starts or stops the
-                    spindle, changes the live VFD link, weakens VFD verification, or gates a stop.
-                    These values are stored with the definition and nothing acts on them yet.
-                  </div>
+                  >{controlText('ModbusSection.text057')}</div>
 
                   <div data-testid="machine-def-panel-modbus-ez">
                     <SectionHead
-                      title="UCCNC Modbus EZ"
+                      title={controlText('ModbusSection.text058')}
                       summary="Plugin commands, telemetry selection and speed range"
                       testId="machine-def-panel-modbus-ez-head"
                     />
@@ -174,7 +175,7 @@ export function ModbusSection({ unsent }: ModbusSectionProps) {
 
                   <div data-testid="machine-def-panel-modbus-connection" style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Serial connection"
+                      title={controlText('ModbusSection.text059')}
                       summary="Shared transport and retry policy for the four function slots"
                       testId="machine-def-panel-modbus-connection-head"
                     />
@@ -220,8 +221,8 @@ export function ModbusSection({ unsent }: ModbusSectionProps) {
                       >
                         <thead>
                           <tr>
-                            <th>slot</th>
-                            <th>function record</th>
+                            <th>{controlText('ModbusSection.text060')}</th>
+                            <th>{controlText('ModbusSection.text061')}</th>
                             {MODBUS_FUNCTION_FIELDS.map(([, label]) => (
                               <th key={label}>{label}</th>
                             ))}

@@ -3,6 +3,8 @@
 // (this WO's ownership manifest is SolidsWorkbenchPage.tsx + dialogs/** only)
 // so every helper a new dialog needs lives inside the manifest.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { PathChain, Vec3 } from '../../../geom/geom-service'
 import { localToWorld, type PlaneFrame } from '../../../sketch3d/planeMath'
 import type { Sketch as CamSketch, SketchEntity as CamSketchEntity } from '../../../lib/sketch/sketcher'
@@ -90,22 +92,22 @@ export function draftFaceNormalPlane(
   offset: number,
 ): DraftFaceNormalResult {
   if (frame === undefined) {
-    return { ok: false, reason: 'Selected face frame is unavailable. Re-pick the face or use a world axis.' }
+    return { ok: false, reason: workbenchText('dressUpGeometry.selectedFaceFrameIsUnavailableRePickTheFace') }
   }
   const origin = frame.origin
   if (![origin.x, origin.y, origin.z].every(Number.isFinite)) {
-    return { ok: false, reason: 'Selected face frame origin is degenerate. Re-pick the face or use a world axis.' }
+    return { ok: false, reason: workbenchText('dressUpGeometry.selectedFaceFrameOriginIsDegenerateRePickThe') }
   }
   const normal = frame.normal
   if (![normal.x, normal.y, normal.z].every(Number.isFinite)) {
-    return { ok: false, reason: 'Selected face normal is degenerate. Re-pick the face or use a world axis.' }
+    return { ok: false, reason: workbenchText('dressUpGeometry.selectedFaceNormalIsDegenerateRePickTheFace') }
   }
   const length = Math.hypot(normal.x, normal.y, normal.z)
   if (!(length > 1e-9)) {
-    return { ok: false, reason: 'Selected face normal is degenerate. Re-pick the face or use a world axis.' }
+    return { ok: false, reason: workbenchText('dressUpGeometry.selectedFaceNormalIsDegenerateRePickTheFace') }
   }
   if (!Number.isFinite(offset)) {
-    return { ok: false, reason: 'Draft neutral-plane offset must be a finite number.' }
+    return { ok: false, reason: workbenchText('dressUpGeometry.draftNeutralPlaneOffsetMustBeAFiniteNumber') }
   }
   const directionScale = (flip ? -1 : 1) / length
   const pullDir = {
@@ -194,19 +196,19 @@ function pointFromPolar(center: { x: number; y: number }, radius: number, angle:
 function entityPointSamples(e: CamSketchEntity): Array<{ id: string; label: string; local: { x: number; y: number } }> {
   switch (e.kind) {
     case 'point':
-      return [{ id: `${e.id}:self`, label: 'Point', local: e.at }]
+      return [{ id: `${e.id}:self`, label: workbenchText('dressUpGeometry.point'), local: e.at }]
     case 'line':
       return [
-        { id: `${e.id}:start`, label: 'Line start', local: e.start },
-        { id: `${e.id}:end`, label: 'Line end', local: e.end },
+        { id: `${e.id}:start`, label: workbenchText('dressUpGeometry.lineStart'), local: e.start },
+        { id: `${e.id}:end`, label: workbenchText('dressUpGeometry.lineEnd'), local: e.end },
       ]
     case 'circle':
-      return [{ id: `${e.id}:center`, label: 'Circle center', local: e.center }]
+      return [{ id: `${e.id}:center`, label: workbenchText('dressUpGeometry.circleCenter'), local: e.center }]
     case 'arc':
       return [
-        { id: `${e.id}:center`, label: 'Arc center', local: e.center },
-        { id: `${e.id}:start`, label: 'Arc start', local: pointFromPolar(e.center, e.radius, e.startAngle) },
-        { id: `${e.id}:end`, label: 'Arc end', local: pointFromPolar(e.center, e.radius, e.endAngle) },
+        { id: `${e.id}:center`, label: workbenchText('dressUpGeometry.arcCenter'), local: e.center },
+        { id: `${e.id}:start`, label: workbenchText('dressUpGeometry.arcStart'), local: pointFromPolar(e.center, e.radius, e.startAngle) },
+        { id: `${e.id}:end`, label: workbenchText('dressUpGeometry.arcEnd'), local: pointFromPolar(e.center, e.radius, e.endAngle) },
       ]
     default:
       return []

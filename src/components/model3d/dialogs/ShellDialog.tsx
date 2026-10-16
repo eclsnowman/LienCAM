@@ -1,8 +1,11 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // Shell stays open during viewport face picking. This is the qualified
 // Fillet/Chamfer command-strip interaction: select faces to open, enter one
 // thickness, inspect the real kernel preview, then Apply.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Check, X } from 'lucide-react'
 import { useSelectAllOnClick } from '../../ui/selectAllOnClick'
 import { useTypeToSet } from '../../ui/useTypeToSet'
@@ -47,32 +50,39 @@ export type ShellDialogProps = ShellDialogCommonProps & (
 
 const DEFAULT_THICKNESS = 2
 
+// WO-2865: the strip stays one row until a refusal shows; then the refusal
+// takes a full-width row of its own and wraps, so the whole sentence and its
+// next step are read instead of clipped at the strip's ellipsis.
+const REFUSAL_STRIP_STYLE: CSSProperties = { flexWrap: 'wrap' }
+const REFUSAL_LINE_STYLE: CSSProperties = { order: 1, flexBasis: '100%', maxWidth: 'none', whiteSpace: 'normal', overflow: 'visible' }
+
 function editReferenceError(dag: FeatureDag, featureId: string): string | undefined {
   const node = dag.getNode(featureId)
   if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'shell') {
-    return `Shell edit refused: '${featureId}' is not a shell feature`
+    return workbenchText('ShellDialog.shellEditRefusedIsNotAShellFeature', { featureId: String(featureId) })
   }
   const ownerId = node.payload.ownerId
   if (typeof ownerId !== 'string' || ownerId.length === 0 || dag.getNode(ownerId) === undefined) {
-    return `Shell edit refused: owner '${String(ownerId)}' is not available`
+    return workbenchText('ShellDialog.shellEditRefusedOwnerIsNotAvailable', { value1: String(String(ownerId)) })
   }
   if (!node.consumes.includes(ownerId)) {
-    return `Shell edit refused: owner '${ownerId}' is missing from the feature dependencies`
+    return workbenchText('ShellDialog.shellEditRefusedOwnerIsMissingFromTheFeature', { ownerId: String(ownerId) })
   }
   const order = dag.featureOrder()
   if (order.indexOf(ownerId) < 0 || order.indexOf(ownerId) >= order.indexOf(featureId)) {
-    return `Shell edit refused: owner '${ownerId}' is not an upstream feature`
+    return workbenchText('ShellDialog.shellEditRefusedOwnerIsNotAnUpstreamFeature', { ownerId: String(ownerId) })
   }
   if (!Array.isArray(node.payload.removeFaces) || node.payload.removeFaces.length === 0 || node.payload.removeFaces.some((id) => typeof id !== 'string' || id.length === 0)) {
-    return `Shell edit refused: '${featureId}' has no valid face references`
+    return workbenchText('ShellDialog.shellEditRefusedHasNoValidFaceReferences', { featureId: String(featureId) })
   }
   if (typeof node.payload.thickness !== 'number' || !Number.isFinite(node.payload.thickness) || node.payload.thickness <= 0) {
-    return `Shell edit refused: '${featureId}' has an invalid thickness`
+    return workbenchText('ShellDialog.shellEditRefusedHasAnInvalidThickness', { featureId: String(featureId) })
   }
   return undefined
 }
 
 export function ShellDialog(props: ShellDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const { dag, history, onApplied, onClose } = props
   const editing = props.mode === 'edit'
   const existing = editing ? dag.getNode(props.featureId) : undefined
@@ -108,7 +118,7 @@ export function ShellDialog(props: ShellDialogProps) {
         thickness,
         name: editing && typeof existing?.payload.name === 'string'
           ? existing.payload.name
-          : `Shell ${previewFeatureId}`,
+          : workbenchText('ShellDialog.shell', { previewFeatureId: String(previewFeatureId) }),
       },
     }
   }, [editing, existing?.payload.name, faceIdsKey, invalid, previewFeatureId, previewOwnerId, thickness])
@@ -136,7 +146,7 @@ export function ShellDialog(props: ShellDialogProps) {
         onClose()
         return
       } catch (error) {
-        setApplyError(`Shell Apply refused: ${error instanceof Error ? error.message : String(error)}`)
+        setApplyError(workbenchText('ShellDialog.shellApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) }))
         return
       } finally {
         applyingRef.current = false
@@ -148,7 +158,7 @@ export function ShellDialog(props: ShellDialogProps) {
       const live = dag.getNode(props.featureId)
       const liveReferenceError = editReferenceError(dag, props.featureId)
       if (live === undefined || liveReferenceError !== undefined) {
-        setApplyError(liveReferenceError ?? `Shell edit refused: '${props.featureId}' is no longer available`)
+        setApplyError(liveReferenceError ?? workbenchText('ShellDialog.shellEditRefusedIsNoLongerAvailable', { featureId: String(props.featureId) }))
         return
       }
       try {
@@ -170,7 +180,7 @@ export function ShellDialog(props: ShellDialogProps) {
     const ownerId = props.ownerId
     if (ownerId === undefined) return
     const id = nextId(dag, 'F')
-    const payload = { opType: 'shell', ownerId, removeFaces: [...props.faceIds], thickness, name: `Shell ${id}` }
+    const payload = { opType: 'shell', ownerId, removeFaces: [...props.faceIds], thickness, name: workbenchText('ShellDialog.shell2', { id: String(id) }) }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [ownerId], refs, payload }))
     } catch (err) {
@@ -206,21 +216,22 @@ export function ShellDialog(props: ShellDialogProps) {
     return () => window.removeEventListener('keydown', onPaletteKeyDown)
   }, [applyDisabled, handleApply, handleClose])
 
+  const refusalShown = props.previewState?.status === 'refused' || referenceError !== undefined || applyError !== undefined
   return (
     <div
-      className={`sketch-confirm-overlay fillet-command-strip${props.previewState?.status === 'refused' || referenceError !== undefined || applyError !== undefined ? ' fillet-command-strip--refusal' : ''}`}
+      className={`sketch-confirm-overlay fillet-command-strip${refusalShown ? ' fillet-command-strip--refusal' : ''}`}
+      style={refusalShown ? REFUSAL_STRIP_STYLE : undefined}
       data-testid="shell-workspace-palette"
       data-preview-status={applyingVisible ? 'applying' : (props.previewState?.status ?? 'idle')}
       role="toolbar"
-      aria-label={editing ? 'Edit Shell command' : 'Shell command'}
+      aria-label={editing ? workbenchText('ShellDialog.editShellCommand') : workbenchText('ShellDialog.shellCommand')}
       aria-busy={applyingVisible}
     >
-      <span className="sketch-confirm-title">Shell</span>
+      <span className="sketch-confirm-title">{workbenchText('ShellDialog.shell3')}</span>
       <span className="sketch-confirm-info" data-testid="shell-face-count">
-        {faceIds.length} face{faceIds.length === 1 ? '' : 's'} to open
-      </span>
+        {workbenchText('ShellDialog.faceToOpen', { length: String((faceIds.length) ?? ''), value2: String((faceIds.length === 1 ? '' : 's')) })}</span>
       <span className="sketch-confirm-hint" data-testid="shell-face-instruction">
-        {faceIds.length === 0 ? 'Select faces to open in the viewport' : 'Click faces to open or keep closed'}
+        {faceIds.length === 0 ? workbenchText('ShellDialog.selectFacesToOpenInTheViewport') : workbenchText('ShellDialog.clickFacesToOpenOrKeepClosed')}
       </span>
       {props.hoverReadout !== undefined && (
         <span
@@ -232,13 +243,13 @@ export function ShellDialog(props: ShellDialogProps) {
         </span>
       )}
       <label className="sketch-confirm-field">
-        <span>Thickness</span>
+        <span>{workbenchText('ShellDialog.thickness')}</span>
         <span data-testid="shell-thickness">
           <input
             ref={thicknessInputRef}
             type="text"
             inputMode="decimal"
-            aria-label="Shell thickness"
+            aria-label={workbenchText('ShellDialog.shellThickness')}
             value={thicknessDraft}
             min={0.1}
             disabled={applyingVisible}
@@ -258,52 +269,52 @@ export function ShellDialog(props: ShellDialogProps) {
             }}
           />
         </span>
-        <span className="sketch-confirm-unit">mm</span>
+        <span className="sketch-confirm-unit">{workbenchText('ShellDialog.mm')}</span>
       </label>
       {referenceError !== undefined && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="shell-reference-error"
-          data-tooltip={referenceError}
+          style={REFUSAL_LINE_STYLE}
+          data-tooltip={readableInternalIds(referenceError)}
           aria-live="polite"
         >
-          {referenceError}
+          {readableInternalIds(referenceError)}
         </span>
       )}
       {applyError !== undefined && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="shell-apply-error"
-          data-tooltip={applyError}
+          style={REFUSAL_LINE_STYLE}
+          data-tooltip={readableInternalIds(applyError)}
           aria-live="polite"
         >
-          {applyError}
+          {readableInternalIds(applyError)}
         </span>
       )}
       {previewControlled && applyingVisible && (
         <span className="fillet-command-status" data-testid="shell-preview-status" data-status="applying" aria-live="polite">
-          Applying...
-        </span>
+          {workbenchText('ShellDialog.applying')}</span>
       )}
       {previewControlled && !applyingVisible && props.previewState?.status === 'pending' && (
         <span className="fillet-command-status" data-testid="shell-preview-status" data-status="pending" aria-live="polite">
-          Updating...
-        </span>
+          {workbenchText('ShellDialog.updating')}</span>
       )}
       {previewControlled && !applyingVisible && props.previewState?.status === 'ready' && (
         <span className="fillet-command-status" data-testid="shell-preview-status" data-status="ready" aria-live="polite">
-          Ready
-        </span>
+          {workbenchText('ShellDialog.ready')}</span>
       )}
       {previewControlled && !applyingVisible && props.previewState?.status === 'refused' && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="shell-preview-status"
           data-status="refused"
-          data-tooltip={props.previewState.message}
+          style={REFUSAL_LINE_STYLE}
+          data-tooltip={readableInternalIds(props.previewState.message)}
           aria-live="polite"
         >
-          {props.previewState.message}
+          {readableInternalIds(props.previewState.message)}
         </span>
       )}
       <span className="sketch-confirm-actions">
@@ -311,25 +322,25 @@ export function ShellDialog(props: ShellDialogProps) {
           type="button"
           className="sketch-prompt-btn sketch-prompt-btn-confirm"
           data-testid="dialog-shell-apply"
-          aria-label="Apply Shell"
-          data-tooltip="Apply Shell (Enter)"
+          aria-label={workbenchText('ShellDialog.applyShell')}
+          data-tooltip={workbenchText('ShellDialog.applyShellEnter')}
           disabled={applyDisabled}
           onClick={() => { void handleApply() }}
         >
           <Check size={12} aria-hidden="true" />
-          <span>Apply</span>
+          <span>{workbenchText('ShellDialog.apply')}</span>
         </button>
         <button
           type="button"
           className="sketch-prompt-btn"
           data-testid="dialog-shell-cancel"
-          aria-label="Cancel Shell"
-          data-tooltip="Cancel Shell (Escape)"
+          aria-label={workbenchText('ShellDialog.cancelShell')}
+          data-tooltip={workbenchText('ShellDialog.cancelShellEscape')}
           disabled={applyingVisible}
           onClick={handleClose}
         >
           <X size={12} aria-hidden="true" />
-          <span>Cancel</span>
+          <span>{workbenchText('ShellDialog.cancel')}</span>
         </button>
       </span>
     </div>

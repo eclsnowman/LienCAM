@@ -1,3 +1,4 @@
+import { geometryDisplayName, pickedFaceDisplayName, readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
 import {
@@ -6,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { areaLabel, feedLabel, fmtArea, fmtDim, fmtFeed, fmtMachineLength, parseDimToMm, unitLabel } from '../../lib/ui/unitFormat'
-import { deriveModelThreadMillTarget, geometryForOperation, operationAcceptsMeshEdgeChains, resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, smartHeightStockBounds, useCamStore } from '../../store'
+import { deriveModelThreadMillTarget, geometryForOperation, meshFeatureTargetAdmission, operationAcceptsMeshEdgeChains, resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, smartHeightStockBounds, useCamStore } from '../../store'
 import { DisclosureSection } from '../ui/DisclosureSection'
 import { NumericInput, OptionalNumericInput } from '../ui/NumericInput'
 import { heightOffsetBoxValue } from './useHeightOffsetDisplay'
@@ -43,7 +44,7 @@ import type {
 } from '../../lib/cam/types'
 import { holeBottomWorldZ, isTiltedOffZ, ModelOriginComputeError, OwningStockError, ReferencePlaneError, resolveGeometryZToFrames, resolveModelBottomZ, resolveTopZ } from '../../store/dispatchGeo'
 import type { FeedrateOverride, HeightParams, HeightPlaneName, HeightReference, ImportedGeometry, Loop2D, MachineActionKind, NestRecord, Operation, PassParams, Setup } from '../../types'
-import { MACHINE_ACTION_TYPES, machineActionLabel } from '../../types'
+import { MACHINE_ACTION_TYPES, callableMachineMacros, machineActionLabel } from '../../types'
 import { RefPlaneSelect } from '../ui/RefPlaneSelect'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 import { LEGACY_MODEL_ITEM_ID, ensureDocumentArchiveHydrated } from '../../doc/documentHolder'
@@ -113,12 +114,21 @@ import {
   startMachiningBoundaryPickPresentation,
 } from './newOperationMachiningBoundaryPickPresentation'
 import { ResolvedHeightPlanInspector } from '../cam/ResolvedHeightPlanInspector'
+import {
+  isMeshChainId,
+  isMeshChainInstancePicked,
+  isStlChainSource,
+  loopSelectionPicks,
+  withLoopSelection,
+  type LoopSelectionPick,
+  type MeshChainSourceBinding,
+  type MeshChainSources,
+} from '../../lib/cam/meshChainInstances'
 // A viewport callback can outlive the render that created it. Keying the active
 // session by this modal instance's stable state setter lets stop/reset invalidate
 // an old callback synchronously without adding hooks back to the decomposed body.
 const activeLoopPickSessions = new WeakMap<object, symbol>()
 
-type MeshChainSourceBinding = { geometryId: string; geometryName: string }
 type PersistedContourParams = ContourParams & {
   meshChainSources?: Record<string, MeshChainSourceBinding[]>
 }
@@ -319,6 +329,24 @@ function stlChainSourceLabel(geometry: ImportedGeometry): string {
   return tx('NewOperationModalBody.closed_loops', { p1: geometry.name, p2: closedLoopCount })
 }
 
+/** WO-2859: an imported STL is offered to a family BEFORE anything has been
+ * derived from it whenever choosing it can derive what that family cuts: the
+ * edge-chain families (WO-251/258) load its chains, and the recognised-hole
+ * families (WO-1851: a drill or a bore aims at a proved hole) detect its holes.
+ * Before this, a fresh STL reached Drill only once someone had already pressed
+ * Detect holes elsewhere - and Drill's own list was the only place to do that.
+ * One rule for the dropdown, the viewport pick set and the source label. */
+function familyDerivesFromStl(operationType: Operation['type']): boolean {
+  return operationAcceptsMeshEdgeChains(operationType) || meshFeatureTargetAdmission(operationType) === 'holes'
+}
+
+function stlDerivesOnSelectionFor(
+  geometry: ImportedGeometry,
+  operationType: Operation['type'],
+): boolean {
+  return geometry.type === 'mesh' && geometry.format === 'stl' && familyDerivesFromStl(operationType)
+}
+
 /** WO-1521: a nest's owned seed copy and the workspace original it was
  * deep-copied from (`deepCopySeedGeometry`, src/store/index.ts) share a name and
  * geometry, so the flat Source geometry dropdown rendered byte-identical rows
@@ -355,7 +383,7 @@ function isViewportPickableOperationSource(
   return solidOperation
     ? geometry.type === 'mesh' || geometry.type === 'brep'
     : (geometryForOperation(geometry, operationType).loops?.length ?? 0) > 0 || geometry.type === 'brep'
-      || (operationAcceptsMeshEdgeChains(operationType) && geometry.type === 'mesh' && geometry.format === 'stl')
+      || stlDerivesOnSelectionFor(geometry, operationType)
 }
 
 /** Every newly authored keyed-item reference carries the compound Model
@@ -584,8 +612,8 @@ function OperationModalInteractionGuard({
 
 // ── Presentational body ───────────────────────────────────────────────────────
 // BK-178-DECOMP: the derived-values + JSX render body. Receives the state bundle
-// plus the resolved (guaranteed-non-null) setup/isEditMode/setupId as props, so it
-// holds no hooks and cannot reintroduce the hooks-order hazard.
+// plus the resolved (guaranteed-non-null) setup/isEditMode/setupId as props.
+// Its local Run macro choice is initialized before any conditional render.
 export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setupId }: {
   state: ReturnType<typeof useNewOperationModalState>
   setup: Setup
@@ -593,6 +621,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   setupId: string | null
 }) {
   useText('cam-operations-new-operation')
+  const [runMacroId, setRunMacroId] = useState('')
   const {
     closeModal, project, toolLibrary, toolLibraries, addOperation, updateOperation, editingOpPayload, computeToolpath,
     deriveBrepLayer, displayUnits, savedReviewCameraRef, tab, setTab, opType, setOpType,
@@ -715,12 +744,14 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   // WO-258: that admission is the SHARED predicate, not an op-type literal -
   // Pocket joins Contour here by joining the one rule, and geometryForOperation
   // above still decides which of the loaded chains this family may see.
+  // WO-2859: Drill and Bore join through `stlDerivesOnSelectionFor` - choosing
+  // the STL detects its holes the way choosing it for Contour loads its chains.
   const operationSourceGeometries = project.geometry.filter(
     g => {
       const operationLoops = geometryForOperation(g, opType).loops ?? []
       return isModelOpSourceEligible(g) || (!isModelOriginGeometry(g) && (
         operationLoops.length > 0 || g.type === 'brep'
-        || (operationAcceptsMeshEdgeChains(opType) && g.type === 'mesh' && g.format === 'stl')
+        || stlDerivesOnSelectionFor(g, opType)
       ))
     },
   )
@@ -995,17 +1026,20 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   // WO-405: under "All Parts" the boundary is bound to the STL the picked chain
   // came from (WO-258: params.geometryId stays '__all__', meshChainSources and
   // the picked loops carry the binding). The V2 scope names that ONE geometry:
-  // the first source whose loops contain a picked chain - the part the chain was
-  // picked from, the same choice compute makes when it names a missing chain.
+  // the first source owning a picked chain - the part the chain was picked from.
+  // WO-2859: two copies of one STL share chain ids, so "owning" means the part
+  // instance the pick is bound to, never merely the first part carrying the id.
+  const planarRoughMeshChainPicks = (planarRoughParams as { meshChainSources?: MeshChainSources }).meshChainSources
   const planarRoughAllPartsBoundGeometryId = useMemo(() => {
     if (!(isPocket || isAdaptive) || planarRoughGeometryId !== '__all__') return ''
     if (planarRoughParams.boundarySource === 'stock') return ''
-    const picked = new Set(planarRoughParams.loopIds ?? [])
-    if (picked.size === 0) return ''
+    const pickedIds = planarRoughParams.loopIds ?? []
+    if (pickedIds.length === 0) return ''
     const source = resolveOpGeometrySources(project.geometry, '__all__', planarRoughOperationType)
-      .find(geometry => (geometry.loops ?? []).some(loop => picked.has(loop.id)))
+      .find(geometry => (geometry.loops ?? []).some(loop =>
+        isMeshChainInstancePicked(pickedIds, planarRoughMeshChainPicks, loop.id, geometry.id)))
     return source?.id ?? ''
-  }, [isPocket, isAdaptive, planarRoughGeometryId, planarRoughParams.boundarySource, planarRoughParams.loopIds, planarRoughOperationType, project.geometry])
+  }, [isPocket, isAdaptive, planarRoughGeometryId, planarRoughParams.boundarySource, planarRoughParams.loopIds, planarRoughMeshChainPicks, planarRoughOperationType, project.geometry])
   const planarRoughScopeGeometryId = planarRoughGeometryId === '__all__'
     ? planarRoughAllPartsBoundGeometryId
     : planarRoughGeometryId
@@ -1811,6 +1845,15 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   // Shared geometry — '__all__' means collect from every loaded 2D file
   const isAllGeo    = geoId === '__all__'
   const selectedGeo = isAllGeo ? null : project.geometry.find(g => g.id === geoId)
+  // Display lookups retain the durable reference's actual owner, including
+  // legacy ownership. Neither a missing body nor another selection is its name.
+  const geometryNameForId = (id: string) => {
+    const geo = project.geometry.find(candidate => candidate.id === id)
+    return geo ? geometryDisplayName(geo, project.modelItems) : tx('NewOperationModalBody.Reference_unavailable')
+  }
+  const machiningBoundaryGeo = machiningBoundaryFace ? project.geometry.find(candidate =>
+    candidate.modelBody?.ref.bodyId === machiningBoundaryFace.bodyId &&
+    resolveOwningModelItemId(candidate) === (machiningBoundaryFace.modelItemId ?? LEGACY_MODEL_ITEM_ID)) : undefined
   const allGeoSources = resolveOpGeometrySources(project.geometry, '__all__', opType)
   // Engrave/Trace can follow either kind. Contour deliberately exposes exactly
   // one path family at a time; every other 2D/2.5D op remains closed-only.
@@ -1818,12 +1861,20 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     isEngrave ? true
     : isContour ? (contourPathType === 'open' ? !l.closed : l.closed)
     : l.closed
-  const closedLoops = isAllGeo
-    ? allGeoSources.flatMap(g => (g.loops ?? []).filter(loopIsPickable))
+  // WO-2859: under All Parts each row is one loop ON one part - two copies of
+  // one STL list the same chain id once per copy, and a tick names the copy.
+  const closedLoopRows = isAllGeo
+    ? allGeoSources.flatMap(g => (g.loops ?? []).filter(loopIsPickable).map(loop => ({ loop, source: g })))
     : selectedGeo
-      ? (geometryForOperation(selectedGeo, opType).loops ?? []).filter(loopIsPickable)
+      ? (geometryForOperation(selectedGeo, opType).loops ?? []).filter(loopIsPickable).map(loop => ({ loop, source: selectedGeo }))
       : []
+  const closedLoops = closedLoopRows.map(row => row.loop)
   const selectedLoopIds = isFace ? face.loopIds : isDrill ? drill.loopIds : isBore ? bore.loopIds : isThreadMill ? threadMill.loopIds : isPocket ? pocket.loopIds : isChamfer ? chamfer.loopIds : isEngrave ? engrave.loopIds : isVCarve ? vcarve.loopIds : isAdaptive ? adaptive.loopIds : contour.loopIds
+  // WO-2859: an STL's hole detection resolves later; it may only fill in the
+  // source, family and still-empty pick it started from, never one the
+  // operator has moved on to in the meantime.
+  const holeDetectTargetRef = useRef({ geoId, opType, picked: selectedLoopIds.length })
+  holeDetectTargetRef.current = { geoId, opType, picked: selectedLoopIds.length }
 
   // WO-1942: Thread Mill authors its band from the same picked-cylinder stand-in.
   // A pick belongs to the family that made it (a Thread Mill pick lands on an
@@ -3506,22 +3557,32 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   // WO-258: ONE binder for every family that may pick a chain (Contour, Pocket),
   // so the by-name refusal at the compute seam has the same evidence whichever
   // dialog authored the operation.
+  // WO-2859: the saved binding is read from the one pick list
+  // (`loopSelectionPicks`): a chain picked on named part instances keeps them as
+  // authored, even when that part has since lost the chain (compute then names
+  // it); a chain picked on no instance (viewport pick, All loops) binds every
+  // live part carrying it. A binding no pick carries never reaches Save.
   const meshChainSourcesForSave = (
     loopIds: readonly string[],
     previous: Record<string, MeshChainSourceBinding[]> | undefined,
   ): Record<string, MeshChainSourceBinding[]> | undefined => {
     if (!isAllGeo) return undefined
+    const picks = loopSelectionPicks({ geometryId: '__all__', loopIds: [...loopIds], meshChainSources: previous } as never)
     const meshChainSources: Record<string, MeshChainSourceBinding[]> = {}
-    for (const chainId of loopIds.filter((id) => id.startsWith('mec:'))) {
-      const liveBindings = allGeoSources
-        .filter((geometry) =>
-          geometry.type === 'mesh' &&
-          geometry.format === 'stl' &&
-          geometry.loops?.some((loop) => loop.id === chainId),
-        )
-        .map((geometry) => ({ geometryId: geometry.id, geometryName: geometry.name }))
-      const bindings = liveBindings.length > 0 ? liveBindings : previous?.[chainId]
-      if (bindings?.length) meshChainSources[chainId] = bindings
+    for (const chainId of [...new Set(loopIds)].filter(isMeshChainId)) {
+      const authored = picks.flatMap((pick) => pick.loopId === chainId && pick.instance ? [pick.instance] : [])
+      const bindings = authored.length
+        ? authored.map((binding) => {
+            const live = allGeoSources.find((geometry) => geometry.id === binding.geometryId)
+            return live ? { geometryId: live.id, geometryName: live.name } : binding
+          })
+        : allGeoSources
+          .filter((geometry) =>
+            isStlChainSource(geometry) &&
+            geometry.loops?.some((loop) => loop.id === chainId),
+          )
+          .map((geometry) => ({ geometryId: geometry.id, geometryName: geometry.name }))
+      if (bindings.length) meshChainSources[chainId] = bindings
     }
     return Object.keys(meshChainSources).length > 0 ? meshChainSources : undefined
   }
@@ -3629,10 +3690,20 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     : undefined
   const adaptiveModelReferences =
     adaptiveEdgeChainModelReferences ?? adaptiveMachiningBoundaryModelReferences
-  const adaptiveForSave = {
+  // WO-2859: Adaptive takes STL chains on the same closed-only rule as Pocket,
+  // so it saves the same All Parts chain bindings through the one binder.
+  const adaptiveForSave: typeof effectiveAdaptive & {
+    meshChainSources?: Record<string, MeshChainSourceBinding[]>
+  } = {
     ...effectiveAdaptive,
     loopIds: contourLoopIdsForSave(effectiveAdaptive.loopIds, !!adaptiveEdgeChainModelReferences),
   }
+  const adaptiveMeshChainSources = meshChainSourcesForSave(
+    adaptiveForSave.loopIds,
+    (adaptive as typeof adaptiveForSave).meshChainSources,
+  )
+  if (adaptiveMeshChainSources) adaptiveForSave.meshChainSources = adaptiveMeshChainSources
+  else delete adaptiveForSave.meshChainSources
   // WO-1939: Engrave persists the chain it follows. Its path ids are the
   // chain-derived ones (engraveModelChainGeometry above), never a stale pick.
   const engraveModelReferences = engraveModelChainGeometry ? modelEdgeChainModelReferences : undefined
@@ -3759,7 +3830,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   const vcarveHeightValid = !isVCarve || (vcarveHeightAuthority !== 'repair_required' &&
     vcarveHeightPreview.state === 'resolved' && vcarveClearingToolValid
   )
-  const canCreate = machineActionKind !== null ? true
+  const callableMacros = callableMachineMacros(project.machine)
+  const selectedRunMacro = callableMacros.find((macro) => macro.id === runMacroId)
+  const canCreate = machineActionKind !== null ? (machineActionKind !== 'run_macro' || selectedRunMacro !== undefined)
     : isParallel3d || isSteepShallow3d || isScallop3d || isPencil3d
     ? (!!toolId && (isPencil3d ? pencilCutterSupported : isParallel3d ? parallelCutterSupported : cutter3dSupported) && !!parallelHeightPartIdEff &&
        !heightRepairRequired && parallel3dHeightPreview.state === 'resolved')
@@ -3893,13 +3966,16 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   // geometry: Create adds it at the end of the setup's operation list, named
   // as typed, and selects it, so its own fields open in the Properties panel.
   const handleCreateMachineAction = (kind: MachineActionKind) => {
+    if (kind === 'run_macro' && !selectedRunMacro) return
     const store = useCamStore.getState()
     const id = store.addMachineAction(setup.id, kind)
     if (opName.trim()) store.updateMachineAction(setup.id, id, { name: opName.trim() })
+    if (kind === 'run_macro' && selectedRunMacro) store.updateMachineAction(setup.id, id, { macroId: selectedRunMacro.id })
     store.setActiveSetup(setup.id)
     store.setActiveOperation(id)
     closeModal()
     resetState()
+    setRunMacroId('')
   }
 
   const handleCreate = () => {
@@ -4639,6 +4715,37 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         })
       })
     }
+    // WO-2859: choosing an STL for a drill or a bore detects its holes - the
+    // same store action Detect holes runs for an STL (WO-1851) - and picks
+    // them up the way Detect holes does: every hole selected, and for a drill
+    // the per-hole depths the recognition measured.
+    if (meshFeatureTargetAdmission(opType) === 'holes' && selected?.type === 'mesh' && selected.format === 'stl') {
+      const family = opType
+      return useCamStore.getState().loadMeshFeatureTargets(id).then(() => {
+        const current = holeDetectTargetRef.current
+        if (current.geoId !== id || current.opType !== family || current.picked > 0) return
+        const landed = useCamStore.getState().project.geometry.find(g => g.id === id)
+        if (!landed) return
+        const forFamily = geometryForOperation(landed, family)
+        const holeLoopIds = (forFamily.loops ?? []).filter(loop => loop.closed).map(loop => loop.id)
+        const holes = (forFamily.layers2d ?? []).flatMap(layer => layer.holes ?? [])
+        if (holeLoopIds.length === 0) return
+        if (family === 'drill') {
+          setDrill(d => ({ ...d, loopIds: holeLoopIds, perHoleDepth: holes.length > 0 ? true : d.perHoleDepth }))
+          if (holes.length > 0) setSelectedBottom(Math.min(...holes.map(hole => hole.bottomZ)))
+        } else {
+          setBore(b => ({ ...b, loopIds: holeLoopIds }))
+        }
+        pushPickedLoopsToViewport(holeLoopIds)
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        setBrepDeriveError(message)
+        useCamStore.getState().addConsoleEvent({
+          severity: 'error', source: 'import', message,
+          entityRef: { kind: 'geometry', id },
+        })
+      })
+    }
     return undefined
   }
 
@@ -4673,6 +4780,32 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     getVp()?.setPartPickMode?.(null)
     setIsPickingSourcePart(false)
   }
+
+  // WO-2859: the chain families' selection is ONE pick list - a loop id on one
+  // part instance, or on every part carrying it (meshChainInstances.ts). These
+  // read and write it; `loopIds` and `meshChainSources` are derived from it in
+  // `withLoopSelection`, never written apart.
+  const isChainFamily = isPocket || isAdaptive || isContour
+  const meshChainPicks = isChainFamily
+    ? ((isPocket ? pocket : isAdaptive ? adaptive : contour) as { meshChainSources?: MeshChainSources }).meshChainSources
+    : undefined
+  const updateLoopSelection = (next: (current: LoopSelectionPick[]) => LoopSelectionPick[]) => {
+    const apply = <T extends { geometryId?: string; loopIds?: string[] }>(params: T): T =>
+      withLoopSelection(params, next(loopSelectionPicks(params)))
+    if (isPocket) setPocket(apply)
+    else if (isAdaptive) setAdaptive(apply)
+    else if (isContour) setContour(apply)
+  }
+  /** Replace the selection; a family without instance picks takes the ids. */
+  const setLoopSelection = (picks: readonly LoopSelectionPick[]) => {
+    if (isChainFamily) updateLoopSelection(() => [...picks])
+    else setLoopIds([...new Set(picks.map(pick => pick.loopId))])
+  }
+  /** A row whose tick names its part instance: an STL edge chain under All
+   *  Parts, for a family that saves chain bindings. */
+  const isChainInstanceRow = (row: { loop: { id: string }; source?: { type: string; format?: string } }) =>
+    isAllGeo && (isPocket || isAdaptive || isContour) && isMeshChainId(row.loop.id) &&
+    !!row.source && isStlChainSource(row.source)
 
   const setLoopIds = (ids: string[]) => {
     if (isFace)            setFace(f => ({ ...f, loopIds: ids }))
@@ -4725,7 +4858,16 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       else acceptedLoopIds.delete(loopId)
       const nextLoopIds = [...acceptedLoopIds]
       setUserClearedLoops(nextLoopIds.length === 0)
-      if (isFace) {
+      // WO-2859: a viewport click names a chain id but not which copy of the
+      // STL it hit (and highlights the id on every copy), so it picks the id
+      // on every part that carries it - exactly what it shows. Every other
+      // pick keeps the instances it had.
+      if (isChainFamily) {
+        updateLoopSelection(current => nextLoopIds.flatMap((id): LoopSelectionPick[] => {
+          const kept = id === loopId ? [] : current.filter(pick => pick.loopId === id)
+          return kept.length > 0 ? kept : [{ loopId: id }]
+        }))
+      } else if (isFace) {
         setFace(prev => ({
           ...prev,
           loopIds: nextLoopIds,
@@ -4748,11 +4890,6 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
           ...prev,
           loopIds: nextLoopIds,
         }))
-      } else if (isPocket) {
-        setPocket(prev => ({
-          ...prev,
-          loopIds: nextLoopIds,
-        }))
       } else if (isChamfer) {
         setChamfer(prev => ({
           ...prev,
@@ -4765,16 +4902,6 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         }))
       } else if (isEngrave) {
         setEngrave(prev => ({
-          ...prev,
-          loopIds: nextLoopIds,
-        }))
-      } else if (isAdaptive) {
-        setAdaptive(prev => ({
-          ...prev,
-          loopIds: nextLoopIds,
-        }))
-      } else {
-        setContour(prev => ({
           ...prev,
           loopIds: nextLoopIds,
         }))
@@ -4791,14 +4918,15 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
 
   const clearLoopSelection = () => {
     setUserClearedLoops(true)
-    setLoopIds([])
+    setLoopSelection([])
     pushPickedLoopsToViewport([])
   }
 
   const selectAllLoops = () => {
-    const allLoopIds = closedLoops.map(loop => loop.id)
+    // Every row, so every copy: no per-instance binding narrows it (WO-2859).
+    const allLoopIds = [...new Set(closedLoops.map(loop => loop.id))]
     setUserClearedLoops(allLoopIds.length === 0)
-    setLoopIds(allLoopIds)
+    setLoopSelection(allLoopIds.map(loopId => ({ loopId })))
     pushPickedLoopsToViewport(allLoopIds)
   }
 
@@ -4889,7 +5017,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     if (!sel.isModelFace) return { error: tx('NewOperationModalBody.That_was_not_a_modeled_body_face_pick', { p1: what }) }
     if (!sel.geoId) return { get error() { return tx('NewOperationModalBody.The_picked_face_reported_no_owning_body_re_sync') } }
     const owner = project.geometry.find(g => g.id === sel.geoId)
-    if (!owner) return { error: tx('NewOperationModalBody.The_picked_face_belongs_to_a_body_that_is_2', { p1: sel.geoId }) }
+    if (!owner) return { error: tx('NewOperationModalBody.The_picked_face_belongs_to_a_body_that_is_2', { p1: geometryNameForId(sel.geoId) }) }
     if (!isModelOpSourceEligible(owner)) {
       return { error: tx('NewOperationModalBody.cannot_be_the_source_of_this_operation_pick_a', { p1: owner.name }) }
     }
@@ -5369,7 +5497,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       // invariant, not a source change - refuse it by name rather than
       // deriving one body's face index against another body's shape.
       if (sel.geoId !== geoId) {
-        setBrepDeriveError(tx('NewOperationModalBody.That_face_belongs_to_a_different_body_than_this', { p1: sel.geoId }))
+        setBrepDeriveError(tx('NewOperationModalBody.That_face_belongs_to_a_different_body_than_this', { p1: geometryNameForId(sel.geoId) }))
         return
       }
       setBrepFacePicks(prev => nowSelected
@@ -5562,7 +5690,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     beginBrepPickSuspension()
     getVp()?.setBrepPickMode?.('edge', (sel, nowSelected) => {
       if (sel.geoId !== geoId) {
-        setBrepDeriveError(tx('NewOperationModalBody.That_edge_belongs_to_a_different_body_than_this', { p1: sel.geoId }))
+        setBrepDeriveError(tx('NewOperationModalBody.That_edge_belongs_to_a_different_body_than_this', { p1: geometryNameForId(sel.geoId) }))
         return
       }
       setBrepEdgePicks(prev => nowSelected
@@ -5602,7 +5730,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       }
       if (sel.geoId !== geoId) {
         setModelEdgePickError(
-          tx('NewOperationModalBody.That_edge_belongs_to_a_different_body_than_this_2', { p1: sel.geoId }) +
+          tx('NewOperationModalBody.That_edge_belongs_to_a_different_body_than_this_2', { p1: geometryNameForId(sel.geoId) }) +
           tx('NewOperationModalBody.Change_Source_geometry_first'),
         )
         return
@@ -5720,17 +5848,17 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
           ) : brepPickKind === 'edge' ? (
             <>{tx('NewOperationModalBody.Click_model_edges_to_select_or_deselect_them')}<strong>{tx('NewOperationModalBody.edge_selected', { p1: brepEdgePicks.length, p2: brepEdgePicks.length !== 1 ? tx('NewOperationModalBody.Census_s') : '' })}</strong></>
           ) : brepPickKind === 'machining-boundary' ? (
-            <>{tx('NewOperationModalBody.Click_a_flat_face_on_the_model_to_use')}{machiningBoundaryPickError && <strong style={{ color: '#ff8c8c' }}> {machiningBoundaryPickError}</strong>}</>
+            <>{tx('NewOperationModalBody.Click_a_flat_face_on_the_model_to_use')}{machiningBoundaryPickError && <strong style={{ color: '#ff8c8c' }}> {readableInternalIds(machiningBoundaryPickError)}</strong>}</>
           ) : brepPickKind === 'face-target' ? (
-            <>{tx('NewOperationModalBody.Click_the_FLAT_model_face_that_the_Face_operation')}{brepDeriveError && <strong style={{ color: '#ff8c8c' }}> {brepDeriveError}</strong>}</>
+            <>{tx('NewOperationModalBody.Click_the_FLAT_model_face_that_the_Face_operation')}{brepDeriveError && <strong style={{ color: '#ff8c8c' }}> {readableInternalIds(brepDeriveError)}</strong>}</>
           ) : brepPickKind === 'model-edge' ? (
             <>{tx('NewOperationModalBody.Click_edges_on_the_model_to_build_this_operation')}<strong data-testid="model-edge-pick-count">{tx('NewOperationModalBody.edge_selected', { p1: modelEdgePicks.length, p2: modelEdgePicks.length !== 1 ? tx('NewOperationModalBody.Census_s') : '' })}</strong>
-              {modelEdgePickError && <strong style={{ color: '#ff8c8c' }} data-testid="model-edge-pick-banner-error"> {modelEdgePickError}</strong>}</>
+              {modelEdgePickError && <strong style={{ color: '#ff8c8c' }} data-testid="model-edge-pick-banner-error"> {readableInternalIds(modelEdgePickError)}</strong>}</>
           ) : brepPickKind === 'model-bore' ? (isModelBorePickResolving
             ? <>{tx('NewOperationModalBody.Reading_the_picked_face_hold_on')}</>
-            : <>{isThreadMill ? tx('NewOperationModalBody.Click_one_hole_or_boss_wall_to_thread') : tx('NewOperationModalBody.Click_one_internal_cylindrical_wall_to_use_as_this')}{brepDeriveError && <strong style={{ color: '#ff8c8c' }}> {brepDeriveError}</strong>}</>
+            : <>{isThreadMill ? tx('NewOperationModalBody.Click_one_hole_or_boss_wall_to_thread') : tx('NewOperationModalBody.Click_one_internal_cylindrical_wall_to_use_as_this')}{brepDeriveError && <strong style={{ color: '#ff8c8c' }}> {readableInternalIds(brepDeriveError)}</strong>}</>
           ) : (
-            <>{tx('NewOperationModalBody.Click_a_FLAT_face_to_use_as_the_datum')}{brepDeriveError && <strong style={{ color: '#ff8c8c' }}> {brepDeriveError}</strong>}</>
+            <>{tx('NewOperationModalBody.Click_a_FLAT_face_to_use_as_the_datum')}{brepDeriveError && <strong style={{ color: '#ff8c8c' }}> {readableInternalIds(brepDeriveError)}</strong>}</>
           )}
         </span>
         {brepPickKind === 'face' && (
@@ -5799,7 +5927,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
           </div>
           <div className="modal-body op-modal-body">
             <div className="op-tab-content" data-testid="op-edit-load-error">
-              <span className="op-hint op-hint-warn" style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, display: 'block' }}>{tx('NewOperationModalBody.Cannot_edit_this_operation', { p1: editLoadError })}</span>
+              <span className="op-hint op-hint-warn" style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, display: 'block' }}>{tx('NewOperationModalBody.Cannot_edit_this_operation', { p1: readableInternalIds(editLoadError) })}</span>
             </div>
           </div>
           <div className="modal-footer">
@@ -6014,6 +6142,23 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                 </>
               )}
 
+              {machineActionKind === 'run_macro' && (
+                <div className="mform-group">
+                  <label className="mform-label" htmlFor="run-macro-create-select">Macro</label>
+                  <select
+                    id="run-macro-create-select"
+                    className="mform-input"
+                    data-testid="run-macro-create-select"
+                    value={selectedRunMacro?.id ?? ''}
+                    onChange={(event) => setRunMacroId(event.target.value)}
+                  >
+                    <option value="">Choose a macro</option>
+                    {callableMacros.map((macro) => <option key={macro.id} value={macro.id}>{macro.name} (M{macro.mCode})</option>)}
+                  </select>
+                  <p>Only shown macros with program-callable M-codes are listed. M6 also changes tools.</p>
+                  {callableMacros.length === 0 && <p>This machine has no callable macros.</p>}
+                </div>
+              )}
               <p className="op-section-label" style={{ marginTop: 18 }}>{tx('NewOperationModalBody.Operation_name')}</p>
               <input
                 className="mform-input"
@@ -6386,7 +6531,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       {/* WO-1954: the label follows the shared capability map -
                           Parallel, (WO-1957) Scallop, (WO-1958) Steep/Shallow
                           and (WO-1959) Pencil compute a modeled body. */}
-                      {g.name}{tx('NewOperationModalBody.symbol_4')}{g.type === 'brep' ? tx('NewOperationModalBody.STEP_model') : g.type === 'model'
+                      {geometryDisplayName(g, project.modelItems)}{tx('NewOperationModalBody.symbol_4')}{g.type === 'brep' ? tx('NewOperationModalBody.STEP_model') : g.type === 'model'
                         ? modelBindingCapability.computeSupported ? tx('NewOperationModalBody.Modeled_body') : tx('NewOperationModalBody.Modeled_body_compute_pending')
                         : tx('NewOperationModalBody.STL_mesh')}{tx('NewOperationModalBody.symbol_5')}</option>
                   ))}
@@ -6425,7 +6570,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   {parallel3dSolids.map(g => (
                     <option key={g.id} value={g.id}>
                       {/* WO-1956: the label follows the shared capability map. */}
-                      {g.name}{tx('NewOperationModalBody.symbol_4')}{g.type === 'brep' ? tx('NewOperationModalBody.STEP_model') : g.type === 'model'
+                      {geometryDisplayName(g, project.modelItems)}{tx('NewOperationModalBody.symbol_4')}{g.type === 'brep' ? tx('NewOperationModalBody.STEP_model') : g.type === 'model'
                         ? modelBindingCapability.computeSupported ? tx('NewOperationModalBody.Modeled_body') : tx('NewOperationModalBody.Modeled_body_compute_pending')
                         : tx('NewOperationModalBody.STL_mesh')}{tx('NewOperationModalBody.symbol_5')}</option>
                   ))}
@@ -6463,7 +6608,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   <option value="">{tx('NewOperationModalBody.Select_a_solid')}</option>
                   {parallel3dSolids.map(g => (
                     <option key={g.id} value={g.id}>
-                      {g.name}{tx('NewOperationModalBody.symbol_4')}{g.type === 'brep' ? tx('NewOperationModalBody.STEP_model') : g.type === 'model' ? tx('NewOperationModalBody.LienCAM_modeled_solid') : tx('NewOperationModalBody.STL_mesh')}{tx('NewOperationModalBody.symbol_5')}</option>
+                      {geometryDisplayName(g, project.modelItems)}{tx('NewOperationModalBody.symbol_4')}{g.type === 'brep' ? tx('NewOperationModalBody.STEP_model') : g.type === 'model' ? tx('NewOperationModalBody.LienCAM_modeled_solid') : tx('NewOperationModalBody.STL_mesh')}{tx('NewOperationModalBody.symbol_5')}</option>
                   ))}
                   </select>
                 </>
@@ -6496,7 +6641,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   <Layers size={28} />
                   <span className="op-no-tool-title">{tx('NewOperationModalBody.No_geometry_loaded')}</span>
                   <span className="op-no-tool-body">
-                    {operationAcceptsMeshEdgeChains(opType)
+                    {familyDerivesFromStl(opType)
                       ? tx('NewOperationModalBody.Import_an_SVG_DXF_or_STL_file_to_get')
                       : tx('NewOperationModalBody.Import_an_SVG_or_DXF_file_to_get_loop')}
                   </span>
@@ -6531,11 +6676,15 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                           // shared derive-then-bind route; drill computes after
                           // Detect holes. Other modes retain the named refusal.
                           ? modelBindingCapability.computeSupported
-                            ? tx('NewOperationModalBody.modeled_body', { p1: g.name })
-                            : tx('NewOperationModalBody.modeled_body_compute_pending', { p1: g.name })
+                            ? tx('NewOperationModalBody.modeled_body', { p1: geometryDisplayName(g, project.modelItems) })
+                            : tx('NewOperationModalBody.modeled_body_compute_pending', { p1: geometryDisplayName(g, project.modelItems) })
                           : operationAcceptsMeshEdgeChains(opType) && g.type === 'mesh' && g.format === 'stl'
                             ? stlChainSourceLabel(g)
-                          : tx('NewOperationModalBody.closed_loops_2', { p1: g.name, p2: (geometryForOperation(g, opType).loops ?? []).filter(l => l.closed).length, p3: g.type === 'brep' ? tx('NewOperationModalBody.3D_model') : '' }))
+                          // WO-2859: an STL whose holes are not detected yet says
+                          // what it is, never "0 closed loops".
+                          : stlDerivesOnSelectionFor(g, opType) && (geometryForOperation(g, opType).loops ?? []).length === 0
+                            ? `${geometryDisplayName(g, project.modelItems)}${tx('NewOperationModalBody.symbol_4')}${tx('NewOperationModalBody.STL_mesh')}${tx('NewOperationModalBody.symbol_5')}`
+                          : tx('NewOperationModalBody.closed_loops_2', { p1: geometryDisplayName(g, project.modelItems), p2: (geometryForOperation(g, opType).loops ?? []).filter(l => l.closed).length, p3: g.type === 'brep' ? tx('NewOperationModalBody.3D_model') : '' }))
                           // WO-1521: annotate a nest-owned seed on EVERY branch.
                           + nestSeedSuffix(g, project.nests)}
                       </option>
@@ -6550,12 +6699,14 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   {modelEdgeChainDropNotice}
                 </span>
               )}
-              {selectedGeo?.type === 'mesh' && selectedGeo.format === 'stl' && isDerivingPickedSourcePart && (
+              {/* The hint names edge chains, so it shows only for a family that
+                  loads them; a drill's hole detection (WO-2859) is quick. */}
+              {selectedGeo?.type === 'mesh' && selectedGeo.format === 'stl' && isDerivingPickedSourcePart && operationAcceptsMeshEdgeChains(opType) && (
                 <span className="op-hint" data-testid="mesh-edge-chain-deriving">{tx('NewOperationModalBody.Deriving_edge_chains_from_the_picked_STL')}</span>
               )}
               {selectedGeo?.type === 'mesh' && selectedGeo.format === 'stl' && brepDeriveError && (
                 <span className="op-hint op-hint-warn" data-testid="mesh-edge-chain-error">
-                  {brepDeriveError}
+                  {readableInternalIds(brepDeriveError)}
                 </span>
               )}
               {/* B-rep derive buttons — brep source: pick face/edges/holes + section;
@@ -6591,7 +6742,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   )}
                   {modelEdgePickError && (
                     <span className="op-hint op-hint-warn" data-testid="model-edge-pick-error">
-                      {modelEdgePickError}
+                      {readableInternalIds(modelEdgePickError)}
                     </span>
                   )}
                   {effectiveModelEdgeChain && modelEdgeMigratedIds.length > 0 && (
@@ -6662,7 +6813,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   )}
                   {brepDeriveError && (
                     <span className="op-hint op-hint-warn" data-testid="brep-derive-error">
-                      {brepDeriveError}
+                      {readableInternalIds(brepDeriveError)}
                     </span>
                   )}
                   {brepFaceDepthHint && (
@@ -6707,12 +6858,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   </div>
                   <span className="op-hint" data-testid="machining-boundary-readout" style={{ marginBottom: 0 }}>
                     {machiningBoundaryFace
-                      ? tx('NewOperationModalBody.Face_picked_id', { p1: machiningBoundaryFace.faceStableId })
+                      ? pickedFaceDisplayName(machiningBoundaryGeo ? geometryDisplayName(machiningBoundaryGeo, project.modelItems) : undefined)
                       : tx('NewOperationModalBody.No_face_picked_yet_the_operation_uses_the_whole')}
                   </span>
                   {machiningBoundaryPickError && (
                     <span className="op-hint op-hint-warn" data-testid="machining-boundary-pick-error">
-                      {machiningBoundaryPickError}
+                      {readableInternalIds(machiningBoundaryPickError)}
                     </span>
                   )}
                 </>
@@ -6797,19 +6948,23 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   </button>
 
                   <div className="op-loop-list">
-                    {closedLoops.map(loop => {
+                    {closedLoopRows.map(row => {
+                      const { loop, source } = row
                       // Only legacy edited operations use empty + not-cleared as
                       // "all". New Pocket sketch defaults and authored
                       // All-loops choices store every selected loop id.
                       const allByDefault = selectedLoopIds.length === 0 && !userClearedLoops
-                      const checked = allByDefault || selectedLoopIds.includes(loop.id)
-                      const sourceGeoName = isAllGeo
-                        ? project.geometry.find(g => g.loops?.some(l => l.id === loop.id))?.name
-                        : undefined
+                      // WO-2859: an STL chain row under All Parts is checked
+                      // for the part it was ticked on, not for every copy.
+                      const instanceRow = isChainInstanceRow(row)
+                      const checked = allByDefault || (instanceRow
+                        ? isMeshChainInstancePicked(selectedLoopIds, meshChainPicks, loop.id, source.id)
+                        : selectedLoopIds.includes(loop.id))
+                      const sourceGeoName = isAllGeo ? source.name : undefined
                       const chamferSide = chamfer.loopSides[loop.id] ??
                         (loop.type === 'hole' ? 'inner' : 'outer')
                       return (
-                        <div key={loop.id} className={`op-loop-check ${checked && !allByDefault ? 'op-loop-check-active' : ''}`}>
+                        <div key={isAllGeo ? `${source.id}:${loop.id}` : loop.id} className={`op-loop-check ${checked && !allByDefault ? 'op-loop-check-active' : ''}`}>
                           <label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, cursor: 'pointer' }}>
                             <input
                               type="checkbox"
@@ -6819,8 +6974,31 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                                 // and push the same value to the viewport (the old code pushed
                                 // the STALE pre-update array). From the "all" default, unchecking
                                 // one box materialises every-other-loop; otherwise toggle this id.
+                                if (instanceRow) {
+                                  // WO-2859: tick or untick THIS part's copy of the
+                                  // chain in the one pick list; the id stays picked
+                                  // while any copy is. A pick on every copy (no
+                                  // instance) becomes one pick per listed copy first.
+                                  const bindingOf = (r: typeof row) => ({ geometryId: r.source.id, geometryName: r.source.name })
+                                  const current: LoopSelectionPick[] = allByDefault
+                                    ? [...new Set(closedLoops.map(l => l.id))].map(loopId => ({ loopId }))
+                                    : loopSelectionPicks({ geometryId: geoId, loopIds: selectedLoopIds, meshChainSources: meshChainPicks } as never)
+                                  const expanded = current.flatMap((pick): LoopSelectionPick[] =>
+                                    pick.loopId === loop.id && !pick.instance
+                                      ? closedLoopRows.filter(r => r.loop.id === loop.id && isChainInstanceRow(r))
+                                        .map(r => ({ loopId: loop.id, instance: bindingOf(r) }))
+                                      : [pick])
+                                  const picks = checked
+                                    ? expanded.filter(pick => !(pick.loopId === loop.id && pick.instance?.geometryId === source.id))
+                                    : [...expanded, { loopId: loop.id, instance: bindingOf(row) }]
+                                  const next = [...new Set(picks.map(pick => pick.loopId))]
+                                  setUserClearedLoops(next.length === 0)
+                                  setLoopSelection(picks)
+                                  pushPickedLoopsToViewport(next)
+                                  return
+                                }
                                 const next = allByDefault
-                                  ? closedLoops.filter(l => l.id !== loop.id).map(l => l.id)
+                                  ? [...new Set(closedLoops.filter(l => l.id !== loop.id).map(l => l.id))]
                                   : (selectedLoopIds.includes(loop.id)
                                       ? selectedLoopIds.filter(x => x !== loop.id)
                                       : [...selectedLoopIds, loop.id])
@@ -8983,7 +9161,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       </button>
                       <div className="op-hint" data-testid="face-target-readout">
                         {face.targetPlaneGeo
-                          ? tx('NewOperationModalBody.Census_Target_face', { p1: project.geometry.find(candidate => candidate.id === face.targetPlaneGeo?.geoId)?.name ?? face.targetPlaneGeo.geoId, p2: face.targetPlaneGeo.faceIndex })
+                          ? tx('NewOperationModalBody.Census_Target_face', { p1: geometryNameForId(face.targetPlaneGeo.geoId), p2: face.targetPlaneGeo.faceIndex })
                           : tx('NewOperationModalBody.No_target_face_selected_yet')}
                       </div>
                     </div>
@@ -10095,6 +10273,21 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                 </>
               ) : (
                 <>
+                  {isChamfer && (
+                    <div data-testid="chamfer-entry-policy">
+                      <p className="op-section-label">{tx('NewOperationModalBody.Chamfer_entry_policy')}</p>
+                      <select
+                        aria-label={tx('NewOperationModalBody.Chamfer_entry_policy')}
+                        value={chamfer.entryPolicy ?? 'authored'}
+                        onChange={e => setChamfer(c => ({ ...c, entryPolicy: e.target.value as 'authored' | 'clear_space' }))}
+                      >
+                        <option value="authored">{tx('NewOperationModalBody.Chamfer_authored_entry')}</option>
+                        <option value="clear_space">{tx('NewOperationModalBody.Chamfer_clear_space_entry')}</option>
+                      </select>
+                      {chamfer.entryPolicy === 'clear_space' && <p className="op-hint">{tx('NewOperationModalBody.Chamfer_clear_space_description')}</p>}
+                    </div>
+                  )}
+                  {!(isChamfer && chamfer.entryPolicy === 'clear_space') && (<>
                   <div className="op-toggle-row">
                     <button
                       className={`op-toggle-btn ${linking.entryType === 'plunge' ? 'op-toggle-active' : ''}`}
@@ -10112,6 +10305,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       onChange={v => setLinking(l => ({ ...l, rampAngle: v }))}
                     />
                   )}
+                  </>)}
 
                   {contourPathType === 'closed' && (
                   <>

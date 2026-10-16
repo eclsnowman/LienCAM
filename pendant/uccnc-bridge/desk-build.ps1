@@ -25,7 +25,12 @@ $out  = Join-Path $env:TEMP 'liencam-bridge-desk'
 $root = Join-Path $env:TEMP 'liencam-bridge-desk-uccnc'
 $exe  = Join-Path $out 'liencam-bridge.exe'
 $sourceRoot = if ($env:LIENCAM_DESK_SOURCE_ROOT) { $env:LIENCAM_DESK_SOURCE_ROOT } else {
-  Split-Path -Parent (git -C $here rev-parse --path-format=absolute --git-common-dir)
+  $guess = Split-Path -Parent (git -C $here rev-parse --path-format=absolute --git-common-dir)
+  # 10-13: the dev box's .git is a junction to the SSD, so its parent is no checkout;
+  # git's first worktree entry is the main one.
+  if (Test-Path (Join-Path $guess '.git')) { $guess } else {
+    ((git -C $here worktree list --porcelain | Select-Object -First 1) -replace '^worktree ', '')
+  }
 }
 $boardSource = Join-Path $here 'boards'
 $boardOutput = Join-Path $out 'boards'

@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // WO INT-4A: extrude dialog on the BoxSizeDialog pattern -- 'create' mode
 // picks a sketch profile + a DRIVING distance and inserts a new 'feature'
 // DAG node (InsertNodeCommand, undo removes it); 'edit' mode reuses the
@@ -29,6 +30,8 @@
 // through onApplyGuard BEFORE any history command executes, so a stale or
 // mismatched preview refuses the commit rather than committing blind.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -204,7 +207,7 @@ function selectorFromProfilePicks(results: readonly ProfilePickResult[]): Profil
 }
 
 function extrudeRegionSummary(selectedCount: number, totalCount: number): string {
-  return `${selectedCount} of ${totalCount} regions`
+  return workbenchText('ExtrudeDialog.ofRegions', { selectedCount: String(selectedCount), totalCount: String(totalCount) })
 }
 
 function extrudeNameWithRegionSummary(name: string, summary?: string): string {
@@ -232,6 +235,7 @@ export function isUpstreamProducer(dag: FeatureDag, featureId: string | undefine
 }
 
 export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, treeSketchPick, onTreePickConsumed, bodyOptions, onStartProfilePick, onProfileSelectionChange, onRequestTargetPick, onRequestEndTargetPick, onCancelEndTargetPick, endTargetLabel, onApplied, onClose, previewState, onPreviewIntent, onApplyGuard }: ExtrudeDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const editing = mode === 'edit'
   const existing = editing && featureId !== undefined ? (dag.getNode(featureId)?.payload as Record<string, unknown> | undefined) : undefined
   const suppliedSketches = sketchOptions ?? dag.nodeIds()
@@ -297,7 +301,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
     if (treeSketchPick === undefined || treeSketchPick.nonce <= handledTreeSketchPickNonceRef.current) return
     handledTreeSketchPickNonceRef.current = treeSketchPick.nonce
     if (isPickingProfile || !treeSketchPickAvailable) {
-      console.info(`Tree pick ignored: ${isPickingProfile ? 'profile pick session is active' : 'sketch is not available'}`)
+      console.info(workbenchText('ExtrudeDialog.treePickIgnored', { value1: String(isPickingProfile ? workbenchText('ExtrudeDialog.profilePickSessionIsActive') : workbenchText('ExtrudeDialog.sketchIsNotAvailable')) }))
       onTreePickConsumed?.(treeSketchPick.nonce)
       return
     }
@@ -397,7 +401,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
     setProfilePickDraft([])
     const stop = onStartProfilePick({
       allowedIds: sketches.map((option) => option.id),
-      prompt: 'Click regions to toggle them, then press Enter or Done.',
+      prompt: workbenchText('ExtrudeDialog.clickRegionsToToggleThemThenPressEnterOr'),
       maxPicks: 'many',
       onSelectionChange: setProfilePickDraft,
       onDone: (results) => {
@@ -474,7 +478,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
     let acceptance: ExtrudeApplyAcceptance | undefined
     if (onApplyGuard !== undefined) {
       if (previewIntent === null) {
-        setApplyError('Extrude Apply refused: the accepted preview is no longer available.')
+        setApplyError(workbenchText('ExtrudeDialog.extrudeApplyRefusedTheAcceptedPreviewIsNoLonger'))
         return
       }
       const refusal = await onApplyGuard(previewIntent)
@@ -501,7 +505,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
       const payload = {
         ...restPayload,
         name: extrudeNameWithRegionSummary(
-          typeof restPayload.name === 'string' ? restPayload.name : `Extrude ${featureId}`,
+          typeof restPayload.name === 'string' ? restPayload.name : workbenchText('ExtrudeDialog.extrude', { featureId: String(featureId) }),
           featureRegionSummary,
         ),
         sketchId,
@@ -548,7 +552,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         boolMode,
         ...(boolMode !== 'newBody' ? { targetFeatureId } : {}),
         ...((endCondition === 'blind' || endCondition === 'symmetric') && bound !== '' ? { expression: bound } : {}),
-        name: extrudeNameWithRegionSummary(`Extrude ${id}`, featureRegionSummary),
+        name: extrudeNameWithRegionSummary(workbenchText('ExtrudeDialog.extrude2', { id: String(id) }), featureRegionSummary),
       }
       try {
         history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [...new Set([sketchId, ...targetConsumes, ...endTargetConsumes, ...paramConsumes])], payload }))
@@ -563,10 +567,10 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
 
   return (
     <DialogShell
-      title={editing ? 'Edit extrude' : 'Extrude'}
+      title={editing ? workbenchText('ExtrudeDialog.editExtrude') : workbenchText('ExtrudeDialog.extrude3')}
       onApply={() => { void handleApply() }}
       onCancel={isPickingProfile ? cancelProfilePick : onClose}
-      cancelLabel={isPickingProfile ? 'Stop picking' : 'Cancel'}
+      cancelLabel={isPickingProfile ? workbenchText('ExtrudeDialog.stopPicking') : workbenchText('ExtrudeDialog.cancel')}
       applyDisabled={applyDisabled || isPickingProfile}
       floatingPalette
     >
@@ -579,26 +583,24 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
           aria-pressed={isPickingProfile}
           onClick={isPickingProfile ? finishProfilePick : beginProfilePick}
         >
-          {isPickingProfile ? 'Done picking' : 'Pick profile in viewport'}
+          {isPickingProfile ? workbenchText('ExtrudeDialog.donePicking') : workbenchText('ExtrudeDialog.pickProfileInViewport')}
           <span className="op-pick-count">
-            {(sketches.find((option) => option.id === sketchId)?.label ?? sketchId) || 'none'}
+            {(sketches.find((option) => option.id === sketchId)?.label ?? sketchId) || workbenchText('ExtrudeDialog.none')}
             {profileCandidates.length > 0 ? ` - ${profileRegionSummary}` : ''}
           </span>
         </button>
         {treeSelectionActive && (
           <div data-testid="extrude-tree-sketch-status" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Sketch: {sketches.find((option) => option.id === sketchId)?.label ?? sketchId} (from the design tree) - whole sketch
-          </div>
+            {workbenchText('ExtrudeDialog.sketch')}{sketches.find((option) => option.id === sketchId)?.label ?? sketchId}{workbenchText('ExtrudeDialog.fromTheDesignTreeWholeSketch')}</div>
         )}
         {isPickingProfile && (
           <div data-testid="extrude-profile-pick-guidance" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Click regions to toggle them. Press Enter or Done picking to keep the highlighted set; Escape cancels.
-          </div>
+            {workbenchText('ExtrudeDialog.clickRegionsToToggleThemPressEnterOrDone')}</div>
         )}
         {(profileSelector?.kind === 'region' || profileSelector?.kind === 'regions') && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span data-testid="extrude-selected-profile-region" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-              Chosen: {profileRegionSummary}
+              {workbenchText('ExtrudeDialog.chosen')}{profileRegionSummary}
             </span>
             <button
               type="button"
@@ -609,14 +611,13 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
                 setTreeSelectionActive(false)
               }}
             >
-              Use whole sketch
-            </button>
+              {workbenchText('ExtrudeDialog.useWholeSketch')}</button>
           </div>
         )}
         <details>
-          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>Choose profile by name fallback</summary>
+          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>{workbenchText('ExtrudeDialog.chooseProfileByNameFallback')}</summary>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <span style={{ width: 70, color: 'var(--text-muted)' }}>Profile</span>
+            <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.profile')}</span>
             <select
               data-testid="extrude-profile-select"
               value={sketchId}
@@ -627,7 +628,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
               }}
               style={{ flex: 1 }}
             >
-              {!profileAvailable && sketchId !== '' && <option value={sketchId}>(unavailable: {sketchId})</option>}
+              {!profileAvailable && sketchId !== '' && <option value={sketchId}>{workbenchText('ExtrudeDialog.unavailable')}{sketchId}{workbenchText('ExtrudeDialog.value')}</option>}
               {sketches.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
@@ -649,7 +650,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
                       disabled={candidate.profileSelector.kind !== 'region' || onlyExplicitChoice}
                       onChange={(event) => setFallbackRegionChecked(candidate.key, event.target.checked)}
                     />
-                    Region {index + 1}
+                    {workbenchText('ExtrudeDialog.region')}{index + 1}
                   </label>
                 )
               })}
@@ -658,11 +659,10 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         </details>
         {!profileAvailable && (
           <div data-testid="extrude-profile-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            Select an available upstream sketch profile.
-          </div>
+            {workbenchText('ExtrudeDialog.selectAnAvailableUpstreamSketchProfile')}</div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>End</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.end')}</span>
           <select
             data-testid="extrude-end-condition-select"
             value={endCondition}
@@ -685,7 +685,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
           </select>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Direction</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.direction')}</span>
           <select
             data-testid="extrude-direction-select"
             value={direction}
@@ -703,18 +703,18 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         {(endCondition === 'blind' || endCondition === 'symmetric') && (
           <>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 70, color: 'var(--text-muted)' }}>Distance</span>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.distance')}</span>
               <span data-testid="extrude-distance" style={{ flex: 1 }}>
                 <NumericInput value={distance} onChange={setDistance} min={0.1} disabled={expression.trim() !== ''} style={{ width: '100%' }} />
               </span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('ExtrudeDialog.mm')}</span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 70, color: 'var(--text-muted)' }}>fx</span>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.fx')}</span>
               <input
                 data-testid="extrude-distance-expression"
                 type="text"
-                placeholder="optional driving expression, e.g. 2*base+5"
+                placeholder={workbenchText('ExtrudeDialog.optionalDrivingExpressionEG2Base5')}
                 value={expression}
                 onChange={(e) => setExpression(e.target.value)}
                 style={{ flex: 1 }}
@@ -724,11 +724,11 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         )}
         {supportsTerminalOffset && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 70, color: 'var(--text-muted)' }}>Offset</span>
+            <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.offset')}</span>
             <span data-testid="extrude-terminal-offset" style={{ flex: 1 }}>
               <NumericInput value={terminalOffset} onChange={setTerminalOffset} style={{ width: '100%' }} />
             </span>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('ExtrudeDialog.mm')}</span>
           </label>
         )}
         {needsEndTarget && (
@@ -739,23 +739,22 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
             disabled={onRequestEndTargetPick === undefined}
             onClick={beginEndTargetPick}
           >
-            {endCondition === 'toFace' ? 'Pick face or plane' : endCondition === 'toPart' ? 'Pick part or body' : 'Pick vertex or point'}
+            {endCondition === 'toFace' ? workbenchText('ExtrudeDialog.pickFaceOrPlane') : endCondition === 'toPart' ? workbenchText('ExtrudeDialog.pickPartOrBody') : workbenchText('ExtrudeDialog.pickVertexOrPoint')}
             <span
               className="op-pick-count"
               data-testid="extrude-end-target-name"
               style={{ minWidth: 0, maxWidth: '65%', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.2, textAlign: 'right' }}
             >
-              {endTarget === undefined ? 'none' : pickedEndTargetLabel ?? endTargetLabel?.(endTarget) ?? ('planeFeatureId' in endTarget ? endTarget.planeFeatureId : endTarget.bodyFeatureId)}
+              {endTarget === undefined ? workbenchText('ExtrudeDialog.none') : pickedEndTargetLabel ?? endTargetLabel?.(endTarget) ?? ('planeFeatureId' in endTarget ? endTarget.planeFeatureId : endTarget.bodyFeatureId)}
             </span>
           </button>
         )}
         {needsEndTarget && endTarget === undefined && (
           <div data-testid="extrude-end-target-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {EXTRUDE_END_CONDITION_LABELS[endCondition]} needs an eligible target from the viewport or model tree.
-          </div>
+            {EXTRUDE_END_CONDITION_LABELS[endCondition]}{workbenchText('ExtrudeDialog.needsAnEligibleTargetFromTheViewportOrModel')}</div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Result</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.result')}</span>
           <select
             data-testid="extrude-boolmode-select"
             value={boolMode}
@@ -778,21 +777,20 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
               disabled={onRequestTargetPick === undefined}
               onClick={beginTargetPick}
             >
-              Pick body in viewport
-              <span className="op-pick-count">{(bodies.find((option) => option.id === targetFeatureId)?.label ?? targetFeatureId) || 'none'}</span>
+              {workbenchText('ExtrudeDialog.pickBodyInViewport')}<span className="op-pick-count">{(bodies.find((option) => option.id === targetFeatureId)?.label ?? targetFeatureId) || workbenchText('ExtrudeDialog.none')}</span>
             </button>
             <details>
-              <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>Choose target by name fallback</summary>
+              <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>{workbenchText('ExtrudeDialog.chooseTargetByNameFallback')}</summary>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                <span style={{ width: 70, color: 'var(--text-muted)' }}>Target</span>
+                <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('ExtrudeDialog.target')}</span>
                 <select
                   data-testid="extrude-target-select"
                   value={targetFeatureId}
                   onChange={(e) => setTargetFeatureId(e.target.value)}
                   style={{ flex: 1 }}
                 >
-                  {!targetAvailable && targetFeatureId !== '' && <option value={targetFeatureId}>(unavailable: {targetFeatureId})</option>}
-                  {bodies.length === 0 && <option value="">(no body available)</option>}
+                  {!targetAvailable && targetFeatureId !== '' && <option value={targetFeatureId}>{workbenchText('ExtrudeDialog.unavailable')}{targetFeatureId}{workbenchText('ExtrudeDialog.value')}</option>}
+                  {bodies.length === 0 && <option value="">{workbenchText('ExtrudeDialog.noBodyAvailable')}</option>}
                   {bodies.map((opt) => (
                     <option key={opt.id} value={opt.id}>
                       {opt.label}
@@ -805,17 +803,15 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         )}
         {noTargetAvailable && (
           <div data-testid="extrude-target-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {EXTRUDE_BOOL_MODE_LABELS[boolMode]} needs an existing body to target; create one first or choose New body.
-          </div>
+            {EXTRUDE_BOOL_MODE_LABELS[boolMode]}{workbenchText('ExtrudeDialog.needsAnExistingBodyToTargetCreateOneFirst')}</div>
         )}
         {needsTarget && !noTargetAvailable && !targetAvailable && (
           <div data-testid="extrude-target-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            Select an available upstream target body.
-          </div>
+            {workbenchText('ExtrudeDialog.selectAnAvailableUpstreamTargetBody')}</div>
         )}
         {expressionError !== undefined && (
           <div data-testid="extrude-distance-expression-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {expressionError}
+            {readableInternalIds(expressionError)}
           </div>
         )}
         {previewControlled && (
@@ -831,15 +827,15 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
             {previewState?.status === 'refused'
               ? previewState.message
               : previewState?.status === 'pending'
-                ? 'Updating preview...'
+                ? workbenchText('ExtrudeDialog.updatingPreview')
                 : previewState?.status === 'ready'
-                  ? 'Live preview ready'
+                  ? workbenchText('ExtrudeDialog.livePreviewReady')
                   : ''}
           </div>
         )}
         {applyError !== undefined && (
           <div data-testid="extrude-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {applyError}
+            {readableInternalIds(applyError)}
           </div>
         )}
       </div>

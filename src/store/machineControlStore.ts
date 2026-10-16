@@ -5,7 +5,8 @@ import { operatorText } from '../i18n/locales/en/console-and-operator-messages'
 // localStorage). The GrblController instance lives module-side in
 // machineSession.ts; this store holds only render-ready snapshots it emits.
 
-import { create } from 'zustand'
+import { create, type StateCreator } from 'zustand'
+import { jobInFlight, streamedToolChange } from '../lib/machine/currentTool'
 // WO-422 (ADR-0041): the connection lifecycle and the progress shape are the
 // CONTRACT's, not GRBL's. WO-423 closes the last one: a failed run carries the
 // contract's JobFault, so nothing here imports from grbl/ any more.
@@ -449,12 +450,16 @@ export interface MachineControlState {
    *  on the controller right now (the PROBING lamp). Null when the frame does
    *  not carry the field or the controller could not read it. */
   probeCycle: boolean | null
+  /** WO-2774: the Probing screen holds a stopped probe run (its red "Stopped
+   *  at step N" / "Did not start" line is up). Published by ProbingPanel from
+   *  its session, so the header chip reads it on every workspace. */
+  probeRunStopped: boolean
   /** COMMANDED modal accessory state from $G. This can lead the live report. */
   commandedAccessories: CommandedAccessoryState | null
   /** REPORTED accessory state from status-report A:, resolved by the controller. */
   reportedAccessories: AccessoryState
   /** WO-2668: each output pin's state AS THE CONTROLLER READ IT BACK, keyed
-   *  `port:pin`, the definition's polarity applied. Written by the session from
+   *  `port:pin`, as a raw electrical level. Readers apply their own polarity. Written by the session from
    *  every output receipt and output read, whoever switched the pin - a Control
    *  button, MDI, a macro or a program line. An absent key is a pin nobody has
    *  read this session; a reader keeps its own fallback for it. */
@@ -509,6 +514,13 @@ export interface MachineControlState {
    *  on a controller that reports none (the UCCNC bridge) - the tool the
    *  operator fitted at a guided change or measured by number (WO-2105). */
   activeTool: number | null
+  /** WO-2878: freshness of the two sources of the current tool, as EVENTS on
+   *  one monotonic sequence. toolReportStamp is taken by every action that
+   *  reports or sets the tool - even when it repeats the stored number;
+   *  streamToolStamp when the acked cursor enters a T word of the program, or
+   *  a run ends on one. currentToolOf() lets the larger one speak. */
+  toolReportStamp: number
+  streamToolStamp: number
   /** $# offsets by label (G54..G59, G28, G30, G92) - values are [x, y, z]. */
   offsets: Record<string, number[]>
   /** Tool length offset ($# TLO), mm. */
@@ -570,7 +582,7 @@ export interface MachineControlState {
    *  different events and arrive at different rates. WO-426. */
   setReportedAccessories: (state: AccessoryState) => void
   /** WO-2668: one pin's controller readback; null forgets it (unread). */
-  setOutputPin: (key: string, on: boolean | null) => void
+  setOutputPin: (key: string, level: boolean | null) => void
   pushConsole: (dir: 'tx' | 'rx', text: string, severity: MachineConsoleLine['severity']) => void
   clearConsole: () => void
   setAlarm: (alarm: MachineAlarm | null) => void
@@ -612,6 +624,7 @@ export interface MachineControlState {
   /** WO-2256: install (or clear) the file numbering of the staged program. */
   setStagedNumbering: (numbering: StagedNumbering | null) => void
   setProbeCycle: (probeCycle: boolean | null) => void
+  setProbeRunStopped: (probeRunStopped: boolean) => void
   applyJobProgress: (progress: StreamerProgress) => void
   applyJobEvent: (
     event: 'started' | 'paused' | 'resumed' | 'stopped' | 'completed' | 'failed',
@@ -636,7 +649,43 @@ const initialJob: MachineJobState = {
 
 let consoleSeq = 0
 
-export const useMachineControl = create<MachineControlState>()((set) => ({
+let toolStampSeq = 0
+function nextToolStamp(): number {
+  return ++toolStampSeq
+}
+
+/** The stream speaks again when the acked cursor enters a different T word
+ *  (by line, so a second run through the same T counts), or when a run ends
+ *  on one: that tool is what the program left in the spindle. */
+function streamToolAdvanced(prev: MachineControlState, next: MachineControlState): boolean {
+  if (next.job === prev.job) return false
+  // Bookkeeping only: a publication carrying no tool list (a partial job)
+  // moves no stream cursor, and must never throw the publication itself.
+  if (!Array.isArray(next.job?.toolChanges)) return false
+  const entry = streamedToolChange(next.job.toolChanges, next.job.ackedSourceLine)
+  if (entry === null) return false
+  if (!Array.isArray(prev.job?.toolChanges)) return true
+  const before = streamedToolChange(prev.job.toolChanges, prev.job.ackedSourceLine)
+  if (before === null || before.sourceLine !== entry.sourceLine || before.tool !== entry.tool) return true
+  return jobInFlight(prev.job.phase) && !jobInFlight(next.job.phase)
+}
+
+/** Every publication - the actions below and every direct setState from the
+ *  session - passes here, so no job writer can move the cursor unstamped. */
+const stampStreamTool = (config: StateCreator<MachineControlState>): StateCreator<MachineControlState> =>
+  (set, get, api) => {
+    const stamped = ((partial: Partial<MachineControlState> | ((s: MachineControlState) => Partial<MachineControlState>), replace?: boolean) => {
+      const prev = get()
+      const patch = typeof partial === 'function' ? partial(prev) : partial
+      const next = replace ? (patch as MachineControlState) : { ...prev, ...patch }
+      const out = streamToolAdvanced(prev, next) ? { ...patch, streamToolStamp: nextToolStamp() } : patch
+      ;(set as (p: Partial<MachineControlState>, r?: boolean) => void)(out, replace)
+    }) as typeof set
+    api.setState = stamped
+    return config(stamped, get, api)
+  }
+
+export const useMachineControl = create<MachineControlState>()(stampStreamTool((set) => ({
   connectionPhase: 'disconnected',
   connectionKind: null,
   connectionDetail: null,
@@ -654,6 +703,7 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
   overrideAvailability: UNKNOWN_OVERRIDE_AVAILABILITY,
   inputs: null,
   probeCycle: null,
+  probeRunStopped: false,
   commandedAccessories: null,
   reportedAccessories: ACCESSORIES_OFF,
   outputPins: {},
@@ -676,6 +726,8 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
   activeWcs: DEFAULT_WCS,
   parserModal: null,
   activeTool: null,
+  toolReportStamp: 0,
+  streamToolStamp: 0,
   offsets: {},
   tlo: null,
   probe: null,
@@ -713,6 +765,7 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
             singleBlock: false,
             inputs: null,
             probeCycle: null,
+            probeRunStopped: false,
             commandedAccessories: null,
             reportedAccessories: ACCESSORIES_OFF,
             outputPins: {},
@@ -720,6 +773,7 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
             activeWcs: DEFAULT_WCS,
             parserModal: null,
             activeTool: null,
+            toolReportStamp: nextToolStamp(),
             offsets: {},
             tlo: null,
             probe: null,
@@ -779,14 +833,14 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
 
   setReportedAccessories: (state) => set({ reportedAccessories: state }),
 
-  setOutputPin: (key, on) =>
+  setOutputPin: (key, level) =>
     set((s) => {
-      if (on === null) {
+      if (level === null) {
         if (!(key in s.outputPins)) return {}
         const { [key]: _forgotten, ...rest } = s.outputPins
         return { outputPins: rest }
       }
-      return s.outputPins[key] === on ? {} : { outputPins: { ...s.outputPins, [key]: on } }
+      return s.outputPins[key] === level ? {} : { outputPins: { ...s.outputPins, [key]: level } }
     }),
 
   pushConsole: (dir, text, severity) =>
@@ -820,7 +874,10 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
         spindle: state.spindle,
         coolant: state.coolant,
       },
-      activeTool: state.tool ?? s.activeTool,
+      // WO-2878: a report is tool knowledge only when it CARRIES a tool
+      // (tool null = this report says nothing about it); a units or MDI
+      // refresh must not outrank the program's last T with no tool fact.
+      ...(state.tool === null ? {} : { activeTool: state.tool, toolReportStamp: nextToolStamp() }),
     })),
 
   applyOffset: (entry) =>
@@ -846,10 +903,12 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
   setToolChange: (toolChange) => set(
     toolChange !== null && toolChange.mode === 'toolChange' && toolChange.tool !== null
       && TOOL_FITTED_STEPS.has(toolChange.step)
-      ? { toolChange, activeTool: toolChange.tool }
+      ? { toolChange, activeTool: toolChange.tool, toolReportStamp: nextToolStamp() }
       : { toolChange },
   ),
-  setActiveTool: (tool) => set((s) => (s.activeTool === tool ? {} : { activeTool: tool })),
+  // WO-2878: a repeat of the stored number still publishes - the receipt
+  // itself is the news (Measure T3 after a program that ended on T2 is T3).
+  setActiveTool: (tool) => set({ activeTool: tool, toolReportStamp: nextToolStamp() }),
 
   setFitTrace: (fitTrace) => set({ fitTrace }),
   setSurfaceMesh: (surfaceMesh) => set({ surfaceMesh }),
@@ -929,6 +988,7 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
     }
   }),
   setProbeCycle: (probeCycle) => set({ probeCycle }),
+  setProbeRunStopped: (probeRunStopped) => set((s) => (s.probeRunStopped === probeRunStopped ? s : { probeRunStopped })),
 
   applyJobProgress: (progress) =>
     set((s) => ({
@@ -987,4 +1047,4 @@ export const useMachineControl = create<MachineControlState>()((set) => ({
       fitTrace: event === 'started' ? null : s.fitTrace,
       holdsSeen: event === 'started' ? 0 : s.holdsSeen,
     })),
-}))
+})))

@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // OffsetsPanel - work coordinate systems (MACHINE-CONTROL plan, stage 8).
 // CANONICAL-LOCATION rule (Operator 2026-07-31): this panel is about WHICH
 // system is active and WHAT is stored - selection + tables only. Zeroing
@@ -210,10 +214,11 @@ export function WorkRotationCell({
   )
 }
 
-const ROTATION_HEAD_TOOLTIP = 'Rotation of this work offset in degrees, counter-clockwise seen from above. '
-  + 'Held in the controller; 0 = square.'
+const ROTATION_HEAD_TOOLTIP = controlText('OffsetsPanel.text001')
+  + controlText('OffsetsPanel.text002')
 
 export function OffsetsPanel() {
+  useText('control-screens-not-probing')
   const machine = useCamStore(controlMachine)
   const axes = enabledControlAxes(machine.controllerDefinition)
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
@@ -259,21 +264,21 @@ export function OffsetsPanel() {
   // offsetsRotation.css.
   const rowGrid = axes.length === 3
     ? undefined
-    : { gridTemplateColumns: `42px repeat(${axes.length}, minmax(0, 1fr)) minmax(0, 0.85fr)` }
+    : { gridTemplateColumns: controlText('OffsetsPanel.text003', { value1: String(axes.length) }) }
 
   return (
     <section className="panel control-panel">
       <div className="panel-header">
-        <span className="panel-title">Work offsets</span>
+        <span className="panel-title">{controlText('OffsetsPanel.text004')}</span>
         {collapsed && !activeWcs && <span className="control-offsets-meta">-</span>}
         <button
           className="panel-action-btn"
           data-testid="control-offsets-toggle"
           onClick={() => useUiPrefs.setState({ machineOffsetsCollapsed: !collapsed })}
           data-tooltip={
-            collapsed ? 'Show all six coordinate systems' : 'Collapse to the active system only'
+            collapsed ? controlText('OffsetsPanel.text005') : controlText('OffsetsPanel.text006')
           }
-          aria-label={collapsed ? 'Show all work offsets' : 'Collapse work offsets'}
+          aria-label={collapsed ? controlText('OffsetsPanel.text007') : controlText('OffsetsPanel.text008')}
         >
           {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
         </button>
@@ -291,7 +296,7 @@ export function OffsetsPanel() {
                 className={`control-chip-btn control-wcs-chip ${activeOffsetReported && activeWcs === wcs ? 'control-chip-active' : ''}`}
                 data-testid={`control-wcs-${wcs.toLowerCase()}`}
                 disabled={!canAct}
-                data-tooltip={`Make ${wcs} the active work coordinate system`}
+                data-tooltip={controlText('OffsetsPanel.text009', { value1: String(wcs) })}
                 onClick={() => selectWorkOffset(wcs)}
               >
                 {wcs}
@@ -304,11 +309,11 @@ export function OffsetsPanel() {
             className="control-offsets-row control-offsets-head offsets-rotation-row"
             style={rowGrid}
           >
-            <span>{collapsed ? 'Active' : ''}</span>
+            <span>{collapsed ? controlText('OffsetsPanel.text010') : ''}</span>
             {axes.map((axis) => (
               <span key={axis}>{axis}{isRotaryAxis(axis) ? ' (deg)' : ''}</span>
             ))}
-            <span className="offsets-rotation-head" data-tooltip={ROTATION_HEAD_TOOLTIP}>Rot deg</span>
+            <span className="offsets-rotation-head" data-tooltip={ROTATION_HEAD_TOOLTIP}>{controlText('OffsetsPanel.text011')}</span>
           </div>
           {shownList.map((wcs) => {
             const v = offsets[wcs]
@@ -356,7 +361,7 @@ export function OffsetsPanel() {
           })}
           {collapsed && shownList.length === 0 && (
             <div className="control-offsets-row offsets-rotation-row">
-              <span className="control-offsets-label">WCS?</span>
+              <span className="control-offsets-label">{controlText('OffsetsPanel.text012')}</span>
               <span>-</span>
               <span>-</span>
               <span>-</span>
@@ -367,13 +372,10 @@ export function OffsetsPanel() {
         {!collapsed && (
           <div className="control-offsets-meta">
             <span>({unitLabel(units)})</span>
-            <span>TLO {tlo === null ? '-' : fmtMachineLength(tlo, units)}</span>
-            <span>
-              Probe{' '}
-              {probe
+            <span>{catalogChildren(controlText('OffsetsPanel.text013', { value1: '\u0000value1\u0000' }), { value1: tlo === null ? '-' : fmtMachineLength(tlo, units) })}</span>
+            <span>{catalogChildren(controlText('OffsetsPanel.text014', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: ' ', value2: probe
                 ? `${probe.values.map((v) => fmtMachineLength(v, units)).join(', ')}${probe.success ? '' : ' (failed)'}`
-                : '-'}
-            </span>
+                : '-' })}</span>
           </div>
         )}
       </div>

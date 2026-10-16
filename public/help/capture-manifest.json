@@ -5960,7 +5960,7 @@
         "status-bar"
       ],
       "generator": "scripted",
-      "generatorCmd": "node tools/capture/wiki-gaps/p2.mjs --only=3-1",
+      "generatorCmd": "node tools/capture/wiki-gaps/p2.mjs --only=3D",
       "locked": false,
       "reviewNotes": "WO-2710 2026-10-09: candidate src/tests/evidence/WO-2710/candidates/3-1-adaptive-3d-toolpath.png accepted in the 4:42 PM picture review (Rholand); converted to webp q88 unchanged in size.",
       "captureRecord": {
@@ -5969,30 +5969,32 @@
         "slot": "levels",
         "file": "public/help/adaptive-3d/levels.webp",
         "status": "captured",
-        "sourceCommit": "bb045d6360a3aa2b7ba72b44d5dc9d4725aaea78",
-        "buildId": "9556f3e4ee1b9361",
-        "route": "node tools/capture/wiki-gaps/p2.mjs --only=3-1",
-        "capturedAt": "2026-10-09T21:11:32.258Z",
-        "candidate": "src/tests/evidence/WO-2710/candidates/3-1-adaptive-3d-toolpath.png",
+        "sourceCommit": "fc98531ca60cc1bca43a04350f7891a8285de532",
+        "buildId": "58c7141e8cde33ad",
+        "route": "node tools/capture/wiki-gaps/p2.mjs --only=3D",
+        "capturedAt": "2026-10-15T23:41:39.435Z",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/3-1-adaptive-3d-toolpath.png",
         "crop": null,
         "viewport": [
           1920,
           1080
         ],
         "deviceScaleFactor": 1,
-        "sha256": "d0ddfb41d5e1f964747003d9b93f01bda33f5a5b5566fe8915c532ca81ba6070",
-        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710",
-        "captureRunId": "wo2710-2026-10-09T21-04-50-311Z",
+        "sha256": "086456c95425603db0f7dbf15cd890446d5c53443ba74c6e4251a7b5e1fa2382",
+        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
+        "captureRunId": "wo2848-g8-p2",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "fabb0c39ff15248b8d1f7fb1f2af0d746686dab10125b854a33ae4bb77fb6112",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
         "served": "vite preview of a production build (npm run build output)",
-        "appState": "examples/06-knob-handwheel/knob-handwheel.camproject opened with Open project (starter machine). Toolpath tab, REGEN ALL pressed and finished; \"3D Rough 1\" selected in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed 4 wheel steps toward the part. Whole frame.",
-        "wholeFrame": null
+        "appState": "examples/06-knob-handwheel/knob-handwheel.camproject opened with Open project (starter machine). Toolpath computation finished; \"3D Rough 1\" selected on the Toolpath tab in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed 4 wheel steps toward the part. Whole frame.",
+        "wholeFrame": null,
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2710/candidates/3-1-adaptive-3d-toolpath.png"
       }
     },
     {
@@ -6065,7 +6067,7 @@
         "status-bar"
       ],
       "generator": "scripted",
-      "generatorCmd": "node tools/capture/wiki-gaps/p2.mjs --only=3-2",
+      "generatorCmd": "node tools/capture/wiki-gaps/p2.mjs --only=3D",
       "locked": false,
       "reviewNotes": "WO-2710 2026-10-09: candidate src/tests/evidence/WO-2710/candidates/3-2-parallel-3d-toolpath.png accepted in the 4:42 PM picture review (Rholand); converted to webp q88 unchanged in size.",
       "captureRecord": {
@@ -6074,30 +6076,32 @@
         "slot": "draped",
         "file": "public/help/parallel-3d/draped.webp",
         "status": "captured",
-        "sourceCommit": "bb045d6360a3aa2b7ba72b44d5dc9d4725aaea78",
-        "buildId": "9556f3e4ee1b9361",
-        "route": "node tools/capture/wiki-gaps/p2.mjs --only=3-2",
-        "capturedAt": "2026-10-09T21:19:15.642Z",
-        "candidate": "src/tests/evidence/WO-2710/candidates/3-2-parallel-3d-toolpath.png",
+        "sourceCommit": "fc98531ca60cc1bca43a04350f7891a8285de532",
+        "buildId": "58c7141e8cde33ad",
+        "route": "node tools/capture/wiki-gaps/p2.mjs --only=3D",
+        "capturedAt": "2026-10-15T23:42:05.553Z",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/3-2-parallel-3d-toolpath.png",
         "crop": null,
         "viewport": [
           1920,
           1080
         ],
         "deviceScaleFactor": 1,
-        "sha256": "e7e7b8973f1727612c4e75be006821485148a8215985a67698f4df8d93e6dafb",
-        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710",
-        "captureRunId": "wo2710-2026-10-09T21-04-50-311Z",
+        "sha256": "46714b9663ba6533dfdbda2ffa8c5f3ca2bec7c00833bc356515bc35594e1e12",
+        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
+        "captureRunId": "wo2848-g8-p2",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "fabb0c39ff15248b8d1f7fb1f2af0d746686dab10125b854a33ae4bb77fb6112",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
         "served": "vite preview of a production build (npm run build output)",
-        "appState": "examples/06-knob-handwheel/knob-handwheel.camproject opened with Open project (starter machine). Toolpath tab, REGEN ALL pressed and finished; \"3D Finish 2\" selected in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed 4 wheel steps toward the part. Whole frame.",
-        "wholeFrame": null
+        "appState": "examples/06-knob-handwheel/knob-handwheel.camproject opened with Open project (starter machine). Toolpath computation finished; \"3D Finish 2\" selected on the Toolpath tab in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed 0 wheel steps toward the part. Whole frame.",
+        "wholeFrame": null,
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2710/candidates/3-2-parallel-3d-toolpath.png"
       }
     },
     {
@@ -6179,30 +6183,32 @@
         "slot": "result",
         "file": "public/help/vcarve/result.webp",
         "status": "captured",
-        "sourceCommit": "bb045d6360a3aa2b7ba72b44d5dc9d4725aaea78",
-        "buildId": "9556f3e4ee1b9361",
+        "sourceCommit": "fc98531ca60cc1bca43a04350f7891a8285de532",
+        "buildId": "58c7141e8cde33ad",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=T-3",
-        "capturedAt": "2026-10-09T21:04:33.047Z",
-        "candidate": "src/tests/evidence/WO-2710/candidates/T-3-vcarve-toolpath.png",
+        "capturedAt": "2026-10-15T23:43:26.267Z",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/T-3-vcarve-toolpath.png",
         "crop": null,
         "viewport": [
           1920,
           1080
         ],
         "deviceScaleFactor": 1,
-        "sha256": "f9de8241b6d1716095d45efe735e1f0999a674c7537d50c12534cbea0c447d38",
-        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710",
-        "captureRunId": "wo2710-2026-10-09T21-02-23-198Z",
+        "sha256": "11f80b82d04224bf0c671fce2b3cab22dd1a6432bdbc30a1bee6add215ccb150",
+        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
+        "captureRunId": "wo2848-g8-p2",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "fabb0c39ff15248b8d1f7fb1f2af0d746686dab10125b854a33ae4bb77fb6112",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
         "served": "vite preview of a production build (npm run build output)",
-        "appState": "examples/05-name-sign/name-sign.camproject opened with Open project (starter machine). Toolpath tab, REGEN ALL pressed and finished; \"V-carve 1\" selected in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed 4 wheel steps toward the part. Whole frame.",
-        "wholeFrame": null
+        "appState": "examples/05-name-sign/name-sign.camproject opened with Open project (starter machine). Toolpath computation finished; \"V-carve 1\" selected on the Toolpath tab in the design tree, so the view shows its path and the Properties panel its summary; the view zoomed 4 wheel steps toward the part. Whole frame.",
+        "wholeFrame": null,
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2710/candidates/T-3-vcarve-toolpath.png"
       }
     },
     {
@@ -6330,30 +6336,32 @@
         "slot": "calibrate",
         "file": "public/help/reference-image-calibration/calibrate.webp",
         "status": "captured",
-        "sourceCommit": "bb045d6360a3aa2b7ba72b44d5dc9d4725aaea78",
-        "buildId": "9556f3e4ee1b9361",
+        "sourceCommit": "fc98531ca60cc1bca43a04350f7891a8285de532",
+        "buildId": "58c7141e8cde33ad",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=K-1",
-        "capturedAt": "2026-10-09T21:03:57.689Z",
-        "candidate": "src/tests/evidence/WO-2710/candidates/K-1-reference-image-calibrate.png",
+        "capturedAt": "2026-10-15T23:34:19.938Z",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/K-1-reference-image-calibrate.png",
         "crop": null,
         "viewport": [
           1920,
           1080
         ],
         "deviceScaleFactor": 1,
-        "sha256": "bbc21a5b8c03e39edf68162d97141db149f3dca7134ec30b2594bd1d9d6bf3d7",
-        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710",
-        "captureRunId": "wo2710-2026-10-09T21-02-23-198Z",
+        "sha256": "e53e1be32ef1a1c5c70408da7e0986a047a7370b4d3b0328b20c4bbac583d2bc",
+        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
+        "captureRunId": "wo2848-g8-p2",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "fabb0c39ff15248b8d1f7fb1f2af0d746686dab10125b854a33ae4bb77fb6112",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
         "served": "vite preview of a production build (npm run build output)",
         "appState": "Sketch tab, New sketch; Import into sketch > Reference image (tracing underlay) given examples/07-relief-medallion/medallion.png; the Reference image panel open; Calibrate pressed and two marks clicked on the picture: the distance box (current distance, Real distance) beside them. Whole frame.",
-        "wholeFrame": null
+        "wholeFrame": null,
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2710/candidates/K-1-reference-image-calibrate.png"
       }
     },
     {
@@ -6423,11 +6431,11 @@
         "slot": "restore-review",
         "file": "public/help/settings-user-data/restore-review.webp",
         "status": "captured",
-        "sourceCommit": "bb045d6360a3aa2b7ba72b44d5dc9d4725aaea78",
-        "buildId": "9556f3e4ee1b9361",
+        "sourceCommit": "fc98531ca60cc1bca43a04350f7891a8285de532",
+        "buildId": "58c7141e8cde33ad",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=S-1",
-        "capturedAt": "2026-10-09T21:03:33.226Z",
-        "candidate": "src/tests/evidence/WO-2710/candidates/S-1b-restore-review-dialog.png",
+        "capturedAt": "2026-10-15T23:34:40.685Z",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/S-1b-restore-review-dialog.png",
         "crop": {
           "x": 640,
           "y": 54,
@@ -6439,26 +6447,28 @@
           1080
         ],
         "deviceScaleFactor": 1,
-        "sha256": "cab295fdb0270487443befb563a07d2503e56df47c1c52bbbe6841d413814ffd",
-        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710",
-        "captureRunId": "wo2710-2026-10-09T21-02-23-198Z",
+        "sha256": "96d249980dd14b46f1a8dcaa063894bf2e64649baa9a367724ab70c8fcb0ffc1",
+        "approval": "reviewed: picture review 2026-10-09 4:42 PM CT (Rholand), WO-2710; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
+        "captureRunId": "wo2848-g8-p2",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "fabb0c39ff15248b8d1f7fb1f2af0d746686dab10125b854a33ae4bb77fb6112",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
         "served": "vite preview of a production build (npm run build output)",
         "appState": "S-1b-restore-review.png cropped to the Settings window.",
-        "wholeFrame": "S-1b-restore-review.png"
+        "wholeFrame": "S-1b-restore-review.png",
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2710/candidates/S-1b-restore-review-dialog.png"
       }
     },
     {
       "topic": "probing-tab",
       "slot": "probing-outside-corner",
       "path": "public/help/probing-tab/",
-      "subject": "Control > Probing, built-in simulator connected (GRBL-dialect demo machine, 800x600x150), CLEAR pressed, homed, idle. Simulated part: Position (machine): X 350.00 mm, Y 260.00 mm, top Z 35.00 mm; Size: 100.00 mm (X) x 80.00 mm (Y) x 30.00 mm (height). Probe stood 8 mm inside the front-right corner, 5 mm above the top (machine X442 Y268 Z40). Outside corner picked, corner front-right, setup defaults; BEFORE START picture on step 1 (YOU), Picture key open, Start probing / Stop. Nothing run yet.",
+      "subject": "Outside corner front-right setup before Start probing, with the front and top previews, Picture key, brief step guidance and expanded shared Console with history and MDI",
       "surroundings": [
         "top-toolbar",
         "mode-tab-strip",
@@ -6467,40 +6477,53 @@
         "control-safety-bar",
         "control-console",
         "console",
-        "status-bar"
+        "status-bar",
+        "mdi"
       ],
       "generator": "scripted",
-      "generatorCmd": "node tools/capture/wiki-gaps/desktop.mjs --only=G01",
+      "generatorCmd": "node src/tests/evidence/WO-2755/capture-outside-corner.mjs --port=5255 --run=<fresh-run-name> --runtime-slot",
       "locked": false,
-      "reviewNotes": "WO-2710 provenance repair only: picture and Help slot already on main in 4391dde4d (WO-2709 staged integration). Reuses the original WO-2709 sidecar; no recapture or new Control integration.",
+      "reviewNotes": "WO-2755: complete 1920x1080 pixels inspected; Outside corner setup, BEFORE START preview, Picture key, shared expanded Console/MDI and all action buttons readable. No probing cycle/hardware. Lossless PNG-to-WebP conversion has exact decoded RGBA equality.",
       "captureRecord": {
-        "order": "WO-2709",
         "topic": "probing-tab",
         "slot": "probing-outside-corner",
         "file": "public/help/probing-tab/probing-outside-corner.webp",
         "status": "captured",
-        "sourceCommit": "1ecf48cfd6caa349fb38212f12adf703960ab874",
-        "sourceTreeDirty": false,
-        "sourceScope": [
-          "index.html",
-          "src"
+        "sourceCommit": "1dfa75f9cc426b95b2ebc72b8496553ca7c22ff1",
+        "route": "node src/tests/evidence/WO-2755/capture-outside-corner.mjs --port=5255 --run=<fresh-run-name> --runtime-slot",
+        "capturedAt": "2026-10-12T22:05:14.994Z",
+        "afterDimensions": [
+          1920,
+          1080
         ],
-        "sourceHash": "c9c3a189808a6689ab7a253fd2d177f918a45dc19701fbaeaedef7dea23b9211",
-        "capturedAt": "2026-10-09T18:38:23.681Z",
+        "sha256": "8cfba34f0613537d9ab49db76aa447da0e792fa42558e66b6e94bc3aca052edd",
+        "originalEvidence": "src/tests/evidence/WO-2755/outside-corner-01/probing-outside-corner.png",
+        "originalSha256": "b0656c4e520ed2654e3a185ba6154972689e90d9111ee07168ab011207d4a0ce",
+        "provenance": "src/tests/evidence/WO-2755/outside-corner-01/result.json",
+        "sourceProvenance": {
+          "commit": "1dfa75f9cc426b95b2ebc72b8496553ca7c22ff1",
+          "workingTreeDirty": false,
+          "workingTreeScope": [
+            "src"
+          ],
+          "sourceExcludes": [
+            "src/tests"
+          ],
+          "sourceHash": "3fe3316e90bc29fe7e7f5ae4cb48ba67b0ae251c1a9a4b39f805452e32d18897",
+          "sourceHashAlgorithm": "sha256-path-and-content-v1",
+          "sourceFileCount": 1252
+        },
+        "order": "WO-2755",
+        "approval": "reviewed: whole-frame pixel QA, WO-2755",
+        "candidate": "src/tests/evidence/WO-2755/outside-corner-01/probing-outside-corner.png",
+        "sourceHash": "3fe3316e90bc29fe7e7f5ae4cb48ba67b0ae251c1a9a4b39f805452e32d18897",
         "viewport": [
           1920,
           1080
         ],
-        "appState": "Control > Probing, built-in simulator connected (GRBL-dialect demo machine, 800x600x150), CLEAR pressed, homed, idle. Simulated part: Position (machine): X 350.00 mm, Y 260.00 mm, top Z 35.00 mm; Size: 100.00 mm (X) x 80.00 mm (Y) x 30.00 mm (height). Probe stood 8 mm inside the front-right corner, 5 mm above the top (machine X442 Y268 Z40). Outside corner picked, corner front-right, setup defaults; BEFORE START picture on step 1 (YOU), Picture key open, Start probing / Stop. Nothing run yet.",
-        "route": "node tools/capture/wiki-gaps/desktop.mjs --only=G01",
-        "candidate": "src/tests/evidence/WO-2709/candidates/G01-probing-tab-outside-corner.png",
-        "sha256": "f5e7e6356b5b9b82359cf597308f619cea64f9643002b6b854300176bd61585c",
-        "approval": "Inherited WO-2709 staged integration on main (4391dde4d); no additional approval claimed by WO-2710",
-        "sourceFiles": [
-          "src/components/machine/ProbingPanel.tsx",
-          "src/components/machine/probing/ProbingScreen.tsx",
-          "src/components/machine/probing/ProbeStepPicture.tsx"
-        ]
+        "appState": "Outside corner front-right setup before Start probing, with the front and top previews, Picture key, brief step guidance and expanded shared Console with history and MDI",
+        "adoptionRecord": "src/tests/evidence/WO-2755/PROBING-IMAGE-ADOPTION.json",
+        "captureKind": "fresh"
       }
     },
     {
@@ -6528,28 +6551,32 @@
         "slot": "probing-result-confirm",
         "file": "public/help/probing-tab/probing-result-confirm.webp",
         "status": "captured",
-        "sourceCommit": "1ecf48cfd6caa349fb38212f12adf703960ab874",
+        "sourceCommit": "deb771899d55919e9c9f5c42f89f0e285d8f7175",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "src"
         ],
-        "sourceHash": "c9c3a189808a6689ab7a253fd2d177f918a45dc19701fbaeaedef7dea23b9211",
-        "capturedAt": "2026-10-09T18:38:44.894Z",
+        "sourceHash": "23b45e0da22ee1aeaf0e606e77a9376129dba6473e3ea78dc7644de337dfecd9",
+        "capturedAt": "2026-10-16T00:34:49.624Z",
         "viewport": [
           1920,
           1080
         ],
         "appState": "Control > Probing, built-in simulator connected (GRBL-dialect demo machine, 800x600x150), CLEAR pressed, homed, idle. Simulated part: Position (machine): X 350.00 mm, Y 260.00 mm, top Z 35.00 mm; Size: 100.00 mm (X) x 80.00 mm (Y) x 30.00 mm (height). Probe stood 8 mm inside the front-right corner, 5 mm above the top (machine X442 Y268 Z40). Start probing pressed; the simulator run finished (\"Outside corner probe finished. Ready.\"); result step 6 with its Confirm button, BEFORE Confirm (nothing written).",
         "route": "node tools/capture/wiki-gaps/desktop.mjs --only=G02",
-        "candidate": "src/tests/evidence/WO-2709/candidates/G02-probe-result-confirm.png",
-        "sha256": "606cc10c359e6f0674de6f35cc45829d52d5c47a5f663f07d51080414e33c4b7",
-        "approval": "Inherited WO-2709 staged integration on main (4391dde4d); no additional approval claimed by WO-2710",
+        "candidate": "src/tests/evidence/WO-2848/g02/candidates/G02-probe-result-confirm.png",
+        "sha256": "9743d2c48588c60a5c64f3a7f78e6fa37576342ae0481e34f2d9277da42acedf",
+        "approval": "Inherited WO-2709 staged integration on main (4391dde4d); no additional approval claimed by WO-2710; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ProbingPanel.tsx",
           "src/components/machine/probing/ProbingScreen.tsx",
           "src/components/machine/probing/ProbeStepPicture.tsx"
-        ]
+        ],
+        "stepSentence": "Press Confirm to set X0 Y0 at the corner (G54).",
+        "resultText": "Corner at machine X 448.50 Y 261.50 mm.\nConfirm",
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2709/candidates/G02-probe-result-confirm.png"
       }
     },
     {
@@ -6576,17 +6603,17 @@
         "gap": "C-2",
         "picture": "C-2-uccnc-controller.png",
         "bytes": 152818,
-        "capturedAt": "2026-10-09T23:35:00.093Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:21:53.696Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=C-2",
         "viewport": [
@@ -6605,13 +6632,15 @@
         "slot": "uccnc-controller",
         "file": "public/help/machine-definition-catalog/uccnc-controller.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/C-2-uccnc-controller.png",
-        "sha256": "7e8b230c077ecb8c6ed7de9cb1f9fc43726af486767c26d69708c7eb83dd01bb",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/C-2-uccnc-controller.png",
+        "sha256": "bf26a036d2b7a0e2c2baaa499ba78c213e48172b093f3b0c51d7ec9520e86986",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/MachineDefinitionPanel.tsx",
           "src/components/machine/definition/ControllerDefinitionSection.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/C-2-uccnc-controller.png"
       }
     },
     {
@@ -6638,17 +6667,17 @@
         "gap": "C-4",
         "picture": "C-4-offsets-typed.png",
         "bytes": 106949,
-        "capturedAt": "2026-10-09T23:23:24.026Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:22:29.631Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=C-4",
         "viewport": [
@@ -6664,12 +6693,14 @@
         "slot": "offsets-typed",
         "file": "public/help/control-jog-zero/offsets-typed.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/C-4-offsets-typed.png",
-        "sha256": "1bd5e9044c14c365145b2abea5ca15a6f0579986a7ae152e0975a79719ab786d",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/C-4-offsets-typed.png",
+        "sha256": "5eb597761fbf384aa8b372d5ab1f4360d6c3492744a6c8c008fd29b8f59b3809",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/OffsetsPanel.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/C-4-offsets-typed.png"
       }
     },
     {
@@ -6696,17 +6727,17 @@
         "gap": "C-6",
         "picture": "C-6a-m6-tool-change.png",
         "bytes": 333818,
-        "capturedAt": "2026-10-09T23:39:53.984Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:31:49.831Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=C-6",
         "viewport": [
@@ -6716,8 +6747,8 @@
         "deviceScaleFactor": 1,
         "wholeFrame": null,
         "crop": null,
-        "appState": "Control > Main, built-in simulator, starter machine re-declared as UCCNC and defined with a fixed tool setter on the simulated part top (machine X-115 Y-125 Z-60.25). G54 at the part's front-left top corner. examples/01-fixture-plate/uccnc.nc loaded through Load > Open file and started with CYCLE START; the program reached its first M6: the tool-change card asking for the next tool. Whole frame.",
-        "card": "Tool change - insert T3, then press CYCLE START.\nGuided change\nMark a position macro \"used for tool change\" on the Macros panel (park it over the probe pad).",
+        "appState": "Control > Main, built-in simulator, starter machine re-declared as UCCNC, Safe Z -5 mm, fixed setter on the simulated part top (machine X-115 Y-125 Z-60.25), position macro marked used for tool change, T1 reference measured. G54 at the part's front-left top corner. examples/01-fixture-plate/uccnc.nc loaded through Load > Open file; From line 64, Plan, \"Run the tool change for T2 first\" (WO-2810) opens the guided T2 change. Whole frame.",
+        "card": "Guided tool change - T2 (swap the tool)\nPROBE\nInsert T2 and snug it. Then press Continue: the tool is measured at the tool setter (right here if this machine has none) and the program resumes.\nContinue - probe T2\nCancel",
         "setter": {
           "x": -115,
           "y": -125,
@@ -6727,13 +6758,16 @@
         "slot": "m6-tool-change",
         "file": "public/help/control-run-job/m6-tool-change.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/C-6a-m6-tool-change.png",
-        "sha256": "00044e4827611335e7b6a419ad15ee729a853c855b22151a29e11046fc658c84",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/C-6a-m6-tool-change.png",
+        "sha256": "e28ffb3e0e436d7cca195d5598c4b19836498a3eadfa3628edb0123e14b5abbe",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ControlPage.tsx",
           "src/components/machine/ProgramPanel.tsx"
-        ]
+        ],
+        "reference": "Tool length probed: contact at G54 Z 0.00 mm (machine Z -60.25 mm). Recorded for T1.",
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/C-6a-m6-tool-change.png"
       }
     },
     {
@@ -6753,17 +6787,17 @@
         "gap": "G03",
         "picture": "G03-routine-chooser.png",
         "bytes": 390786,
-        "capturedAt": "2026-10-09T23:40:43.011Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:24:39.307Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=G03",
         "viewport": [
@@ -6778,73 +6812,73 @@
           {
             "kind": "workZero",
             "label": "Z0",
-            "short": "Top of stock",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "edge",
             "label": "Edge",
-            "short": "Single X/Y face",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "outsideCorner",
             "label": "Outside corner",
-            "short": "Two outside faces",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "insideCorner",
             "label": "Inside corner",
-            "short": "Two inside faces",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "angle",
             "label": "Angle",
-            "short": "Two-point alignment",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "bore",
             "label": "Bore",
-            "short": "Round inside center",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "boss",
             "label": "Boss",
-            "short": "Round outside center",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "rectPocket",
             "label": "Rect pocket",
-            "short": "Four inside faces",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "rectBoss",
             "label": "Rect boss",
-            "short": "Four outside faces",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "zSurface",
             "label": "Z surface",
-            "short": "Map cutting surface",
+            "short": "",
             "beforeStart": false
           },
           {
             "kind": "toolZ",
             "label": "Tool Z",
-            "short": "Measure active tool",
+            "short": "",
             "beforeStart": true
           },
           {
             "kind": "calibrate",
             "label": "Calibrate",
-            "short": "Probe X / Y radius",
+            "short": "",
             "beforeStart": true
           }
         ],
@@ -6852,13 +6886,15 @@
         "slot": "routine-chooser",
         "file": "public/help/probing-tab/routine-chooser.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/G03-routine-chooser.png",
-        "sha256": "40c1dd1a9840c4e1d31d6d4c05f5c1f9aea40c2cce70e1438bd2f0afe364def0",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/G03-routine-chooser.png",
+        "sha256": "e29d438447e20bd7cadcc6037de2d84474ee7338c5b62cefeaa0f3c1f0b08704",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ProbingPanel.tsx",
           "src/components/machine/probing/ProbeStepPicture.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/G03-routine-chooser.png"
       }
     },
     {
@@ -6885,17 +6921,17 @@
         "gap": "G05",
         "picture": "G05a-z-surface-setup.png",
         "bytes": 222675,
-        "capturedAt": "2026-10-09T23:24:41.280Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:25:55.710Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=G05",
         "viewport": [
@@ -6930,13 +6966,15 @@
         "slot": "z-surface-setup",
         "file": "public/help/probing-tab/z-surface-setup.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/G05a-z-surface-setup.png",
-        "sha256": "bd69564d962d707e67c776fca4eed61cd552f3b43f9704ea687a61e5bd690461",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/G05a-z-surface-setup.png",
+        "sha256": "cc969db4f6039514c1cd7f071a9f878c8d99f197c8f27148403a9cedef5c77a8",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ProbingPanel.tsx",
           "src/components/machine/probing/ProbingScreen.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/G05a-z-surface-setup.png"
       }
     },
     {
@@ -6963,17 +7001,17 @@
         "gap": "G07",
         "picture": "G07a-calibrate-plan.png",
         "bytes": 226796,
-        "capturedAt": "2026-10-09T23:32:14.603Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:26:38.727Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=G07",
         "viewport": [
@@ -7011,13 +7049,15 @@
         "slot": "calibrate-plan",
         "file": "public/help/probing-tab/calibrate-plan.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/G07a-calibrate-plan.png",
-        "sha256": "a91ede6820ab5309b0eefe5dc4b5ea18be12c40dc5391bce713a503abc34e7dd",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/G07a-calibrate-plan.png",
+        "sha256": "47bd3b3a394de163c9f7ae6796fe4f2a175b7a5345f6761e13a9c940e472d388",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ProbingPanel.tsx",
           "src/components/machine/probing/ProbeStepPicture.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/G07a-calibrate-plan.png"
       }
     },
     {
@@ -7044,17 +7084,17 @@
         "gap": "G06",
         "picture": "G06-tools-setter.png",
         "bytes": 85155,
-        "capturedAt": "2026-10-09T23:31:39.492Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:28:12.830Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=G06",
         "viewport": [
@@ -7080,12 +7120,14 @@
         "topic": "control-tool-setter",
         "slot": "tools-setter",
         "file": "public/help/control-tool-setter/tools-setter.webp",
-        "candidate": "src/tests/evidence/WO-2714/candidates/G06-tools-setter.png",
-        "sha256": "3b0204394fdfa73d2a6f794d8b439875aee96066f134e1abe68d414c8220c346",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/G06-tools-setter.png",
+        "sha256": "61abe4c4636e596653bd523e15506b268bf6ef86f6573cd9f174f10832b36ae8",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ToolsProbePanel.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/G06-tools-setter.png"
       }
     },
     {
@@ -7112,17 +7154,17 @@
         "gap": "G06",
         "picture": "G06-tools-setter-apply.png",
         "bytes": 122513,
-        "capturedAt": "2026-10-09T23:31:39.465Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:28:12.803Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=G06",
         "viewport": [
@@ -7143,12 +7185,14 @@
         "topic": "control-tool-setter",
         "slot": "tools-setter-apply",
         "file": "public/help/control-tool-setter/tools-setter-apply.webp",
-        "candidate": "src/tests/evidence/WO-2714/candidates/G06-tools-setter-apply.png",
-        "sha256": "417a0c7296cf3a0a2638c45dcaeaf3fcc96a58968aaae4d3519ba2c314e83b28",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/G06-tools-setter-apply.png",
+        "sha256": "359217b6a462a990a7170e26240ef2815750d80e3b22d36acb1bd9c1591fa98e",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/ToolsProbePanel.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/G06-tools-setter-apply.png"
       }
     },
     {
@@ -7238,17 +7282,17 @@
         "gap": "G11",
         "picture": "G11-simulated-part-full.png",
         "bytes": 76172,
-        "capturedAt": "2026-10-09T23:34:28.383Z",
-        "captureRunId": "wo2710-2026-10-09T23-21-54-152Z",
-        "sourceCommit": "aad40229d16f6bd6b56a75cccd67032ded811c4c",
+        "capturedAt": "2026-10-15T23:28:37.487Z",
+        "captureRunId": "wo2848-g8-p2",
+        "sourceCommit": "829fc26d59c08082e20af0b2c12b5e4c89bed884",
         "sourceTreeDirty": false,
         "sourceScope": [
           "index.html",
           "public",
           "src"
         ],
-        "sourceHash": "316b459e99beff72d6d522af47cdce4b67eca8e7f8ddd62c83a297dc9808f3da",
-        "buildId": "5adfced21d12b411",
+        "sourceHash": "760c56a94fdfb2bdf04762217662f348e5ef179c9079b4b8a2834911519b8563",
+        "buildId": "58c7141e8cde33ad",
         "served": "vite preview of a production build (npm run build output)",
         "route": "node tools/capture/wiki-gaps/p2.mjs --only=G11",
         "viewport": [
@@ -7264,12 +7308,192 @@
         "slot": "simulated-part-full",
         "file": "public/help/control-simulator/simulated-part-full.webp",
         "status": "captured",
-        "candidate": "src/tests/evidence/WO-2714/candidates/G11-simulated-part-full.png",
-        "sha256": "9355eb43dcee06451ba0fb4d17776e6f1182624278387fcf80a3910b5a781a31",
-        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714",
+        "candidate": "src/tests/evidence/WO-2848/p2/candidates/G11-simulated-part-full.png",
+        "sha256": "a3283e3016fe4204a4ab3e1113f11d1ae0dfd998603a696b02e5f1f5dc76ce86",
+        "approval": "reviewed: architect whole-frame acceptance 2026-10-09 6:41 PM CT, WO-2714; re-shot on the frozen alpha.2 tree by WO-2848 (G8); architect before/after verdict pending",
         "sourceFiles": [
           "src/components/machine/SimulatedPartPanel.tsx"
-        ]
+        ],
+        "reshotBy": "WO-2848",
+        "previousCandidate": "src/tests/evidence/WO-2714/candidates/G11-simulated-part-full.png"
+      }
+    },
+    {
+      "topic": "form-workspace",
+      "slot": "rotate-axis",
+      "path": "public/help/form-workspace/",
+      "subject": "Form Rotate with Selection centre, Y, a typed 90 degree angle and Apply; selected cage faces and rotation rings",
+      "surroundings": [
+        "top-toolbar",
+        "model-tree",
+        "viewport",
+        "model-toolbox"
+      ],
+      "generator": "accepted-evidence-reuse",
+      "generatorCmd": "See src/tests/evidence/WO-2755/IMAGE-ADOPTION.json; original src/tests/evidence/WO-2508/repair-1/provenance.json",
+      "locked": false,
+      "reviewNotes": "WO-2755: inspected full original pixels; Form controls byte-identical. SolidsWorkbenchPage changes since capture only classify deliberate geometry-client shutdown; no rendered Form layout delta. CAM viewport overlay and right-drag changes do not affect this Model Form frame. Original capture records a known model-remount console diagnostic; no new clean capture is claimed. Lossless WebP conversion preserves decoded RGBA.",
+      "captureRecord": {
+        "topic": "form-workspace",
+        "slot": "rotate-axis",
+        "file": "public/help/form-workspace/rotate-axis.webp",
+        "status": "captured",
+        "sourceCommit": "7dee853bf47d6d38f12a490199bc45ebbadf492e",
+        "sha256": "4f5f143b5f0beb2ef0daa0bb1fd20507931ab173a0f077351668a568443fe7ba",
+        "afterDimensions": [
+          1600,
+          1000
+        ],
+        "originalEvidence": "src/tests/evidence/WO-2508/repair-1/centre-y-before.png",
+        "originalSha256": "6acc313d2a241abdc069053160ddd1a2c2232010dae6e62f51f5ae46504049ca",
+        "reusedAtSourceCommit": "980bef371fdee41e5a3c7a9805a66fd6813e83e7",
+        "provenance": "src/tests/evidence/WO-2508/repair-1/provenance.json",
+        "order": "WO-2755",
+        "approval": "reviewed: accepted evidence reuse, WO-2755",
+        "candidate": "src/tests/evidence/WO-2508/repair-1/centre-y-before.png",
+        "sourceHash": "950862decf078280d9404f18a9a9f8662977c7d35ed20c10e8569b74b9871852",
+        "sourceProvenance": {
+          "commit": "7dee853bf47d6d38f12a490199bc45ebbadf492e",
+          "workingTreeDirty": false,
+          "workingTreeScope": [
+            "src"
+          ],
+          "sourceExcludes": [
+            "src/tests"
+          ],
+          "sourceHash": "950862decf078280d9404f18a9a9f8662977c7d35ed20c10e8569b74b9871852",
+          "sourceHashAlgorithm": "sha256-path-and-content-v1",
+          "sourceFileCount": 1243,
+          "screenshotBytes": 317808,
+          "screenshotSha256": "6acc313d2a241abdc069053160ddd1a2c2232010dae6e62f51f5ae46504049ca"
+        },
+        "viewport": [
+          1600,
+          1000
+        ],
+        "appState": "Form Rotate with Selection centre, Y, a typed 90 degree angle and Apply; selected cage faces and rotation rings",
+        "capturedAt": "2026-10-11T00:21:49.913Z",
+        "captureTimeEvidence": "src/tests/evidence/WO-2508/repair-1/measurements.json",
+        "adoptionRecord": "src/tests/evidence/WO-2755/IMAGE-ADOPTION.json",
+        "captureKind": "accepted-evidence-reuse"
+      }
+    },
+    {
+      "topic": "creating-operations",
+      "slot": "run-macro-properties",
+      "path": "public/help/creating-operations/",
+      "subject": "Run macro Properties with Check fixture (M2101) selected and its operation ordered between two cutting operations",
+      "surroundings": [
+        "top-toolbar",
+        "design-tree",
+        "viewport",
+        "properties-panel"
+      ],
+      "generator": "accepted-evidence-reuse",
+      "generatorCmd": "See src/tests/evidence/WO-2755/IMAGE-ADOPTION.json; original src/tests/evidence/WO-2478/verification-source.json",
+      "locked": false,
+      "reviewNotes": "WO-2755: inspected full original pixels; Visible Properties, operation tree and toolbar source byte-identical. Later execution fixes do not change this operation picker. Right-drag dismissal changes only an absent context menu; Model boot changes are not mounted in this Setup frame. Original capture reports zero page/console errors. Lossless WebP conversion preserves decoded RGBA.",
+      "captureRecord": {
+        "topic": "creating-operations",
+        "slot": "run-macro-properties",
+        "file": "public/help/creating-operations/run-macro-properties.webp",
+        "status": "captured",
+        "sourceCommit": "1c144cb00be1e2a3ef32aff5367280dd4e061263",
+        "sha256": "c6e9cc57deb6820128b8814fc118333d86a2e0cf8e4c7f48abf7effea8a1cc90",
+        "afterDimensions": [
+          1920,
+          1080
+        ],
+        "originalEvidence": "src/tests/evidence/WO-2478/run-macro-properties-verified.png",
+        "originalSha256": "d9658bb95706ce1bae80230b2fe507fca072bbe4b37061fb5f7c41d3dd9b6368",
+        "reusedAtSourceCommit": "980bef371fdee41e5a3c7a9805a66fd6813e83e7",
+        "provenance": "src/tests/evidence/WO-2478/verification-source.json",
+        "order": "WO-2755",
+        "approval": "reviewed: accepted evidence reuse, WO-2755",
+        "candidate": "src/tests/evidence/WO-2478/run-macro-properties-verified.png",
+        "sourceHash": "c415e68efff6a83877d79d4a02ad99a3e35608151220dabb1c2b96ab9821d229",
+        "sourceProvenance": {
+          "commit": "1c144cb00be1e2a3ef32aff5367280dd4e061263",
+          "workingTreeDirty": false,
+          "workingTreeScope": [
+            "src"
+          ],
+          "sourceExcludes": [
+            "src/tests"
+          ],
+          "sourceHash": "c415e68efff6a83877d79d4a02ad99a3e35608151220dabb1c2b96ab9821d229",
+          "sourceHashAlgorithm": "sha256-path-and-content-v1",
+          "sourceFileCount": 1246
+        },
+        "viewport": [
+          1920,
+          1080
+        ],
+        "appState": "Run macro Properties with Check fixture (M2101) selected and its operation ordered between two cutting operations",
+        "capturedAt": null,
+        "captureTimeEvidence": "Capture time not recorded in the original receipt; no fresh capture claimed.",
+        "adoptionRecord": "src/tests/evidence/WO-2755/IMAGE-ADOPTION.json",
+        "captureKind": "accepted-evidence-reuse"
+      }
+    },
+    {
+      "topic": "sketch-modify-tools",
+      "slot": "edit-pattern",
+      "path": "public/help/sketch-modify-tools/",
+      "subject": "Model sketch circular pattern editor with four circles, Count, centre, Step angle and instance checkboxes",
+      "surroundings": [
+        "top-toolbar",
+        "model-tree",
+        "viewport",
+        "model-toolbox"
+      ],
+      "generator": "accepted-evidence-reuse",
+      "generatorCmd": "See src/tests/evidence/WO-2755/IMAGE-ADOPTION.json; original src/tests/evidence/WO-2616/capture-result-6e7694fc4.json",
+      "locked": false,
+      "reviewNotes": "WO-2755: inspected full original pixels; Sketch modules, editor, workbench and toolbar source byte-identical. Later Run macro controls belong to absent CAM properties/modal surfaces; right-drag dismissal is not shown here. Original accepted two-host capture reports zero page/console errors. Lossless WebP conversion preserves decoded RGBA.",
+      "captureRecord": {
+        "topic": "sketch-modify-tools",
+        "slot": "edit-pattern",
+        "file": "public/help/sketch-modify-tools/edit-pattern.webp",
+        "status": "captured",
+        "sourceCommit": "6e7694fc4fa3d1b912332f1f9a9aeaea71f99f3f",
+        "sha256": "a08fa71cde417bc65a4d7c9be909c6e581054ccd2ffeab752b420e76238637d2",
+        "afterDimensions": [
+          1920,
+          1080
+        ],
+        "originalEvidence": "src/tests/evidence/WO-2616/model-edit-four-circle-pattern.png",
+        "originalSha256": "46085e1ccb062083ea619e429df218f1dfa07923672f93c9ab914158bce437d7",
+        "reusedAtSourceCommit": "980bef371fdee41e5a3c7a9805a66fd6813e83e7",
+        "provenance": "src/tests/evidence/WO-2616/capture-result-6e7694fc4.json",
+        "order": "WO-2755",
+        "approval": "reviewed: accepted evidence reuse, WO-2755",
+        "candidate": "src/tests/evidence/WO-2616/model-edit-four-circle-pattern.png",
+        "sourceHash": "c43269aeb1c1578596acd3ef74a49c46aea4a1c96a0501c0619a44ff1a7eb971",
+        "sourceProvenance": {
+          "commit": "6e7694fc4fa3d1b912332f1f9a9aeaea71f99f3f",
+          "workingTreeDirty": false,
+          "workingTreeScope": [
+            "src/components/model3d/workbench",
+            "src/lib/sketch",
+            "src/store/index.ts"
+          ],
+          "sourceExcludes": [
+            "src/tests"
+          ],
+          "sourceHash": "c43269aeb1c1578596acd3ef74a49c46aea4a1c96a0501c0619a44ff1a7eb971",
+          "sourceHashAlgorithm": "sha256-path-and-content-v1",
+          "sourceFileCount": 131
+        },
+        "viewport": [
+          1920,
+          1080
+        ],
+        "appState": "Model sketch circular pattern editor with four circles, Count, centre, Step angle and instance checkboxes",
+        "capturedAt": null,
+        "captureTimeEvidence": "src/tests/evidence/WO-2616/capture-run-6e7694fc4.json (run window only, not exact screenshot time)",
+        "adoptionRecord": "src/tests/evidence/WO-2755/IMAGE-ADOPTION.json",
+        "captureKind": "accepted-evidence-reuse"
       }
     }
   ],

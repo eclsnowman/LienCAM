@@ -2,8 +2,10 @@
 //
 // Pins: the Sketch tab needs the chooser ONLY when no document is active
 // (direct entries set the document first and bypass it); the candidate
-// list covers every 2D layer with loop counts and greys STL-projected
-// (read-only, ADR-0011) and locked layers WITH a reason; "New sketch"
+// list covers every OPENABLE 2D layer with loop counts - projection layers
+// (read-only, ADR-0011) and locked layers are not listed, and a part with no
+// openable layer has no group (WO-2854, the operator 2026-10-15: "are we going to
+// allow editing of STL projections? If not why is it in there?"); "New sketch"
 // (startNewSketch) always creates a fresh blank layer + document, never
 // reopening a stored one. UI-level behavior (modal rendering, Esc) is
 // covered by the stage gate capture.
@@ -102,7 +104,7 @@ describe('sketchTabNeedsChooser (bypass logic)', () => {
 })
 
 describe('listSketchEntryCandidates', () => {
-  it('lists all 2D layers with container/loop count; greys projected and locked with reasons', () => {
+  it('lists openable 2D layers with container/loop count; projected and locked layers are absent', () => {
     const geometry: ImportedGeometry[] = [
       geo({
         id: 'dxf', name: 'part.dxf', format: 'dxf',
@@ -143,7 +145,7 @@ describe('listSketchEntryCandidates', () => {
       }),
     ]
     const c = listSketchEntryCandidates(geometry)
-    expect(c).toHaveLength(4)
+    expect(c.map((x) => x.layerId)).toEqual(['d1', 'k1'])
 
     const byId = new Map(c.map((x) => [x.layerId, x]))
     // DXF layer: selectable, 2 loops, container named after the file.
@@ -151,14 +153,46 @@ describe('listSketchEntryCandidates', () => {
     expect(byId.get('d1')!.loopCount).toBe(2)
     expect(byId.get('d1')!.containerName).toBe('part.dxf')
     expect(byId.get('d1')!.hasStoredSketch).toBe(false)
-    // Locked layer: greyed, says why.
-    expect(byId.get('d2')!.disabledReason).toMatch(/locked/i)
-    // STL projection: greyed, read-only per ADR-0011.
-    expect(byId.get('s1')!.disabledReason).toMatch(/read-only/i)
-    expect(byId.get('s1')!.disabledReason).toMatch(/ADR-0011/)
+    // Locked layer and STL projection (read-only per ADR-0011): not offered,
+    // and the STL part - projections only - contributes no group.
+    expect(byId.has('d2')).toBe(false)
+    expect(byId.has('s1')).toBe(false)
+    expect(c.some((x) => x.geoId === 'stl')).toBe(false)
     // Baked sketch layer: selectable, flagged as a parametric re-edit.
     expect(byId.get('k1')!.disabledReason).toBeNull()
     expect(byId.get('k1')!.hasStoredSketch).toBe(true)
+  })
+
+  it('WO-2854: Full Suite offers no projection row - STEP and model projection parts have no group', () => {
+    const plane = {
+      origin: { x: 0, y: 0, z: 0 }, xAxis: { x: 1, y: 0, z: 0 },
+      yAxis: { x: 0, y: 1, z: 0 }, normal: { x: 0, y: 0, z: 1 },
+    }
+    const geometry: ImportedGeometry[] = [
+      geo({
+        id: 'svg', name: 'Leadscrew_Stepper_Mount', format: 'svg', loops: [],
+        layers2d: [
+          { id: 'color-0', name: 'Layer 1', color: '#0ff', visible: true },
+          { id: 'color-1', name: 'Layer 2', color: '#f0f', visible: true },
+        ],
+      }),
+      geo({
+        id: 'step', name: 'Part 1', format: 'step', type: 'brep', loops: [],
+        layers2d: [{ id: 'cyl', name: 'Cylinder (12)', color: '#fff', visible: true, projectionPlane: plane }],
+      }),
+      geo({
+        id: 'model', name: 'Extrude F1', format: 'model', type: 'brep', loops: [],
+        layers2d: [{ id: 'sec', name: 'Section z=0.1', color: '#fff', visible: true, projectionPlane: plane }],
+      }),
+      geo({
+        id: 'locked-only', name: 'frozen.dxf', format: 'dxf', loops: [],
+        layers2d: [{ id: 'f', name: '0', color: '#fff', visible: true, locked: true }],
+      }),
+    ]
+    const c = listSketchEntryCandidates(geometry)
+    expect(c.map((x) => `${x.geoId}:${x.layerId}`)).toEqual(['svg:color-0', 'svg:color-1'])
+    expect(c.every((x) => x.disabledReason === null)).toBe(true)
+    expect(JSON.stringify(c)).not.toMatch(/projection|read-only|ADR-0011|locked/i)
   })
 
   it('empty project -> no candidates (chooser shows only New sketch)', () => {

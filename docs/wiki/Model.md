@@ -46,7 +46,7 @@ The Model tab builds and edits solid parts: feature tree, bodies, parameters and
 
 The left panel starts with the model's name, a switch-model arrow, + (New model) and Finish (back to Setup). Below that are four sections you can fold: Model (the feature tree with its filter bar), Bodies (one row per solid with a show checkbox, a colour swatch and its volume), Parameters (named values), and Inspect (Measure, Appearance, hide and isolate, Section, and mass properties).
 
-The right rail holds the modeling tools in five groups: Sketch (New sketch), Create (Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean), Construct (Offset plane, Midplane, At angle, Axis, Plane through, Tangent plane, Point), Modify (Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole, Defeature, Edit...) and Document (Undo, Redo, Import, Export, STL, Debug export). Click a group's name to fold it, and the button at the top of the rail switches to compact icons (hover a tool for its name); both are remembered. While a sketch is open the rail shows the sketch tools instead, and in Form it shows the Form tools.
+The right rail holds the modeling tools in five groups: Sketch (New sketch), Create (Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean), Construct (Offset plane, Midplane, At angle, Axis, Plane through, Tangent plane, Point), Modify (Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole, Move Hole, Defeature, Edit...) and Document (Undo, Redo, Import, Export, STL, Debug export). Click a group's name to fold it, and the button at the top of the rail switches to compact icons (hover a tool for its name); both are remembered. While a sketch is open the rail shows the sketch tools instead, and in Form it shows the Form tools.
 
 <a id="model-workspace-tour-docked-palettes"></a>
 
@@ -64,7 +64,7 @@ The Construct group makes reference geometry for sketches and features: Offset p
 
 ### What the tree shows
 
-The Model section lists the part's history in order: Origin and the XY, XZ and YZ planes at the top, then a row for every sketch (pen icon), every construction plane, axis and point, every imported STEP or STL part, and every feature - Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean, Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole and Defeature - each under the name you gave it. A Form row holds everything done inside Form; Edit on it reopens the cage. Every row has its status mark, a suppress button and a right-click menu, and sketch rows an eye to show or hide them ("The feature tree"); the bodies the features make are shown, hidden and isolated from the Bodies list below.
+The Model section lists the part's history in order: Origin and the XY, XZ and YZ planes at the top, then a row for every sketch (pen icon), every construction plane, axis and point, every imported STEP or STL part, and every feature - Extrude, Revolve, Sweep, Loft, Form, Relief, Boolean, Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole, Move Hole and Defeature - each under the name you gave it. A Form row holds everything done inside Form; Edit on it reopens the cage. Every row has its status mark, a suppress button and a right-click menu, and sketch rows an eye to show or hide them ("The feature tree"); the bodies the features make are shown, hidden and isolated from the Bodies list below.
 
 The view cube sits in the bottom-left corner of the 3D view: click a face (TOP, FRONT, RIGHT and so on) to look from that side. The small cube button beside it opens Display mode: Shaded with edges, Shaded, no edges, Unshaded (wireframe) or Translucent, Perspective or Orthographic, and the Zebra stripes and Curvature checks for judging smooth surfaces. Press N, then click a face or plane, to look straight at it.
 
@@ -158,9 +158,13 @@ Fillet and Chamfer each open one slim bar at the bottom of the view: click edges
 
 Apply stays greyed out until the preview is ready, so you always see the shape before you commit it. A size that does not fit shows why in the bar and the part stays as it was. One fillet or chamfer works on one body: once the first edge is picked, clicks on other bodies are ignored.
 
-On an imported STEP part, turn on Fillet and click a fillet that is already on the part: the bar opens with its current radius. Type the new radius and Apply - only that fillet changes. On an STL opened in the Model tab, Fillet changes the radius of a rounded edge the same way, and Chamfer puts a chamfer on the sharp edges you click.
+On an imported STEP part, turn on Fillet and click a fillet that is already on the part: the bar opens with its current radius. Type the new radius and Apply - the recognized fillet or its tangent chain changes. On an STL opened in the Model tab, Fillet changes the radius of a rounded edge the same way, and Chamfer puts a chamfer on the sharp edges you click.
 
 ![The slim Fillet bar with two edges selected, the radius typed, and the rounded edges previewed on the body](images/fillet-chamfer-3d/fillet-preview.webp)
+
+On imported STEP and STL parts, a tangent-connected fillet or chamfer chain is one feature. With Fillet or Chamfer active, click an existing blend to change its radius or distance for the whole chain. Defeature removes the recognized chain as a whole; removing a boss takes its foot fillet with it. A size that cannot be built leaves the part unchanged and gives the reason.
+
+Chamfer picks real sharp edges. The seam used to draw a cylinder is not a sharp edge and is not offered for Chamfer.
 
 See also: [Shell, draft, hole](Model#shell-draft-hole), [The feature tree](Model#feature-tree-history), [Editing imported STEP and STL parts](Model#model-imported-parts).
 
@@ -178,21 +182,33 @@ Hole: click Hole, then click a face - the panel opens with the Seed point (X, Y,
 
 ![The Draft card with the neutral face confirmed, one face picked to draft, and the drafted preview](images/shell-draft-hole/draft-preview.webp)
 
+Draft beside existing fillets keeps their radii when the edit can be built. Shell can work on filleted parts too; opening a pocketed part can leave separate pieces rather than one connected body.
+
+After Shell succeeds, the Console reports any information about the resulting pieces once, including when you edit an existing Shell.
+
+On a curved STEP face, Hole uses the surface normal at the point you click as its drilling direction. The seed point still comes from that click.
+
 See also: [3D fillet and chamfer](Model#fillet-chamfer-3d), [Defeature, resize hole and hole depth](Model#defeature-resize-hole), [Editing imported STEP and STL parts](Model#model-imported-parts).
 
 <a id="push-pull"></a>
 
 ## Push/pull direct editing
 
-Push/Pull grabs a flat face and moves it along its normal with a drag arrow or a typed distance - and the result is a feature row you can edit later.
+Push/Pull moves a flat face along its normal, or offsets a cylindrical or conical hole face on a STEP body, with a drag arrow or a typed distance. The result is a feature row you can edit later.
 
-1. Click Push/Pull in the Modify group, then click a flat face on a body.
+1. Click Push/Pull in the Modify group, then click a flat face, or a cylindrical or conical hole face on a STEP body.
 2. Drag the arrow, or type a distance in the small card next to the face (+ pulls, - pushes). Letting go of the drag does not commit - you can keep adjusting.
 3. Press Enter to preview a typed value, then Enter again or Apply to commit. Esc or Cancel stops.
 
 The commit adds a Push/Pull row to the feature tree like any other feature, so it rebuilds with the model. To change it later, select the row and press Edit... - the arrow and the distance card come back on the same face with the distance you used.
 
 ![Push/Pull on the top face of a block: the arrow, the distance card with 8 mm typed, and the previewed taller body](images/push-pull/pushpull-gizmo.webp)
+
+Push/Pull and pocket-depth edits can carry neighboring fillet and chamfer chains with the face, keeping their size, including supported drafted walls and cone feet. On STL parts, a flat face meeting fillets can move with those fillets, and a counterbore floor can be picked for Push/Pull. An edit that cannot be built reports why and leaves the body unchanged.
+
+On a STEP hole, a cylindrical face changes radius by the typed offset; a cone moves parallel to itself and keeps its angle. A positive offset enlarges the hole. On an STL, a flat face beside a curved rim can move while staying joined to that rim.
+
+On an STL, Edit on the Push/Pull tree row brings back its stored distance. Apply replaces that edit; Undo and Redo step through the replacement, including when you press Undo quickly after Apply.
 
 See also: [Defeature, resize hole and hole depth](Model#defeature-resize-hole), [The feature tree](Model#feature-tree-history), [Editing imported STEP and STL parts](Model#model-imported-parts).
 
@@ -212,6 +228,14 @@ Hole depth: while Resize hole is waiting for a hole, press Depth on its bar (Dia
 
 ![The Delete faces card with the recognized holes listed, one ticked and shown orange, and the healed preview ready](images/defeature-resize-hole/defeature-groups.webp)
 
+Move Hole in the Modify group relocates a recognized hole on STEP or STL. Click the hole and type an XYZ delta in mm on the same face, then Apply. Every counterbore or countersink step moves together with its diameters and depths preserved. An overlap or wall breakthrough reports why the move cannot be built. Edit on the Move Hole tree row reopens it; Undo restores the old position.
+
+On an STL, Defeature can remove a recognized round boss with its foot fillet, or a dome, leaving the plate face. Stepped-hole recognition includes connected cylindrical and conical bands, so moving a hole carries the whole stack.
+
+A resized stepped hole keeps its remaining steps selectable for later edits and CAM face picks.
+
+To change an imported-hole resize again, select its Resize hole row in the feature tree and choose Edit. The card reopens at the diameter you last applied; enter the next diameter and Apply to replace that edit. If an upstream change removed the hole, the console says why it cannot reopen.
+
 See also: [Push/pull direct editing](Model#push-pull), [Shell, draft, hole](Model#shell-draft-hole), [Editing imported STEP and STL parts](Model#model-imported-parts).
 
 <a id="booleans-3d"></a>
@@ -226,7 +250,9 @@ Boolean combine joins two bodies with Union, Subtract or Intersect - click the b
 
 The result replaces both bodies, and the boolean is a row in the feature tree you can edit. "Restart viewport pick" starts the clicks over, and "Choose from lists" gives Target and Tool lists instead. Choosing the same body twice shows "Target and tool must be different bodies."
 
-With an STL open in the Model tab, Boolean works on the STL as the target and the tool is a shape you set in the panel: Tool Box (Centre and Size) or Cylinder (Centre, Diameter, Length), in mm, in the part's own coordinates.
+If Subtract would remove the whole target, it says that nothing would remain and leaves the model unchanged.
+
+Import in the Document group can add an STL as another body. Boolean can use an STL and a STEP body, or two STLs, with either body as target or tool. Select the bodies in the view or from the lists; a mesh target also offers a Box or Cylinder tool sized in the panel. An STL used by a Boolean is hidden while that feature is active; Undo or rollback before it shows the STL again. An STL added through Model Import becomes a faceted solid that can later be exported as STEP.
 
 ![The Boolean combine panel with target and tool picked in the view and Op set to Subtract](images/booleans-3d/boolean-result.webp)
 
@@ -321,9 +347,11 @@ See also: [Appearance, visibility, isolate, section](Model#appearance-visibility
 
 An imported STEP or STL part opens in the Model tab as a body you can edit directly - push faces, change fillets and holes, remove features, add holes and chamfers - without redrawing it.
 
+Import in the Model rail accepts STEP and STL files. A closed STL imported here becomes a faceted solid for further modeling and STEP export; curved surfaces keep their facets. This lets you combine imported bodies in one model.
+
 A STEP part gets here two ways: Import in the Document group brings a STEP file into the model as a body named after the file, or the pen button (Edit as model) on an imported STEP row in Setup opens it in the Model tab. It is then a body like any other: Push/Pull, Fillet, Chamfer, Shell, Draft, Hole, Resize hole (diameter or depth) and Defeature all work on it, and Fillet also changes the radius of a fillet already on the part.
 
-An STL gets here with the pen button (Edit as model) on its row in Setup. It opens as a mesh body and stays an STL; the message line says how many features it recognised ("Click a feature to select it whole"). A click picks a whole feature - a hole, a rounded edge, a flat face - never a single triangle.
+An STL opened with the pen button (Edit as model) on its row in Setup can remain a mesh body and stay an STL; the message line says how many features it recognised ("Click a feature to select it whole"). A click picks a whole feature - a hole, a rounded edge, a flat face - never a single triangle.
 
 | Tool | On an STL |
 | --- | --- |
@@ -335,9 +363,13 @@ An STL gets here with the pen button (Edit as model) on its row in Setup. It ope
 | Hole | Drills a hole square to the face you click, with the usual Hole panel. |
 | Resize hole | Changes a recognized hole's diameter, or its depth with Depth. |
 | Defeature | Removes recognized features and heals the part. |
-| Boolean | Adds or cuts a Box or Cylinder you size in the panel. |
+| Boolean | Combines with another STL or STEP body in either direction, or with a Box or Cylinder sized in the panel. |
+
+Move Hole relocates a complete recognized hole stack on STEP or STL. From body in Form also accepts the open STL; the source mesh is hidden while its Form feature is active. Relief is not available on a mesh body yet; hover its disabled button to read why.
 
 Each Apply is one step for Undo. Finish (top of the left panel) goes back to Setup with the edited part.
+
+Import in the Model rail brings every solid of a multi-solid STEP into the model as its own body and reports the body count in the console. Cancel while the import is counting solids drops the import.
 
 See also: [Editing an import as a model](Importing-files#edit-import-as-model), [Defeature, resize hole and hole depth](Model#defeature-resize-hole), [3D fillet and chamfer](Model#fillet-chamfer-3d), [Model booleans](Model#booleans-3d).
 

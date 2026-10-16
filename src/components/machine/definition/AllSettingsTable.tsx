@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { SettingBox } from './DefinitionFields'
 import {
@@ -231,11 +234,11 @@ const num = (text: string): number | null => {
 function probingFields(machine: MachineConfig): AppField[] {
   const setterFields: AppField[] = TOOL_SETTER_AXES.map((axis) => ({
     key: `probing.toolSetter.${axis}`,
-    group: 'Probing',
-    name: `Tool setter position ${axis.toUpperCase()}`,
-    unit: 'machine mm',
-    meaning: `Where the fixed tool setter stands, ${axis.toUpperCase()} in machine coordinates - `
-      + 'Measure tool goes here. Blank leaves the axis unstated; 0 is a stated coordinate.',
+    group: controlText('AllSettingsTable.text001'),
+    name: controlText('AllSettingsTable.toolSetterPosition', { axis: axis.toUpperCase() }),
+    unit: controlText('AllSettingsTable.text002'),
+    meaning: controlText('AllSettingsTable.text003', { value1: String(axis.toUpperCase()) })
+      + controlText('AllSettingsTable.text004'),
     kind: 'number' as const,
     value: fmt(machine.probing?.toolSetter?.[axis]),
     write: (text: string, w: Writers) => {
@@ -252,10 +255,10 @@ function probingFields(machine: MachineConfig): AppField[] {
   }))
   const feedGeometry: AppField[] = [...PROBING_FEED_FIELDS, ...PROBING_GEOMETRY_FIELDS].map(([label, field, unit]) => ({
     key: `probing.${field}`,
-    group: 'Probing',
-    name: label,
+    group: controlText('AllSettingsTable.text005'),
+    name: controlText(`AllSettingsTable.probeNames.${field}`),
     unit,
-    meaning: `${label} - the probe routines' ${field}, kept by this app on the machine record.`,
+    meaning: controlText('AllSettingsTable.text006', { value1: String(label), value2: String(field) }),
     kind: 'number' as const,
     value: fmt(machine.probing?.[field as keyof MachineProbeDefaults] as number | undefined),
     write: (text: string, w: Writers) => {
@@ -272,8 +275,8 @@ function probingFields(machine: MachineConfig): AppField[] {
 function spindleFields(machine: MachineConfig): AppField[] {
   return [
     {
-      key: 'spindle.maxRpm', group: 'Spindle', name: 'Maximum RPM', unit: 'rpm', kind: 'number',
-      meaning: 'The fastest this spindle turns - the CAM half of the record.',
+      key: 'spindle.maxRpm', group: controlText('AllSettingsTable.text007'), name: controlText('AllSettingsTable.maximumRpm'), unit: 'rpm', kind: 'number',
+      meaning: controlText('AllSettingsTable.text008'),
       value: fmt(machine.maxSpindleRpm),
       write: (text, w) => {
         const v = num(text); if (v === null) return false
@@ -281,8 +284,8 @@ function spindleFields(machine: MachineConfig): AppField[] {
       },
     },
     {
-      key: 'spindle.minRpm', group: 'Spindle', name: 'Minimum RPM', unit: 'rpm', kind: 'number',
-      meaning: 'The slowest this spindle turns - the CAM half of the record.',
+      key: 'spindle.minRpm', group: controlText('AllSettingsTable.text009'), name: controlText('AllSettingsTable.minimumRpm'), unit: 'rpm', kind: 'number',
+      meaning: controlText('AllSettingsTable.text010'),
       value: fmt(machine.minSpindleRpm),
       write: (text, w) => {
         const v = num(text); if (v === null) return false
@@ -290,9 +293,9 @@ function spindleFields(machine: MachineConfig): AppField[] {
       },
     },
     {
-      key: 'spindle.direction', group: 'Spindle', name: 'Direction', unit: 'none', kind: 'enum',
+      key: 'spindle.direction', group: controlText('AllSettingsTable.text011'), name: controlText('AllSettingsTable.direction'), unit: 'none', kind: 'enum',
       options: ['cw', 'ccw'],
-      meaning: 'Which way M3 turns this spindle.',
+      meaning: controlText('AllSettingsTable.text012'),
       value: machine.spindleDirection ?? null,
       write: (text, w) => {
         if (text !== 'cw' && text !== 'ccw') return false
@@ -304,6 +307,8 @@ function spindleFields(machine: MachineConfig): AppField[] {
 
 const spindleLinkValue = (value: string | number | boolean | null): string | null => {
   if (value === null) return null
+  // Row values also drive checkbox state and machine writers; only display
+  // labels belong to the language catalog.
   if (typeof value === 'boolean') return value ? 'True' : 'False'
   return String(value)
 }
@@ -317,9 +322,9 @@ function spindleLinkFields(machine: MachineConfig): AppField[] {
   if (definition === undefined) return []
   if (definition === null) {
     return [{
-      key: 'spindleLinkDefinition', group: 'Spindle VFD link', name: 'VFD link', unit: 'none',
+      key: 'spindleLinkDefinition', group: controlText('AllSettingsTable.text015'), name: controlText('AllSettingsTable.vfdLink'), unit: 'none',
       kind: 'enum', value: 'none', vfdDrive: true,
-      meaning: 'This machine explicitly states that it has no stored VFD link.',
+      meaning: controlText('AllSettingsTable.text016'),
     }]
   }
 
@@ -338,11 +343,11 @@ function spindleLinkFields(machine: MachineConfig): AppField[] {
     const leaf = String(path[path.length - 1])
     rows.push({
       key,
-      group: 'Spindle VFD link',
-      name: `VFD ${path.map(String).join(' / ')}`,
+      group: controlText('AllSettingsTable.text017'),
+      name: controlText('AllSettingsTable.vfdPath', { path: path.map(String).join(' / ') }),
       unit: /Ms$/.test(leaf) ? 'ms' : leaf === 'baud' ? 'baud' : leaf === 'upToSpeedToleranceRpm' ? 'rpm' : 'none',
       kind: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'text',
-      meaning: `Stored VFD link field ${vfdPathKey(path)}; edited through the Spindle area's VFD document.`,
+      meaning: controlText('AllSettingsTable.text018', { value1: String(vfdPathKey(path)) }),
       value: spindleLinkValue(value),
       area: 'spindle',
       vfdPath: path,
@@ -372,14 +377,14 @@ function outputFields(machine: MachineConfig): AppField[] {
     }
   const rows: AppField[] = []
   outputs.forEach((output, index) => {
-    const label = `Output ${index + 1}`
-    const base = { group: 'Outputs and coolant', unit: 'none' as string }
+    const label = controlText('AllSettingsTable.text019', { value1: String(index + 1) })
+    const base = { group: controlText('AllSettingsTable.text020'), unit: 'none' as string }
     const pinPart = (part: 'port' | 'pin' | 'negate'): AppField => ({
       ...base,
       key: `outputs.${index}.pin.${part}`,
-      name: `${label} pin ${part}`,
+      name: controlText(part === 'port' ? 'AllSettingsTable.outputPinPort' : part === 'pin' ? 'AllSettingsTable.outputPinNumber' : 'AllSettingsTable.outputPinNegate', { label }),
       kind: part === 'negate' ? 'boolean' : 'number',
-      meaning: `${output.name || label}: the ${part === 'negate' ? 'polarity (active low)' : part} of the pin it switches.`,
+      meaning: controlText('AllSettingsTable.text022', { value1: String(output.name || label), value2: String(part === 'negate' ? controlText('AllSettingsTable.text021') : part) }),
       value: part === 'negate'
         ? (output.pin.negate === null ? null : output.pin.negate ? 'True' : 'False')
         : String(output.pin[part]),
@@ -396,14 +401,14 @@ function outputFields(machine: MachineConfig): AppField[] {
     })
     rows.push(
       {
-        ...base, key: `outputs.${index}.name`, name: `${label} name`, kind: 'text',
-        meaning: 'What this output is called on the page and in the console.',
+        ...base, key: `outputs.${index}.name`, name: controlText('AllSettingsTable.outputName', { label }), kind: 'text',
+        meaning: controlText('AllSettingsTable.text023'),
         value: output.name,
         write: (text, w) => { patch(index, (o) => ({ ...o, name: text }))(w); return true },
       },
       {
-        ...base, key: `outputs.${index}.onCode`, name: `${label} on code`, kind: 'text',
-        meaning: 'The M-code that switches this output on.',
+        ...base, key: `outputs.${index}.onCode`, name: controlText('AllSettingsTable.outputOnCode', { label }), kind: 'text',
+        meaning: controlText('AllSettingsTable.text024'),
         value: output.onCode,
         write: (text, w) => {
           const code = normalizeMachineMCode(text.trim())
@@ -412,8 +417,8 @@ function outputFields(machine: MachineConfig): AppField[] {
         },
       },
       {
-        ...base, key: `outputs.${index}.offCode`, name: `${label} off code`, kind: 'text',
-        meaning: 'The M-code that switches this output off; blank means the shared stop word only.',
+        ...base, key: `outputs.${index}.offCode`, name: controlText('AllSettingsTable.outputOffCode', { label }), kind: 'text',
+        meaning: controlText('AllSettingsTable.text025'),
         value: output.offCode,
         write: (text, w) => {
           const trimmed = text.trim()
@@ -426,10 +431,10 @@ function outputFields(machine: MachineConfig): AppField[] {
       pinPart('pin'),
       pinPart('negate'),
       {
-        ...base, key: `outputs.${index}.role`, name: `${label} CAM role`, kind: 'enum',
+        ...base, key: `outputs.${index}.role`, name: controlText('AllSettingsTable.outputCamRole', { label }), kind: 'enum',
         options: ['', 'flood', 'mist', 'vacuum'],
-        meaning: 'Which coolant channel this output is; blank means it is switched only by'
-          + ' its own word, or its imported role is wiring evidence nobody has confirmed yet.',
+        meaning: controlText('AllSettingsTable.text026')
+          + controlText('AllSettingsTable.text027'),
         // WO-1777 phase 2: THE SAME ANSWER THE OUTPUTS AREA GIVES. This row
         // used to carry its own inline copy of the old predicate, so the All
         // settings table showed an imported Flood/Mist role while the record
@@ -468,8 +473,8 @@ function outputFields(machine: MachineConfig): AppField[] {
         },
       },
       {
-        ...base, key: `outputs.${index}.onDelayMs`, name: `${label} on delay`, unit: 'ms', kind: 'number',
-        meaning: 'How long to wait after switching this output on.',
+        ...base, key: `outputs.${index}.onDelayMs`, name: controlText('AllSettingsTable.outputOnDelay', { label }), unit: 'ms', kind: 'number',
+        meaning: controlText('AllSettingsTable.text028'),
         value: fmt(output.onDelayMs ?? 0),
         write: (text, w) => {
           const v = num(text); if (v === null || v < 0) return false
@@ -477,8 +482,8 @@ function outputFields(machine: MachineConfig): AppField[] {
         },
       },
       ...(output.sharedSwitch === undefined ? [{
-        ...base, key: `outputs.${index}.inUse`, name: `${label} in use`, kind: 'boolean',
-        meaning: 'Whether this controller output is active; its wiring remains stated when it is off.',
+        ...base, key: `outputs.${index}.inUse`, name: controlText('AllSettingsTable.inUse', { label }), kind: 'boolean',
+        meaning: controlText('AllSettingsTable.text029'),
         value: output.disabled === true ? 'False' : 'True',
         write: (text, w) => {
           patch(index, (o) => ({ ...o, disabled: text === 'True' ? undefined : true }))(w); return true
@@ -492,9 +497,9 @@ function outputFields(machine: MachineConfig): AppField[] {
   for (const group of groups) {
     const members = outputs.filter((o) => o.sharedSwitch === group)
     rows.push({
-      key: `outputs.shared.${group}`, group: 'Outputs and coolant', unit: 'none', kind: 'boolean',
-      name: `${group} in use`,
-      meaning: `The controller switches ${members.map((o) => o.onCode).join(' and ')} with one setting; this turns them on or off together.`,
+      key: `outputs.shared.${group}`, group: controlText('AllSettingsTable.text030'), unit: 'none', kind: 'boolean',
+      name: controlText('AllSettingsTable.inUse', { label: group }),
+      meaning: controlText('AllSettingsTable.text031', { value1: String(members.map((o) => o.onCode).join(' and ')) }),
       value: members.some((o) => !o.disabled) ? 'True' : 'False',
       write: (text, w) => {
         const inUse = text === 'True'
@@ -530,13 +535,13 @@ function parkFields(machine: MachineConfig): AppField[] {
     for (const axis of ['x', 'y', 'z'] as const) {
       rows.push({
         key: `park.P${n}.${axis}`,
-        group: 'Park positions (G30)',
+        group: controlText('AllSettingsTable.text032'),
         name: `P${n} ${axis.toUpperCase()}`,
         unit: 'mm',
         kind: !fromMacros || positionMacros[n - 1] ? 'number' : 'readonly',
         meaning: fromMacros
-          ? `G30 P${n}, machine coordinates - set by this machine's position macro, edited on the Macros panel.`
-          : `G30 P${n}, machine coordinates. G30.1 stores P1 at the current position.`,
+          ? controlText('AllSettingsTable.text033', { value1: String(n) })
+          : controlText('AllSettingsTable.text034', { value1: String(n) }),
         value: fmt(positions?.[n]?.[axis]),
         write: fromMacros && positionMacros[n - 1] ? (text, w) => {
           const v = num(text); if (v === null) return false
@@ -574,12 +579,11 @@ function operatorStopParkFields(machine: MachineConfig): AppField[] {
   const set = machine.operatorStopPark ?? null
   return (['x', 'y', 'z'] as const).map((axis): AppField => ({
     key: `park.operatorStop.${axis}`,
-    group: 'Park positions (G30)',
-    name: `Operator stop ${axis.toUpperCase()}`,
+    group: controlText('AllSettingsTable.text032'),
+    name: controlText('AllSettingsTable.operatorStopName', { value1: axis.toUpperCase() }),
     unit: 'mm',
     kind: 'number',
-    meaning: 'Where an operator stop parks, machine coordinates - the posted stop and Control\'s clamp pause both go here. '
-      + 'Empty: the machine\'s Park 1.',
+    meaning: controlText('AllSettingsTable.operatorStopMeaning'),
     value: fmt(set?.[axis]),
     write: (text, w) => {
       const trimmed = text.trim()
@@ -593,8 +597,8 @@ function operatorStopParkFields(machine: MachineConfig): AppField[] {
 /** The one app writer for Safe Z, with the row identity its authority uses. */
 function safeZAppField(machine: MachineConfig, key: string): AppField {
   return {
-    key, group: 'Machine', name: 'Safe Z', unit: 'mm', kind: 'number',
-    meaning: 'Machine-coordinate Z every rapid clears to, typed on this machine.',
+    key, group: controlText('AllSettingsTable.text035'), name: controlText('AllSettingsTable.safeZ'), unit: 'mm', kind: 'number',
+    meaning: controlText('AllSettingsTable.text036'),
     value: fmt(machineSafeZ(machine)?.z),
     write: (text, w) => {
       const trimmed = text.trim()
@@ -631,10 +635,10 @@ function controllerBoardField(machine: MachineConfig): AppField[] {
   const known = stated === null ? null : uccncBoardName(stated)
   const unknownLabel = stated !== null && known === null ? uccncBoardUnknownName(stated) : null
   return [{
-    key: 'machine.controllerBoard', group: 'Machine', name: 'Controller board',
+    key: 'machine.controllerBoard', group: controlText('AllSettingsTable.text037'), name: controlText('AllSettingsTable.controllerBoard'),
     unit: 'none', kind: 'enum',
-    meaning: 'Which CNCdrive board this machine\'s definition declares - '
-      + 'the same fact the Controller area edits.',
+    meaning: controlText('AllSettingsTable.text038')
+      + controlText('AllSettingsTable.text039'),
     // The unset row's VALUE stays null: the Stated filter reads
     // `value !== null`, so an absent fact must not pose as stated (WO-1732
     // architect correction). "Not stated" is the DISPLAY of that null, via
@@ -647,7 +651,7 @@ function controllerBoardField(machine: MachineConfig): AppField[] {
       ...uccncBoardOptions().map((option) => option.name),
     ],
     value: stated === null ? null : known ?? unknownLabel,
-    unsetLabel: 'Not stated',
+    unsetLabel: controlText('AllSettingsTable.text041'),
     write: (text, w) => {
       const trimmed = text.trim()
       if (trimmed === 'Not stated') {
@@ -786,7 +790,7 @@ export function buildAllSettingsRows(machine: MachineConfig): AllSettingsRow[] {
         name: setting.key,
         kind: 'readonly',
         unit: 'none',
-        meaning: 'Not used by LienCAM.',
+        meaning: controlText('AllSettingsTable.text042'),
         value: setting.value,
         visible: true,
         source: 'profile',
@@ -1035,6 +1039,7 @@ export function AllSettingsTable({
   defineHoming,
   vfdEdit,
 }: AllSettingsTableProps) {
+  const text = useText('control-screens-not-probing')
   const [group, setGroup] = useState('')
   const [show, setShow] = useState<ShowFilter>('everything')
   const [onlyUsed, setOnlyUsed] = useState(false)
@@ -1073,7 +1078,7 @@ export function AllSettingsTable({
     return () => window.removeEventListener('resize', measure)
   }, [])
 
-  const index = useMemo(() => buildAllSettingsRows(draft), [draft])
+  const index = useMemo(() => buildAllSettingsRows(draft), [draft, text])
   // Plasma/laser/knife-only rows and unenabled-axis rotary rows stay in the
   // index (hidden is not deleted, WO-1695) - only this table's display reads
   // `visible`.
@@ -1083,7 +1088,7 @@ export function AllSettingsTable({
   // unedited page (the common case) computes the rows once, not twice.
   const savedIndex = useMemo(
     () => (source === draft ? index : buildAllSettingsRows(source)),
-    [source, draft, index],
+    [source, draft, index, text],
   )
   const savedValue = useMemo(() => {
     const map = new Map<string, string | null>()
@@ -1151,15 +1156,15 @@ export function AllSettingsTable({
     const id = Number(key.slice(1))
     if (!grblConnected) {
       editDraft((m) => recordGrblSettings(m, { ...(m.grblSettings ?? {}), [id]: text }))
-      console.log(`$${id} not sent - connect to apply.`)
+      console.log(controlText('AllSettingsTable.text043', { value1: String(id) }))
       return
     }
     void writeGrblSettingAndReadBack(id, text).then((result) => {
       if (result.ok) {
         editDraft((m) => recordGrblSettings(m, { ...(m.grblSettings ?? {}), [id]: result.value }))
-        console.log(`GRBL read back $${id}=${result.value}.`)
+        console.log(controlText('AllSettingsTable.text044', { value1: String(id), value2: String(result.value) }))
       } else {
-        console.log(`Not sent: ${result.reason}`)
+        console.log(controlText('AllSettingsTable.text045', { value1: String(result.reason) }))
       }
     })
   }
@@ -1286,9 +1291,9 @@ export function AllSettingsTable({
           }}
           style={{ width: '100%' }}
         >
-          <option value="none">No VFD link - the controller drives the spindle</option>
+          <option value="none">{controlText('AllSettingsTable.text046')}</option>
           {VFD_MODEL_TEMPLATES.map((template) => (
-            <option key={template.id} value={template.id}>{`Modbus VFD - ${template.label}`}</option>
+            <option key={template.id} value={template.id}>{controlText('AllSettingsTable.text047', { value1: String(template.label) })}</option>
           ))}
         </select>
       )
@@ -1339,17 +1344,17 @@ export function AllSettingsTable({
             className="mform-input-mono"
             data-testid={`machine-def-all-settings-value-${row.controller}-${row.key}`}
           >
-            {row.value ?? ''}
+            {kind === 'boolean' && row.value !== null
+              ? controlText(row.value === 'True' ? 'AllSettingsTable.text013' : 'AllSettingsTable.text014')
+              : row.value ?? ''}
           </span>
           {row.app?.area && setSection && (
             <button
               type="button"
               className="control-chip-btn"
-              data-tooltip={row.app.area === 'outputs' ? 'Edit on Outputs & coolant' : 'Edit on Spindle'}
+              data-tooltip={row.app.area === 'outputs' ? controlText('AllSettingsTable.text050') : controlText('AllSettingsTable.text051')}
               onClick={() => { setSection(row.app!.area!) }}
-            >
-              Edit
-            </button>
+            >{controlText('AllSettingsTable.text052')}</button>
           )}
         </span>
       )
@@ -1377,7 +1382,8 @@ export function AllSettingsTable({
           onChange={(e) => { commitRow(row, e.target.value) }}
         >
           {row.value === null && <option value="">{row.app?.unsetLabel ?? ''}</option>}
-          {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          {options.map((o) => <option key={o} value={o}>{row.key === 'machine.controllerBoard' && o === 'Not stated'
+            ? controlText('AllSettingsTable.text040') : o}</option>)}
         </select>
       )
     }
@@ -1406,30 +1412,30 @@ export function AllSettingsTable({
   return (
     <div data-testid="machine-def-all-settings" style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-        <label className="mform-label" htmlFor="machine-def-all-settings-group">Group</label>
+        <label className="mform-label" htmlFor="machine-def-all-settings-group">{controlText('AllSettingsTable.text055')}</label>
         <select
           id="machine-def-all-settings-group"
           className="mform-select"
           data-testid="machine-def-all-settings-group"
-          aria-label="Group"
+          aria-label={controlText('AllSettingsTable.text056')}
           value={group}
           onChange={(e) => { setGroup(e.target.value) }}
         >
-          <option value="">All groups</option>
+          <option value="">{controlText('AllSettingsTable.text057')}</option>
           {groups.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
-        <label className="mform-label" htmlFor="machine-def-all-settings-show">Show</label>
+        <label className="mform-label" htmlFor="machine-def-all-settings-show">{controlText('AllSettingsTable.text058')}</label>
         <select
           id="machine-def-all-settings-show"
           className="mform-select"
           data-testid="machine-def-all-settings-show"
-          aria-label="Show"
+          aria-label={controlText('AllSettingsTable.text059')}
           value={show}
           onChange={(e) => { setShow(e.target.value as ShowFilter) }}
         >
-          <option value="everything">Everything</option>
-          <option value="stated">Stated by the profile</option>
-          <option value="changed">Changed by me</option>
+          <option value="everything">{controlText('AllSettingsTable.text060')}</option>
+          <option value="stated">{controlText('AllSettingsTable.text061')}</option>
+          <option value="changed">{controlText('AllSettingsTable.text062')}</option>
         </select>
         <label
           htmlFor="machine-def-all-settings-used-only"
@@ -1441,17 +1447,15 @@ export function AllSettingsTable({
             type="checkbox"
             checked={onlyUsed}
             onChange={(e) => { setOnlyUsed(e.target.checked); setScrollTop(0) }}
-          />
-          Only settings LienCAM uses
-        </label>
+          />{controlText('AllSettingsTable.text063')}</label>
         <span
           data-testid="machine-def-all-settings-count"
           role="status"
           style={{ marginLeft: 'auto', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}
         >
           {onlyUsed
-            ? `${rowCount} of ${matchedBeforeUse.length} settings shown`
-            : `${rowCount} setting${rowCount === 1 ? '' : 's'}`}
+            ? controlText('AllSettingsTable.text064', { value1: String(rowCount), value2: String(matchedBeforeUse.length) })
+            : controlText(rowCount === 1 ? 'AllSettingsTable.countSingular' : 'AllSettingsTable.countPlural', { value1: String(rowCount) })}
         </span>
       </div>
       <div style={{ position: 'relative', minWidth: 0 }}>
@@ -1475,11 +1479,11 @@ export function AllSettingsTable({
           >
             <thead>
               <tr>
-                <th style={{ width: 140 }}>Group</th>
-                <th style={{ width: 220 }}>Setting</th>
-                <th style={{ width: 200 }}>Value</th>
-                <th style={{ width: 90 }}>Unit</th>
-                <th>What it does</th>
+                <th style={{ width: 140 }}>{controlText('AllSettingsTable.text066')}</th>
+                <th style={{ width: 220 }}>{controlText('AllSettingsTable.text067')}</th>
+                <th style={{ width: 200 }}>{controlText('AllSettingsTable.text068')}</th>
+                <th style={{ width: 90 }}>{controlText('AllSettingsTable.text069')}</th>
+                <th>{controlText('AllSettingsTable.text070')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1498,9 +1502,7 @@ export function AllSettingsTable({
                   <td>
                     {row.group}
                     {!row.usedByLiencam && (
-                      <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-                        Not used by LienCAM
-                      </div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{controlText('AllSettingsTable.text071')}</div>
                     )}
                   </td>
                   <td title={row.key}>{row.name}</td>
@@ -1524,14 +1526,14 @@ export function AllSettingsTable({
           {rowCount === 0 && (
             <p className="mform-help" data-testid="machine-def-all-settings-empty">
               {settingSearch.trim() === ''
-                ? 'This machine has no settings to list.'
-                : `No setting matches "${settingSearch}".`}
+                ? controlText('AllSettingsTable.text072')
+                : controlText('AllSettingsTable.text073', { value1: String(settingSearch) })}
             </p>
           )}
         </div>
         <div
           role="scrollbar"
-          aria-label="All settings rows"
+          aria-label={controlText('AllSettingsTable.text074')}
           aria-controls="machine-def-all-settings-viewport"
           aria-orientation="vertical"
           aria-valuemin={0}

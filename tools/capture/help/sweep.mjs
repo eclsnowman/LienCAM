@@ -1,6 +1,7 @@
 // Foreground route replay. Failures are retained individually, never silently skipped.
 import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { HELP_EVIDENCE } from './evidence-root.mjs'
 // WO-2708: Windows can reserve 62396-63095 (Hyper-V excluded ports). CAPTURE_PORT_BASE
 // moves the four fixed route ports (62492-62495) to BASE..BASE+3.
 const port = p => process.env.CAPTURE_PORT_BASE ? String(Number(process.env.CAPTURE_PORT_BASE) + Number(p) - 62492) : p
@@ -20,7 +21,7 @@ const jobs = [
   ['WO-2135', 'walk.mjs', port('62495'), '--only', 'nest'],
   ['WO-2135', 'make-pictures.mjs'],
 ]
-const dir = 'src/tests/evidence/WO-2491'
+const dir = HELP_EVIDENCE
 const results = []
 const selected = process.argv.slice(2)
 // WO-2708: one capture run id for every route this sweep starts, so a lane's

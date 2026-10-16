@@ -4,6 +4,8 @@
 // made; this palette names it, flips it (planes) and applies it. Backdropless, so the model stays
 // clickable.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useState } from 'react'
 import type { PickedPlaneKind, PointDefinitionKind } from '../../../sketch3d'
 import { DialogShell } from './DialogShell'
@@ -14,27 +16,27 @@ export interface ConstructDatumDialogValue {
 }
 
 export const PICKED_PLANE_TYPE_WORDS: Record<PickedPlaneKind, string> = {
-  'three-points': 'Through three points',
-  'two-edges': 'Through two edges',
-  tangent: 'Tangent to a face',
+  get 'three-points'() { return workbenchText('ConstructDatumDialog.throughThreePoints') },
+  get 'two-edges'() { return workbenchText('ConstructDatumDialog.throughTwoEdges') },
+  get tangent() { return workbenchText('ConstructDatumDialog.tangentToAFace') },
 }
 
 export const PICKED_PLANE_HINTS: Record<PickedPlaneKind, string> = {
-  'three-points': 'Click three vertices in the viewport. X runs from the first to the second.',
-  'two-edges': 'Click two edges in the viewport (a round edge counts as its centre line).',
-  tangent: 'Click a cylinder or shaft where the plane should touch it (a flat face gives its own plane).',
+  get 'three-points'() { return workbenchText('ConstructDatumDialog.clickThreeVerticesInTheViewportXRunsFrom') },
+  get 'two-edges'() { return workbenchText('ConstructDatumDialog.clickTwoEdgesInTheViewportARoundEdge') },
+  get tangent() { return workbenchText('ConstructDatumDialog.clickACylinderOrShaftWhereThePlaneShould') },
 }
 
 export const POINT_TYPE_WORDS: Record<PointDefinitionKind, string> = {
-  vertex: 'At a vertex',
-  'circle-centre': 'At a circle\'s centre',
-  'edge-plane': 'Where an edge meets a plane',
+  get vertex() { return workbenchText('ConstructDatumDialog.atAVertex') },
+  get 'circle-centre'() { return workbenchText('ConstructDatumDialog.atACircleSCentre') },
+  get 'edge-plane'() { return workbenchText('ConstructDatumDialog.whereAnEdgeMeetsAPlane') },
 }
 
 export const POINT_HINTS: Record<PointDefinitionKind, string> = {
-  vertex: 'Click a vertex in the viewport.',
-  'circle-centre': 'Click a round edge (or a round or flat face) in the viewport.',
-  'edge-plane': 'Click an edge in the viewport, then choose the plane below or click a flat face.',
+  get vertex() { return workbenchText('ConstructDatumDialog.clickAVertexInTheViewport') },
+  get 'circle-centre'() { return workbenchText('ConstructDatumDialog.clickARoundEdgeOrARoundOrFlat') },
+  get 'edge-plane'() { return workbenchText('ConstructDatumDialog.clickAnEdgeInTheViewportThenChooseThe') },
 }
 
 export interface ConstructDatumDialogProps<K extends string> {
@@ -65,6 +67,7 @@ export interface ConstructDatumDialogProps<K extends string> {
 }
 
 export function ConstructDatumDialog<K extends string>(props: ConstructDatumDialogProps<K>) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [name, setName] = useState(props.initialName)
   const [flip, setFlip] = useState(props.initialFlip)
   const [error, setError] = useState<string | null>(null)
@@ -76,9 +79,9 @@ export function ConstructDatumDialog<K extends string>(props: ConstructDatumDial
   }, [onValueChange, name, flip])
 
   const localError = props.picked === null
-    ? (props.progress ?? 'Pick in the viewport.')
+    ? (props.progress ?? workbenchText('ConstructDatumDialog.pickInTheViewport'))
     : name.trim().length === 0
-      ? 'Enter a name.'
+      ? workbenchText('ConstructDatumDialog.enterAName')
       : null
   const applyDisabled = localError !== null || applying
 
@@ -98,7 +101,7 @@ export function ConstructDatumDialog<K extends string>(props: ConstructDatumDial
   const kinds = Object.keys(props.typeWords) as K[]
   return (
     <DialogShell
-      title={props.mode === 'create' ? props.title : `Edit ${props.title.toLowerCase()}`}
+      title={props.mode === 'create' ? props.title : workbenchText('ConstructDatumDialog.edit', { value1: String(props.title.toLowerCase()) })}
       onApply={() => { void apply() }}
       onCancel={props.onClose}
       applyDisabled={applyDisabled}
@@ -107,7 +110,7 @@ export function ConstructDatumDialog<K extends string>(props: ConstructDatumDial
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} data-testid={`${testId}-dialog`}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Type</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('ConstructDatumDialog.type')}</span>
           {props.mode === 'create'
             ? (
               <select data-testid={`${testId}-type`} value={props.kind} onChange={(event) => props.onKindChange?.(event.target.value as K)}>
@@ -123,25 +126,24 @@ export function ConstructDatumDialog<K extends string>(props: ConstructDatumDial
         )}
         {props.mode === 'create' && props.planeOptions !== undefined && (
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Plane</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('ConstructDatumDialog.plane')}</span>
             <select data-testid={`${testId}-plane`} value={props.planeId ?? ''} onChange={(event) => props.onPlaneChange?.(event.target.value)}>
-              {props.planeId === '' && <option value="">{props.pickedFaceLabel ?? 'The picked face'}</option>}
+              {props.planeId === '' && <option value="">{props.pickedFaceLabel ?? workbenchText('ConstructDatumDialog.thePickedFace')}</option>}
               {props.planeOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
             </select>
           </label>
         )}
         <div data-testid={`${testId}-picked`} style={{ fontSize: 'var(--font-size-sm)', color: props.picked === null ? 'var(--text-muted)' : 'var(--text-accent)' }}>
-          {props.picked === null ? (props.progress ?? 'Nothing picked yet.') : `${props.title}: ${props.picked}`}
+          {props.picked === null ? (props.progress ?? workbenchText('ConstructDatumDialog.nothingPickedYet')) : `${props.title}: ${props.picked}`}
         </div>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>Name</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('ConstructDatumDialog.name')}</span>
           <input data-testid={`${testId}-name`} value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         {props.showFlip && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input data-testid={`${testId}-flip`} type="checkbox" checked={flip} onChange={(event) => setFlip(event.target.checked)} />
-            Flip normal
-          </label>
+            {workbenchText('ConstructDatumDialog.flipNormal')}</label>
         )}
         {(localError ?? error) !== null && (
           <div data-testid={`${testId}-error`} style={{ color: error !== null ? 'var(--text-danger)' : 'var(--text-muted)' }}>{error ?? localError}</div>

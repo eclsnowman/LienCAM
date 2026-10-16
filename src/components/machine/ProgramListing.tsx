@@ -1,6 +1,103 @@
+import { textFor } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import type { ProgramStep } from '../../lib/machine/controller'
 import { fmtNum } from '../../lib/post/format'
 import type { StagedProgramView } from '../../store/machineControlStore'
+
+export type ProgramListingKind = 'header' | 'comment' | 'rapid' | 'feed' | 'arc' | 'tool-change' | 'm-code' | 'code'
+
+/** G/M-looking text inside an expression, parameter name or quoted payload
+ * is not a word. Keep its delimiters so dynamic G[#...] remains unresolved. */
+function displayWordsSource(code: string): string {
+  let result = ''
+  let depth = 0
+  let quote: string | null = null
+  for (let at = 0; at < code.length; at++) {
+    const ch = code[at]
+    if (quote !== null) { if (ch === quote) quote = null; result += ' '; continue }
+    if (ch === '"' || ch === "'") { quote = ch; result += ' '; continue }
+    if (ch === '#' && code[at + 1] === '<') {
+      result += '#'
+      while (++at < code.length) { result += ' '; if (code[at] === '>') break }
+      continue
+    }
+    if (ch === '[') { depth++; result += '['; continue }
+    if (ch === ']') { depth = Math.max(0, depth - 1); result += ']'; continue }
+    result += depth > 0 ? ' ' : ch
+  }
+  return result
+}
+
+/** Display spans only: concatenation is the original line, including whitespace. */
+export function listingCommentParts(text: string): Array<{ text: string; comment: boolean }> {
+  const parts: Array<{ text: string; comment: boolean }> = []
+  let start = 0
+  for (let at = 0; at < text.length; at++) {
+    if (text[at] !== '(' && text[at] !== ';') continue
+    if (at > start) parts.push({ text: text.slice(start, at), comment: false })
+    const begin = at
+    if (text[at] === ';') at = text.length
+    else {
+      let depth = 1
+      while (++at < text.length && depth > 0) {
+        if (text[at] === '(') depth++
+        else if (text[at] === ')') depth--
+      }
+    }
+    parts.push({ text: text.slice(begin, at), comment: true })
+    start = at
+    at--
+  }
+  if (start < text.length) parts.push({ text: text.slice(start), comment: false })
+  return parts
+}
+
+/** One display-only pass over all rows, so a window's continuation lines inherit
+ * their preceding G0/G1/G2/G3. Never changes text, ids or controller parsing.
+ * Unknown/canned motion cancels our colour inference; it cannot authorize a move. */
+export function programListingKinds(
+  lines: readonly ProgramListingLine[], steps: readonly ProgramStep[] = [],
+): ProgramListingKind[] {
+  const byId = new Map(steps.map(step => [step.id, step]))
+  const passive = [17, 18, 19, 20, 21, 40, 41, 42, 43, 49, 54, 55, 56, 57, 58, 59, 59.1, 59.2, 59.3, 61, 64, 90, 91, 90.1, 91.1, 93, 94, 95, 98, 99]
+  const nonmodal = [4, 10, 28, 30, 52, 53, 92, 92.1, 92.2, 92.3]
+  const knownG = new Set([0, 1, 2, 3, ...passive, ...nonmodal])
+  let motion: 'rapid' | 'feed' | 'arc' | null = null
+  return lines.map(line => {
+    if (line.lineNumber === null && line.moveId === null) return 'header'
+    // Typed staged rows need no lexical guess about translated descriptions.
+    // Raw file rows deliberately omit steps at the call site below.
+    const step = line.moveId === null ? undefined : byId.get(line.moveId)
+    if (step?.kind === 'line') { motion = step.rapid ? 'rapid' : 'feed'; return motion }
+    if (step?.kind === 'arc') { motion = 'arc'; return motion }
+    if (step?.kind === 'toolChange') return 'tool-change'
+    if (step?.kind === 'spindle' || step?.kind === 'coolant') return 'm-code'
+    if (step) return 'code'
+    // Use the renderer's nested-comment boundaries too: a word inside an
+    // outer comment must neither acquire a colour nor change later modal rows.
+    const stripped = listingCommentParts(line.text)
+      .filter(part => !part.comment).map(part => part.text).join('').trim()
+    if (!stripped) return line.text.trim() ? 'comment' : 'code'
+    // Parameter names are not axes; subprogram calls can change modal state.
+    if (/^\s*#/i.test(stripped)) return 'code'
+    if (/^\s*O\s*(?:\d|<)/i.test(stripped)) { motion = null; return 'code' }
+    const code = displayWordsSource(stripped)
+    const g = [...code.matchAll(/(?<![A-Z])G\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/gi)].map(word => Number(word[1]))
+    const m = [...code.matchAll(/(?<![A-Z])M\s*(\d+(?:\.\d*)?)/gi)].map(word => Number(word[1]))
+    const explicit = g.findLast(value => value === 0 || value === 1 || value === 2 || value === 3)
+    const unknownMotion = /G\s*(?:#|\[)/i.test(code) || g.some(value => !knownG.has(value))
+    if (unknownMotion) motion = null
+    else if (explicit !== undefined) motion = explicit === 0 ? 'rapid' : explicit === 1 ? 'feed' : 'arc'
+    if (m.includes(98) || m.includes(99)) { motion = null; return 'm-code' }
+    if (m.includes(6)) return 'tool-change'
+    if (!unknownMotion && explicit !== undefined) return motion!
+    if (m.length) return 'm-code'
+    if (!unknownMotion && !g.some(value => nonmodal.includes(value))
+      && /[XYZABCUVWIJKR]\s*(?:[+-]?(?:\d|\.)|#|\[)/i.test(code)) return motion ?? 'code'
+    return 'code'
+  })
+}
 
 export interface ProgramListingLine {
   text: string
@@ -56,13 +153,13 @@ function formatStep(
     ])
   }
   if (step.kind === 'dwell') return `G4 P${fmtNum(step.seconds, 3)}`
-  if (step.kind === 'marker') return 'Program marker'
+  if (step.kind === 'marker') return controlText('ProgramListing.text001')
   if (step.kind === 'spindle') {
     if (step.direction === 'off') return 'M5'
     return `${step.direction === 'cw' ? 'M3' : 'M4'} S${fmtNum(step.rpm, 3)}`
   }
   if (step.kind === 'coolant') {
-    if (step.channel === 'air') return `Air ${step.on ? 'on' : 'off'}`
+    if (step.channel === 'air') return controlText('ProgramListing.text002', { value1: step.on ? controlText('ProgramListing.on') : controlText('ProgramListing.off') })
     if (!step.on) return 'M9'
     return step.channel === 'flood' ? 'M8' : 'M7'
   }
@@ -70,15 +167,15 @@ function formatStep(
     return `T${step.toolNumber} M6${step.description ? ` - ${step.description}` : ''}`
   }
   if (step.kind === 'toolLengthOffset') {
-    return `Tool length offset ${fmtNum(step.deltaMm, 3)} mm`
+    return controlText('ProgramListing.text003', { value1: String(fmtNum(step.deltaMm, 3)) })
   }
   if (step.kind === 'workOffset') {
     return step.op === 'select'
       ? step.wcs
-      : `Set ${step.wcs} ${step.axis}${fmtNum(step.valueMm, 3)}`
+      : controlText('ProgramListing.text004', { value1: String(step.wcs), value2: String(step.axis), value3: String(fmtNum(step.valueMm, 3)) })
   }
-  if (step.kind === 'park') return `Park at ${step.parkId}`
-  return `Pause - ${step.message}`
+  if (step.kind === 'park') return controlText('ProgramListing.text005', { value1: String(step.parkId) })
+  return controlText('ProgramListing.text006', { value1: String(step.message) })
 }
 
 /** Render the exact staged program in the posted vocabulary operators know.
@@ -92,7 +189,7 @@ export function stagedProgramListing(view: StagedProgramView): ProgramListingLin
   for (const [index, step] of view.program.steps.entries()) {
     const setup = firstStepSetups.get(step.id)
     if (setup) {
-      lines.push({ text: `${setup.setupName} in ${setup.wcs}`, moveId: null, lineNumber: null })
+      lines.push({ text: controlText('ProgramListing.text007', { value1: String(setup.setupName), value2: String(setup.wcs) }), moveId: null, lineNumber: null })
     }
     lines.push({
       text: formatStep(step, previous), moveId: step.id,

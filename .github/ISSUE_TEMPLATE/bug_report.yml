@@ -11,8 +11,10 @@ body:
         **If the machine moved when it should not have, press your E-STOP first.**
         Then fill this in. The more of it you can fill, the faster it gets fixed.
 
-        Questions and ideas belong in Discussions, not here. Please do not paste passwords,
-        license keys or personal data; project files and G-code are fine.
+        Questions and ideas belong in Discussions, not here. Issues and all attachments are
+        public: anyone can read or download them. Remove anything private, including passwords,
+        license keys, personal data and confidential designs, from project files, G-code,
+        screenshots and logs before posting.
   - type: dropdown
     id: kind
     attributes:
@@ -84,7 +86,7 @@ body:
       description: >
         Drag in your project file (.camproject), the posted G-code, and screenshots.
         Zip them if GitHub refuses the type. A project file is the single most useful
-        thing you can attach.
+        thing you can attach. Attachments are public; remove anything private before uploading.
   - type: textarea
     id: console
     attributes:

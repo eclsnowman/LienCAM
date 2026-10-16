@@ -1,31 +1,35 @@
+import { catalogChildren, liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type AxisName } from '../../../types'
 import { uccncSettingField } from '../../../lib/machine/uccncProfileImport'
 import { type SettingSource } from './DefinitionFields'
 import { NotSent } from './DefinitionFields'
 
 
-export const PIN_FIELDS = [
-  ['step',   'stepPin'],
-  ['dir',    'dirPin'],
-  ['home',   'homePin'],
-  ['limit-', 'limitMinusPin'],
-  ['limit+', 'limitPlusPin'],
-  ['enable', 'enablePin'],
-] as const
+export const PIN_FIELDS = liveCatalog(() => ([
+  [controlText('AxisProfileFields.text001'),   'stepPin'],
+  [controlText('AxisProfileFields.text002'),    'dirPin'],
+  [controlText('AxisProfileFields.text003'),   'homePin'],
+  [controlText('AxisProfileFields.text004'), 'limitMinusPin'],
+  [controlText('AxisProfileFields.text005'), 'limitPlusPin'],
+  [controlText('AxisProfileFields.text006'), 'enablePin'],
+] as const))
 
 /** Every polarity key UCCNC can carry for an axis. Which ones get their own
  * box here is decided by the named pin fields, not by the axis name: assigning
  * a pin moves its polarity onto the pin triple, and an unassigned pin's
  * polarity is a typed setting on the definition, boxed here and editable. */
-export const AXIS_PROFILE_POLARITY_FIELDS = [
-  ['step', 'Steppinnegate'],
-  ['direction', 'Dirpinnegate'],
-  ['enable', 'Enapinnegate'],
-  ['limit-', 'Limitminuspinnegate'],
-  ['limit+', 'Limitpluspinnegate'],
-  ['home', 'Homepinnegate'],
-  ['curr hi/lo', 'Currhilowpinnegate'],
-] as const
+export const AXIS_PROFILE_POLARITY_FIELDS = liveCatalog(() => ([
+  [controlText('AxisProfileFields.text007'), 'Steppinnegate'],
+  [controlText('AxisProfileFields.text008'), 'Dirpinnegate'],
+  [controlText('AxisProfileFields.text009'), 'Enapinnegate'],
+  [controlText('AxisProfileFields.text010'), 'Limitminuspinnegate'],
+  [controlText('AxisProfileFields.text011'), 'Limitpluspinnegate'],
+  [controlText('AxisProfileFields.text012'), 'Homepinnegate'],
+  [controlText('AxisProfileFields.text013'), 'Currhilowpinnegate'],
+] as const))
 
 /**
  * WHICH POLARITY KEYS THIS AXIS'S CONTROLLER HAS - and ONLY that question.
@@ -67,29 +71,29 @@ export function axisCatalogueFields(
     uccncSettingField(`axessettingscontrol${axis}.${key}`) !== undefined)
 }
 
-export const AXIS_ROTARY_PROFILE_FIELDS = [
-  ['rotary', 'Rotaryaxis'],
-  ['rollover', 'Rotaryrollover'],
-] as const
+export const AXIS_ROTARY_PROFILE_FIELDS = liveCatalog(() => ([
+  [controlText('AxisProfileFields.text014'), 'Rotaryaxis'],
+  [controlText('AxisProfileFields.text015'), 'Rotaryrollover'],
+] as const))
 
 /** The drive's current-select output is one physical fact: two coordinates
  * plus its active polarity. Keep the three controller spellings together in
  * the per-axis drawer so a locally authored definition can state or clear the
  * same values a `.pro` import supplies. */
-export const AXIS_CURRENT_HI_LOW_PROFILE_FIELDS = [
+export const AXIS_CURRENT_HI_LOW_PROFILE_FIELDS = liveCatalog(() => ([
   ['', 'Currhilowportnumber'],
   ['', 'Currhilowpinnumber'],
-  ['negate', 'Currhilowpinnegate'],
-] as const
+  [controlText('AxisProfileFields.text016'), 'Currhilowpinnegate'],
+] as const))
 
-export const AXIS_DRAG_KNIFE_PROFILE_FIELDS = [
-  ['enabled', 'Dragknifeenabled'],
-  ['stop angle', 'Dragknifestopatangle'],
-  ['retract angle', 'Dragkniferetractatangle'],
-  ['retract height', 'Dragkniferetractheight'],
-  ['move-back feed', 'Dragknifemovebackfeedrate'],
-  ['pull-out feed', 'Dragknifepulloutfeedrate'],
-] as const
+export const AXIS_DRAG_KNIFE_PROFILE_FIELDS = liveCatalog(() => ([
+  [controlText('AxisProfileFields.text017'), 'Dragknifeenabled'],
+  [controlText('AxisProfileFields.text018'), 'Dragknifestopatangle'],
+  [controlText('AxisProfileFields.text019'), 'Dragkniferetractatangle'],
+  [controlText('AxisProfileFields.text020'), 'Dragkniferetractheight'],
+  [controlText('AxisProfileFields.text021'), 'Dragknifemovebackfeedrate'],
+  [controlText('AxisProfileFields.text022'), 'Dragknifepulloutfeedrate'],
+] as const))
 
 /**
  * A BLOCK OF PROFILE-ONLY FACTS THAT BELONG TO ONE AXIS - and WO-1050 gave it
@@ -124,6 +128,7 @@ export function AxisProfileReadouts({ axis, fields, settings, testId, label, col
   label?: string
   collapsed?: boolean
 }) {
+  useText('control-screens-not-probing')
   // WHAT THIS CELL ACTUALLY DRAWS. `SettingBox` returns null for a key another
   // named field owns, so asking here is what keeps the summary's count and the
   // opened contents the same number.
@@ -165,11 +170,9 @@ export function AxisProfileReadouts({ axis, fields, settings, testId, label, col
           fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)',
           cursor: 'pointer', whiteSpace: 'nowrap',
         }}
-        data-tooltip={`${drawn.length} ${label ?? 'profile'} settings for ${axis}`
-          + ' - stored with this machine definition; nothing in this software drives them yet.'}
-      >
-        {label ?? 'profile'} - {stated === 0 ? 'none' : stated} of {drawn.length} set
-      </summary>
+        data-tooltip={controlText('AxisProfileFields.text024', { value1: String(drawn.length), value2: String(label ?? 'profile'), value3: String(axis) })
+          + controlText('AxisProfileFields.text025')}
+      >{catalogChildren(controlText('AxisProfileFields.text023', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: label ?? 'profile', value2: stated === 0 ? 'none' : stated, value3: drawn.length })}</summary>
       {grid}
     </details>
   )

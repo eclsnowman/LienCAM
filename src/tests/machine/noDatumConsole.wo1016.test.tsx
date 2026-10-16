@@ -135,8 +135,9 @@ describe('WO-1016 no-datum console transition', () => {
       expect(dro('machine', axis).disabled).toBe(false)
     }
     expect(dro('work', 'x').value).toBe('---')
+    // WO-2817 (the operator 10-15 card: 'The after text seems fine? Keep wording brief.'): no off-switch step.
     expect(screen.getByTestId('control-datum-chip').textContent)
-      .toBe('NO DATUM - HOME FIRST, CHECK SWITCHES')
+      .toBe('NO DATUM - HOME FIRST')
     expect((screen.getByTestId('control-safez') as HTMLButtonElement).disabled).toBe(true)
 
     for (let index = 0; index < 20; index += 1) view.rerender(<ControlPage />)

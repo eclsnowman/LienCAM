@@ -645,6 +645,8 @@ export type ChamferHeightReference =
 export type CoordinateReference = ChamferHeightReference
 
 export interface ChamferParams {
+  /** Absent retains authored Linking entry. This policy is Chamfer-only. */
+  entryPolicy?: 'authored' | 'clear_space'
   geometryId: string
   loopIds: string[]
   /** Per-loop chamfer side — 'outer' offsets the path outward (outside profile),
@@ -671,7 +673,23 @@ export interface ChamferParams {
   referencePlaneGeo?: { geoId: string; faceIndex: number; localZ: number }
 }
 
+export interface ChamferEntryEvidence {
+  readonly frame: 'world' | 'unknown' | 'mismatched'
+  /** These are retained-material envelopes, never exact physical-stock certificates. */
+  readonly stockSource: 'prior-result-envelope' | 'loaded-stock-envelope' | 'unavailable'
+  readonly dispatch: { readonly opId: string; readonly setupId: string }
+  readonly workholding: { readonly complete: boolean; readonly omissions: readonly {
+    readonly instanceId: string; readonly geometryId?: string; readonly componentId?: string; readonly reason: string
+  }[] }
+}
+
 export interface ChamferWorkerPayload extends HolderClearanceInputs {
+  entryEvidence?: ChamferEntryEvidence
+  /** Actual predecessor provenance; sampled remainingStock is never whole-cell proof. */
+  clearSpacePredecessors?: readonly import('./holderClearance').ClearSpacePredecessor[]
+  remainingStock?: import('./stockState').StockState
+  clearancePart?: import('./holderClearance').ClearanceMesh
+  workholding?: readonly import('./holderClearance').ClearanceMesh[]
   opId: string
   setupId: string
   params: ChamferParams
@@ -832,6 +850,9 @@ export interface ACWorkerPayload extends HolderClearanceInputs {
    *  direct-engine callers omit this and retain the historical zero origin. */
   loopOrigins?: Record<string, { x: number; y: number }>
   wcsOrigin: { x: number; y: number; z: number }
+  /** Dispatch-time project machine G0 rate (mm/min), also the execution resolver's
+   *  fast-traverse default/ceiling. Optional for historical direct-engine callers. */
+  machineRapidRate?: number
   feedrateOverride?: FeedrateOverride
 }
 
@@ -1197,6 +1218,9 @@ export interface PocketWorkerPayload extends HolderClearanceInputs {
 
 export interface LoopData {
   id: string
+  /** The loop's saved operator name (Loop2D.name) - what the operation's
+   *  Geometry list shows. Message text only; identity stays `id`. */
+  name?: string
   points: Array<{ x: number; y: number }>
   closed: boolean
   type: string

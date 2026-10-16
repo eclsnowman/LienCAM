@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // WO UI-13A: draft dialog -- neutral-plane draft (GEO-4 DraftRequest).
 // Faces are picked in-viewport before this dialog opens (see FilletDialog.tsx's
 // header for the shared pick-mode rationale, entityKind 'face').
@@ -7,6 +8,8 @@
 // viewport's world-space hit frame and constructs the neutral-plane normal
 // FROM the pull direction, preserving the kernel's parallel-plane invariant.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, X } from 'lucide-react'
 import { NumericInput } from '../../ui/NumericInput'
@@ -120,52 +123,53 @@ function readFaceFrame(value: unknown): DraftFaceFrame | undefined {
 function editReferenceError(dag: FeatureDag, featureId: string): string | undefined {
   const node = dag.getNode(featureId)
   if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'draft') {
-    return `Draft edit refused: '${featureId}' is not a draft feature`
+    return workbenchText('DraftDialog.draftEditRefusedIsNotADraftFeature', { featureId: String(featureId) })
   }
   const ownerId = node.payload.ownerId
   if (typeof ownerId !== 'string' || ownerId.length === 0 || dag.getNode(ownerId) === undefined) {
-    return `Draft edit refused: owner '${String(ownerId)}' is not available`
+    return workbenchText('DraftDialog.draftEditRefusedOwnerIsNotAvailable', { value1: String(String(ownerId)) })
   }
   if (!node.consumes.includes(ownerId)) {
-    return `Draft edit refused: owner '${ownerId}' is missing from the feature dependencies`
+    return workbenchText('DraftDialog.draftEditRefusedOwnerIsMissingFromTheFeature', { ownerId: String(ownerId) })
   }
   const order = dag.featureOrder()
   if (order.indexOf(ownerId) < 0 || order.indexOf(ownerId) >= order.indexOf(featureId)) {
-    return `Draft edit refused: owner '${ownerId}' is not an upstream feature`
+    return workbenchText('DraftDialog.draftEditRefusedOwnerIsNotAnUpstreamFeature', { ownerId: String(ownerId) })
   }
   const faces = node.payload.faces
   if (!Array.isArray(faces) || faces.length === 0 || faces.some((id) => typeof id !== 'string' || id.length === 0)) {
-    return `Draft edit refused: '${featureId}' has no valid face references`
+    return workbenchText('DraftDialog.draftEditRefusedHasNoValidFaceReferences', { featureId: String(featureId) })
   }
   if (typeof node.payload.angleDeg !== 'number' || !Number.isFinite(node.payload.angleDeg) || node.payload.angleDeg <= 0 || node.payload.angleDeg >= 90) {
-    return `Draft edit refused: '${featureId}' has an invalid angle`
+    return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidAngle', { featureId: String(featureId) })
   }
   if (node.payload.pullMode !== undefined && node.payload.pullMode !== 'axis' && node.payload.pullMode !== 'face-normal') {
-    return `Draft edit refused: '${featureId}' has an invalid pull mode`
+    return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidPullMode', { featureId: String(featureId) })
   }
   if (node.payload.pullAxis !== undefined && !isPathAxis(node.payload.pullAxis)) {
-    return `Draft edit refused: '${featureId}' has an invalid pull axis`
+    return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidPullAxis', { featureId: String(featureId) })
   }
   if (node.payload.pullFlip !== undefined && typeof node.payload.pullFlip !== 'boolean') {
-    return `Draft edit refused: '${featureId}' has an invalid pull direction`
+    return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidPullDirection', { featureId: String(featureId) })
   }
   if (node.payload.offset !== undefined && (typeof node.payload.offset !== 'number' || !Number.isFinite(node.payload.offset))) {
-    return `Draft edit refused: '${featureId}' has an invalid neutral-plane offset`
+    return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidNeutralPlaneOffset', { featureId: String(featureId) })
   }
   if (node.payload.pullMode === 'face-normal') {
     const sourceId = node.payload.faceFrameSourceId
     if (typeof sourceId !== 'string' || sourceId.length === 0 || faces.includes(sourceId)) {
-      return `Draft edit refused: '${featureId}' has an invalid neutral-face reference`
+      return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidNeutralFaceReference', { featureId: String(featureId) })
     }
     const frame = readFaceFrame(node.payload.faceFrame)
     if (frame === undefined || !draftFaceNormalPlane(frame, node.payload.pullFlip === true, typeof node.payload.offset === 'number' ? node.payload.offset : 0).ok) {
-      return `Draft edit refused: '${featureId}' has an invalid neutral-face frame`
+      return workbenchText('DraftDialog.draftEditRefusedHasAnInvalidNeutralFaceFrame', { featureId: String(featureId) })
     }
   }
   return undefined
 }
 
 export function DraftDialog(props: DraftDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const { dag, history, onApplied, onClose } = props
   const editing = props.mode === 'edit'
   const existing = editing ? dag.getNode(props.featureId) : undefined
@@ -198,7 +202,7 @@ export function DraftDialog(props: DraftDialogProps) {
   const draftFaceIds = neutralRequired ? faceIds.slice(1) : faceIds
   const faceSelectionError =
     neutralRequired && faceIds.length < 2
-      ? 'Select a neutral face first, then at least one additional face to draft.'
+      ? workbenchText('DraftDialog.selectANeutralFaceFirstThenAtLeastOne')
       : undefined
   const invalid =
     referenceError !== undefined ||
@@ -247,7 +251,7 @@ export function DraftDialog(props: DraftDialogProps) {
         offset,
         name: editing && typeof existingPayload?.name === 'string'
           ? existingPayload.name
-          : `Draft ${previewFeatureId}`,
+          : workbenchText('DraftDialog.draft', { previewFeatureId: String(previewFeatureId) }),
       },
     }
   }, [angleDeg, editing, existingPayload?.name, faceIdsKey, invalid, neutralRequired, offset, previewFeatureId, previewOwnerId, pullAxis, pullFlip, pullMode, selectedFaceFrameKey])
@@ -330,7 +334,7 @@ export function DraftDialog(props: DraftDialogProps) {
       const live = dag.getNode(props.featureId)
       const liveReferenceError = editReferenceError(dag, props.featureId)
       if (live === undefined || liveReferenceError !== undefined) {
-        setApplyError(liveReferenceError ?? `Draft edit refused: '${props.featureId}' is no longer available`)
+        setApplyError(liveReferenceError ?? workbenchText('DraftDialog.draftEditRefusedIsNoLongerAvailable', { featureId: String(props.featureId) }))
         return
       }
       const nextPayload: Record<string, unknown> = {
@@ -391,10 +395,10 @@ export function DraftDialog(props: DraftDialogProps) {
       <header className="draft-command-header" onPointerDown={beginCardDrag}>
         <GripVertical size={14} aria-hidden="true" />
         <div className="draft-command-heading">
-          <span className="draft-command-kicker">Draft faces</span>
-          <strong id="draft-command-title">{editing ? 'Edit draft' : 'Select neutral face, then draft faces'}</strong>
+          <span className="draft-command-kicker">{workbenchText('DraftDialog.draftFaces')}</span>
+          <strong id="draft-command-title">{editing ? workbenchText('DraftDialog.editDraft') : workbenchText('DraftDialog.selectNeutralFaceThenDraftFaces')}</strong>
         </div>
-        <button type="button" className="modal-close-btn" aria-label="Cancel draft" data-testid="dialog-shell-close" disabled={applying} onClick={onClose}>
+        <button type="button" className="modal-close-btn" aria-label={workbenchText('DraftDialog.cancelDraft')} data-testid="dialog-shell-close" disabled={applying} onClick={onClose}>
           <X size={14} />
         </button>
       </header>
@@ -406,21 +410,21 @@ export function DraftDialog(props: DraftDialogProps) {
             className="draft-role-row"
             data-state={faceIds.length === 0 ? 'active' : workflowManaged && props.selectionStep === 'neutral' ? 'ready' : 'complete'}
           >
-            <span className="draft-role-index">1</span>
-            <span><strong>Neutral face</strong><small>{faceIds.length === 0 ? 'Click a face in the viewport' : workflowManaged && props.selectionStep === 'neutral' ? 'Selected - confirm this role' : 'Confirmed'}</small></span>
+            <span className="draft-role-index">{workbenchText('DraftDialog.1')}</span>
+            <span><strong>{workbenchText('DraftDialog.neutralFace')}</strong><small>{faceIds.length === 0 ? workbenchText('DraftDialog.clickAFaceInTheViewport') : workflowManaged && props.selectionStep === 'neutral' ? workbenchText('DraftDialog.selectedConfirmThisRole') : workbenchText('DraftDialog.confirmed')}</small></span>
           </div>
           <div
             data-testid="draft-face-role"
             className="draft-role-row"
             data-state={workflowManaged && props.selectionStep !== 'faces' ? 'pending' : draftFaceIds.length === 0 ? 'active' : 'ready'}
           >
-            <span className="draft-role-index">2</span>
-            <span><strong>Draft faces</strong><small>{draftFaceIds.length} draft face{draftFaceIds.length === 1 ? '' : 's'} selected</small></span>
+            <span className="draft-role-index">{workbenchText('DraftDialog.2')}</span>
+            <span><strong>{workbenchText('DraftDialog.draftFaces')}</strong><small>{workbenchText('DraftDialog.draftFaceSelected', { length: String((draftFaceIds.length) ?? ''), value2: String((draftFaceIds.length === 1 ? '' : 's')) })}</small></span>
           </div>
         </div> : (
           <div className="draft-role-row" data-state="ready">
-            <span className="draft-role-index">1</span>
-            <span><strong>Draft faces</strong><small>{draftFaceIds.length} face{draftFaceIds.length === 1 ? '' : 's'} selected</small></span>
+            <span className="draft-role-index">{workbenchText('DraftDialog.1')}</span>
+            <span><strong>{workbenchText('DraftDialog.draftFaces')}</strong><small>{workbenchText('DraftDialog.faceSelected', { length: String((draftFaceIds.length) ?? ''), value2: String((draftFaceIds.length === 1 ? '' : 's')) })}</small></span>
           </div>
         )}
         {workflowManaged && props.selectionStep === 'neutral' && (
@@ -431,25 +435,22 @@ export function DraftDialog(props: DraftDialogProps) {
             disabled={applying || faceIds.length === 0 || !faceDirection.ok}
             onClick={props.onConfirmNeutral}
           >
-            Confirm neutral face
-          </button>
+            {workbenchText('DraftDialog.confirmNeutralFace')}</button>
         )}
         {workflowManaged && props.selectionStep === 'faces' && (
           <button type="button" className="modal-btn modal-btn-ghost" data-testid="draft-reselect-neutral" disabled={applying} onClick={props.onReselectNeutral}>
-            Reselect neutral face
-          </button>
+            {workbenchText('DraftDialog.reselectNeutralFace')}</button>
         )}
         <div data-testid="draft-face-count" style={{ color: 'var(--text-muted)' }}>
           {neutralRequired
-            ? `${faceIds.length === 0 ? '0 neutral faces' : '1 neutral face'}, ${Math.max(0, faceIds.length - 1)} draft face${faceIds.length === 2 ? '' : 's'}`
-            : `${faceIds.length} face${faceIds.length === 1 ? '' : 's'} selected`}
+            ? workbenchText('DraftDialog.draftFace', { value1: String(faceIds.length === 0 ? workbenchText('DraftDialog.0NeutralFaces') : workbenchText('DraftDialog.1NeutralFace')), value2: String(Math.max(0, faceIds.length - 1)), value3: String(faceIds.length === 2 ? '' : 's') })
+            : workbenchText('DraftDialog.faceSelected', { length: String(faceIds.length), value2: String(faceIds.length === 1 ? '' : 's') })}
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Direction</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('DraftDialog.direction')}</span>
           {workflowManaged ? (
             <span data-testid="draft-pull-axis" data-value="face-normal" style={{ flex: 1, color: 'var(--text-primary)' }}>
-              Neutral face normal
-            </span>
+              {workbenchText('DraftDialog.neutralFaceNormal')}</span>
           ) : (
             <select
               data-testid="draft-pull-axis"
@@ -474,8 +475,7 @@ export function DraftDialog(props: DraftDialogProps) {
                 data-tooltip={faceDirection.ok ? undefined : faceDirection.reason}
                 data-testid="draft-pull-axis-option-face-normal"
               >
-                First selected face normal{faceDirection.ok ? '' : ' (unavailable)'}
-              </option>
+                {workbenchText('DraftDialog.firstSelectedFaceNormal', { value1: String((faceDirection.ok ? '' : workbenchText('DraftDialog.unavailable'))) })}</option>
               {(['x', 'y', 'z'] as const).map((axis) => (
                 <option
                   key={axis}
@@ -494,78 +494,75 @@ export function DraftDialog(props: DraftDialogProps) {
             className={pullFlip ? 'modal-btn modal-btn-primary' : 'modal-btn modal-btn-ghost'}
             onClick={() => setPullFlip((f) => !f)}
           >
-            Flip
-          </button>
+            {workbenchText('DraftDialog.flip')}</button>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Offset</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('DraftDialog.offset')}</span>
           <span data-testid="draft-offset" style={{ flex: 1 }}>
             <NumericInput value={offset} onChange={setOffset} disabled={applying} style={{ width: '100%' }} />
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('DraftDialog.mm')}</span>
         </label>
         <div data-testid="draft-pull-summary" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
           {pullMode === 'face-normal'
-            ? `Pull direction: selected face ${pullFlip ? '(flipped) ' : ''}normal (${fmt(pullDir.x)}, ${fmt(pullDir.y)}, ${fmt(pullDir.z)}), neutral plane offset ${fmt(offset)} mm from that face`
-            : `Pull direction: world ${sign}${AXIS_LABEL[pullAxis]} (${fmt(pullDir.x)}, ${fmt(pullDir.y)}, ${fmt(pullDir.z)}), neutral plane offset ${fmt(offset)} mm along that axis`}
+            ? workbenchText('DraftDialog.pullDirectionSelectedFaceNormalNeutralPlaneOffsetMm', { value1: String(pullFlip ? workbenchText('DraftDialog.flipped') : ''), value2: String(fmt(pullDir.x)), value3: String(fmt(pullDir.y)), value4: String(fmt(pullDir.z)), value5: String(fmt(offset)) })
+            : workbenchText('DraftDialog.pullDirectionWorldNeutralPlaneOffsetMmAlongThat', { sign: String(sign), value2: String(AXIS_LABEL[pullAxis]), value3: String(fmt(pullDir.x)), value4: String(fmt(pullDir.y)), value5: String(fmt(pullDir.z)), value6: String(fmt(offset)) })}
         </div>
         {!faceDirection.ok && (
           <div data-testid="draft-face-frame-error" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
             {workflowManaged
               ? faceIds.length === 0
-                ? 'Click a neutral face in the viewport to define the draft direction.'
-                : 'The neutral face direction is unavailable. Re-pick a valid neutral face.'
+                ? workbenchText('DraftDialog.clickANeutralFaceInTheViewportToDefine')
+                : workbenchText('DraftDialog.theNeutralFaceDirectionIsUnavailableRePickA')
               : faceDirection.reason}
           </div>
         )}
         {faceSelectionError !== undefined && (
           <div data-testid="draft-face-selection-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {faceSelectionError}
+            {readableInternalIds(faceSelectionError)}
           </div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Angle</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('DraftDialog.angle')}</span>
           <span data-testid="draft-angle" style={{ flex: 1 }}>
             <NumericInput value={angleDeg} onChange={setAngleDeg} min={0.1} max={89.9} disabled={applying} style={{ width: '100%' }} />
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>deg</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('DraftDialog.deg')}</span>
         </label>
         {referenceError !== undefined && (
           <div data-testid="draft-reference-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {referenceError}
+            {readableInternalIds(referenceError)}
           </div>
         )}
         {applyError !== undefined && (
           <div data-testid="draft-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {applyError}
+            {readableInternalIds(applyError)}
           </div>
         )}
         {previewControlled && props.previewState?.status === 'pending' && (
           <div data-testid="draft-preview-status" data-status="pending" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-            Updating preview...
-          </div>
+            {workbenchText('DraftDialog.updatingPreview')}</div>
         )}
         {previewControlled && props.previewState?.status === 'ready' && (
           <div data-testid="draft-preview-status" data-status="ready" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-            Preview ready
-          </div>
+            {workbenchText('DraftDialog.previewReady')}</div>
         )}
         {previewControlled && props.previewState?.status === 'refused' && (
           <div data-testid="draft-preview-status" data-status="refused" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            {props.previewState.message}
+            {readableInternalIds(props.previewState.message)}
           </div>
         )}
       </div>
       </div>
       <footer className="draft-command-footer">
-        <button type="button" className="modal-btn modal-btn-ghost" data-testid="dialog-shell-cancel" disabled={applying} onClick={onClose}>Cancel</button>
+        <button type="button" className="modal-btn modal-btn-ghost" data-testid="dialog-shell-cancel" disabled={applying} onClick={onClose}>{workbenchText('DraftDialog.cancel')}</button>
         <button
           type="button"
           className="modal-btn modal-btn-primary"
           data-testid="dialog-shell-apply"
           disabled={applying || invalid || (previewControlled && props.previewState?.status !== 'ready')}
           onClick={() => { void handleApply() }}
-        >Apply</button>
+        >{workbenchText('DraftDialog.apply')}</button>
       </footer>
     </aside>
   )

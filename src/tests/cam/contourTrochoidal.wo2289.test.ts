@@ -459,7 +459,8 @@ describe('WO-2289: Contour Roughing style Trochoidal through the production comp
       expect(troch).toEqual(offset)
       const lines = info.mock.calls.map(args => String(args[0])).filter(l => l.includes('trochoidal'))
       expect(lines).toEqual([
-        'Contour: loop "small" was roughed with Offset - the trochoidal channel does not fit it. ' +
+        // The operator sees no internal loop id (WO-2880); an unnamed loop is "a selected loop".
+        'Contour: a selected loop was roughed with Offset - the trochoidal channel does not fit it. ' +
         'Narrow the Channel width to rough it in orbits.',
       ])
     })

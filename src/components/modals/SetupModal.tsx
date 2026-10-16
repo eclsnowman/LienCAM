@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 const words = textFor('setup-stock-tools-machine-post')
 import { Fragment, useState, useEffect, useCallback, useMemo, useLayoutEffect, useRef } from 'react'
@@ -841,7 +842,7 @@ export function SetupModal() {
     if (!sel.isModelFace) return { error: words("SetupModal.that_was_not_a_modeled_body_face") }
     if (!sel.geoId) return { error: words("SetupModal.the_picked_face_reported_no_owning_body") }
     const owner = project.geometry.find(g => g.id === sel.geoId)
-    if (!owner) return { error: words("SetupModal.the_picked_face_belongs_to_a_body", { value1: sel.geoId }) }
+    if (!owner) return { error: words("SetupModal.the_picked_face_belongs_to_a_body") }
     // WO-355: resolve the OWNING Model Item HERE, at the one boundary that can
     // fail, instead of letting an unresolved id ride into the headless-replay
     // layer where a silent LEGACY_MODEL_ITEM_ID default would read the wrong
@@ -872,7 +873,7 @@ export function SetupModal() {
     localPoints: Array<[number, number, number]>
   } | { error: string } {
     const owner = project.geometry.find((geometry) => geometry.id === sel.geoId)
-    if (!owner) return { error: words("SetupModal.the_picked_edge_belongs_to_a_body", { value1: sel.geoId }) }
+    if (!owner) return { error: words("SetupModal.the_picked_edge_belongs_to_a_body") }
     if (resolveOwningModelItemId(owner) === undefined) {
       return { error: words("SetupModal.is_not_a_modeled_body_pick_a_2", { value1: owner.name }) }
     }
@@ -2023,7 +2024,7 @@ export function SetupModal() {
                   <CircleDot size={12} /> {boreBinding ? words("SetupModal.re_pick_circle_cylinder") : words("SetupModal.pick_circle_cylinder")}
                 </button>
                 {borePickError && (
-                  <div className="wcs-no-stock" role="alert" data-testid="setup-bore-pick-error">{borePickError}</div>
+                  <div className="wcs-no-stock" role="alert" data-testid="setup-bore-pick-error">{readableInternalIds(borePickError)}</div>
                 )}
                 {/* WO-337: "maybe I want the bottom of a hole, not the top" - one
                     control away, shown only once both ends are known (a live

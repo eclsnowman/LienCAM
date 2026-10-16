@@ -17,6 +17,8 @@
 // before BK-20 closed that particular gap (see faceArea.ts) -- reused here
 // for the kinds that are still open gaps.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import * as THREE from 'three'
 import type { CachedBody } from '../../../viewport3d'
 import type { BridgeVertexRef, PickHit } from '../../../viewport3d'
@@ -67,8 +69,8 @@ export type MeasureOutcome = MeasureReadout | MeasureFailure
 
 // WO-2142: the panel shows `note` to the operator, so it speaks his words --
 // never report names, WOs or kernel query names.
-const APPROX_SURFACE_NOTE = 'approximate - measured on the displayed surface'
-const APPROX_DISTANCE_NOTE = 'approximate - closest points on the displayed surface'
+const APPROX_SURFACE_NOTE = workbenchText('measureLogic.approximateMeasuredOnTheDisplayedSurface')
+const APPROX_DISTANCE_NOTE = workbenchText('measureLogic.approximateClosestPointsOnTheDisplayedSurface')
 
 export function isFailure(outcome: MeasureOutcome): outcome is MeasureFailure {
   return 'error' in outcome
@@ -76,8 +78,8 @@ export function isFailure(outcome: MeasureOutcome): outcome is MeasureFailure {
 
 const UNITS: Record<ReadoutKind, string> = {
   length: 'mm',
-  area: 'mm^2',
-  volume: 'mm^3',
+  get area() { return workbenchText('measureLogic.mm2') },
+  get volume() { return workbenchText('measureLogic.mm3') },
   radius: 'mm',
   diameter: 'mm',
   distance: 'mm',
@@ -246,20 +248,20 @@ export async function measureSingle(
 ): Promise<MeasureOutcome[]> {
   if (hit.kind === 'body') {
     const result = await measureExact(bodyId, 'volume')
-    return [{ label: 'Volume', kind: 'volume', value: result.value, unit: UNITS.volume, approx: false, ids: [] }]
+    return [{ label: workbenchText('measureLogic.volume'), kind: 'volume', value: result.value, unit: UNITS.volume, approx: false, ids: [] }]
   }
 
   if (hit.kind === 'vertex') {
     const ref = hit.id as BridgeVertexRef
     return [
       {
-        label: 'Vertex',
+        label: workbenchText('measureLogic.vertex'),
         kind: 'distance',
         value: 0,
         unit: 'mm',
         approx: false,
         ids: [...ref.adjacentEdgeIds],
-        note: `Position (${hit.point.x.toFixed(3)}, ${hit.point.y.toFixed(3)}, ${hit.point.z.toFixed(3)}) mm`,
+        note: workbenchText('measureLogic.positionMm', { value1: String(hit.point.x.toFixed(3)), value2: String(hit.point.y.toFixed(3)), value3: String(hit.point.z.toFixed(3)) }),
       },
     ]
   }
@@ -282,14 +284,14 @@ export async function measureSingle(
     if (collisions.length > 0) return [{ error: edgeIdCollisionMessage(collisions) }]
 
     const lengthResult = await measureExact(bodyId, 'length', [hit.id])
-    readouts.push({ label: 'Length', kind: 'length', value: lengthResult.value, unit: UNITS.length, approx: false, ids: [hit.id] })
+    readouts.push({ label: workbenchText('measureLogic.length'), kind: 'length', value: lengthResult.value, unit: UNITS.length, approx: false, ids: [hit.id] })
 
     const axisFace = axisFaceForEdge(hit.id, snapshots)
     if (axisFace?.axis !== undefined) {
       const pts = edgePoints(body, hit.id)
       const radius = meshDerivedRadius(pts, toVec3FromTuple(axisFace.centroid), toVec3FromTuple(axisFace.axis))
       readouts.push({
-        label: 'Radius',
+        label: workbenchText('measureLogic.radius'),
         kind: 'radius',
         value: radius,
         unit: UNITS.radius,
@@ -298,7 +300,7 @@ export async function measureSingle(
         note: APPROX_SURFACE_NOTE,
       })
       readouts.push({
-        label: 'Diameter',
+        label: workbenchText('measureLogic.diameter'),
         kind: 'diameter',
         value: radius * 2,
         unit: UNITS.diameter,
@@ -312,14 +314,14 @@ export async function measureSingle(
 
   // face
   const areaResult = await measureExact(bodyId, 'area', [hit.id])
-  readouts.push({ label: 'Area', kind: 'area', value: areaResult.value, unit: UNITS.area, approx: false, ids: [hit.id] })
+  readouts.push({ label: workbenchText('measureLogic.area'), kind: 'area', value: areaResult.value, unit: UNITS.area, approx: false, ids: [hit.id] })
 
   const snap = snapshots[hit.id]
   if (snap?.axis !== undefined && (snap.type === 'cylinder' || snap.type === 'cone' || snap.type === 'torus')) {
     const pts = facePoints(body, hit.id)
     const radius = meshDerivedRadius(pts, toVec3FromTuple(snap.centroid), toVec3FromTuple(snap.axis))
     readouts.push({
-      label: 'Radius',
+      label: workbenchText('measureLogic.radius'),
       kind: 'radius',
       value: radius,
       unit: UNITS.radius,
@@ -328,7 +330,7 @@ export async function measureSingle(
       note: APPROX_SURFACE_NOTE,
     })
     readouts.push({
-      label: 'Diameter',
+      label: workbenchText('measureLogic.diameter'),
       kind: 'diameter',
       value: radius * 2,
       unit: UNITS.diameter,
@@ -379,7 +381,7 @@ export function measureDistance(a: PickWithBody, b: PickWithBody): MeasureOutcom
   const value = meshDerivedMinDistance(ptsA, ptsB)
   const exact = a.hit.kind === 'vertex' && b.hit.kind === 'vertex'
   return {
-    label: 'Distance',
+    label: workbenchText('measureLogic.distance'),
     kind: 'distance',
     value,
     unit: UNITS.distance,
@@ -402,44 +404,44 @@ export function measureAngle(a: PickWithBody, b: PickWithBody): MeasureOutcome {
     const snapA = a.snapshots[a.hit.id]
     const snapB = b.snapshots[b.hit.id]
     if (snapA === undefined || snapB === undefined || snapA.type !== 'plane' || snapB.type !== 'plane') {
-      return { error: 'angle needs both faces to be planar with a captured normal' }
+      return { error: workbenchText('measureLogic.angleNeedsBothFacesToBePlanarWithA') }
     }
     const value = angleBetweenDirections(toVec3FromTuple(snapA.normal), toVec3FromTuple(snapB.normal))
     return {
-      label: 'Angle',
+      label: workbenchText('measureLogic.angle'),
       kind: 'angle',
       value,
       unit: UNITS.angle,
       approx: false,
       ids: [a.hit.id, b.hit.id],
-      note: 'unsigned angle between face normals, 0-90 deg',
+      note: workbenchText('measureLogic.unsignedAngleBetweenFaceNormals090Deg'),
     }
   }
   if (a.hit.kind === 'edge' && b.hit.kind === 'edge') {
     if (!isStraightEdge(a.body, a.hit.id) || !isStraightEdge(b.body, b.hit.id)) {
-      return { error: 'angle is only computed between straight edges' }
+      return { error: workbenchText('measureLogic.angleIsOnlyComputedBetweenStraightEdges') }
     }
     const ptsA = edgePoints(a.body, a.hit.id)
     const ptsB = edgePoints(b.body, b.hit.id)
-    if (ptsA.length < 2 || ptsB.length < 2) return { error: 'edge has too few points to derive a direction' }
+    if (ptsA.length < 2 || ptsB.length < 2) return { error: workbenchText('measureLogic.edgeHasTooFewPointsToDeriveADirection') }
     const dirA = ptsA[ptsA.length - 1].clone().sub(ptsA[0])
     const dirB = ptsB[ptsB.length - 1].clone().sub(ptsB[0])
     const value = angleBetweenDirections(dirA, dirB)
     return {
-      label: 'Angle',
+      label: workbenchText('measureLogic.angle'),
       kind: 'angle',
       value,
       unit: UNITS.angle,
       approx: false,
       ids: [a.hit.id, b.hit.id],
-      note: 'unsigned angle between edge directions, 0-90 deg',
+      note: workbenchText('measureLogic.unsignedAngleBetweenEdgeDirections090Deg'),
     }
   }
-  return { error: 'angle needs two faces or two straight edges' }
+  return { error: workbenchText('measureLogic.angleNeedsTwoFacesOrTwoStraightEdges') }
 }
 
 export function formatReadout(r: MeasureReadout): string {
-  const approxTag = r.approx ? ' (approx)' : ''
-  if (Number.isNaN(r.value)) return `${r.label}: unavailable${approxTag}`
+  const approxTag = r.approx ? workbenchText('measureLogic.approx') : ''
+  if (Number.isNaN(r.value)) return workbenchText('measureLogic.unavailable', { label: String(r.label), approxTag: String(approxTag) })
   return `${r.label}: ${r.value.toFixed(3)} ${r.unit}${approxTag}`
 }

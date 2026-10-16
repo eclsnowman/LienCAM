@@ -13,7 +13,7 @@ import { CNCViewport } from './CNCViewport'
 import { shouldDisplayAdaptiveCarvedStock } from '../../lib/viewport/stockRemovalDisplayAuthority'
 import { serializeCamera, deserializeCamera } from '../../lib/viewport/cameraPersist'
 import type { SketchOffset } from '../../lib/sketch/sketcher/sketchLayer'
-import { resolveSketchEditorOffset } from '../../lib/viewport/sketchEditorOffset'
+import { resolveSketchEditorPose } from '../../lib/sketch/sketchEditorPose'
 import { useSketcherTool, SketcherOverlays, sketcherMenuPort } from '../../lib/sketch/sketcher'
 import { camOverlaysPort, setCamOverlaySurface } from './camOverlaysPort'
 import { sketchEditingLayerId } from '../../lib/sketch/editingLayer'
@@ -362,9 +362,9 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
     if (suspended || interactionMode !== 'normal' || viewer.mode === 'sketch') return
 
     const viewport = viewportRef.current
-    // WO-1503: the browser fires 'contextmenu' on right-button release no
-    // matter how far the pointer moved first, so a right-drag pan (the
-    // default right-button-pans scheme) must not also pop this menu.
+    // WO-1503: release-order browsers must not open a menu after a right-drag.
+    // WO-2728: press-order browsers open it first; ViewportContextMenu observes
+    // the still-held gesture and dismisses it when movement exceeds 10 px.
     if (viewport?.consumeRightButtonWasDrag(event.clientX, event.clientY)) {
       event.preventDefault()
       return
@@ -883,18 +883,14 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
           ? sketchChainForHighlight.operandIds.map((o) =>
               typeof o === 'string' ? o : o.entityId)
           : []
-    // Display offset: pose the sketch layer at the edited part's home so a nest
-    // owned-seed edits AT its visible lower-left slot (the seed's loops stay in
-    // the clean LOCAL frame; the offset is display-only and is inverse-applied
-    // to picking). OWNER RULE (Operator, 2026-07-22, final): a sketch edits at the
-    // conventional workspace origin unless it belongs to a genuine NEST seed
-    // (ownerNestId set) -- moving the ad hoc container or any plain geometry
-    // must never displace where a sketch opens; only a real nest seed's slot
-    // pose carries into the sketch editor. See resolveSketchEditorOffset for
-    // the full rule and rationale.
+    // Display offset: pose the sketch layer at the edited part's own placement,
+    // the pose the CAM view draws that part at, so an opened layer sits exactly
+    // where it lives (the loops stay in the clean LOCAL frame; the offset is
+    // display-only and is inverse-applied to picking). WO-2854 replaced the
+    // 2026-07-22 nest-only rule, which drew every other part at the origin.
     const sk = viewer.mode === 'sketch' ? activeSketch : null
     const offset: SketchOffset | undefined = sk
-      ? resolveSketchEditorOffset(useCamStore.getState().project.geometry, sk.layerId)
+      ? resolveSketchEditorPose(useCamStore.getState().project.geometry, sk)
       : undefined
     vp.updateSketch(sk, {
       selectedIds: new Set<string>([...sketchSelectedIds, ...chainIds]),

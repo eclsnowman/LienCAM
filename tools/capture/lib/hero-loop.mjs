@@ -151,7 +151,7 @@ export async function runHeroLoop({ build, evidence = 'src/tests/evidence/WO-239
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 })
       await page.locator('#liencam-splash').waitFor({ state: 'hidden' })
       await step('Start with an empty project', () => page.getByRole('button', { name: 'Start with an empty project', exact: true }).click(),
-        async () => !await page.getByRole('dialog', { name: 'Try an example' }).count())
+        async () => !await page.getByRole('dialog', { name: 'Open a project' }).count())
       await step('Set dark theme and UI scale 100%', async () => {
         await page.getByRole('button', { name: 'Application settings', exact: true }).click()
         await page.getByTestId('settings-interface-scale').click()

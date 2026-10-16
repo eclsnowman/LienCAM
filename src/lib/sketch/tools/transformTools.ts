@@ -56,6 +56,7 @@ import type {
   SketchConstraint,
   SketchDimension,
 } from '../types'
+import { withoutOffsetLink } from './offsetTool'
 import { isInjectedSketchAnchorId } from '../sketchAnchors'
 import type { SketchDoc, SketchDocTransform } from './trimTool'
 import { axisConstraintKindAt, pickEntity, remapConstraint } from './patternTools'
@@ -647,7 +648,23 @@ export function transformApply(
   if (!transformPlaced(chain)) return `${label}: finish placing it first`
   const t = transformSpecOf(chain)
   if (typeof t === 'string') return t
-  return transformSelection(doc, chain.ids, chain.op, t, chain.keepOriginal, newId)
+  const result = transformSelection(doc, chain.ids, chain.op, t, chain.keepOriginal, newId)
+  if (typeof result === 'string' || !chain.keepOriginal) return result
+  const originals = new Set(doc.entities.map(e => e.id))
+  const selected = transformSetIds(doc.entities, chain.ids)
+  const sources = doc.entities.filter(e => selected.has(e.id))
+  const copies = result.transform.entities.filter(e => !originals.has(e.id))
+  const center = chain.base!, mappedCenter = t.map(center)
+  return { ...result, axisDropped: 0, toReference: 0, transform: {
+    ...result.transform, entities: result.transform.entities.map(e => originals.has(e.id) ? e : withoutOffsetLink(e)), constraints: doc.constraints, dimensions: doc.dimensions,
+    patterns: [...(doc.patterns ?? []), {
+      id: (newId ?? (() => crypto.randomUUID()))(), sources: sources.map(e => e.id), suppressed: [],
+      values: { kind: 'transform', count: 2, center, stepAngle: t.dTheta, scale: t.scale,
+        shift: { x: mappedCenter.x - center.x, y: mappedCenter.y - center.y } },
+      members: copies.map((e, i) => ({ id: e.id, sourceId: sources[i].id, column: 1, row: 0 })),
+    }],
+  } }
+
 }
 
 // ---- Ghost preview ------------------------------------------------------------------------------

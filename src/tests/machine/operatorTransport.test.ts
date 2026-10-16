@@ -45,9 +45,8 @@ describe('operatorTransport canonical CYCLE START verdict', () => {
     }))).toMatchObject({
       action: 'none',
       cycleStartEnabled: false,
-      nextAction:
-        'No machine datum. Before using Home All, check each axis is off its home switch; '
-        + 'then home the machine before choosing a work-coordinate action.',
+      // WO-2817 (the operator 10-15 card: 'The after text seems fine? Keep wording brief.'): no off-switch step.
+      nextAction: 'No machine datum. Press Home All before choosing a work-coordinate action.',
     })
     expect(deriveOperatorTransport(input())).toMatchObject({
       action: 'start',

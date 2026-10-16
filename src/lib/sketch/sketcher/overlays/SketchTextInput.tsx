@@ -1,3 +1,4 @@
+import { useText } from '../../../../i18n'
 import { useEffect, useRef } from 'react'
 import type { SketcherOverlaySurface, SketcherOverlaysPort } from './port'
 
@@ -45,6 +46,7 @@ function screenPxPerMm(vp: SketcherOverlaySurface): number {
 }
 
 export function SketchTextInput({ port }: Props) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const isSketch = port.useIsSketchActive()
   const editId = port.useTextEditId()
   // The LIVE entity string drives the controlled input: typing mutates the
@@ -130,7 +132,7 @@ export function SketchTextInput({ port }: Props) {
         type="text"
         value={text}
         spellCheck={false}
-        aria-label="Sketch text"
+        aria-label={workbenchText('SketchTextInput.sketchText')}
         // VISUALLY INVISIBLE: no border, no background, transparent glyphs AND
         // transparent caret, ~2px footprint. The input captures focus + keys
         // only; the user sees ONLY the real cyan-tinted text in the sketch

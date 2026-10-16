@@ -569,8 +569,9 @@ export const SANCTIONED_AUTHORING: readonly SanctionedAuthoring[] = [
     claims: { setsDisplayNone: false, removesNode: false },
     censusStatus: 'Ordinary DOM inside the viewport host: the shared WorkbenchConfirmBar and AnchoredValueEntry authoring sites are already named and dispositioned by the census.',
   },
+  // WO-2784 RE-PIN: WO-2322 (686f74ad2f, landed a43dc7cf90) moved the corner-handles aria-label into the workbench text catalog; same portal site, key re-texted only.
   {
-    key: 'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label="Reference image corner handles"> {IMAGE_CORNERS.map((corn...',
+    key: "components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label={workbenchText('ReferenceImagePlacement.referenceImageCorn...",
     route: 'BODY-PORTAL', authorsOutOfFlow: true,
     reason: 'WO-2331 (3693668eb): body-portalled fixed corner handles follow projected image corners in either sketch host; the fixed coordinates are document coordinates. A host migration needs a separate source grant.',
     claims: { setsDisplayNone: false, removesNode: false },
@@ -582,6 +583,22 @@ export const SANCTIONED_AUTHORING: readonly SanctionedAuthoring[] = [
     reason: 'WO-2318 (e1a181ed2): portals the shared focus-trapped modal shell out of the scrolling sketch toolbox/rail so the scrim covers the viewport; moving it is outside this grant.',
     claims: { setsDisplayNone: false, removesNode: false },
     censusStatus: 'Ordinary whole-document fixed modal-backdrop, data-ui78-sanctioned and MODAL-GOVERNED at its own authoring key in the committed dispositions; no child browsing context.',
+  },
+  // WO-2784 RE-PIN: WO-2761 (a705bf8564) added dressUpDeadClick.ts, whose two computed calls
+  // index local string-lookup tables. New sites, sanctioned by name as resolution limits.
+  {
+    key: "components/model3d/dressUpDeadClick.ts:dressUpDeadClickLine > SURFACE[surface ?? 'other']()",
+    route: 'UNRESOLVED', authorsOutOfFlow: false,
+    reason: 'WO-2761 (a705bf8564) dead-click console line: SURFACE is a module-local Record<SurfaceType, () => string> whose every member returns a catalog string via textFor(); the key is a SurfaceType or the literal fallback. The computed call builds message text, not a DOM receiver.',
+    claims: { setsDisplayNone: false, removesNode: false },
+    censusStatus: 'Outside the census domain: the function returns a console string and authors no document, element or floating surface.',
+  },
+  {
+    key: 'components/model3d/dressUpDeadClick.ts:dressUpDeadClickLine > FEATURE[host.featureClass]()',
+    route: 'UNRESOLVED', authorsOutOfFlow: false,
+    reason: 'WO-2761 (a705bf8564) dead-click console line: FEATURE is a module-local Record<FeatureClass, () => string> whose every member returns a catalog string via textFor(), indexed by the picked face verdict\'s feature class. The computed call builds message text, not a DOM receiver.',
+    claims: { setsDisplayNone: false, removesNode: false },
+    censusStatus: 'Outside the census domain: the function returns a console string and authors no document, element or floating surface.',
   },
   {
     key: 'form/remesh.ts:r > home[i](q)',
@@ -779,33 +796,17 @@ export const SANCTIONED_AUTHORING: readonly SanctionedAuthoring[] = [
     censusStatus:
       'Outside the census domain by construction: this call authors no DOM node of any kind, so there is no surface for any census to enumerate. The name collision is with the DOM API, not the behaviour.',
   },
+  // WO-2784 RE-PIN: WO-2616 (4d60c51a8a, landed 5211ea829b) moved the linear/circular and
+  // path-pattern commits in `overlayApply` from doc.append to doc.replace(appendDefinedPattern(...)),
+  // so only the offset commit's doc.append remains. The key is unique again and carries no
+  // ordinal; the former #1/#2 sites no longer exist and their sanctions are retired with them.
   {
-    key: 'lib/sketch/sketcher/toolController.ts:overlayApply > doc.append({ entities: r.entities, constraints: r.constraints }, [])  #1',
+    key: 'lib/sketch/sketcher/toolController.ts:overlayApply > doc.append({ entities: r.entities, constraints: r.constraints }, [])',
     route: 'UNRESOLVED',
     authorsOutOfFlow: false,
     claims: NO_CLAIMS,
     reason:
-      'The sketch document port again, not the DOM -- see the `end` entry for the full reasoning. THREE byte-identical statements now sit in `overlayApply`, which is the one case no source-derived name can separate, so they are told apart by a source-order ordinal and each is sanctioned on its own terms. The ordinals map: `#1` is this one, the linear/circular pattern commit; `#2` is the path-pattern commit; `#3` is the offset commit. There were two until WO-1569 added the path-pattern branch BETWEEN them.',
-    censusStatus:
-      'Outside the census domain by construction: this call authors no DOM node, so no census has anything to enumerate.',
-  },
-  {
-    key: 'lib/sketch/sketcher/toolController.ts:overlayApply > doc.append({ entities: r.entities, constraints: r.constraints }, [])  #2',
-    route: 'UNRESOLVED',
-    authorsOutOfFlow: false,
-    claims: NO_CLAIMS,
-    reason:
-      'The path-pattern commit, which WO-1569 inserted BETWEEN the original two and which therefore TOOK the `#2` ordinal from the offset commit that used to hold it. That is the ordinal-shift cost this file discloses rather than hides, and auditSanctions().stale is what caught it the moment the count changed. Sanctioned separately for the reason A3 taught this program the expensive way -- two authoring sites sharing one grant is how a third one later inherits a reason nobody wrote for it.',
-    censusStatus:
-      'Outside the census domain by construction: this call authors no DOM node, so no census has anything to enumerate.',
-  },
-  {
-    key: 'lib/sketch/sketcher/toolController.ts:overlayApply > doc.append({ entities: r.entities, constraints: r.constraints }, [])  #3',
-    route: 'UNRESOLVED',
-    authorsOutOfFlow: false,
-    claims: NO_CLAIMS,
-    reason:
-      'The offset commit -- the side-locked offset applied at the live distance -- and the site that held `#2` until WO-1569 inserted the path-pattern branch above it. Same sketch document port, same twice-written AMBIGUOUS binding, same refusal as its two siblings, and written out in full here rather than inheriting a reason authored for a different branch.',
+      'The offset commit -- the side-locked offset applied at the live distance. The sketch document port again, not the DOM -- see the `end` entry for the full reasoning: same twice-written AMBIGUOUS `doc` binding, same refusal. It held the `#3` ordinal while the linear/circular and path-pattern commits were byte-identical siblings in this function; WO-2616 moved both of those to doc.replace, so this is now the only such statement in `overlayApply`.',
     censusStatus:
       'Outside the census domain by construction: this call authors no DOM node, so no census has anything to enumerate.',
   },

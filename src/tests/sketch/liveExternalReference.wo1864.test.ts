@@ -300,11 +300,14 @@ describe('WO-1864 tier A: a projected model reference follows the model', () => 
     const baked = bakeSketch(kept)
     expect(baked.loops.length).toBe(1)
     const rows = buildReferenceRows(kept.entities)
-    expect(rows.every((row) => row.status === 'unresolved' && row.sourceLabel === `Face ${FRONT}`)).toBe(true)
-    expect(rows[0].detail).toContain(`"Face ${FRONT}" could not be found`)
+    // WO-2858: the reference reads "Face"; the link keeps the face's stable key.
+    expect(rows.every((row) => row.status === 'unresolved' && row.sourceLabel === 'Face')).toBe(true)
+    expect(rows[0].detail).toContain('"Face" could not be found')
+    expect(rows[0].detail).not.toContain(FRONT)
     const links = kept.entities.map((entity) => entity.projectionLink!)
+    expect(links.every((link) => link.stableId === FRONT)).toBe(true)
     expect(unresolvedReferenceSentence('Sketch 2', links))
-      .toBe(`Sketch 2: the projected reference "Face ${FRONT}" could not be found in the model; ` +
+      .toBe('Sketch 2: the projected reference "Face" could not be found in the model; ' +
         'its geometry stays where it last stood.')
     // Reported once: the next pass with the source still gone says nothing new.
     expect(regen(kept, cache, false).newlyUnresolved).toBe(0)
@@ -417,7 +420,8 @@ describe('WO-1864: the constraint browser names every projected reference', () =
     const row = (id: string) => screen.getByTestId(`sketch-browser-reference-${id}`)
     expect(row(linked.id).getAttribute('data-reference-status')).toBe('linked')
     expect(row(gone.id).getAttribute('data-reference-status')).toBe('unresolved')
-    expect(row(gone.id).getAttribute('data-tooltip')).toContain(`"Face ${FRONT}" could not be found in the model`)
+    expect(row(gone.id).getAttribute('data-tooltip')).toContain('"Face" could not be found in the model')
+    expect(row(gone.id).getAttribute('data-tooltip')).not.toContain(FRONT)
     expect(row(copy.id).getAttribute('data-reference-status')).toBe('not-linked')
     expect(row(copy.id).textContent).toContain('not linked')
     expect(screen.getByTestId('sketch-browser-references').textContent).toContain('References (4) - 1 unresolved')
@@ -502,11 +506,13 @@ describe('WO-1864 tier B: real SolidsWorkbenchPage + occt-wasm kernel', () => {
       })
     }
     let resolved = pickEdge(20)
-    if (!resolved.ok || !resolved.candidate.sourceLabel.includes('capEnd')) resolved = pickEdge(-20)
+    // WO-2858: the label reads "Edge"; the cap is told apart by the stable source identity.
+    if (!resolved.ok || !resolved.candidate.sourceIdentity?.stableId.includes('capEnd')) resolved = pickEdge(-20)
     expect(resolved.ok, resolved.ok ? '' : resolved.message).toBe(true)
     if (!resolved.ok) return
     expect(resolved.candidate.sourceKind).toBe('model-edge')
-    expect(resolved.candidate.sourceLabel).toContain('capEnd')
+    expect(resolved.candidate.sourceIdentity?.stableId).toContain('capEnd')
+    expect(resolved.candidate.sourceLabel).toBe('Edge')
     const capZ = resolved.candidate.paths[0].points[0].y // YZ frame: local y is world z
     expect(Math.abs(capZ)).toBeCloseTo(20, 4)
     const side = Math.sign(capZ)

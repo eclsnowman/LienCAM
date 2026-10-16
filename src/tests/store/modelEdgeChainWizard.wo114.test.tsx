@@ -539,15 +539,17 @@ function pickInnerBorderThroughWizard() {
   fireEvent.click(screen.getByTestId('model-edges-done'))
 }
 
-async function pickMachiningBoundaryThroughWizard(geoId: string, faceStableId: string) {
+async function pickMachiningBoundaryThroughWizard(geoId: string, faceStableId: string, bodyName = 'Model F1') {
   fireEvent.click(screen.getByTestId('machining-boundary-pick'))
   expect(capturedPickCallback).not.toBeNull()
   act(() => {
     capturedPickCallback!({ geoId, kind: 'face', index: 0, isModelFace: true }, true)
   })
+  // WO-2858: the readout names the body; the face key stays in the saved reference.
   await waitFor(() => {
-    expect(screen.getByTestId('machining-boundary-readout').textContent).toContain(faceStableId)
+    expect(screen.getByTestId('machining-boundary-readout').textContent).toContain(`Picked face on ${bodyName}`)
   })
+  expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain(faceStableId)
 }
 
 // Commit 2e5678b7 made a valid Smart Height V2 envelope the only runtime

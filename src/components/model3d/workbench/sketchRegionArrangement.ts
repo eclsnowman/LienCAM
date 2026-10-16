@@ -45,6 +45,8 @@
 // holes CW, exact line/arc segments carrying their source entity's srcId lineage). Tessellation is
 // used ONLY for area/containment math, never emitted.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { area, boolean as booleanRings, ensureGeom2dReady, netArea, type Ring } from '../../../cam3d/geom2d'
 import type { ProfileRegion } from '../../../geom/geom-service'
 import type { Sketch3dEntity } from '../../../sketch3d'
@@ -640,7 +642,7 @@ function classifyAndBuildRegions(rawLoops: ProfileLoop[]): ProfileLoop[][] {
     // An odd-depth loop always has an even-depth nearest container by construction; a miss would be
     // a data-integrity error, so it is named rather than guessed at.
     if (region === undefined) {
-      throw new Error(`sketch region arrangement: hole loop ${index} has no enclosing region (unexpected nesting).`)
+      throw new Error(workbenchText('sketchRegionArrangement.sketchRegionArrangementHoleLoopHasNoEnclosingRegion', { index: String(index) }))
     }
     region.holes.push(index)
   }

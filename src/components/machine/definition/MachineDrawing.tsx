@@ -1,3 +1,7 @@
+import { catalogChildren } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import type { MachineConfig } from '../../../types'
 
 // WO-1690 - THE MACHINE, DRAWN. v2/SLICES.md T7: "the machine is drawn on the
@@ -19,6 +23,7 @@ export function MachineDrawing({ travel, xHome, yHome }: {
   xHome: HomeDirection
   yHome: HomeDirection
 }) {
+  useText('control-screens-not-probing')
   const spanX = Math.max(travel.x, 1)
   const spanY = Math.max(travel.y, 1)
   const scale = DRAWING_MAX / Math.max(spanX, spanY)
@@ -41,7 +46,7 @@ export function MachineDrawing({ travel, xHome, yHome }: {
         height={h + pad * 2}
         viewBox={`${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}`}
         role="img"
-        aria-label={`Machine envelope, X ${travel.x} by Y ${travel.y}, home corner marked`}
+        aria-label={controlText('MachineDrawing.text001', { value1: String(travel.x), value2: String(travel.y) })}
       >
         <rect
           x={0} y={0} width={w} height={h}
@@ -54,15 +59,11 @@ export function MachineDrawing({ travel, xHome, yHome }: {
             fill="var(--accent-red)"
           />
         )}
-        <text x={w / 2} y={h + pad - 2} textAnchor="middle" fontSize={9} fill="var(--text-muted)">
-          X {travel.x}
-        </text>
+        <text x={w / 2} y={h + pad - 2} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{catalogChildren(controlText('MachineDrawing.text002', { value1: '\u0000value1\u0000' }), { value1: travel.x })}</text>
         <text
           x={-pad + 2} y={h / 2} textAnchor="middle" fontSize={9} fill="var(--text-muted)"
           transform={`rotate(-90 ${-pad + 2} ${h / 2})`}
-        >
-          Y {travel.y}
-        </text>
+        >{catalogChildren(controlText('MachineDrawing.text003', { value1: '\u0000value1\u0000' }), { value1: travel.y })}</text>
       </svg>
     </div>
   )

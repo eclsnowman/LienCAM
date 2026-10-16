@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type MachineSkew } from '../../../types'
 import { type MachineConfig } from '../../../types'
 import { machineSkew } from '../../../types'
@@ -80,7 +83,7 @@ export function readSkewBox(text: string): SkewVerdict {
   // remaining travel bound it at the bridge, so every finite measurement is
   // stored rather than grading a machine this app cannot inspect.
   if (!Number.isFinite(offsetMm)) {
-    return { kind: 'refused', why: 'That is not a number, so the saved skew is kept.' }
+    return { kind: 'refused', why: controlText('SkewField.text001') }
   }
   return { kind: 'measured', skew: { offsetMm } }
 }
@@ -113,10 +116,10 @@ export function withSkew(m: MachineConfig, skew: MachineSkew | null): MachineCon
  *  costing a full-width band to say it.
  */
 export const SKEW_NOT_APPLIED =
-  'Signed offset distance measured for the slaved gantry pair; the sign records the '
-  + 'required direction. Nothing corrects for it yet - toolpaths, jogs and probing all '
-  + 'run uncorrected, and Apply does not send it to the controller. It is written down '
-  + 'here so the number exists before anything uses it.'
+  controlText('SkewField.text002')
+  + controlText('SkewField.text003')
+  + controlText('SkewField.text004')
+  + controlText('SkewField.text005')
 
 /**
  * THE SKEW FIELD. One small labelled box, and after WO-1050 it sits on the row
@@ -157,6 +160,7 @@ export function SkewField({ machine, typed, onTyped, onChange, standalone = fals
    *  pairing, one with no controller definition at all. */
   standalone?: boolean
 }) {
+  useText('control-screens-not-probing')
   const stored = machineSkew(machine)
   const shown = typed ?? (stored ? String(stored.offsetMm) : '')
   const verdict = readSkewBox(shown)
@@ -192,19 +196,19 @@ export function SkewField({ machine, typed, onTyped, onChange, standalone = fals
             fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)',
           }}
         >
-          {standalone && <span style={{ flex: 'none' }}>Gantry skew</span>}
+          {standalone && <span style={{ flex: 'none' }}>{controlText('SkewField.text006')}</span>}
           <input
             className="mform-input mform-input-mono"
             type="text"
             inputMode="decimal"
-            aria-label="Gantry skew offset in millimetres"
+            aria-label={controlText('SkewField.text007')}
             data-testid="machine-def-skew-offset"
             value={shown}
-            placeholder="unset"
+            placeholder={controlText('SkewField.text008')}
             onChange={(e) => write(e.target.value)}
             style={{ flex: 'none', width: 78 }}
           />
-          <span style={{ flex: 'none' }}>mm</span>
+          <span style={{ flex: 'none' }}>{controlText('SkewField.text009')}</span>
         </label>
 
         {/* THE STATUS OF THE RECORD, IN WORDS, always rendered - and note that
@@ -223,7 +227,7 @@ export function SkewField({ machine, typed, onTyped, onChange, standalone = fals
             color: stored ? 'var(--text-primary)' : 'var(--text-muted)',
           }}
         >
-          {stored ? formatSkewOffset(stored.offsetMm) : 'Not measured'}
+          {stored ? formatSkewOffset(stored.offsetMm) : controlText('SkewField.text010')}
         </span>
 
         {/* AND THE CLAIM ITSELF, STILL IN RENDERED TEXT. Somebody looking at a
@@ -233,9 +237,7 @@ export function SkewField({ machine, typed, onTyped, onChange, standalone = fals
           <span
             data-testid="machine-def-skew-not-applied-mark"
             style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}
-          >
-            not applied
-          </span>
+          >{controlText('SkewField.text011')}</span>
         )}
       </div>
 

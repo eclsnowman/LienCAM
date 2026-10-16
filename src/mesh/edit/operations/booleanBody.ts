@@ -700,7 +700,7 @@ const positionKey = (x: number, y: number, z: number): string =>
 /** Who became what across the boolean (ADR-0051 s4.4): the triangle half out
  *  of manifold's own face ids, the vertex half by exact position. A facet no
  *  entry claims is new, and `composeSourceFacetIds` marks it NO_SOURCE_FACET. */
-function booleanAncestry(input: MeshBuffers, output: MeshBuffers, leftTriangle: Int32Array): MeshEditAncestry {
+export function booleanAncestry(input: MeshBuffers, output: MeshBuffers, leftTriangle: Int32Array): MeshEditAncestry {
   const triangles: number[][] = Array.from({ length: facetCount(input) }, () => []);
   for (let out = 0; out < leftTriangle.length; out++) {
     const source = leftTriangle[out];

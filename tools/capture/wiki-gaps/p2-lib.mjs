@@ -12,7 +12,8 @@ import { CHROMIUM_CAPTURE_ARGS } from '../lib/harness.mjs'
 import { captureSourceProvenance } from '../lib/provenance.mjs'
 
 export const ROOT = process.cwd()
-export const EVIDENCE = path.resolve(ROOT, 'src/tests/evidence/WO-2710')
+// WIKI_GAPS_EVIDENCE: a later picture run (WO-2848) keeps its candidates in its own evidence.
+export const EVIDENCE = path.resolve(ROOT, process.env.WIKI_GAPS_EVIDENCE || 'src/tests/evidence/WO-2710')
 export const OUT = path.join(EVIDENCE, 'candidates')
 export const DEBUG = path.join(EVIDENCE, 'debug')
 export const VIEWPORT = { width: 1920, height: 1080 }
@@ -128,10 +129,13 @@ export async function openApp(browser, baseUrl, { gap, runId, buildId, route }) 
     },
     /** Open a shipped .camproject through the real Open button's file picker. */
     async openProject(file) {
-      const [fc] = await Promise.all([
-        page.waitForEvent('filechooser', { timeout: 15_000 }),
-        page.getByRole('button', { name: 'Open project', exact: true }).click(),
-      ])
+      // The Open button may first show the Open a project picker; its Browse...
+      // button is the operator's route to the file picker.
+      const chooser = page.waitForEvent('filechooser', { timeout: 15_000 })
+      await page.getByRole('button', { name: 'Open project', exact: true }).click()
+      const browse = page.locator('.project-picker-browse')
+      await browse.waitFor({ timeout: 3000 }).then(() => browse.click(), () => {})
+      const fc = await chooser
       await fc.setFiles(path.resolve(ROOT, file))
       // Open may ask Save / Discard / Cancel over the empty start project.
       const discard = page.getByTestId('confirm-dialog-alt').filter({ hasText: /^Discard$/ })

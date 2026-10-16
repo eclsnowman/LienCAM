@@ -24,9 +24,11 @@ The Control tab drives your machine through a USB serial connection to a GRBL-fa
 
 1. Connect to the machine at the top (see "Connecting to the machine").
 2. Load a program: post the selected setup straight into the sender, or open a G-code file from disk.
-3. The safety bar is always visible: E-STOP, Feed Hold (decelerate to a controlled stop), CYCLE START (start or resume), and Stop/Reset (end the cycle). CYCLE START, Feed Hold and Stop/Reset fit side by side at the default panel width. Follow the status sentence for the next action; a tool-change card has its own Continue button.
+3. The safety bar is always visible: E-STOP, Feed Hold (decelerate to a controlled stop), CYCLE START (start or resume), and Stop/Reset (end the cycle). CYCLE START, Feed Hold and Stop/Reset fit side by side at the default panel width. Follow the status sentence for the next action; a tool-change card has its own Continue button. That card appears where the program has an M6. A GRBL post has no M6 - it writes the change as a comment and an M0 - so no card appears: the program holds, the status sentence names the tool to fit, and CYCLE START resumes it.
 
 > **Warning:** The E-STOP button in the app depends on a working controller link. Keep your physical E-stop in reach.
+
+Program moves are color coded by default: rapid, feed, arc, tool-change and M-code rows use distinct colors, and comments are dimmed. Settings \> Theme \> Color code program moves turns move colors off or on. Colors describe the listing only; they do not change G-code or establish that a move is safe.
 
 ![The Control tab with the program preview centered and panels around it](images/control-tab-overview/control-overview.webp)
 
@@ -149,6 +151,8 @@ The Jog panel moves the machine in steps or continuously, and the Work offsets p
 
 > **Warning:** Park moves first raise Z to a machine-coordinate height you set yourself. Where Z zero sits differs per machine, so there is no safe default - park refuses to run until you have set that height.
 
+Home starts the homing cycle, including when an axis is already on its home switch. Follow the connected controller status; there is no preliminary instruction to jog off the switch.
+
 Control's Offsets tab shows the quick work offsets beside the Work offset setup table. The table keeps, for this machine, a fixture name and X, Y and Z for each of G54 to G59. A value typed there is stored with an amber border (not sent yet) - it reaches the controller only when you press Push on its row. Push changed (N) sends every row whose stored values differ from the controller; N is how many rows that is. Set from position makes the machine's current position that row's zero and sends it. Rotation is held in the controller and is sent as you type it. Push and Set from position wait while a program runs or is held, and until the machine is idle.
 
 ![The jog cluster and work offset zero buttons with the position readout](images/control-jog-zero/jog-zero.webp)
@@ -179,11 +183,15 @@ Post a setup straight into the sender or load a file, trace the job outline firs
 
 > **Warning:** Stop/Reset ends the current run. Use Feed Hold when you intend to resume it; restarting from a line is a new run whose plan you must review.
 
+When the chosen line expects a different tool from the last known spindle tool, or that tool is unknown, a pop-up names both before anything moves. Choose Run the tool change for T\<n\> first, then start from line \<N\>, or Start from line \<N\> now; Cancel sends nothing. Starting part-way through is your call: Start now uses whatever tool is fitted and adds no tool change. Choosing the tool change uses the guided change and then arms the chosen line for CYCLE START. A matching tool needs no pop-up.
+
 Re-arm from start appears in the transport bar when a text file is loaded. It arms the program from line 1, exactly as if you had just opened it: the controller is first brought back to a known idle, and nothing moves until you press CYCLE START. You can use it to prepare a fresh run without starting motion. After a completed run, after resolving a failed run, or whenever the loaded program is not armed, CYCLE START itself arms the program from line 1 and runs it; the Console says "Armed from line 1." You do not need to press Re-arm first. From line and Plan preserve your chosen starting line instead. Re-arm is greyed while the program runs or is held (press Feed Hold, then Stop/Reset first) and during an alarm; the reason shows under it. A setup posted from the project or a file the controller takes as moves has no Re-arm button: CYCLE START also arms that loaded program from line 1 when it can; the status names any problem that needs resolving.
+
+If only a typed MDI move is running, Load waits for that line to finish and the controller to report idle, then loads the replacement without starting it. The Console names the waiting Load. A stop, fault, changed connection or a 30-second wait cancels the request and reports why; another Load replaces the waiting request. A running or held program still needs to be stopped before loading another program.
 
 When Control \> Load posts a setup from the open project, the console and tool-change card name the tool that uses each number in that program, including numbers chosen in Post Process. A file opened from disk uses the library lookup for its tool names; the open project's per-program choices do not rename that file's tools.
 
-A freshly posted setup loaded from the same project reads current, with its Intended stock tied to that project. If Load refuses another program, the accepted program, its starting line and its progress stay in place. The Console prints that Load's refusal reason once; a later CYCLE START or Re-arm attempt reports its own result. After resolving a refused start, reconnecting or clearing E-STOP, CYCLE START can arm the loaded program from line 1. If a connection lost your chosen starting line or kept stop, choose the line again, load or Re-arm before starting.
+A freshly posted setup loaded from the same project reads current, with its Intended stock tied to that project. A refused replacement preserves an accepted program that is still ready or held. After a completed or failed run, a new file refused for a machine-side reason replaces that finished file; the status names the new refusal, and CYCLE START cannot run the old file. The Console prints the refusal reason once; a later CYCLE START or Re-arm attempt reports its own result. After resolving a refused start, reconnecting or clearing E-STOP, CYCLE START can arm the loaded program from line 1. If a connection lost your chosen starting line or kept stop, choose the line again, load or Re-arm before starting.
 
 Est. remaining is a time estimate, not a count of moves. While held at an M0, a tool change or Feed Hold, it uses the time to execute the moves still left: their lengths at their feeds, the machine rapid rate for rapids, and any remaining dwell. While running, a current post's estimate counts down; if it runs out with motion still to come, the moves left decide. Without a current post, the estimate follows the remaining motion. If no estimate can be made, it reads unavailable.
 
@@ -193,7 +201,9 @@ After Stop/Reset during a macro or MDI move, Control follows the controller's re
 
 Type a feed or spindle override percentage and press Enter to request that value. UCCNC sends the exact percentage in one command; GRBL uses its reset and steps. Quick feed override clicks that reach their requested values print no clamp warning; a confirmed different value still gets a clamp message.
 
-The Vacuum button lights from the controller's reported output state, whether a button, MDI, a program or a macro switched it. It goes dark when the reported output is off. Macro buttons do not yet share this indicator behavior. A program output line in the Console names the configured output and its M word, for example "Line 5: Vacuum on (M7, port 3 pin 16)."
+The Vacuum button lights from the controller's reported output state, whether a button, MDI, a program or a macro switched it. It goes dark when the reported output is off. A program output line in the Console names the configured output and its M word, for example "Line 5: Vacuum on (M7, port 3 pin 16)."
+
+In Edit macros, Drives output is optional and starts at none. Choose an output from the machine definition and Save to keep the choice with the macro. A macro button assigned to an output lights when the connected controller reports that output on, including changes made outside the macro. It is unlit when readback is off or unavailable; an unlit button alone does not prove the physical output is off. Choosing an output does not add commands to the macro.
 
 The Control 3D view keeps your zoom and pan through MDI moves, work offset changes (including probing Confirm) and WCS changes. Load re-fits the program, even for the same file; Fit trace and the view buttons still fit on demand. Before you adjust the view, automatic framing continues.
 
@@ -210,6 +220,14 @@ To change the loaded program, right-click a line in the program listing. Run fro
 ![A job running: program progress, preview with live position, overrides at hand](images/control-run-job/run-job.webp)
 
 ![The simulator is held at M6: insert T3, then press CYCLE START. The yellow setup and stock chips show a mismatch with the open project, not a normal setup state.](images/control-run-job/m6-tool-change.webp)
+
+On UCCNC, Rapid % sends each G0 at that percentage of the machine rapid rate; G1, G2 and G3 keep their programmed cutting feeds. Feed % still applies on top. A change during a run affects moves not yet sent to the board; moves already sent keep their sent speed. Changing Rapid % before starting re-stages the loaded program, and a refused re-stage leaves the displayed percentage at the value accepted before it.
+
+If Load refuses a file for a machine-side reason with no active accepted program, the file stays available, including after MDI or after the previous program finished. Fix the named cause, then press CYCLE START: it runs the full Load checks again and arms that file from line 1 only if they pass. MDI used to fix the cause does not discard the file. This also applies when Load waited for a moving MDI line to finish.
+
+Continue is the action on both the guided tool-change card and the Park + clamp card. At the clamp card CYCLE START is disabled and its hint names Continue; follow the card and press Continue to proceed.
+
+The shipped sample router on the built-in simulator reports its default work zero for that connection, so Load checks the program against declared travel using that zero. A move outside travel is still refused; stored work offsets and other machines keep their own zeros.
 
 See also: [The Control tab](Control#control-tab-overview), [Posting G-code](Post-Process#post-basics), [Jogging and setting zero](Control#control-jog-zero).
 
@@ -294,6 +312,8 @@ Choose Simulate followed by your machine name in Control to practice running pro
 The simulator takes its travel, enabled axes, homing convention, motion, spindle and output settings from the selected machine. It interprets the program using that machine's declared controller dialect. G81, G82 and G83 drilling cycles use their R and Z levels, dwell or pecks, and G98/G99 return heights. The Control program preview and live position follow the simulated moves.
 
 A machine with a stated fixed tool setter also has a virtual setter at that machine XY position. Its contact height uses the measured reference-tool contact when it is below the stated setter Z, otherwise the stated Z. A machine with no stated setter has none. Measure tool can touch this virtual setter; see "The fixed tool setter" for the measurement and reference workflow.
+
+On a fresh shipped Sample hobby router (GRBL), home is the back-right top, with machine zero at the maximum end of each axis. When G54 has no stored axes, the simulator starts its work zero at the default virtual part's front-left top. Any saved G54 axis, even an explicit zero, takes precedence; this default is not saved and applies only to the shipped sample. If you change work offsets after Load, the simulator reads the staged program against the offsets in force when you press CYCLE START.
 
 > **Tip:** The Control simulator practices the machine sender and probing. The Simulate tab is a separate toolpath and stock preview. Simulator results do not verify physical wiring, clearances or a real tool setter.
 

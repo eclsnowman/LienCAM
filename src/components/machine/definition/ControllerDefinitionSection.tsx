@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { Plus } from 'lucide-react'
 import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 import { GrblSettingsTable } from '../GrblSettingsTable'
@@ -14,6 +17,7 @@ type ControllerDefinitionSectionProps = Pick<MachineDefinitionPanelState, 'def' 
 // branch it still needs on Legacy today) waits for whichever order next
 // touches that file - WO-1696 already does, to wire the setup walkthrough in.
 export function ControllerDefinitionSection({ def, defineController, draft, editDraft, setupKind }: ControllerDefinitionSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <>
       {controllerSurface(draft).grblSettings && (
@@ -31,33 +35,25 @@ export function ControllerDefinitionSection({ def, defineController, draft, edit
               color: 'var(--text-muted)', lineHeight: 1.5,
             }}
           >
-            {draft.name} has no controller definition. Axes, homing cycle and pin
-            assignments are not defined for this machine - nothing here is
-            assumed on its behalf.
-            <button
+            {draft.name}{controlText('ControllerDefinitionSection.text001')}<button
               type="button"
               className="control-chip-btn"
               data-testid="machine-def-panel-define"
-              data-tooltip="Describe this machine's axes, homing cycle and pin assignments"
+              data-tooltip={controlText('ControllerDefinitionSection.text002')}
               onClick={defineController}
             >
-              <Plus size={12} /> Define this machine
-            </button>
+              <Plus size={12} />{controlText('ControllerDefinitionSection.text003')}</button>
           </div>
         ) : (
           <div className="panel-empty" data-testid="machine-def-panel-undefined">
-            {draft.name} has no controller definition. Axes, homing cycle and pin
-            assignments are not defined for this machine - nothing here is
-            assumed on its behalf.
-            <button
+            {draft.name}{controlText('ControllerDefinitionSection.text004')}<button
               type="button"
               className="control-chip-btn"
               data-testid="machine-def-panel-define"
-              data-tooltip="Describe this machine's axes, homing cycle and pin assignments"
+              data-tooltip={controlText('ControllerDefinitionSection.text005')}
               onClick={defineController}
             >
-              <Plus size={12} /> Define this machine
-            </button>
+              <Plus size={12} />{controlText('ControllerDefinitionSection.text006')}</button>
           </div>
         ))}
     </>

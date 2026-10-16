@@ -19,6 +19,8 @@
 // no UI control is ever bound to a dead field (the propagateTangent lesson,
 // geom-service.ts:243-245).
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type {
   BodyHandle,
   ExtrudeEndTargetIdentity,
@@ -53,26 +55,26 @@ export const EXTRUDE_END_CONDITIONS = ['blind', 'symmetric', 'upToNext', 'toFace
 export type ExtrudeEndCondition = (typeof EXTRUDE_END_CONDITIONS)[number]
 
 export const EXTRUDE_END_CONDITION_LABELS: Record<ExtrudeEndCondition, string> = {
-  blind: 'Blind',
-  symmetric: 'Symmetric',
-  upToNext: 'Up to next',
-  toFace: 'Up to face / plane',
-  toPart: 'Up to part / body',
-  toVertex: 'Up to vertex / point',
-  throughAll: 'Through all',
+  get blind() { return workbenchText('extrudeParams.blind') },
+  get symmetric() { return workbenchText('extrudeParams.symmetric') },
+  get upToNext() { return workbenchText('extrudeParams.upToNext') },
+  get toFace() { return workbenchText('extrudeParams.upToFacePlane') },
+  get toPart() { return workbenchText('extrudeParams.upToPartBody') },
+  get toVertex() { return workbenchText('extrudeParams.upToVertexPoint') },
+  get throughAll() { return workbenchText('extrudeParams.throughAll') },
 }
 
 export const EXTRUDE_DIRECTION_LABELS: Record<ExtrudeDirection, string> = {
-  up: 'Up',
-  down: 'Down',
-  midplane: 'Symmetric (midplane)',
+  get up() { return workbenchText('extrudeParams.up') },
+  get down() { return workbenchText('extrudeParams.down') },
+  get midplane() { return workbenchText('extrudeParams.symmetricMidplane') },
 }
 
 export const EXTRUDE_BOOL_MODE_LABELS: Record<ExtrudeBoolMode, string> = {
-  newBody: 'New body',
-  add: 'Add',
-  remove: 'Remove',
-  intersect: 'Intersect',
+  get newBody() { return workbenchText('extrudeParams.newBody') },
+  get add() { return workbenchText('extrudeParams.add') },
+  get remove() { return workbenchText('extrudeParams.remove') },
+  get intersect() { return workbenchText('extrudeParams.intersect') },
 }
 
 /** Legacy-compat defaults. These are ALSO exactly what the doc-schema v2->v3
@@ -117,7 +119,7 @@ export function extrudeKernelOp(mode: ExtrudeBoolMode): ExtrudeRequest['op'] {
       return 'intersect'
     default: {
       const _exhaustive: never = mode
-      throw new Error(`extrudeKernelOp: unhandled bool mode '${String(_exhaustive)}'`)
+      throw new Error(workbenchText('extrudeParams.extrudekernelopUnhandledBoolMode', { value1: String(String(_exhaustive)) }))
     }
   }
 }
@@ -147,7 +149,7 @@ export function resolveExtrudeEnd(direction: ExtrudeDirection, distance: number)
   if (!Number.isFinite(distance) || distance <= 0) {
     return {
       ok: false,
-      reason: `extrude distance must be a positive magnitude (got ${distance}); use Direction = Down to extrude downward`,
+      reason: workbenchText('extrudeParams.extrudeDistanceMustBeAPositiveMagnitudeGotUse', { distance: String(distance) }),
     }
   }
   switch (direction) {
@@ -159,7 +161,7 @@ export function resolveExtrudeEnd(direction: ExtrudeDirection, distance: number)
       return { ok: true, end: { kind: 'symmetric', distance } }
     default: {
       const _exhaustive: never = direction
-      throw new Error(`resolveExtrudeEnd: unhandled direction '${String(_exhaustive)}'`)
+      throw new Error(workbenchText('extrudeParams.resolveextrudeendUnhandledDirection', { value1: String(String(_exhaustive)) }))
     }
   }
 }
@@ -220,18 +222,18 @@ export type BuildExtrudeRequestArgs = BuildExtrudeRequestArgsBase & (
 
 function parseTargetIdentity(raw: unknown): { ok: true; identity: ExtrudeEndTargetIdentity } | { ok: false; reason: string } {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, reason: 'extrude end condition requires a stable target identity' }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeEndConditionRequiresAStableTargetIdentity') }
   }
   const value = raw as Record<string, unknown>
   if (typeof value.modelItemId !== 'string' || value.modelItemId === '') {
-    return { ok: false, reason: 'extrude end target is missing modelItemId' }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetIsMissingModelItemId') }
   }
   if (value.planeFeatureId !== undefined) {
     if (typeof value.planeFeatureId !== 'string' || value.planeFeatureId === '') {
-      return { ok: false, reason: 'extrude datum-plane target is missing planeFeatureId' }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeDatumPlaneTargetIsMissingPlaneFeatureId') }
     }
     if (value.bodyFeatureId !== undefined || value.subshape !== undefined) {
-      return { ok: false, reason: 'extrude end target cannot name both a datum plane and body geometry' }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetCannotNameBothADatumPlane') }
     }
     return {
       ok: true,
@@ -239,19 +241,19 @@ function parseTargetIdentity(raw: unknown): { ok: true; identity: ExtrudeEndTarg
     }
   }
   if (typeof value.bodyFeatureId !== 'string' || value.bodyFeatureId === '') {
-    return { ok: false, reason: 'extrude end target is missing bodyFeatureId' }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetIsMissingBodyFeatureId') }
   }
   let subshape: ExtrudeTargetIdentity['subshape']
   if (value.subshape !== undefined) {
     if (value.subshape === null || typeof value.subshape !== 'object' || Array.isArray(value.subshape)) {
-      return { ok: false, reason: 'extrude end target subshape is malformed' }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetSubshapeIsMalformed') }
     }
     const s = value.subshape as Record<string, unknown>
     if ((s.kind !== 'face' && s.kind !== 'vertex') || typeof s.stableId !== 'string' || s.stableId === '') {
-      return { ok: false, reason: 'extrude end target subshape requires kind and stableId' }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetSubshapeRequiresKindAndStableId') }
     }
     if (s.lineage !== undefined && (!Array.isArray(s.lineage) || s.lineage.some((id) => typeof id !== 'string' || id === ''))) {
-      return { ok: false, reason: 'extrude end target lineage must contain stable ids' }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetLineageMustContainStableIds') }
     }
     subshape = {
       kind: s.kind,
@@ -276,46 +278,46 @@ function resolvePersistedTarget(
   const parsed = parseTargetIdentity(raw)
   if (!parsed.ok) return parsed
   const { identity } = parsed
-  if (modelItemId === undefined) return { ok: false, reason: 'extrude end target cannot be resolved without the active modelItemId' }
+  if (modelItemId === undefined) return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetCannotBeResolvedWithoutTheActive') }
   if (identity.modelItemId !== modelItemId) {
-    return { ok: false, reason: `extrude end target belongs to Model Item '${identity.modelItemId}', not '${modelItemId}'` }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetBelongsToModelItemNot', { modelItemId: String(identity.modelItemId), modelItemId2: String(modelItemId) }) }
   }
   if ('planeFeatureId' in identity) {
     if (expected !== 'face') {
-      return { ok: false, reason: `extrude ${expected === 'body' ? 'Up to part' : 'Up to vertex'} requires body geometry, not a datum plane` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeRequiresBodyGeometryNotADatumPlane', { value1: String(expected === 'body' ? workbenchText('extrudeParams.upToPart') : workbenchText('extrudeParams.upToVertex')) }) }
     }
     if (lookupPlaneTarget === undefined) {
-      return { ok: false, reason: `extrude datum-plane target '${identity.planeFeatureId}' cannot be resolved without a plane lookup` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeDatumPlaneTargetCannotBeResolvedWithoutA', { planeFeatureId: String(identity.planeFeatureId) }) }
     }
     const plane = lookupPlaneTarget(identity.planeFeatureId)
     if (plane === undefined) {
-      return { ok: false, reason: `extrude datum-plane target '${identity.planeFeatureId}' is lost (no live plane definition)` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeDatumPlaneTargetIsLostNoLivePlane', { planeFeatureId: String(identity.planeFeatureId) }) }
     }
     const target: ResolvedExtrudePlaneTarget = { identity: identity as ExtrudePlaneTargetIdentity, plane }
     return { ok: true, target }
   }
   if (expected === 'body' && identity.subshape !== undefined) {
-    return { ok: false, reason: 'extrude Up to part requires a body target, not a subshape' }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeUpToPartRequiresABodyTargetNot') }
   }
   if (expected !== 'body' && identity.subshape?.kind !== expected) {
-    return { ok: false, reason: `extrude end target requires a stable ${expected} id` }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetRequiresAStableId', { expected: String(expected) }) }
   }
   const resolvedBody = resolveBodyTarget?.(identity.bodyFeatureId)
   if (resolvedBody !== undefined && !resolvedBody.ok) {
     return resolvedBody.reason === 'lost'
-      ? { ok: false, reason: `extrude end target body '${identity.bodyFeatureId}' is lost (no live descendant)` }
-      : { ok: false, reason: `extrude end target body '${identity.bodyFeatureId}' is ambiguous between live bodies: ${resolvedBody.candidates.join(', ')}` }
+      ? { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetBodyIsLostNoLiveDescendant', { bodyFeatureId: String(identity.bodyFeatureId) }) }
+      : { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetBodyIsAmbiguousBetweenLiveBodies', { bodyFeatureId: String(identity.bodyFeatureId), value2: String(resolvedBody.candidates.join(', ')) }) }
   }
   const currentBodyId = resolvedBody?.bodyId ?? identity.bodyFeatureId
   if (identity.subshape !== undefined && currentBodyId !== identity.bodyFeatureId) {
     return {
       ok: false,
-      reason: `extrude end target ${identity.subshape.kind} '${identity.subshape.stableId}' on body '${identity.bodyFeatureId}' is lost after body remap to '${currentBodyId}'`,
+      reason: workbenchText('extrudeParams.extrudeEndTargetOnBodyIsLostAfterBody', { kind: String(identity.subshape.kind), stableId: String(identity.subshape.stableId), bodyFeatureId: String(identity.bodyFeatureId), currentBodyId: String(currentBodyId) }),
     }
   }
   const body = lookupTarget(currentBodyId)
   if (body === undefined) {
-    return { ok: false, reason: `extrude end target body '${identity.bodyFeatureId}' resolved to '${currentBodyId}' but has no live body` }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeEndTargetBodyResolvedToButHasNo', { bodyFeatureId: String(identity.bodyFeatureId), currentBodyId: String(currentBodyId) }) }
   }
   return { ok: true, target: { identity: { ...identity, bodyFeatureId: currentBodyId }, body } }
 }
@@ -346,18 +348,18 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
   const { featureId, payload, distance, lookupTarget, modelItemId } = args
   const selectedProfiles = 'profiles' in args && args.profiles !== undefined ? args.profiles : [args.profile]
   if (selectedProfiles.length === 0) {
-    return { ok: false, reason: 'extrude requires at least one profile region' }
+    return { ok: false, reason: workbenchText('extrudeParams.extrudeRequiresAtLeastOneProfileRegion') }
   }
   const profiles = [...selectedProfiles] as [ProfileRegion, ...ProfileRegion[]]
 
   const rawDirection = payload.direction === undefined ? DEFAULT_EXTRUDE_DIRECTION : payload.direction
   if (!isExtrudeDirection(rawDirection)) {
-    return { ok: false, reason: `unknown extrude direction '${String(rawDirection)}'` }
+    return { ok: false, reason: workbenchText('extrudeParams.unknownExtrudeDirection', { value1: String(String(rawDirection)) }) }
   }
 
   const rawMode = payload.boolMode === undefined ? DEFAULT_EXTRUDE_BOOL_MODE : payload.boolMode
   if (!isExtrudeBoolMode(rawMode)) {
-    return { ok: false, reason: `unknown extrude boolean mode '${String(rawMode)}'` }
+    return { ok: false, reason: workbenchText('extrudeParams.unknownExtrudeBooleanMode', { value1: String(String(rawMode)) }) }
   }
   const op = extrudeKernelOp(rawMode)
 
@@ -373,20 +375,20 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
       rawTargetIds.some((id) => typeof id !== 'string' || id === '') ||
       new Set(rawTargetIds).size !== rawTargetIds.length
     ) {
-      return { ok: false, reason: `extrude ${rawMode} requires a target body` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeRequiresATargetBody', { rawMode: String(rawMode) }) }
     }
     // Boolean targets are consumed inputs, not references. Remapping one to a
     // descendant would cut a different body while the DAG still records the
     // persisted id, so require every member to remain live under that id.
     const targetIds = rawTargetIds as string[]
     if (targetIds.includes(featureId)) {
-      return { ok: false, reason: `extrude ${rawMode} cannot target itself` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeCannotTargetItself', { rawMode: String(rawMode) }) }
     }
     const currentTargetId = targetIds[0]
     if (targetIds.length > 1) {
       const missingTargetId = targetIds.find((id) => lookupTarget(id) === undefined)
       if (missingTargetId !== undefined) {
-        return { ok: false, reason: `extrude ${rawMode} target '${missingTargetId}' has no live body (missing or already consumed)` }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeTargetHasNoLiveBodyMissingOrAlready', { rawMode: String(rawMode), missingTargetId: String(missingTargetId) }) }
       }
       const composed = args.composedTarget
       if (
@@ -394,14 +396,14 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
         composed.featureIds.length !== targetIds.length ||
         composed.featureIds.some((id, index) => id !== targetIds[index])
       ) {
-        return { ok: false, reason: `extrude ${rawMode} requires its ${targetIds.length}-body target set to be composed` }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeRequiresItsBodyTargetSetToBeComposed', { rawMode: String(rawMode), length: String(targetIds.length) }) }
       }
       target = composed.body
     } else {
       target = lookupTarget(currentTargetId)
     }
     if (target === undefined) {
-      return { ok: false, reason: `extrude ${rawMode} target '${currentTargetId}' has no live body (missing or already consumed)` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeTargetHasNoLiveBodyMissingOrAlready2', { rawMode: String(rawMode), currentTargetId: String(currentTargetId) }) }
     }
     targetId = currentTargetId
   }
@@ -410,7 +412,7 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
     ? (rawDirection === 'midplane' ? 'symmetric' : 'blind')
     : payload.endCondition
   if (!isExtrudeEndCondition(rawEnd)) {
-    return { ok: false, reason: `unknown extrude end condition '${String(rawEnd)}'` }
+    return { ok: false, reason: workbenchText('extrudeParams.unknownExtrudeEndCondition', { value1: String(String(rawEnd)) }) }
   }
 
   let end: ExtrudeEnd
@@ -421,7 +423,7 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
       end = endRes.end
     } else {
       if (rawDirection === 'midplane') {
-        return { ok: false, reason: 'extrude Blind cannot use Direction = Symmetric; choose the Symmetric end condition' }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeBlindCannotUseDirectionSymmetricChooseTheSymmetric') }
       }
       const endRes = resolveExtrudeEnd(rawDirection, distance)
       if (!endRes.ok) return { ok: false, reason: endRes.reason }
@@ -429,12 +431,12 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
     }
   } else {
     if (rawDirection === 'midplane' && rawEnd !== 'throughAll') {
-      return { ok: false, reason: `extrude ${rawEnd} does not support a symmetric direction` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeDoesNotSupportASymmetricDirection', { rawEnd: String(rawEnd) }) }
     }
     const direction: 1 | -1 = rawDirection === 'down' ? -1 : 1
     const offset = payload.terminalOffset === undefined ? 0 : payload.terminalOffset
     if (typeof offset !== 'number' || !Number.isFinite(offset)) {
-      return { ok: false, reason: `extrude terminal offset must be finite (got ${String(offset)})` }
+      return { ok: false, reason: workbenchText('extrudeParams.extrudeTerminalOffsetMustBeFiniteGot', { value1: String(String(offset)) }) }
     }
 
     if (rawEnd === 'toFace' || rawEnd === 'toPart' || rawEnd === 'toVertex') {
@@ -449,24 +451,24 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
       )
       if (!resolved.ok) return resolved
       if ('bodyFeatureId' in resolved.target.identity && resolved.target.identity.bodyFeatureId === featureId) {
-        return { ok: false, reason: 'extrude end condition cannot target its own output body' }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeEndConditionCannotTargetItsOwnOutputBody') }
       }
       end = { kind: rawEnd, direction, target: resolved.target, offset } as ExtrudeEnd
     } else {
       let candidates = [...(args.candidateTargets ?? [])].filter((candidate) => candidate.identity.bodyFeatureId !== featureId)
       if (modelItemId === undefined) {
-        return { ok: false, reason: `extrude ${rawEnd} cannot be resolved without the active modelItemId` }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeCannotBeResolvedWithoutTheActiveModelItemId', { rawEnd: String(rawEnd) }) }
       }
       const foreign = candidates.find((candidate) => candidate.identity.modelItemId !== modelItemId)
       if (foreign) {
-        return { ok: false, reason: `extrude ${rawEnd} candidate '${foreign.identity.bodyFeatureId}' belongs to another Model Item` }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeCandidateBelongsToAnotherModelItem', { rawEnd: String(rawEnd), bodyFeatureId: String(foreign.identity.bodyFeatureId) }) }
       }
       if (rawEnd === 'throughAll' && candidates.length === 0 && target !== undefined && targetId !== undefined) {
         candidates.push({ identity: { modelItemId, bodyFeatureId: targetId }, body: target })
       }
       if (payload.resolvedEndTargets !== undefined) {
         if (!Array.isArray(payload.resolvedEndTargets) || payload.resolvedEndTargets.length === 0) {
-          return { ok: false, reason: `extrude ${rawEnd} has malformed persisted resolved targets` }
+          return { ok: false, reason: workbenchText('extrudeParams.extrudeHasMalformedPersistedResolvedTargets', { rawEnd: String(rawEnd) }) }
         }
         const liveById = new Map<string, ResolvedExtrudeTarget[]>()
         for (const candidate of candidates) {
@@ -479,28 +481,28 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
           const parsed = parseTargetIdentity(raw)
           if (!parsed.ok) return parsed
           if (!('bodyFeatureId' in parsed.identity)) {
-            return { ok: false, reason: `extrude ${rawEnd} persisted target must name body geometry` }
+            return { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetMustNameBodyGeometry', { rawEnd: String(rawEnd) }) }
           }
           const persistedId = parsed.identity.bodyFeatureId
           if (persistedId === undefined) {
-            return { ok: false, reason: `extrude ${rawEnd} persisted target must name a body feature` }
+            return { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetMustNameABodyFeature', { rawEnd: String(rawEnd) }) }
           }
           if (parsed.identity.modelItemId !== modelItemId) {
-            return { ok: false, reason: `extrude ${rawEnd} persisted target body '${persistedId}' belongs to another Model Item` }
+            return { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetBodyBelongsToAnotherModelItem', { rawEnd: String(rawEnd), persistedId: String(persistedId) }) }
           }
           const lineage = args.resolveBodyTarget?.(persistedId)
           if (lineage !== undefined && !lineage.ok) {
             return lineage.reason === 'lost'
-              ? { ok: false, reason: `extrude ${rawEnd} persisted target body '${persistedId}' is lost (no live descendant)` }
-              : { ok: false, reason: `extrude ${rawEnd} persisted target body '${persistedId}' is ambiguous between live bodies: ${lineage.candidates.join(', ')}` }
+              ? { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetBodyIsLostNoLiveDescendant', { rawEnd: String(rawEnd), persistedId: String(persistedId) }) }
+              : { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetBodyIsAmbiguousBetweenLiveBodies', { rawEnd: String(rawEnd), persistedId: String(persistedId), value3: String(lineage.candidates.join(', ')) }) }
           }
           const currentId = lineage?.bodyId ?? persistedId
           const matches = liveById.get(currentId) ?? []
           if (matches.length === 0) {
-            return { ok: false, reason: `extrude ${rawEnd} persisted target body '${persistedId}' resolved to '${currentId}' but has no live body` }
+            return { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetBodyResolvedToButHasNo', { rawEnd: String(rawEnd), persistedId: String(persistedId), currentId: String(currentId) }) }
           }
           if (matches.length > 1) {
-            return { ok: false, reason: `extrude ${rawEnd} persisted target body '${persistedId}' resolves ambiguously to duplicate live body '${currentId}'` }
+            return { ok: false, reason: workbenchText('extrudeParams.extrudePersistedTargetBodyResolvesAmbiguouslyToDuplicateLive', { rawEnd: String(rawEnd), persistedId: String(persistedId), currentId: String(currentId) }) }
           }
           if (!resolvedCandidates.some((candidate) => candidate.identity.bodyFeatureId === currentId)) {
             resolvedCandidates.push(matches[0])
@@ -509,7 +511,7 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
         candidates = resolvedCandidates
       }
       if (candidates.length === 0) {
-        return { ok: false, reason: `extrude ${rawEnd} requires at least one live same-item target body` }
+        return { ok: false, reason: workbenchText('extrudeParams.extrudeRequiresAtLeastOneLiveSameItemTarget', { rawEnd: String(rawEnd) }) }
       }
       end = rawEnd === 'upToNext'
         ? { kind: 'upToNext', direction, candidates, offset }

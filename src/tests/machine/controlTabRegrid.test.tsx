@@ -188,13 +188,14 @@ describe('WO-048: approved panel order per column', () => {
     expect(toolGlance.closest('.control-tool-panel')).toBeTruthy()
   })
 
-  it('stacks RIGHT as Jog -> Overrides -> Spindle / Coolant -> Macros on a scroll path', async () => {
+  it('stacks RIGHT as Jog -> Overrides -> Spindle -> Macros on a scroll path', async () => {
     await mountControlTab()
     const right = screen.getByTestId('control-page').querySelector('.control-col-right')!
     const titles = Array.from(right.querySelectorAll('.panel-title')).map((el) =>
       el.textContent?.trim(),
     )
-    expect(titles).toEqual(['Jog', 'Overrides', 'Spindle / Coolant', 'Macros'])
+    // WO-2836: the spindle panel's title is just "Spindle".
+    expect(titles).toEqual(['Jog', 'Overrides', 'Spindle', 'Macros'])
     // WO-068 finding 1: four content-sized panels outgrow a 900px viewport,
     // so the rail's panels live inside the rail's REAL scroller. The CSS
     // contract for that scroller is pinned in controlPagePolish.

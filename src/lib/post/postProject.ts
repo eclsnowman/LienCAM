@@ -16,7 +16,7 @@
 // on the same stock deliberately do.
 
 import type { Project, Setup } from '../../types'
-import { buildPostInput, resolveOperatorStops } from './buildPostInput'
+import { buildPostInput, resolveMachineActions, resolveOperatorStops } from './buildPostInput'
 import { postCombined, postProgram } from './index'
 import type {
   PostConfig,
@@ -105,12 +105,18 @@ function filterOps(input: PostInput, keepIds: string[]): PostInput {
     new Set(operations.map((o) => o.op.id)),
     input.setup.operatorStops,
   )
+  const machineActions = resolveMachineActions(
+    input.setup.operations.map((operation) => operation.op.id),
+    new Set(operations.map((operation) => operation.op.id)),
+    input.setup.machineActions,
+  )
   return {
     ...input,
     setup: {
       ...input.setup,
       operations,
       ...(operatorStops ? { operatorStops } : {}),
+      ...(machineActions ? { machineActions } : {}),
     },
   }
 }

@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { NumericInput } from '../../ui/NumericInput'
 import type { SketchBlockEntity } from '../../../lib/sketch/types'
 
@@ -39,19 +40,20 @@ interface BlockPropertiesRowProps {
  * the plan where it does not spell this out explicitly.
  */
 export function BlockPropertiesRow({ block, onSetScale, onSetRotationDeg }: BlockPropertiesRowProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   if (!block) return null
   const rotationDeg = (block.rotation * 180) / Math.PI
   return (
     <div className="tree-section" data-testid="block-properties-row">
       <div className="tree-section-header">
-        <span>Block{block.name ? `: ${block.name}` : ''}</span>
+        <span>{workbenchText('BlockPropertiesRow.block', { value1: String((block.name ? `: ${block.name}` : '')) })}</span>
       </div>
       <div className="sketch-snap-settings">
         <label
           className="sketch-snap-spacing"
-          data-tooltip="Uniform scale factor of the block's members about its origin (no independent X/Y in v1)"
+          data-tooltip={workbenchText('BlockPropertiesRow.uniformScaleFactorOfTheBlockSMembersAbout')}
         >
-          <span>Scale (x)</span>
+          <span>{workbenchText('BlockPropertiesRow.scaleX')}</span>
           <NumericInput
             className="block-scale-input"
             min={0.001}
@@ -62,9 +64,9 @@ export function BlockPropertiesRow({ block, onSetScale, onSetRotationDeg }: Bloc
         </label>
         <label
           className="sketch-snap-spacing"
-          data-tooltip="Rotation of the block's members about its origin, in degrees CCW"
+          data-tooltip={workbenchText('BlockPropertiesRow.rotationOfTheBlockSMembersAboutItsOrigin')}
         >
-          <span>Rotation (deg)</span>
+          <span>{workbenchText('BlockPropertiesRow.rotationDeg')}</span>
           <NumericInput
             className="block-rotation-input"
             step={15}

@@ -1,3 +1,6 @@
+import { featureDisplayName } from '../../../lib/operatorLabels'
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { isReferenceImagePayload } from '../../../referenceImage/referenceImage'
 // WO UI-3: design-tree extension for the 3D feature DAG (DOC-2's FeatureDag +
 // DOC-5's RegenScheduler status model). Framework piece per the WO's ruling 1:
@@ -259,6 +262,9 @@ export interface FeatureTreeProps {
   reorder?: FeatureTreeReorderControls
   edit?: FeatureTreeEditControls
   del?: FeatureTreeDeleteControls
+  /** WO-2868: a failed or degraded row's reason in the operator's words (the Model screen passes
+   *  plainDiagnosticText). Optional: without it the tooltip lists the diagnostic codes. */
+  diagnosticText?(diags: FeatureStatusSnapshot['diagnostics']): string
 }
 
 const KIND_ICON: Record<DagNodeKind, typeof Box> = {
@@ -281,14 +287,17 @@ function rowIcon(id: string, kind: DagNodeKind): typeof Box {
   return KIND_ICON[kind]
 }
 
-function diagSummary(diags: { code: string }[]): string | undefined {
+/** WO-2868 (sweep H2): with a host `diagnosticText` the row's tooltip is the
+ *  host's plain-words reason, never the bare code ("KERNEL_OP_FAILED"). A tree
+ *  with no host wording (the CAM lab, unit fixtures) keeps the codes. */
+function diagSummary(diags: FeatureStatusSnapshot['diagnostics'], diagnosticText?: (diags: FeatureStatusSnapshot['diagnostics']) => string): string | undefined {
   if (diags.length === 0) return undefined
+  if (diagnosticText !== undefined) return diagnosticText(diags)
   return diags.map((d) => d.code).join(', ')
 }
 
 function nodeLabel(id: string, payload: Record<string, unknown>): string {
-  const name = payload.name
-  return typeof name === 'string' && name.length > 0 ? name : id
+  return featureDisplayName(id, payload)
 }
 
 /** WO UI-8 (mission #1): the `:type` filter's match target -- a feature's OWN
@@ -334,11 +343,11 @@ function reorderBlockedReason(
 ): string {
   const movedName = nodeLabel(movedId, dag.getNode(movedId)?.payload ?? {})
   // WO SKC-15: a genesis refusal is not a dependency -- saying "X uses Origin" would be a lie.
-  if (blocked.reason === 'genesis') return 'Origin and the XY/XZ/YZ planes always stay at the top'
+  if (blocked.reason === 'genesis') return workbenchText('FeatureTree.originAndTheXYXZYZPlanesAlwaysStay')
   const blockingName = nodeLabel(blocked.blockingId, dag.getNode(blocked.blockingId)?.payload ?? {})
   return blocked.direction === 'above'
-    ? `${movedName} uses ${blockingName} - it cannot move above it`
-    : `${blockingName} uses ${movedName} - it cannot move below it`
+    ? workbenchText('FeatureTree.usesItCannotMoveAboveIt', { movedName: String(movedName), blockingName: String(blockingName) })
+    : workbenchText('FeatureTree.usesItCannotMoveBelowIt', { blockingName: String(blockingName), movedName: String(movedName) })
 }
 
 /** WO UI-7 (BK-40): given a target slot index (0..order.length) within
@@ -371,6 +380,7 @@ interface MarkerRowProps {
  *  established button-first idiom (suppress/visibility rows above never use
  *  drag either). */
 function MarkerRow({ order, slot, onMoveMarker, onMarkerDragStart, onMarkerDragEnd }: MarkerRowProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <div
       data-testid="rollback-marker-row"
@@ -414,12 +424,12 @@ function MarkerRow({ order, slot, onMoveMarker, onMarkerDragStart, onMarkerDragE
       }}
     >
       <Rewind size={12} style={{ flexShrink: 0 }} />
-      <span style={{ flex: 1 }}>Rollback marker</span>
+      <span style={{ flex: 1 }}>{workbenchText('FeatureTree.rollbackMarker')}</span>
       <button
         type="button"
         data-testid="rollback-marker-up"
-        data-tooltip="Move marker up (roll back one more feature)"
-        aria-label="Move marker up"
+        data-tooltip={workbenchText('FeatureTree.moveMarkerUpRollBackOneMoreFeature')}
+        aria-label={workbenchText('FeatureTree.moveMarkerUp')}
         disabled={slot <= 0}
         onClick={(e) => {
           e.stopPropagation()
@@ -432,8 +442,8 @@ function MarkerRow({ order, slot, onMoveMarker, onMarkerDragStart, onMarkerDragE
       <button
         type="button"
         data-testid="rollback-marker-down"
-        data-tooltip="Move marker down (restore one more feature)"
-        aria-label="Move marker down"
+        data-tooltip={workbenchText('FeatureTree.moveMarkerDownRestoreOneMoreFeature')}
+        aria-label={workbenchText('FeatureTree.moveMarkerDown')}
         disabled={slot >= order.length}
         onClick={(e) => {
           e.stopPropagation()
@@ -448,6 +458,7 @@ function MarkerRow({ order, slot, onMoveMarker, onMarkerDragStart, onMarkerDragE
 }
 
 function ChevronUpIcon() {
+  useText('sketch-and-model-workbench')
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path d="M18 15l-6-6-6 6" strokeLinecap="round" strokeLinejoin="round" />
@@ -456,6 +467,7 @@ function ChevronUpIcon() {
 }
 
 function ChevronDownIcon() {
+  useText('sketch-and-model-workbench')
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -498,6 +510,7 @@ interface FolderChipProps {
  *  same Ban glyph/aria-pressed idiom every row's own suppress button uses),
  *  delete, and a drop target for "drag a feature INTO this folder". */
 function FolderChip({ folder, collapsed, suppressed, dragActive, isEmpty, onToggleCollapse, onRename, onDelete, onToggleSuppress, onDropFeature }: FolderChipProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(folder.name)
 
@@ -532,7 +545,7 @@ function FolderChip({ folder, collapsed, suppressed, dragActive, isEmpty, onTogg
       <button
         type="button"
         data-testid={`folder-toggle-${folder.id}`}
-        aria-label={collapsed ? 'Expand folder' : 'Collapse folder'}
+        aria-label={collapsed ? workbenchText('FeatureTree.expandFolder') : workbenchText('FeatureTree.collapseFolder')}
         onClick={onToggleCollapse}
         style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
       >
@@ -564,22 +577,21 @@ function FolderChip({ folder, collapsed, suppressed, dragActive, isEmpty, onTogg
             setRenaming(true)
           }}
           style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text' }}
-          data-tooltip="Double-click to rename"
+          data-tooltip={workbenchText('FeatureTree.doubleClickToRename')}
         >
           {folder.name}
         </span>
       )}
       {isEmpty && !renaming && (
         <span data-testid={`folder-empty-hint-${folder.id}`} style={{ color: 'var(--text-muted)', fontSize: 10, fontStyle: 'italic', flexShrink: 0 }}>
-          drag features here
-        </span>
+          {workbenchText('FeatureTree.dragFeaturesHere')}</span>
       )}
       <button
         type="button"
         data-testid={`folder-suppress-${folder.id}`}
         aria-pressed={suppressed}
-        data-tooltip={suppressed ? 'Unsuppress folder' : 'Suppress folder'}
-        aria-label={suppressed ? 'Unsuppress folder' : 'Suppress folder'}
+        data-tooltip={suppressed ? workbenchText('FeatureTree.unsuppressFolder') : workbenchText('FeatureTree.suppressFolder')}
+        aria-label={suppressed ? workbenchText('FeatureTree.unsuppressFolder') : workbenchText('FeatureTree.suppressFolder')}
         onClick={onToggleSuppress}
         style={{
           background: suppressed ? 'var(--select-ui-bg)' : 'transparent',
@@ -595,8 +607,8 @@ function FolderChip({ folder, collapsed, suppressed, dragActive, isEmpty, onTogg
       <button
         type="button"
         data-testid={`folder-delete-${folder.id}`}
-        data-tooltip="Delete folder (members return to root)"
-        aria-label="Delete folder"
+        data-tooltip={workbenchText('FeatureTree.deleteFolderMembersReturnToRoot')}
+        aria-label={workbenchText('FeatureTree.deleteFolder')}
         onClick={onDelete}
         style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
       >
@@ -606,7 +618,8 @@ function FolderChip({ folder, collapsed, suppressed, dragActive, isEmpty, onTogg
   )
 }
 
-export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHover, pollMs, chrome = 'card', genesisVisibility, visibility, suppress, hide, rollback, folders, reorder, del, edit }: FeatureTreeProps) {
+export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHover, pollMs, chrome = 'card', genesisVisibility, visibility, suppress, hide, rollback, folders, reorder, del, edit, diagnosticText }: FeatureTreeProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   // WO UI-7 (BK-40): featureOrder() (the explicit, insertion/insert-at-marker
   // timeline) replaces nodeIds() (id-sort) as the row sequence, so the
   // marker row can sit at a meaningful position between two adjacent rows --
@@ -803,8 +816,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
           type="text"
           data-testid="tree-filter-input"
           value={filterText}
-          placeholder="Filter by name, :errors, :suppressed, :type <kind>..."
-          aria-label="Filter design tree"
+          placeholder={workbenchText('FeatureTree.filterByNameErrorsSuppressedTypeKind')}
+          aria-label={workbenchText('FeatureTree.filterDesignTree')}
           onChange={(e) => setFilterText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
@@ -818,8 +831,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
           <button
             type="button"
             data-testid="tree-filter-clear"
-            data-tooltip="Clear filter"
-            aria-label="Clear filter"
+            data-tooltip={workbenchText('FeatureTree.clearFilter')}
+            aria-label={workbenchText('FeatureTree.clearFilter')}
             onClick={() => setFilterText('')}
             style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}
           >
@@ -858,7 +871,7 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
               outlineOffset: -1,
             }}
           >
-            <span>Root (drop here to ungroup)</span>
+            <span>{workbenchText('FeatureTree.rootDropHereToUngroup')}</span>
           </div>
           {folders.list.map((folder) => (
             <FolderChip
@@ -899,8 +912,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
               <button
                 type="button"
                 data-testid="tree-new-folder-confirm"
-                data-tooltip="Create folder"
-                aria-label="Create folder"
+                data-tooltip={workbenchText('FeatureTree.createFolder')}
+                aria-label={workbenchText('FeatureTree.createFolder')}
                 onClick={() => {
                   const trimmed = newFolderName.trim()
                   if (trimmed.length > 0) folders.onCreateFolder(trimmed)
@@ -916,7 +929,7 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
             <button
               type="button"
               data-testid="tree-new-folder-button"
-              data-tooltip="New folder"
+              data-tooltip={workbenchText('FeatureTree.newFolder')}
               onClick={() => setCreatingFolder(true)}
               style={{
                 display: 'flex',
@@ -930,8 +943,7 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                 fontSize: 11,
               }}
             >
-              <FolderPlus size={13} /> New folder
-            </button>
+              <FolderPlus size={13} />{workbenchText('FeatureTree.newFolder2')}</button>
           )}
         </div>
       )}
@@ -949,7 +961,7 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
           <button
             type="button"
             data-testid="reorder-refusal-dismiss"
-            aria-label="Dismiss"
+            aria-label={workbenchText('FeatureTree.dismiss')}
             onClick={() => setReorderRefusal(null)}
             style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', padding: 2 }}
           >
@@ -959,7 +971,7 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
       )}
 
       {visibleOrder.length === 0 ? (
-        <div style={{ padding: 10, color: 'var(--text-muted)' }}>(no features)</div>
+        <div style={{ padding: 10, color: 'var(--text-muted)' }}>{workbenchText('FeatureTree.noFeatures')}</div>
       ) : (
         (() => {
           // WO SKC-5-R1 (Finding 2): every row still renders exactly once,
@@ -1188,14 +1200,14 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                 <Rewind
                   size={14}
                   data-testid={`feature-row-rolledback-glyph-${id}`}
-                  aria-label="Rolled back"
+                  aria-label={workbenchText('FeatureTree.rolledBack')}
                   style={{ color: 'var(--text-muted)', flexShrink: 0 }}
                 />
               ) : (
                 <Ban
                   size={14}
                   data-testid={`feature-row-suppressed-glyph-${id}`}
-                  aria-label={visualState === 'root' ? 'Suppressed' : 'Suppressed (upstream)'}
+                  aria-label={visualState === 'root' ? workbenchText('FeatureTree.suppressed') : workbenchText('FeatureTree.suppressedUpstream')}
                   style={{ color: 'var(--text-muted)', flexShrink: 0 }}
                 />
               )}
@@ -1211,9 +1223,9 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
               >
                 {nodeLabel(id, node.payload)}
                 {suppressedState === 'cascade' && (
-                  <span style={{ marginLeft: 6, fontStyle: 'italic', textDecoration: 'none' }}>(upstream suppressed)</span>
+                  <span style={{ marginLeft: 6, fontStyle: 'italic', textDecoration: 'none' }}>{workbenchText('FeatureTree.upstreamSuppressed')}</span>
                 )}
-                {visualState === 'rolledBack' && <span style={{ marginLeft: 6 }}>(rolled back)</span>}
+                {visualState === 'rolledBack' && <span style={{ marginLeft: 6 }}>{workbenchText('FeatureTree.rolledBack2')}</span>}
               </span>
               {/* WO UI-17 (criterion 5): the genesis rows' show/hide eye for their always-on
                   viewport glyph -- the ONE row action a permanent reference item carries. Sits at
@@ -1225,8 +1237,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                   className="wb-row-action"
                   data-testid={`genesis-visible-${id}`}
                   aria-pressed={genesisVisibility.isVisible(id)}
-                  data-tooltip={genesisVisibility.isVisible(id) ? 'Hide in viewport' : 'Show in viewport'}
-                  aria-label={genesisVisibility.isVisible(id) ? 'Hide in viewport' : 'Show in viewport'}
+                  data-tooltip={genesisVisibility.isVisible(id) ? workbenchText('FeatureTree.hideInViewport') : workbenchText('FeatureTree.showInViewport')}
+                  aria-label={genesisVisibility.isVisible(id) ? workbenchText('FeatureTree.hideInViewport') : workbenchText('FeatureTree.showInViewport')}
                   onClick={(e) => {
                     e.stopPropagation()
                     genesisVisibility.onToggle(id)
@@ -1251,8 +1263,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                   type="button"
                   data-testid={`feature-row-suppress-${id}`}
                   aria-pressed={suppressedRoot}
-                  data-tooltip={suppressedRoot ? 'Unsuppress' : 'Suppress'}
-                  aria-label={suppressedRoot ? 'Unsuppress' : 'Suppress'}
+                  data-tooltip={suppressedRoot ? workbenchText('FeatureTree.unsuppress') : workbenchText('FeatureTree.suppress')}
+                  aria-label={suppressedRoot ? workbenchText('FeatureTree.unsuppress') : workbenchText('FeatureTree.suppress')}
                   onClick={(e) => {
                     e.stopPropagation()
                     suppress.onToggleSuppress(id)
@@ -1276,8 +1288,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                   className="wb-row-action"
                   data-testid={`feature-row-hide-${id}`}
                   aria-pressed={hide.isHidden(id)}
-                  data-tooltip={hide.isHidden(id) ? 'Show' : 'Hide'}
-                  aria-label={hide.isHidden(id) ? 'Show' : 'Hide'}
+                  data-tooltip={hide.isHidden(id) ? workbenchText('FeatureTree.show') : workbenchText('FeatureTree.hide')}
+                  aria-label={hide.isHidden(id) ? workbenchText('FeatureTree.show') : workbenchText('FeatureTree.hide')}
                   onClick={(e) => {
                     e.stopPropagation()
                     hide.onToggleHidden(id)
@@ -1301,8 +1313,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                     type="button"
                     data-testid={`feature-row-isolate-${id}`}
                     aria-pressed={visibility.isIsolated(id)}
-                    data-tooltip="Isolate"
-                    aria-label="Isolate"
+                    data-tooltip={workbenchText('FeatureTree.isolate')}
+                    aria-label={workbenchText('FeatureTree.isolate')}
                     onClick={(e) => {
                       e.stopPropagation()
                       visibility.onIsolate(id)
@@ -1323,8 +1335,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                     type="button"
                     data-testid={`feature-row-visible-${id}`}
                     aria-pressed={visibility.isBodyVisible(id)}
-                    data-tooltip={visibility.isBodyVisible(id) ? 'Hide' : 'Show'}
-                    aria-label={visibility.isBodyVisible(id) ? 'Hide' : 'Show'}
+                    data-tooltip={visibility.isBodyVisible(id) ? workbenchText('FeatureTree.hide') : workbenchText('FeatureTree.show')}
+                    aria-label={visibility.isBodyVisible(id) ? workbenchText('FeatureTree.hide') : workbenchText('FeatureTree.show')}
                     onClick={(e) => {
                       e.stopPropagation()
                       visibility.onToggleVisible(id)
@@ -1347,8 +1359,8 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                 <button
                   type="button"
                   data-testid={`feature-row-folder-tag-${id}`}
-                  data-tooltip={`In folder '${folders.list.find((f) => f.id === folderId)?.name ?? folderId}' -- click to remove`}
-                  aria-label="Remove from folder"
+                  data-tooltip={workbenchText('FeatureTree.inFolderClickToRemove', { value1: String(folders.list.find((f) => f.id === folderId)?.name ?? folderId) })}
+                  aria-label={workbenchText('FeatureTree.removeFromFolder')}
                   onClick={(e) => {
                     e.stopPropagation()
                     folders.onMoveToFolder(id, null)
@@ -1370,7 +1382,7 @@ export function FeatureTree({ dag, scheduler, selectedId = null, onSelect, onHov
                   <Folder size={11} />
                 </button>
               )}
-              <FeatureStatusBadge status={status} tooltip={diagSummary(snap?.diagnostics ?? [])} />
+              <FeatureStatusBadge status={status} tooltip={diagSummary(snap?.diagnostics ?? [], diagnosticText)} />
             </div>
           )
           rowById.set(

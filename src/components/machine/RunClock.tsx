@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useEffect, useState } from 'react'
 import type { StreamerPhase } from '../../lib/machine/controller'
 import type { ProgramRunEstimate } from '../../lib/machine/programRunEstimate'
@@ -56,6 +60,7 @@ export function RunClock({
    *  part of that move plus every move after it. */
   movesLeft?: { estimate: Pick<ProgramRunEstimate, 'remainingAt'>; cursor: number }
 }) {
+  useText('control-screens-not-probing')
   const active = phase === 'streaming' || phase === 'paused'
   // Where the machine stands along the move it is in (machine seat 10-08:
   // a 6 s cut read 6 s from its start to its end, and at a Feed Hold halfway).
@@ -153,13 +158,9 @@ export function RunClock({
       role="timer"
       aria-label={
         snapshot.remainingMs === null
-          ? `Elapsed ${formatRunClockMs(snapshot.elapsedMs)}; estimated time remaining unavailable`
-          : `Elapsed ${formatRunClockMs(snapshot.elapsedMs)}; estimated time remaining ${formatRunClockMs(snapshot.remainingMs)}`
+          ? controlText('RunClock.text002', { value1: String(formatRunClockMs(snapshot.elapsedMs)) })
+          : controlText('RunClock.text003', { value1: String(formatRunClockMs(snapshot.elapsedMs)), value2: String(formatRunClockMs(snapshot.remainingMs)) })
       }
-    >
-      Elapsed {formatRunClockMs(snapshot.elapsedMs)}
-      {' | '}
-      Est. remaining {snapshot.remainingMs === null ? 'unavailable' : formatRunClockMs(snapshot.remainingMs)}
-    </span>
+    >{catalogChildren(controlText('RunClock.text001', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: formatRunClockMs(snapshot.elapsedMs), value2: ' | ', value3: snapshot.remainingMs === null ? controlText('RunClock.unavailable') : formatRunClockMs(snapshot.remainingMs) })}</span>
   )
 }

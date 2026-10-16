@@ -25,6 +25,7 @@
 // Least surprise: dismissing (backdrop / X / Escape) chooses 'auto' -- the
 // pre-selected historical default. Mounted once at the App root; renders nothing
 // when no choice is pending.
+import { useText } from '../../i18n'
 import { useEffect } from 'react'
 import { Boxes, BoxSelect, Ban, X } from 'lucide-react'
 import { useCamStore } from '../../store'
@@ -32,6 +33,7 @@ import type { ImportStockSelection } from '../../store'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 
 export function ImportStockChoiceModal() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const choice = useCamStore((s) => s.importStockChoice)
   const resolve = useCamStore((s) => s.resolveImportStockChoice)
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
@@ -67,7 +69,7 @@ export function ImportStockChoiceModal() {
         className="modal-container import-stock-choice-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Choose which stock the imported part joins"
+        aria-label={workbenchText('ImportStockChoiceModal.chooseWhichStockTheImportedPartJoins')}
         data-testid="import-stock-choice-dialog"
         style={{ maxWidth: 480, minWidth: 340 }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -75,11 +77,11 @@ export function ImportStockChoiceModal() {
       >
         <div className="modal-header">
           <BoxSelect size={15} className="modal-header-icon" />
-          <span className="modal-title">Which stock should &ldquo;{name}&rdquo; join?</span>
+          <span className="modal-title">{workbenchText('ImportStockChoiceModal.whichStockShouldJoin', { name: String((name) ?? '') })}</span>
           <button
             className="modal-close-btn"
             onClick={() => pick({ kind: 'auto' })}
-            aria-label="Keep the default (auto)"
+            aria-label={workbenchText('ImportStockChoiceModal.keepTheDefaultAuto')}
           >
             <X size={14} />
           </button>
@@ -91,8 +93,7 @@ export function ImportStockChoiceModal() {
           style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}
         >
           <p style={{ margin: '0 0 12px' }}>
-            Pick a stock for this new part. You can change this later from the Design Tree.
-          </p>
+            {workbenchText('ImportStockChoiceModal.pickAStockForThisNewPartYouCan')}</p>
 
           <div className="multibody-import-options">
             {stocks.map((stock) => (
@@ -109,8 +110,7 @@ export function ImportStockChoiceModal() {
                     {stock.name}
                   </span>
                   <span className="multibody-import-option-desc">
-                    Pin this part to {stock.name}&rsquo;s coordinate frame.
-                  </span>
+                    {workbenchText('ImportStockChoiceModal.pinThisPartToSCoordinateFrame', { name: String((stock.name) ?? '') })}</span>
                 </span>
               </button>
             ))}
@@ -125,8 +125,7 @@ export function ImportStockChoiceModal() {
               <BoxSelect size={18} className="multibody-import-option-icon" />
               <span>
                 <span className="multibody-import-option-title">
-                  Auto (default)
-                </span>
+                  {workbenchText('ImportStockChoiceModal.autoDefault')}</span>
               </span>
             </button>
 
@@ -139,8 +138,7 @@ export function ImportStockChoiceModal() {
               <Ban size={18} className="multibody-import-option-icon" />
               <span>
                 <span className="multibody-import-option-title">
-                  None
-                </span>
+                  {workbenchText('ImportStockChoiceModal.none')}</span>
               </span>
             </button>
           </div>

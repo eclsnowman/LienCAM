@@ -288,8 +288,11 @@ describe('CAM-BINDING Stage 5: picking a face end-to-end (no crash, real store w
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('F_top')
+      // WO-2858: the readout names the body, never the face key; the saved
+      // reference below still carries 'F_top'.
+      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('Picked face on Model F1')
     })
+    expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain('F_top')
     expect(setSelectedPartSpy).toHaveBeenLastCalledWith(MODEL_ID)
     expect(useCamStore.getState().viewer.selectedGeometryId).toBe(MODEL_ID)
     expect(screen.queryByTestId('machining-boundary-pick-error')).toBeNull()
@@ -351,8 +354,11 @@ describe('CAM-BINDING Stage 5: picking a face end-to-end (no crash, real store w
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('G_top')
+      // WO-2858: the readout names the body, never the face key; the saved
+      // reference below still carries 'G_top'.
+      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('Picked face on Model F2')
     })
+    expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain('G_top')
     expect(screen.queryByTestId('machining-boundary-pick-error')).toBeNull()
     expect((screen.getByTestId('op-geometry-select') as HTMLSelectElement).value).toBe(OTHER_MODEL_ID)
     // Leaving face-pick mode re-selects the body the face named, not the stale
@@ -584,8 +590,11 @@ describe('CAM-BINDING Stage 5: picking a face end-to-end (no crash, real store w
       capturedPickCallback!({ geoId: MODEL_ID, kind: 'face', index: 1, isModelFace: true })
     })
     await waitFor(() => {
-      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('F_top')
+      // WO-2858: the readout names the body, never the face key; the saved
+      // reference below still carries 'F_top'.
+      expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('Picked face on Model F1')
     })
+    expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain('F_top')
 
     fireEvent.click(screen.getByText('Tool'))
     fireEvent.click(screen.getByText('EM6'))
@@ -614,7 +623,9 @@ describe('CAM-BINDING Stage 5: picking a face end-to-end (no crash, real store w
       expect(screen.getByText('Edit Operation', { exact: false })).toBeTruthy()
     })
     fireEvent.click(screen.getByText('Geometry'))
-    expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('F_top')
+    // WO-2858: edit reopens on the same durable face, named by its body.
+    expect(screen.getByTestId('machining-boundary-readout').textContent).toContain('Picked face on Model F1')
+    expect(screen.getByTestId('machining-boundary-readout').textContent).not.toContain('F_top')
 
     // Simulate an older Stock op carrying all three stale model dependencies:
     // params.geometryId, loop ids in both persistence fields, and the durable

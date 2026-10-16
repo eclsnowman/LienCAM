@@ -73,7 +73,10 @@ export interface GrblParserState {
   distanceMode: 'absolute' | 'incremental' | null
   /** Active motion mode word as written (G0, G1, G2, G3, G38.2, G80...). */
   motionMode: string | null
-  /** Active tool number (T word). GRBL tracks the number only - no table. */
+  /** Active tool number (T word). GRBL tracks the number only - no table.
+   *  null = this report carries NO tool fact (field absent, or a controller
+   *  that cannot report one); never overload 0 for that - 0 is a real T0.
+   *  WO-2878: only a non-null tool counts as a fresh tool report. */
   tool: number | null
   spindle: 'cw' | 'ccw' | 'off' | null
   coolant: 'flood' | 'mist' | 'off' | null

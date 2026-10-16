@@ -14,6 +14,8 @@ import { badgeMaterial, BADGE_TEXT, BADGE_PX, type SketchOffset } from './sketch
 import type { Vec2 as SketchVec2 } from '../types'
 import type { SnapResult, WokenRef } from '../snap'
 import type { ToolOverlay } from '../tools/toolOverlay'
+import { dimGuides } from '../tools/dimPlacement'
+import { DIMENSION_TICK_PX, screenSizedChevron } from '../tools/dimensionGuideSizing'
 import { asNumber } from '../../../theme/viewportColors'
 
 const SKETCH_SNAP_Z = 0.5
@@ -350,7 +352,18 @@ export class SketchOverlayPainter {
 
     // Dimension guides: solid, dimension-colored leader/arc — the live
     // angle-arc preview while a two-line angle dimension is placed.
-    for (const guide of overlay.dimGuides ?? []) {
+    const placement = overlay.dimPlacement
+    const scaleAtAnchor = () => {
+      const at = placement!.placement.labelAnchor
+      const rad = this.offset.rotationDeg * Math.PI / 180
+      const world = { x: this.offset.x + at.x * Math.cos(rad) - at.y * Math.sin(rad),
+        y: this.offset.y + at.x * Math.sin(rad) + at.y * Math.cos(rad) }
+      return Math.max(this.worldPerPixel(world), 1e-9)
+    }
+    const sizedGuides = (wpp: number) => dimGuides(placement!.entities, placement!.placement.plan,
+      placement!.placement.labelAnchor, DIMENSION_TICK_PX * wpp)
+    const guideLines: THREE.Line[] = []
+    for (const guide of placement ? sizedGuides(scaleAtAnchor()) : overlay.dimGuides ?? []) {
       if (guide.length < 2) continue
       const pts = guide.map((p) => new THREE.Vector3(p.x, p.y, 0))
       const mat = new THREE.LineBasicMaterial({
@@ -360,6 +373,44 @@ export class SketchOverlayPainter {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat)
       line.renderOrder = 11
       this.overlayGroup.add(line)
+      guideLines.push(line)
+    }
+    if (placement) {
+      // Render-time sizing covers camera motion WITHOUT a new pointer event.
+      // The render callback supplies the actual camera, including perspective
+      // hosts, without coupling the pure tool resolver to a viewport or store.
+      let lastWpp = Number.NaN
+      const lastProjection = new THREE.Matrix4()
+      const lastCamera = new THREE.Matrix4()
+      const lastPose = new THREE.Matrix4()
+      const lastSize = new THREE.Vector2()
+      const size = new THREE.Vector2()
+      for (const line of guideLines) line.onBeforeRender = (renderer, _scene, camera) => {
+        const wpp = scaleAtAnchor()
+        renderer.getSize(size)
+        if (wpp === lastWpp && lastProjection.equals(camera.projectionMatrix) &&
+            lastCamera.equals(camera.matrixWorld) && lastPose.equals(line.matrixWorld) &&
+            lastSize.equals(size)) return
+        const project = (p: SketchVec2): SketchVec2 | null => {
+          const q = new THREE.Vector3(p.x, p.y, 0).applyMatrix4(line.matrixWorld).project(camera)
+          return Number.isFinite(q.x) && Number.isFinite(q.y)
+            ? { x: q.x * size.x / 2, y: q.y * size.y / 2 } : null
+        }
+        const guides = sizedGuides(wpp)
+        for (let index = 0; index < guideLines.length; index++) {
+          const poly = screenSizedChevron(guides[index], wpp, project)
+          const geometry = guideLines[index].geometry
+          const positions = geometry.getAttribute('position') as THREE.BufferAttribute
+          for (let i = 0; i < poly.length; i++) positions.setXYZ(i, poly[i].x, poly[i].y, 0)
+          positions.needsUpdate = true
+          geometry.computeBoundingSphere()
+        }
+        lastWpp = wpp
+        lastProjection.copy(camera.projectionMatrix)
+        lastCamera.copy(camera.matrixWorld)
+        lastPose.copy(line.matrixWorld)
+        lastSize.copy(size)
+      }
     }
 
     for (const w of overlay.warnings ?? []) {

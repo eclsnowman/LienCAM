@@ -147,9 +147,9 @@ export interface ProbeCycleFromTop {
   stepOutMm: number
   /** The older plan - every touch from where the probe stands, no top touch
    *  and no descent (Outside corner goes around the corner at that height) -
-   *  exactly as planned with `approachFromTop: false`. The
-   *  runner uses it on a controller whose descent cannot stop on contact (a
-   *  text route with no G38.3). */
+   *  exactly as planned with `approachFromTop: false`. WO-2800 (Operator 10-14):
+   *  the runner never runs it in place of this plan, on any route; a
+   *  controller that cannot descend says so and moves nothing. */
   besideTheFace: ProbeFeatureCyclePlanResult
 }
 

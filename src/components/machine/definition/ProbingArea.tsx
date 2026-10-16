@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const probeText = textFor('probing-screens')
+
 import { type MachineConfig } from '../../../types'
 import { type MachineProbeDefaults } from '../../../types'
 import { DEFAULT_MACHINE_PROBE_DEFAULTS } from '../../../lib/machine/toolTable'
@@ -44,10 +47,10 @@ export function probeDefaults(machine: MachineConfig): MachineProbeDefaults {
  *  and final passes - Operator's "four probing feeds". Steps match the values the
  *  Machine Library modal's editor used before this WO moved the edit here. */
 export const PROBING_FEED_FIELDS = [
-  ['Clear positioning', 'positioningFeed', 'mm/min', 100],
-  ['Search speed', 'fastFeed', 'mm/min', 25],
-  ['Probe speed', 'slowFeed', 'mm/min', 5],
-  ['Retract / step-off', 'retract', 'mm', 0.5],
+  [probeText('probingArea1'), 'positioningFeed', 'mm/min', 100],
+  [probeText('probingArea2'), 'fastFeed', 'mm/min', 25],
+  [probeText('probingArea3'), 'slowFeed', 'mm/min', 5],
+  [probeText('probingArea4'), 'retract', 'mm', 0.5],
 ] as const satisfies readonly (readonly [string, keyof MachineProbeDefaults, string, number])[]
 
 /** The rest of `MachineProbeDefaults` - search bounds and stand-off distances
@@ -55,11 +58,11 @@ export const PROBING_FEED_FIELDS = [
  *  "MachineProbeDefaults - this is the ONE editor" names the whole record, and
  *  the modal's disclosure becomes a read-out of all of it, not part of it. */
 export const PROBING_GEOMETRY_FIELDS = [
-  ['Maximum search', 'maxTravel', 'mm', 1],
-  ['Surface clearance', 'surfaceClearance', 'mm', 0.5],
-  ['Search overtravel', 'overtravel', 'mm', 0.5],
-  ['Boss cross-over lift', 'crossOverLift', 'mm', 1],
-  ['Probe pad thickness', 'padThickness', 'mm', 0.5],
+  [probeText('probingArea5'), 'maxTravel', 'mm', 1],
+  [probeText('probingArea6'), 'surfaceClearance', 'mm', 0.5],
+  [probeText('probingArea7'), 'overtravel', 'mm', 0.5],
+  [probeText('probingArea8'), 'crossOverLift', 'mm', 1],
+  [probeText('probingArea9'), 'padThickness', 'mm', 0.5],
 ] as const satisfies readonly (readonly [string, keyof MachineProbeDefaults, string, number])[]
 
 function ProbeFeedField({ label, field, unit, step, value, onChange }: {
@@ -70,6 +73,7 @@ function ProbeFeedField({ label, field, unit, step, value, onChange }: {
   value: number
   onChange: (v: number) => void
 }) {
+  useText('probing-screens')
   return (
     <label
       data-drives-this-app=""
@@ -122,6 +126,7 @@ type ProbingAreaProps =
   & { def: NonNullable<MachineDefinitionPanelState['def']> }
 
 export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, polarityBoxFor }: ProbingAreaProps) {
+  useText('probing-screens')
   const defaults = probeDefaults(draft)
 
   const patchFeed = (field: keyof MachineProbeDefaults, value: number) => {
@@ -135,8 +140,8 @@ export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, pol
   return (
     <div data-testid="machine-def-probing-area">
       <SectionHead
-        title="Probe and tool-setter pins"
-        summary="io.probe / io.probe2, with active-low"
+        title={probeText('probingArea10')}
+        summary={probeText('probingArea11')}
         testId="machine-def-panel-head-probing-pins"
       />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginBottom: 12 }}>
@@ -144,9 +149,9 @@ export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, pol
           display: 'inline-flex', alignItems: 'center', gap: 8,
           fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)',
         }}>
-          <span style={{ minWidth: 70 }}>Probe</span>
+          <span style={{ minWidth: 70 }}>{probeText('probingArea13')}</span>
           <PinField
-            label="" name="Probe"
+            label="" name={probeText('probingArea14')}
             testId="machine-def-panel-probing-pin-probe"
             value={def.io.probe}
             problem={pinProblem('probe')}
@@ -158,9 +163,9 @@ export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, pol
           display: 'inline-flex', alignItems: 'center', gap: 8,
           fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)',
         }}>
-          <span style={{ minWidth: 70 }}>Tool setter</span>
+          <span style={{ minWidth: 70 }}>{probeText('probingArea16')}</span>
           <PinField
-            label="" name="Tool setter"
+            label="" name={probeText('probingArea17')}
             testId="machine-def-panel-probing-pin-probe2"
             value={def.io.probe2}
             problem={pinProblem('probe 2')}
@@ -171,8 +176,8 @@ export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, pol
       </div>
 
       <SectionHead
-        title="Fixed tool setter position"
-        summary="Machine coordinates used by Measure tool"
+        title={probeText('probingArea18')}
+        summary={probeText('probingArea19')}
         testId="machine-def-panel-head-tool-setter-position"
       />
       <div
@@ -196,20 +201,20 @@ export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, pol
             <OptionalNumericInput
               value={defaults.toolSetter?.[axis]}
               step={0.1}
-              placeholder="unset"
-              ariaLabel={`Tool setter ${axis.toUpperCase()} (machine mm)`}
+              placeholder={probeText('probingArea20')}
+              ariaLabel={probeText('probingArea21', { value1: String(axis.toUpperCase()) })}
               className="mform-input mform-input-mono"
               style={{ flex: 'none', width: 90 }}
               onChange={(value) => patchToolSetter(axis, value)}
             />
-            <span style={{ flex: 'none' }}>machine mm</span>
+            <span style={{ flex: 'none' }}>{probeText('probingArea23')}</span>
           </label>
         ))}
       </div>
 
       <SectionHead
-        title="Probing feeds"
-        summary="MachineProbeDefaults - the one editor; the Machine Library modal reads these out"
+        title={probeText('probingArea24')}
+        summary={probeText('probingArea25')}
         testId="machine-def-panel-head-probing-feeds"
       />
       <div
@@ -228,8 +233,8 @@ export function ProbingArea({ def, draft, editDraft, patchIoPin, pinProblem, pol
       </div>
 
       <SectionHead
-        title="Probe routine geometry"
-        summary="The rest of MachineProbeDefaults - search bounds and stand-off distances"
+        title={probeText('probingArea26')}
+        summary={probeText('probingArea27')}
         testId="machine-def-panel-head-probing-geometry"
       />
       <div

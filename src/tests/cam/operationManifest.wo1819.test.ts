@@ -353,7 +353,8 @@ const BYTE_IDENTICAL_CASES: Array<{
     extra: { loopOrigins: { L1: { x: 4, y: 5 } } },
     expected: {
       type: 'COMPUTE_ADAPTIVE_CLEARING',
-      payload: { ...BASE_PAYLOAD, params: PARAMS, loopOrigins: { L1: { x: 4, y: 5 } } },
+      // WO-2787 time-priced links add an explicit machine rapid field, even absent.
+      payload: { ...BASE_PAYLOAD, params: PARAMS, machineRapidRate: undefined, loopOrigins: { L1: { x: 4, y: 5 } } },
     },
   },
   {

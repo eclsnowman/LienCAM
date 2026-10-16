@@ -505,9 +505,17 @@ describe('WO-1335 re-scope: a macro call holds and names itself', () => {
     expect(program.moveCount).toBe(2)
   })
 
-  it('carries a macro stated before the first move as that section`s opening hold', () => {
+  it('holds at a macro stated before the first move, in a motionless section of its own', () => {
+    // WO-2478: a leading macro gets its own motionless section ending at it,
+    // instead of riding as the first section's opening hold. Still held before
+    // any of the file's motion, and still held exactly once (WO-2764 re-pin).
     const program = programOf('G21 G90 G54\nM2001\nG0 X1 Y1 Z1\nM30\n')
-    expect(program.stages[0].macroBefore).toEqual({ line: 2, code: 2001 })
+    expect(program.stages).toHaveLength(2)
+    expect(program.stages[0].moves).toEqual([])
+    expect(program.stages[0].ends).toEqual({ kind: 'macro', line: 2, code: 2001 })
+    expect(program.stages[1].macroBefore).toBeNull()
+    expect(program.stages[1].moves).toHaveLength(1)
+    expect(program.macros).toEqual([{ line: 2, code: 2001 }])
   })
 
   it('still refuses an M-code below the user-macro range, which is a real word', () => {
@@ -1280,16 +1288,45 @@ export const WORD_TABLE: WordRow[] = [
   {
     word: 'M2001, twice with nothing moving between',
     meaning: 'a second user macro before any motion has been interpreted under the first',
+    // WO-2478 (Run macro, many per project): adjacent macros no longer share
+    // one hold. Each gets its own motionless section, so each is held for and
+    // named, and neither can release the other's motion (WO-2764 re-pin).
     claims: [
-      refusedAt(
-        4,
-        'M2001 macro call on line 3',
-        'REFUSED, naming BOTH lines - one boundary is one hold, so the second macro would be accepted '
-        + 'and never named to the operator',
+      inConsole(
+        'a BOUNDARY EACH: the program holds at each macro line in turn and the console names both '
+        + "BY NUMBER - neither is folded into the other's hold, and neither is dropped",
+        (seen) => {
+          expect(seen.holds).toBe(2)
+          const first = seen.console.indexOf('M2001 macro call on line 3')
+          const second = seen.console.indexOf('M2002 macro call on line 4')
+          expect(first).toBeGreaterThan(-1)
+          expect(second).toBeGreaterThan(first)
+        },
+      ),
+      onWire(
+        "the section between the two macros stages none of the file's motion - one zero dwell - and the "
+        + 'move after them reaches the board only once both holds are released',
+        (seen) => {
+          expect(seen.calls).toEqual([
+            'selectWcs(G54)', 'loadMoves(1)', 'selectWcs(G54)', 'loadMoves(1)', 'selectWcs(G54)', 'loadMoves(1)',
+          ])
+          expect(seen.staged.map((move) => move.kind === 'dwell' ? `dwell ${move.seconds}` : move.to)).toEqual([
+            { x: 0, y: 0, z: 10 }, 'dwell 0', { x: 1, y: 0, z: 10 },
+          ])
+        },
       ),
     ],
     program: PRELUDE + AT_ORIGIN + 'M2001\nM2002\nG0 X1\nM30\n',
-    refusedAtLine: 4,
+    staged: [{ x: 0, y: 0, z: 10 }, { x: 1, y: 0, z: 10 }],
+    check: (p) => {
+      expect(p.macros).toEqual([{ line: 3, code: 2001 }, { line: 4, code: 2002 }])
+      expect(p.stages.map((stage) => [stage.moves.length, stage.ends])).toEqual([
+        [1, { kind: 'macro', line: 3, code: 2001 }],
+        [0, { kind: 'macro', line: 4, code: 2002 }],
+        [1, { kind: 'end' }],
+      ])
+    },
+    refusedAtLine: null,
   },
   {
     word: 'M7 / M8 / M9 (the record states the output)',
@@ -1550,7 +1587,10 @@ const CORPUS: CorpusCase[] = [
     // an arc's endpoint Z equal to its start. Four sections: the `M2001` park
     // macro and the `M0` it holds at split it, and the file runs in G54
     // throughout.
-    verdict: { kind: 'loads', stages: 5, moves: 110_615, frames: ['G54', 'G54', 'G54', 'G54', 'G54'] }, // +1: the M0 after M2001 is its own stop (owner ruling 10-04)
+    // WO-2764: +1 again - WO-2478 (2fe053181) gives the M9 after the M2001
+    // park macro its own command section, so the M9 is sent even if the macro
+    // changed coolant. Moves unchanged.
+    verdict: { kind: 'loads', stages: 6, moves: 110_615, frames: ['G54', 'G54', 'G54', 'G54', 'G54', 'G54'] }, // +1: the M0 after M2001 is its own stop (owner ruling 10-04)
   },
   {
     path: 'src/tests/fixtures/foreign-gcode/fusion360-issue395-xy.nc',
@@ -1800,12 +1840,9 @@ export const NEGATIVE_CORPUS: {
     line: 5,
     contains: 'tool change to T2 on line 4',
   },
-  {
-    name: 'a second user macro with nothing moving between it and the first',
-    gcode: 'G21 G90 G54\nG0 X1 Y1 Z1\nM2001\nM2002\nG0 X2 Y2 Z2\nM30\n',
-    line: 4,
-    contains: 'M2001 macro call on line 3',
-  },
+  // WO-2764: "a second user macro with nothing moving between" left this corpus.
+  // WO-2478 loads it - each macro holds in its own section - and the audit
+  // round 4 block below now pins that it loads, holding at both.
 ]
 
 describe('WO-1335 acceptance item 2: malformed G-code refuses, by line, carrying no program', () => {
@@ -1840,11 +1877,19 @@ describe('WO-1335 audit round 4: two boundary commands with no motion between th
     expect(refusal.message).toContain('tool change to T2 on line 4')
   })
 
-  it('refuses a second user macro with nothing moving between it and the first', () => {
-    const refusal = refusalOf('G21 G90 G54\nG0 X1 Y1 Z1\nM2001\nM2002\nG0 X2 Y2 Z2\nM30\n')
-    expect(refusal.line).toBe(4)
-    expect(refusal.message).toContain('an M2002 macro call')
-    expect(refusal.message).toContain('M2001 macro call on line 3')
+  it('holds at each of two user macros with nothing moving between them, in its own section', () => {
+    // WO-2478 (many Run macro actions per project) answers the round-4 hazard
+    // a second way: the second macro gets its own motionless section, so one
+    // hold never names one macro and releases motion meant to follow the
+    // other. Both are held and named, in file order (WO-2764 re-pin).
+    const program = programOf('G21 G90 G54\nG0 X1 Y1 Z1\nM2001\nM2002\nG0 X2 Y2 Z2\nM30\n')
+    expect(program.stages.map((stage) => [stage.moves.length, stage.ends])).toEqual([
+      [1, { kind: 'macro', line: 3, code: 2001 }],
+      [0, { kind: 'macro', line: 4, code: 2002 }],
+      [1, { kind: 'end' }],
+    ])
+    expect(program.stages.every((stage) => stage.macroBefore === null)).toBe(true)
+    expect(program.macros).toEqual([{ line: 3, code: 2001 }, { line: 4, code: 2002 }])
   })
 
   // IN EITHER ORDER. A macro and a tool change at one boundary lose whichever

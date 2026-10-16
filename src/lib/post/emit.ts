@@ -40,8 +40,8 @@ import { g10Line } from './coords'
 import { dimWord, sWord, unitsWord, word, type PostUnits } from './format'
 import { createModalState } from './modal'
 import { resolveCoolantWord, resolveVacuum } from './resolve'
-import type { PostCapabilities, PostConfig, PostDiagnostic, PostInput, PostOperation, EmittedOperationSpan } from './types'
-import { machineSafeZ } from '../../types'
+import type { PostCapabilities, PostConfig, PostDiagnostic, PostInput, PostMachineAction, PostOperation, EmittedOperationSpan } from './types'
+import { callableMachineMacros, machineSafeZ } from '../../types'
 import { workholdingStopPark } from '../machine/macros/clampPauseMacro'
 
 // --- arc-collapse fallback literals -----------------------------------------
@@ -489,10 +489,12 @@ function emitSetupSection(
   // Messages grouped by the operation they run before; null = after the last.
   // A stop naming an operation this input does not emit runs at the end.
   const emittedOpIds = new Set(sections.flatMap((s) => (s.kind === 'operation' ? [s.op.op.id] : [])))
-  const stopsBefore = new Map<string | null, string[]>()
-  for (const stop of input.setup.operatorStops ?? []) {
-    const key = stop.beforeOpId !== null && emittedOpIds.has(stop.beforeOpId) ? stop.beforeOpId : null
-    stopsBefore.set(key, [...(stopsBefore.get(key) ?? []), stop.message])
+  const actionsBefore = new Map<string | null, PostMachineAction[]>()
+  const actions: PostMachineAction[] = input.setup.machineActions
+    ?? (input.setup.operatorStops ?? []).map((stop) => ({ ...stop, kind: 'operator_stop' }))
+  for (const action of actions) {
+    const key = action.beforeOpId !== null && emittedOpIds.has(action.beforeOpId) ? action.beforeOpId : null
+    actionsBefore.set(key, [...(actionsBefore.get(key) ?? []), action])
   }
   const stoppedBefore = new Set<string>()
   // Retract, stop the spindle (and accessories), park, say the message, halt.
@@ -520,6 +522,60 @@ function emitSetupSection(
     liftBeforeTravel = true
     modal.forceReset()
     toolWorkZ = null // the park leaves the tool wherever the machine parks
+  }
+
+  const emitMachineActions = (pending: PostMachineAction[]) => {
+    let messages: string[] = []
+    const flushStops = () => {
+      if (messages.length > 0) emitOperatorStop(messages)
+      messages = []
+    }
+    for (const action of pending) {
+      if (action.kind === 'operator_stop') {
+        messages.push(action.message)
+        continue
+      }
+      flushStops()
+      const macro = callableMachineMacros(input.machine).find((candidate) => candidate.id === action.macroId)
+      if (!macro) {
+        diagnostics.push({
+          level: 'error', code: 'RUN_MACRO_UNAVAILABLE',
+          message: `Run macro operation "${action.name}" has no callable macro on "${input.machine.name}". Choose a shown macro with an M-code.`,
+        })
+        continue
+      }
+      if (config.framing.sectionComment) push(comment(`${action.name}: ${macro.name}`, config))
+      if (macro.mCode === 6) {
+        if (prevToolNumber === null) {
+          const firstToolNumber = input.setup.operations[0]?.tool.toolNumber
+          if (firstToolNumber === undefined) {
+            diagnostics.push({ level: 'error', code: 'RUN_MACRO_TOOL_REQUIRED', message: `Run macro operation "${action.name}" uses M6, which needs a selected tool for its tool-change prelude.` })
+            continue
+          }
+          push(`T${firstToolNumber}`)
+        }
+        // M6 retains its tool-change meaning even when its bound macro is
+        // selected as an action. Use the existing tool-change preparation.
+        const lift = liftBeforeSpindleOff(toolWorkZ, safeWorkZ, xyz, units)
+        if (lift) push(lift)
+        push('M5')
+        push('M9')
+        push(`G0 ${dimWord('Z', safeWorkZ, xyz, units)}`)
+        coolantWasOn = false
+        activeAccessories = []
+      }
+      push(`M${macro.mCode}`)
+      // A macro can move and change modal/spindle state. Re-establish the
+      // program's frame and let the next operation restart its own spindle
+      // and accessories, lifting Z before it travels, as after a tool macro.
+      push(`${unitsWord(units)} G90 G17 G94`)
+      push(`G${wcs.fixtureOffset}`)
+      pendingPauseRestart = prevToolNumber !== null
+      liftBeforeTravel = true
+      modal.forceReset()
+      toolWorkZ = null
+    }
+    flushStops()
   }
 
   // ---- SECTION HEADER ----
@@ -552,8 +608,8 @@ function emitSetupSection(
     // Its lines belong to neither operation's span.
     if (!stoppedBefore.has(section.op.op.id)) {
       stoppedBefore.add(section.op.op.id)
-      const messages = stopsBefore.get(section.op.op.id)
-      if (messages) emitOperatorStop(messages)
+      const pending = actionsBefore.get(section.op.op.id)
+      if (pending) emitMachineActions(pending)
     }
     const { op, tool, feeds, spindle, coolant, moves, nestExpanded } = section.op
     // Adaptive emits semantic finish/traverse roles without inventing a number.
@@ -802,8 +858,8 @@ function emitSetupSection(
   }
 
   // WO-2437: a stop placed after the setup's last operation.
-  const trailingStops = stopsBefore.get(null)
-  if (trailingStops) emitOperatorStop(trailingStops)
+  const trailingActions = actionsBefore.get(null)
+  if (trailingActions) emitMachineActions(trailingActions)
 
   // ---- TRAILING RETRACT ----
   // A multi-setup orchestrator asks for this so the machine lifts to the safe
@@ -820,7 +876,7 @@ function emitSetupSection(
     toolWorkZ = liftZ
   }
 
-  return { lines, safeWorkZ, diagnostics, operationSpans, coolantWasOn, accessories: activeAccessories, lastToolNumber: prevToolNumber, spindle: activeSpindle, spindleStopped: trailingStops !== undefined, endWorkZ: toolWorkZ }
+  return { lines, safeWorkZ, diagnostics, operationSpans, coolantWasOn, accessories: activeAccessories, lastToolNumber: prevToolNumber, spindle: activeSpindle, spindleStopped: trailingActions !== undefined, endWorkZ: toolWorkZ }
 }
 
 // --- multi-setup composition -------------------------------------------------

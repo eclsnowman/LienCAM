@@ -168,6 +168,18 @@ function axialSpan(feature: RecognizedFeature): [number, number] {
   return [low, high];
 }
 
+/** The shoulder target of a recognized counterbore, in the caller's frame. */
+export function counterborePocketTarget(feature: RecognizedFeature, shift: Vec3): MeshPocketTarget {
+  const widest = feature.bands.filter(b => b.surface === 'cylinder').reduce((a, b) => (b.diameterMm > a.diameterMm ? b : a));
+  const ends = widest.axialRangeMm.map(t => feature.axis.origin[2] + feature.axis.direction[2] * t + shift[2]);
+  return {
+    featureId: feature.id, kind: 'counterbore',
+    center: [feature.axis.origin[0] + shift[0], feature.axis.origin[1] + shift[1]],
+    diameterMm: widest.diameterMm, floorZ: Math.min(...ends), topZ: Math.max(...ends),
+    maxDeviationMm: widest.maxDeviationMm, sourceFacetIds: widest.sourceFacetIds,
+  };
+}
+
 /**
  * Every recognised feature of `mesh`, restated as something a drill, a bore or
  * a pocket can be aimed at, in the RECENTRED local frame.
@@ -248,18 +260,7 @@ export function meshFeatureTargets(
         sourceFacetIds: feature.sourceFacetIds,
       });
     } else if (feature.kind === 'counterbore') {
-      const widest = feature.bands.reduce((a, b) => (b.diameterMm > a.diameterMm ? b : a));
-      const shoulderEnds = [zAt(widest.axialRangeMm[0]), zAt(widest.axialRangeMm[1])];
-      pockets.push({
-        featureId: feature.id,
-        kind: feature.kind,
-        center: [feature.axis.origin[0] + shiftX, feature.axis.origin[1] + shiftY],
-        diameterMm: widest.diameterMm,
-        floorZ: Math.min(...shoulderEnds),
-        topZ: Math.max(...shoulderEnds),
-        maxDeviationMm: widest.maxDeviationMm,
-        sourceFacetIds: widest.sourceFacetIds,
-      });
+      pockets.push(counterborePocketTarget(feature, [shiftX, shiftY, shiftZ]));
     }
   }
 

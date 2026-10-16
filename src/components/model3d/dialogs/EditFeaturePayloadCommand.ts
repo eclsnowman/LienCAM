@@ -30,6 +30,8 @@
 // preserving the edge IDs in its replay payload. Omission preserves every
 // existing caller's refs exactly; an explicit [] clears them undo-safely.
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { Command, DagNodeSnapshot, FeatureDag, FeatureRef } from '../../../doc'
 
 export class EditFeaturePayloadCommand implements Command {
@@ -67,7 +69,7 @@ export class EditFeaturePayloadCommand implements Command {
 
   undo(dag: FeatureDag): void {
     if (!this.prior) {
-      throw new Error(`EditFeaturePayloadCommand.undo: '${this.id}' was never edited (do() has not run yet).`)
+      throw new Error(workbenchText('EditFeaturePayloadCommand.editfeaturepayloadcommandUndoWasNeverEditedDoHasNotRun', { id: String(this.id) }))
     }
     const index = dag.featureOrder().indexOf(this.id)
     dag.removeNode(this.id)

@@ -551,7 +551,7 @@ describe('WO-1859: breaking the link', () => {
 // ---- 6. Deleting the source --------------------------------------------------------
 
 describe('WO-1859: deleting the source', () => {
-  it('leaves the offset standing as ordinary geometry - nothing destroyed, nothing dangling', () => {
+  it('WO-2616: removes dependent offsets when the source is deleted, with no dangling constraints', () => {
     const sk = plateWithOffset(2)
     const offsetIds = offsetPieces(sk.entities).map((e) => e.id)
 
@@ -559,15 +559,10 @@ describe('WO-1859: deleting the source', () => {
     expect(r).not.toBeNull()
     if (!r) return
 
-    // Every offset piece survives, at its own coordinates, with no link left.
-    expect(r.entities.filter((e) => offsetIds.includes(e.id))).toHaveLength(10)
+    // Newer WO-2616 makes source deletion cascade; Break remains explicit.
+    expect(r.entities.filter((e) => offsetIds.includes(e.id))).toHaveLength(0)
     expect(r.entities.some((e) => e.offsetLink !== undefined)).toBe(false)
-    const before = new Map(sk.entities.map((e) => [e.id, JSON.stringify(withoutOffsetLink(e))]))
-    for (const e of r.entities) {
-      if (!offsetIds.includes(e.id)) continue
-      expect(JSON.stringify(e)).toEqual(before.get(e.id))
-    }
-    // The offset's own ten coincidents survive too, and nothing dangles.
+    // Constraints to removed copies are removed in the same transaction.
     const surviving = new Set(r.entities.map((e) => e.id))
     for (const c of r.constraints) {
       if (c.kind !== 'coincident') continue
@@ -576,7 +571,7 @@ describe('WO-1859: deleting the source', () => {
     }
   })
 
-  it('a recompute after ANY path removed the source drops the link and keeps the geometry', () => {
+  it('WO-2616: recompute removes dependent copies after another path removed the source', () => {
     const sk = plateWithOffset(2)
     const without = sk.entities.filter((e) => e.id !== 'sA1')
     const r = recomputeOffsetLinks(without)
@@ -584,7 +579,7 @@ describe('WO-1859: deleting the source', () => {
     expect(r.notes[0].outcome).toBe('dropped')
     expect(r.entities.some((e) => e.offsetLink !== undefined)).toBe(false)
     expect(r.entities.map((e) => JSON.stringify(withoutOffsetLink(e))))
-      .toEqual(without.map((e) => JSON.stringify(withoutOffsetLink(e))))
+      .toEqual(without.filter(e => !e.offsetLink).map((e) => JSON.stringify(e)))
   })
 })
 

@@ -220,10 +220,11 @@ describe('WO-329: a fresh STL is reachable through the viewport source-part pick
   it('does not admit the same fresh STL for an operation family that cannot consume mesh edge chains', () => {
     render(<NewOperationModal />)
     act(() => { useCamStore.getState().openModal('new-operation') })
-    fireEvent.click(screen.getByText('Drill'))
+    fireEvent.click(screen.getByText('Engrave / Trace'))
     fireEvent.click(screen.getByText('Geometry'))
 
-    // Drill has no chain admission (WO-258): a loopless STL must stay
+    // Engrave has no chain admission (WO-258); since WO-2859 Drill consumes an
+    // STL's holes, so Engrave is the example. A loopless STL must stay
     // unreachable from the viewport here exactly as it is from the dropdown -
     // this WO only widens the chain-consuming families, never every type.
     expect(screen.queryByTestId('op-pick-source-part')).toBeNull()

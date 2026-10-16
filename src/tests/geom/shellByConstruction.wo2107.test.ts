@@ -3,8 +3,7 @@
 // pocket back in grown by the wall - when the direct shell (MakeThickSolid)
 // fails. Through the production entry point (GeomEngine.applyShell) on the
 // face picked in headed run S1. Where the walls cannot join up (1 mm, 2 mm)
-// the body is left alone and the message says how many pieces and the
-// thinnest wall that keeps it one piece, as Fusion and standard editor refuse it.
+// WO-2799 preserves every valid piece in a compound and reports the separation.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -55,6 +54,9 @@ describe('WO-2107 Shell by shelling the block first, then cutting the holes back
         solids: kernel.getSubShapes(shape, 'solid').length,
         cones: faces.filter((f) => kernel.surfaceType(f) === 'cone').length,
         volume: kernel.getVolume(shape),
+        parts: kernel.getSubShapes(shape, 'solid').map((solid) => ({
+          valid: kernel.isValid(solid), volume: kernel.getVolume(solid), bounds: kernel.getBoundingBox(solid, false),
+        })),
       }
     } finally {
       if (shape !== undefined) kernel.release(shape)
@@ -114,36 +116,50 @@ describe('WO-2107 Shell by shelling the block first, then cutting the holes back
   }
 
   for (const [thickness, pieces] of [[1, 10], [2, 5]] as const) {
-    it(`${thickness} mm: body unchanged, the message names ${pieces} pieces and the thinnest one-piece wall`, async () => {
+    it(`${thickness} mm: preserves all ${pieces} valid pieces, exports the complete compound and leaves the source untouched`, async () => {
       const shell = await engine.applyShell({ featureId: 'S1', body: source, removeFaces: [OPEN_FACE], thickness })
-      expect(shell.ok).toBe(false)
-      expect(shell.body).toBeUndefined()
-      expect(shell.diagnostics).toHaveLength(1)
-      const diag = shell.diagnostics[0]
-      expect(diag.code).toBe('SHELL_FAILED')
-      expect(diag.params?.pieces).toBe(pieces)
-      const onePiece = Number(diag.params?.onePieceThickness)
-      expect(onePiece).toBeGreaterThan(2)
-      expect(onePiece).toBeLessThanOrEqual(2.5)
-      const reason = String(diag.params?.reason)
-      expect(reason).toContain(`${pieces} separate pieces`)
-      expect(reason).toContain(`The thinnest wall that keeps it one piece is ${onePiece} mm`)
-      expect(reason).toContain('left unchanged')
-      expect(reason.toLowerCase()).not.toContain('webassembly')
-
-      // The one-piece thickness it names does build.
-      const retry = await engine.applyShell({ featureId: 'S2', body: source, removeFaces: [OPEN_FACE], thickness: onePiece })
-      expect(retry.ok, JSON.stringify(retry.diagnostics)).toBe(true)
-      await engine.dispose(retry.body!)
-
+      expect(shell.ok, JSON.stringify(shell.diagnostics)).toBe(true)
+      expect(shell.body).toBeDefined()
+      expect(shell.diagnostics).toEqual([{ code: 'OK', severity: 'info', params: {
+        pieces, reason: `Shell left ${pieces} separate pieces: with this face open the pocket no longer joins the outer walls`,
+      } }])
+      const back = await readBack(shell.body!)
+      console.log('WO2815_SHELL=' + JSON.stringify({ thickness, sourceVolume, back }))
+      expect(back.valid).toBe(true)
+      expect(back.solids).toBe(pieces)
+      expect(back.parts.every((p) => p.valid && p.volume > 0)).toBe(true)
+      expect(back.volume).toBeCloseTo((await engine.measure(shell.body!, 'volume')).value, 3)
+      expect(back.volume).toBeGreaterThan(0)
+      expect(back.volume).toBeLessThan(sourceVolume)
+      expect(back.cones).toBe(20)
+      // Independent hand volumes: the isolated blind-hole cups have a 2.5 mm
+      // bore and a 0.5 mm x 45-degree mouth chamfer (radius 3 at z0).
+      // Subtract the cylindrical/frustum hole from the grown outer cylinder.
+      const cupVolume = (depth: number) => Math.PI * (
+        (2.5 + thickness) ** 2 * (depth + thickness)
+        - 2.5 ** 2 * (depth - 0.5)
+        - 0.5 / 3 * (2.5 ** 2 + 2.5 * 3 + 3 ** 2))
+      const cups = back.parts.filter((p) => Math.abs(p.bounds.xmax - p.bounds.xmin - 2 * (2.5 + thickness)) < 1e-5)
+      expect(cups).toHaveLength(thickness === 1 ? 8 : 4)
+      const expectedDepths = thickness === 1 ? [8, 8, 8, 8, 10, 10, 10, 10] : [8, 8, 8, 8]
+      expect(cups.map((p) => Math.round(-p.bounds.zmin - thickness)).sort((a, b) => a - b)).toEqual(expectedDepths)
+      for (const cup of cups) {
+        const depth = Math.round(-cup.bounds.zmin - thickness)
+        expect(cup.volume).toBeCloseTo(cupVolume(depth), 5)
+        expect(cup.bounds.ymax - cup.bounds.ymin).toBeCloseTo(2 * (2.5 + thickness), 5)
+      }
+      const ids = Object.keys(engine.snapshotsFor(shell.body!))
+      expect((await engine.resolve(shell.body!, ids)).every((r) => r.status === 'exact')).toBe(true)
       expect((await engine.measure(source, 'volume')).value).toBeCloseTo(sourceVolume, 8)
+      await engine.dispose(shell.body!)
     }, 300_000)
   }
 
   it('leaks no kernel handles on the construction route', async () => {
     const baseline = engine.debugKernelShapeCount()
     const split = await engine.applyShell({ featureId: 'S1', body: source, removeFaces: [OPEN_FACE], thickness: 1 })
-    expect(split.ok).toBe(false)
+    expect(split.ok).toBe(true)
+    await engine.dispose(split.body!)
     expect(engine.debugKernelShapeCount()).toBe(baseline)
     const built = await engine.applyShell({ featureId: 'S1', body: source, removeFaces: [OPEN_FACE], thickness: 2.5 })
     expect(built.ok).toBe(true)

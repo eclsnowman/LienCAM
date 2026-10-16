@@ -73,24 +73,98 @@ export interface EmitContext {
 const HELIX_FI_STEP = Math.PI / 16     // FreeCAD spiral angular step
 const HELIX_EDGE_BACKOFF = 0.01        // FreeCAD: r = helixRadius - 0.01
 const MAX_HELIX_POINTS = 5000          // safety cap so a tiny angle cannot explode the loop
-// One floor for planner and both emitters (processFeature.MIN_DESCENT_HELIX_RADIUS).
-const DEFAULT_MIN_HELIX_RADIUS = MIN_DESCENT_HELIX_RADIUS
+// One floor for planner and both emitters (processFeature.MIN_DESCENT_HELIX_RADIUS). Read at
+// call time, not bound to a module constant: processFeature reaches this file through
+// repositionTime.ts (WO-2787 round 6), so on that import order processFeature's export is not
+// yet initialised while this module body runs.
+const defaultMinHelixRadius = (): number => MIN_DESCENT_HELIX_RADIUS
 const FINISH_LEAD_SWEEP = Math.PI / 2   // tangent gate: explicit finish leads never exceed 90 deg
 const FINISH_LEAD_FIT_SAMPLES = 8
 const XY_EPS = 1e-9
 
 /** Convert one feature's processFeature result into a full multi-depth ToolpathMove[]. */
 export function emitFeature(result: FeatureResult, ctx: EmitContext): ToolpathMove[] {
+  const floor = floorReplayDepth(ctx)
+  return floor === undefined ? emitFeatureLegacy(result, ctx) : emitFeatureWithFloorFinish(result, ctx, floor)
+}
+
+/** The Z the pass stream is replayed at once more for floor finishing, or undefined when no
+ *  replay is emitted. */
+function floorReplayDepth(ctx: EmitContext): number | undefined {
   // Load-bearing identity branch: omitted/disabled floor finishing executes the exact
   // pre-feature emitter below, preserving the existing move stream byte-for-byte.
-  if (!Number.isFinite(ctx.floorFinishDepth)) return emitFeatureLegacy(result, ctx)
+  if (!Number.isFinite(ctx.floorFinishDepth)) return undefined
   // WO-2038: no floor stock left (rough bottom already at the true floor) means the last
   // rough level cleared the floor; a replay there would cut the whole level again in air.
   // Clear the final depth once, exactly as with floor finishing off.
-  if (Math.abs((ctx.floorFinishDepth as number) - ctx.heights.bottomZ) <= 1e-6) {
-    return emitFeatureLegacy(result, ctx)
+  if (Math.abs((ctx.floorFinishDepth as number) - ctx.heights.bottomZ) <= 1e-6) return undefined
+  return ctx.floorFinishDepth as number
+}
+
+/** One depth level the pass stream is emitted at: the level's start and cutting Z, and
+ *  whether it is the floor-finish replay (cuts and wall rides there carry role 'finish'). */
+export interface EmitLevel { startZ: number; z: number; floorReplay: boolean }
+
+/** Multi-depth: descend from the stock top to the final depth in stepdown bites. */
+function roughLevels(topZ: number, bottomZ: number, stepdown: number): EmitLevel[] {
+  const step = Math.max(stepdown, 0.1)
+  const levels: EmitLevel[] = []
+  let passStartDepth = topZ
+  let guard = 0
+  while (passStartDepth > bottomZ + 1e-6 && guard++ < 2000) {
+    const passEndDepth = Math.max(passStartDepth - step, bottomZ)
+    levels.push({ startZ: passStartDepth, z: passEndDepth, floorReplay: false })
+    passStartDepth = passEndDepth
   }
-  return emitFeatureWithFloorFinish(result, ctx, ctx.floorFinishDepth as number)
+  return levels
+}
+
+/** WO-2787 round 6: every level emitFeature writes the pass stream at, in emit order -- the
+ *  rough levels, then the floor replay when one is scheduled. The reposition time model
+ *  prices a candidate over exactly this schedule. */
+export function emitLevelSchedule(ctx: EmitContext): EmitLevel[] {
+  const levels = roughLevels(ctx.heights.topZ, ctx.heights.bottomZ, ctx.stepdown)
+  const floor = floorReplayDepth(ctx)
+  if (floor === undefined) return levels
+  // Capping the start at topZ covers an axial-stock value larger than the total depth
+  // without emitting above the stock top.
+  levels.push({ startZ: Math.max(floor, Math.min(ctx.heights.bottomZ, ctx.heights.topZ)), z: floor, floorReplay: true })
+  return levels
+}
+
+/** WO-2787 round 6: ONE mapping from a connection pass ('cut', 'lead', 'wallfollow',
+ *  'loopback', 'link') to the moves -- roles and feeds -- it is written as at one level. Both
+ *  level loops emit through it and the reposition time model (repositionTime.ts) prices every
+ *  candidate through it, so a ride is ranked at the roles the program will carry: at the floor
+ *  replay a wall ride is 'finish' at the finishing feed, not the roughing feed. Entries and
+ *  dedicated finish contours stay in the loops. */
+export function emitConnectionPass(
+  moves: ToolpathMove[], passes: AdaptivePass[], i: number,
+  level: EmitLevel, ctx: EmitContext,
+): void {
+  const pass = passes[i]
+  const z = level.z
+  if (pass.type === 'cut') {
+    if (level.floorReplay) emitFloorFinishCut(moves, pass.points, z)
+    else emitCut(moves, pass.points, z, ctx.feeds.feedRate)
+  } else if (pass.type === 'lead') {
+    emitLead(moves, pass.points, z, leadFeedRate(passes, i, ctx))
+  } else if (pass.type === 'wallfollow') {
+    // Wall-follow polylines still contact and clean the floor during the replay. They
+    // therefore use the same finish role/rate as the primary adaptive cuts.
+    if (level.floorReplay) emitFloorFinishCut(moves, pass.points, z)
+    else emitWallFollow(moves, pass.points, z, ctx.feeds.feedRate)
+  } else if (pass.type === 'loopback') {
+    emitLoopback(moves, pass.points, z)
+  } else if (pass.type === 'link') {
+    // A link immediately before an entry is superseded by the entry's own safe
+    // approach (the entry owns the reposition to the helix start), so skip it.
+    const next = passes[i + 1]
+    if (next && next.type === 'entry') return
+    const minHelixR = finitePositive(ctx.minHelixRadius) || defaultMinHelixRadius()
+    const helixAngleRad = Math.max(ctx.helixAngleDeg, 1) * Math.PI / 180
+    emitLink(moves, pass, level.startZ, z, ctx, helixAngleRad, minHelixR)
+  }
 }
 
 function emitFeatureLegacy(result: FeatureResult, ctx: EmitContext): ToolpathMove[] {
@@ -98,29 +172,17 @@ function emitFeatureLegacy(result: FeatureResult, ctx: EmitContext): ToolpathMov
   if (!result.startPoint || result.passes.length === 0) return moves
 
   const { clearanceZ, topZ, bottomZ } = ctx.heights
-  const stepdown = Math.max(ctx.stepdown, 0.1)
-  const minHelixR = finitePositive(ctx.minHelixRadius) || DEFAULT_MIN_HELIX_RADIUS
+  const minHelixR = finitePositive(ctx.minHelixRadius) || defaultMinHelixRadius()
   const helixAngleRad = Math.max(ctx.helixAngleDeg, 1) * Math.PI / 180
   const passes = result.passes
 
-  // Multi-depth: descend from the stock top to the final depth in stepdown bites.
-  let passStartDepth = topZ
-  let guard = 0
-  while (passStartDepth > bottomZ + 1e-6 && guard++ < 2000) {
-    const passEndDepth = Math.max(passStartDepth - stepdown, bottomZ)
+  for (const level of roughLevels(topZ, bottomZ, ctx.stepdown)) {
+    const { startZ: passStartDepth, z: passEndDepth } = level
 
     for (let i = 0; i < passes.length; i++) {
       const pass = passes[i]
       if (pass.type === 'entry') {
         emitEntry(moves, pass, passStartDepth, passEndDepth, ctx, helixAngleRad, minHelixR)
-      } else if (pass.type === 'cut') {
-        emitCut(moves, pass.points, passEndDepth, ctx.feeds.feedRate)
-      } else if (pass.type === 'lead') {
-        emitLead(moves, pass.points, passEndDepth, leadFeedRate(passes, i, ctx))
-      } else if (pass.type === 'wallfollow') {
-        emitWallFollow(moves, pass.points, passEndDepth, ctx.feeds.feedRate)
-      } else if (pass.type === 'loopback') {
-        emitLoopback(moves, pass.points, passEndDepth)
       } else if (pass.type === 'finish') {
         // Dedicated wall-finishing contour (wallFinish feature). Roughing passes emit at
         // every level; the finish contour is depth-gated by wallFinishMode:
@@ -149,15 +211,9 @@ function emitFeatureLegacy(result: FeatureResult, ctx: EmitContext): ToolpathMov
           )
         }
       } else {
-        // A link immediately before an entry is superseded by the entry's own safe
-        // approach (the entry owns the reposition to the helix start), so skip it.
-        const next = passes[i + 1]
-        if (next && next.type === 'entry') continue
-        emitLink(moves, pass, passStartDepth, passEndDepth, ctx, helixAngleRad, minHelixR)
+        emitConnectionPass(moves, passes, i, level, ctx)
       }
     }
-
-    passStartDepth = passEndDepth
   }
 
   // Final retract to clearance.
@@ -190,30 +246,19 @@ function emitFeatureWithFloorFinish(
     )
   }
 
-  const stepdown = Math.max(ctx.stepdown, 0.1)
-  const minHelixR = finitePositive(ctx.minHelixRadius) || DEFAULT_MIN_HELIX_RADIUS
+  const minHelixR = finitePositive(ctx.minHelixRadius) || defaultMinHelixRadius()
   const helixAngleRad = Math.max(ctx.helixAngleDeg, 1) * Math.PI / 180
   const passes = result.passes
   const wallFinishMode = ctx.wallFinishMode ?? 'final'
 
-  let passStartDepth = topZ
   let lastRoughDepth: number | undefined
-  let guard = 0
-  while (passStartDepth > roughBottom + 1e-6 && guard++ < 2000) {
-    const passEndDepth = Math.max(passStartDepth - stepdown, roughBottom)
+  for (const level of roughLevels(topZ, roughBottom, ctx.stepdown)) {
+    const { startZ: passStartDepth, z: passEndDepth } = level
 
     for (let i = 0; i < passes.length; i++) {
       const pass = passes[i]
       if (pass.type === 'entry') {
         emitEntry(moves, pass, passStartDepth, passEndDepth, ctx, helixAngleRad, minHelixR)
-      } else if (pass.type === 'cut') {
-        emitCut(moves, pass.points, passEndDepth, ctx.feeds.feedRate)
-      } else if (pass.type === 'lead') {
-        emitLead(moves, pass.points, passEndDepth, leadFeedRate(passes, i, ctx))
-      } else if (pass.type === 'wallfollow') {
-        emitWallFollow(moves, pass.points, passEndDepth, ctx.feeds.feedRate)
-      } else if (pass.type === 'loopback') {
-        emitLoopback(moves, pass.points, passEndDepth)
       } else if (pass.type === 'finish') {
         // With a floor replay, both final-only modes ('final' and WO-1043's
         // 'final_to_size') belong to trueBottom. The each-stepdown mode still runs at
@@ -232,19 +277,17 @@ function emitFeatureWithFloorFinish(
           )
         }
       } else {
-        const next = passes[i + 1]
-        if (next && next.type === 'entry') continue
-        emitLink(moves, pass, passStartDepth, passEndDepth, ctx, helixAngleRad, minHelixR)
+        emitConnectionPass(moves, passes, i, level, ctx)
       }
     }
 
     lastRoughDepth = passEndDepth
-    passStartDepth = passEndDepth
   }
 
   // One spring/cleanup replay at the true floor. Capping the start at topZ covers an
   // axial-stock value larger than the total depth without emitting above the stock top.
   const floorStartDepth = Math.max(trueBottom, Math.min(roughBottom, topZ))
+  const floorLevel: EmitLevel = { startZ: floorStartDepth, z: trueBottom, floorReplay: true }
   const roughWallFinishAlreadyAtFloor =
     wallFinishMode === 'each_stepdown' &&
     lastRoughDepth !== undefined &&
@@ -254,16 +297,6 @@ function emitFeatureWithFloorFinish(
     const pass = passes[i]
     if (pass.type === 'entry') {
       emitEntry(moves, pass, floorStartDepth, trueBottom, ctx, helixAngleRad, minHelixR)
-    } else if (pass.type === 'cut') {
-      emitFloorFinishCut(moves, pass.points, trueBottom)
-    } else if (pass.type === 'lead') {
-      emitLead(moves, pass.points, trueBottom, leadFeedRate(passes, i, ctx))
-    } else if (pass.type === 'wallfollow') {
-      // Wall-follow polylines still contact and clean the floor during this replay.
-      // They therefore use the same finish role/rate as the primary adaptive cuts.
-      emitFloorFinishCut(moves, pass.points, trueBottom)
-    } else if (pass.type === 'loopback') {
-      emitLoopback(moves, pass.points, trueBottom)
     } else if (pass.type === 'finish') {
       // WO-1043: 'final_to_size' schedules exactly like 'final', so the test is
       // "not each_stepdown" rather than a list of final-ish names. Byte-identical for
@@ -283,9 +316,7 @@ function emitFeatureWithFloorFinish(
         )
       }
     } else {
-      const next = passes[i + 1]
-      if (next && next.type === 'entry') continue
-      emitLink(moves, pass, floorStartDepth, trueBottom, ctx, helixAngleRad, minHelixR)
+      emitConnectionPass(moves, passes, i, floorLevel, ctx)
     }
   }
 

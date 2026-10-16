@@ -104,7 +104,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     sections: [
       {
         kind: 'paragraph',
-        text: 'With the default mouse scheme, LienCAM default (left-orbit), left-drag orbits, right-drag pans, and the wheel or middle-drag zooms. Settings > Navigation offers six other schemes; most keep the left button free for selecting and put orbit, pan, and zoom on the middle or right button, some with Shift or Ctrl held. Two checkboxes there reverse the zoom and pan directions. On a touch screen, one finger orbits and two fingers pinch-zoom and pan. The same scheme applies in the CAM 3D view and in the Model workspace.',
+        text: 'With the default mouse scheme, LienCAM default (left-orbit), left-drag orbits, right-drag pans, and the wheel or middle-drag zooms. Settings > Navigation offers six other schemes; most keep the left button free for selecting and put orbit, pan, and zoom on the middle or right button, some with Shift or Ctrl held. Two checkboxes there reverse the zoom and pan directions. A plain right-click opens the view menu. If your browser opens it as you press the right button, dragging more than 10 pixels dismisses it while the pan continues; the menu does not stay over the moving view. On a touch screen, one finger orbits and two fingers pinch-zoom and pan. The same scheme applies in the CAM 3D view and in the Model workspace.',
       },
       {
         kind: 'steps',

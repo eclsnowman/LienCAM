@@ -26,7 +26,8 @@
 //
 // LAYERING. A LEAF in src/doc: it imports only the shared seedModelArchive
 // helper (which owns the genesis-born DAG + archive serialization). Nothing in
-// src/doc imports it; the store imports it by its direct path.
+// src/doc imports it; the store and the Model screen's Import (WO-2796, the
+// per-solid name/payload helpers) import it by its direct path.
 
 import { newSeededModelDag, finalizeSeedArchive } from './seedModelArchive'
 
@@ -76,6 +77,21 @@ export interface ImportedStepBodySeed {
   bodyIndex: number
 }
 
+/** The display name of solid `bodyIndex` of a multi-body STEP: solid 1 keeps
+ *  the file's name, solids 2..N are "<name> (i)". Shared by the store's "Edit
+ *  as model" fan-out and the Model screen's own Import (WO-2796), so the same
+ *  file names its solids the same way on both routes. */
+export function importedStepSolidName(name: string, bodyIndex: number): string {
+  return bodyIndex === 0 ? name : `${name} (${bodyIndex + 1})`
+}
+
+/** The payload of the 'import' node that owns one solid of a multi-body STEP.
+ *  The ONE shape every fan-out route mints (seed archive below, Model screen
+ *  Import) and the executor's 'import' replay reads back. */
+export function importedStepBodyPayload(body: ImportedStepBodySeed): Record<string, unknown> {
+  return { fileName: body.fileName, cacheKey: body.cacheKey, name: body.name, bodyIndex: body.bodyIndex }
+}
+
 /**
  * INT-IMPORT-EDIT stage 3 (multi-body STEP): build a seed archive with ONE
  * import node PER solid, each carrying its own `bodyIndex`. All N nodes live in
@@ -95,12 +111,7 @@ export function buildMultiBodyImportedStepModelArchive(bodies: readonly Imported
       kind: 'import',
       consumes: [],
       refs: [],
-      payload: {
-        fileName: body.fileName,
-        cacheKey: body.cacheKey,
-        name: body.name,
-        bodyIndex: body.bodyIndex,
-      },
+      payload: importedStepBodyPayload(body),
     })
   })
   return finalizeSeedArchive(dag)

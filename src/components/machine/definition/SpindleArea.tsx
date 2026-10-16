@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { OptionalNumericInput } from '../../ui/NumericInput'
 import { SectionHead } from './DefinitionFields'
 import {
@@ -24,6 +27,7 @@ function BoardSpindleDriveEditor({ drive, disabled, onChange }: {
   disabled: boolean
   onChange: (drive: MachineBoardSpeedSpindleDrive) => void
 }) {
+  useText('control-screens-not-probing')
   const patchDrive = (patch: Partial<MachineBoardSpeedSpindleDrive>): void => {
     onChange({ ...drive, ...patch })
   }
@@ -51,24 +55,24 @@ function BoardSpindleDriveEditor({ drive, disabled, onChange }: {
   return (
     <div data-testid="machine-def-board-spindle" style={{ marginBottom: 10 }}>
       <SectionHead
-        title="Board speed command"
+        title={controlText('SpindleArea.text001')}
         summary="The RPM mapping sent through the same spindle commands as a Modbus drive"
         testId="machine-def-board-spindle-head"
       />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
-        {numberInput('Output port', 'machine-def-board-spindle-port', drive.output.port,
+        {numberInput(controlText('SpindleArea.text002'), 'machine-def-board-spindle-port', drive.output.port,
           (port) => patchDrive({ output: { ...drive.output, port: port ?? 0 } }))}
-        {numberInput('Output pin', 'machine-def-board-spindle-pin', drive.output.pin,
+        {numberInput(controlText('SpindleArea.text003'), 'machine-def-board-spindle-pin', drive.output.pin,
           (pin) => patchDrive({ output: { ...drive.output, pin: pin ?? 0 } }))}
-        {numberInput('Frequency (Hz)', 'machine-def-board-spindle-frequency', drive.frequencyHz,
+        {numberInput(controlText('SpindleArea.text004'), 'machine-def-board-spindle-frequency', drive.frequencyHz,
           (frequencyHz) => patchDrive({ frequencyHz }))}
-        {numberInput('Minimum RPM', 'machine-def-board-spindle-min-rpm', drive.minimumRpm,
+        {numberInput(controlText('SpindleArea.text005'), 'machine-def-board-spindle-min-rpm', drive.minimumRpm,
           (minimumRpm) => patchDrive({ minimumRpm }))}
-        {numberInput('Maximum RPM', 'machine-def-board-spindle-max-rpm', drive.maximumRpm,
+        {numberInput(controlText('SpindleArea.text006'), 'machine-def-board-spindle-max-rpm', drive.maximumRpm,
           (maximumRpm) => patchDrive({ maximumRpm }))}
-        {numberInput('Minimum output (%)', 'machine-def-board-spindle-min-percent', drive.minimumPercent,
+        {numberInput(controlText('SpindleArea.text007'), 'machine-def-board-spindle-min-percent', drive.minimumPercent,
           (minimumPercent) => patchDrive({ minimumPercent }))}
-        {numberInput('Maximum output (%)', 'machine-def-board-spindle-max-percent', drive.maximumPercent,
+        {numberInput(controlText('SpindleArea.text008'), 'machine-def-board-spindle-max-percent', drive.maximumPercent,
           (maximumPercent) => patchDrive({ maximumPercent }))}
       </div>
     </div>
@@ -95,6 +99,7 @@ export function SpindleArea({
   draft, editDraft, source, unsent, spindleLink, spindleLinkIsForeign, spindleLinkOtherMachine,
   spindleStoredIsStated, vfdEdit,
 }: SpindleAreaProps) {
+  useText('control-screens-not-probing')
   const stored = source.spindleLinkDefinition
   const definition = resolvedSpindleLink({
     link: spindleLink, foreign: spindleLinkIsForeign, stored, storedIsStated: spindleStoredIsStated,
@@ -117,13 +122,13 @@ export function SpindleArea({
   return (
     <div data-testid="machine-def-area-spindle">
       <SectionHead
-        title="Spindle"
+        title={controlText('SpindleArea.text009')}
         summary="Drive, RPM range, direction and the VFD link"
         testId="machine-def-area-spindle-head"
       />
 
       <div className="mform-row" data-testid="machine-def-area-spindle-drive">
-        <span className="mform-label">Drive</span>
+        <span className="mform-label">{controlText('SpindleArea.text010')}</span>
         <SpindleDrivePicker
           machineId={source.id}
           definition={definition}
@@ -150,61 +155,61 @@ export function SpindleArea({
       {storedDrive?.kind === 'relay' && (
         <div data-testid="machine-def-relay-spindle" style={{ marginBottom: 10, fontSize: 'var(--font-size-sm)' }}>
           {spindleOutputs.length === 0
-            ? 'No M3/M4 spindle outputs are defined in the Outputs list.'
+            ? controlText('SpindleArea.text011')
             : spindleOutputs.map((output) => (
                 <div key={`${output.onCode}:${output.name}`}>
-                  {`${output.onCode} ${output.name}: port ${output.pin.port}, pin ${output.pin.pin}; M5 stops it`}
+                  {controlText('SpindleArea.text012', { value1: String(output.onCode), value2: String(output.name), value3: String(output.pin.port), value4: String(output.pin.pin) })}
                 </div>
               ))}
         </div>
       )}
 
       <div className="mform-row">
-        <label className="mform-label">Max RPM</label>
+        <label className="mform-label">{controlText('SpindleArea.text013')}</label>
         <OptionalNumericInput
           min={0} step={1000} className="mform-input mform-input-mono"
           value={draft.maxSpindleRpm}
-          placeholder="not set"
-          ariaLabel="Max RPM"
+          placeholder={controlText('SpindleArea.text014')}
+          ariaLabel={controlText('SpindleArea.text015')}
           onChange={(v) => editDraft((m) => ({
             ...m, maxSpindleRpm: v === undefined ? undefined : Math.round(v),
           }))}
         />
       </div>
       <div className="mform-row">
-        <label className="mform-label">Min RPM</label>
+        <label className="mform-label">{controlText('SpindleArea.text016')}</label>
         <OptionalNumericInput
           min={0} step={100} className="mform-input mform-input-mono"
           value={draft.minSpindleRpm}
-          placeholder="not set"
-          ariaLabel="Min RPM"
+          placeholder={controlText('SpindleArea.text017')}
+          ariaLabel={controlText('SpindleArea.text018')}
           onChange={(v) => editDraft((m) => ({
             ...m, minSpindleRpm: v === undefined ? undefined : Math.round(v),
           }))}
         />
       </div>
       <div className="mform-row">
-        <label className="mform-label" htmlFor="machine-def-area-spindle-direction">Direction</label>
+        <label className="mform-label" htmlFor="machine-def-area-spindle-direction">{controlText('SpindleArea.text019')}</label>
         <select
           id="machine-def-area-spindle-direction"
           className="mform-select"
-          aria-label="Direction"
+          aria-label={controlText('SpindleArea.text020')}
           value={draft.spindleDirection}
           onChange={(e) => editDraft((m) => ({ ...m, spindleDirection: e.target.value as 'cw' | 'ccw' }))}
         >
-          <option value="cw">CW (M3)</option>
-          <option value="ccw">CCW (M4)</option>
+          <option value="cw">{controlText('SpindleArea.text021')}</option>
+          <option value="ccw">{controlText('SpindleArea.text022')}</option>
         </select>
       </div>
 
       <details data-testid="machine-def-area-spindle-vfd-link" style={{ marginTop: 12 }}>
         <summary data-testid="machine-def-area-spindle-vfd-summary">
           {summary
-            ? `VFD link - ${summary.name ?? 'unnamed inverter'}, port ${summary.port ?? '(not stated)'}`
-              + (summary.baud !== null ? `, ${summary.baud} baud` : '')
+            ? controlText('SpindleArea.text025', { value1: String(summary.name ?? controlText('SpindleArea.text023')), value2: String(summary.port ?? controlText('SpindleArea.text024')) })
+              + (summary.baud !== null ? controlText('SpindleArea.text026', { value1: String(summary.baud) }) : '')
             : spindleLinkIsForeign
-              ? `VFD link - the connected bridge is for ${spindleLinkOtherMachine ?? 'another machine'}, not this one`
-              : 'VFD link - none declared'}
+              ? controlText('SpindleArea.text028', { value1: String(spindleLinkOtherMachine ?? controlText('SpindleArea.text027')) })
+              : controlText('SpindleArea.text029')}
         </summary>
         <SpindleLinkSection
           link={spindleLink}

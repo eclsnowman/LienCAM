@@ -1,4 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useText } from '../../../../i18n'
+import { useEffect, useRef, useState } from 'react'
+import { patternForSelection } from '../../patterns'
+import { SketchPatternEditor } from './SketchPatternEditor'
 import { useSketcherTool } from '../useSketcherTool'
 import { sketcherTools } from '../toolController'
 import {
@@ -30,12 +33,14 @@ interface Props {
  * button shares them.
  */
 export function SketchContextMenu({ port, at, onClose }: Props) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const tool = useSketcherTool((s) => s.tool)
   const chain = useSketcherTool((s) => s.chain)
   const sketch = port.useSketch()
   const selectedIds = port.useSelectedIds()
   const constructionMode = useSketcherTool((s) => s.constructionMode)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [editingPattern, setEditingPattern] = useState(false)
 
   // Esc closes the MENU only: capture-phase window listener runs before
   // the viewport's bubble-phase sketch key handler, and stopPropagation
@@ -76,6 +81,12 @@ export function SketchContextMenu({ port, at, onClose }: Props) {
 
   const dispatch = (action: ContextMenuAction) => {
     switch (action.kind) {
+      case 'edit-pattern':
+        setEditingPattern(true)
+        return
+      case 'break-pattern':
+        sketcherTools.breakSelectedPattern()
+        break
       case 'confirm-step':
         sketcherTools.end()
         break
@@ -124,6 +135,9 @@ export function SketchContextMenu({ port, at, onClose }: Props) {
     onClose()
   }
 
+  const pattern = sketch && patternForSelection(sketch, selectedIds)
+  if (editingPattern && pattern && sketch) return <SketchPatternEditor pattern={pattern} entities={sketch.entities} onClose={onClose} />
+
   return (
     <>
       {/*
@@ -143,7 +157,7 @@ export function SketchContextMenu({ port, at, onClose }: Props) {
         className="sketch-context-menu"
         style={{ left: at.x, top: at.y }}
         role="menu"
-        aria-label="Sketch context menu"
+        aria-label={workbenchText('SketchContextMenu.sketchContextMenu')}
       >
         {items.map((item) => (
           <div key={item.id}>

@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // WO-2102 - BUILT-IN COMMANDS: what each stock spindle / coolant button SENDS
 // on this machine, with the controller default shown and a per-row Reset.
 //
@@ -42,6 +45,7 @@ function BuiltinRow({
   testIdPrefix: string
   labelSize?: string
 }) {
+  useText('control-screens-not-probing')
   const config = useMachineActions((s) => s.byMachine[machineId])
   const setOverride = useMachineActions((s) => s.setOverride)
   const clearOverride = useMachineActions((s) => s.clearOverride)
@@ -87,7 +91,7 @@ function BuiltinRow({
           rows={Math.max(1, text.split('\n').length)}
           value={text}
           data-testid={`${testIdPrefix}-${action}`}
-          aria-label={`${BUILTIN_ACTION_LABELS[action]} sends`}
+          aria-label={controlText('BuiltinCommandsSection.text001', { value1: String(BUILTIN_ACTION_LABELS[action]) })}
           onChange={(e) => setText(e.target.value)}
           onFocus={() => setEditing(true)}
           onBlur={() => {
@@ -107,12 +111,10 @@ function BuiltinRow({
               setText(defaults?.join('\n') ?? '')
               setError(null)
             }}
-            data-tooltip={controller ? `Reset to the ${controllerDisplayName(controller)} default` : 'Clear this override'}
-          >
-            Reset
-          </button>
+            data-tooltip={controller ? controlText('BuiltinCommandsSection.text002', { value1: String(controllerDisplayName(controller)) }) : controlText('BuiltinCommandsSection.text003')}
+          >{controlText('BuiltinCommandsSection.text004')}</button>
         ) : (
-          <span data-tooltip="This is the controller default">default</span>
+          <span data-tooltip={controlText('BuiltinCommandsSection.text005')}>{controlText('BuiltinCommandsSection.text006')}</span>
         )}
       </span>
     </div>
@@ -155,6 +157,7 @@ export function BuiltinCommandRows({
  *  machine) and on the setup page of a machine with no controller definition
  *  yet - the Actions tab reached these whatever the machine's state. */
 export function BuiltinCommandsSection({ machine }: { machine: MachineConfig }) {
+  useText('control-screens-not-probing')
   const resolution = resolveDeclaredController(machine)
   const controller = resolution.ok ? resolution.controller : null
   // The Actions modal's own "Add / edit macros" door, kept with the rows it
@@ -164,7 +167,7 @@ export function BuiltinCommandsSection({ machine }: { machine: MachineConfig }) 
   return (
     <div data-testid="machine-def-builtin-commands" data-drives-this-app="" style={{ marginTop: 12 }}>
       <SectionHead
-        title="Built-in commands"
+        title={controlText('BuiltinCommandsSection.text007')}
         summary={`What each stock spindle and coolant button sends${controller ? ` (${controllerDisplayName(controller)})` : ''}.`}
         testId="machine-def-builtin-commands-head"
       />
@@ -183,8 +186,7 @@ export function BuiltinCommandsSection({ machine }: { machine: MachineConfig }) 
         style={{ marginTop: 8 }}
         onClick={() => setMacroEditorOpen(true)}
       >
-        <Plus size={12} /> Add / edit macros
-      </button>
+        <Plus size={12} />{controlText('BuiltinCommandsSection.text008')}</button>
       <MacroEditor open={macroEditorOpen} onClose={() => setMacroEditorOpen(false)} />
     </div>
   )

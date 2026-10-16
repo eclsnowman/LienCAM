@@ -104,6 +104,8 @@ When a STEP file holds several separate bodies, a dialog titled "This file has N
 
 ![The multi-body import dialog offering Keep as one item or One item per body](images/multi-body-step/choice-modal.webp)
 
+Those choices belong to the Geometry list in Setup. Import in the Model tab brings each solid into its own model body automatically and reports the count; Cancel during import drops it.
+
 See also: [Importing STEP and IGES solids](Importing-files#import-step), [Editing an import as a model](Importing-files#edit-import-as-model), [Which stock owns a part](Setup-Stock-and-Workholding#stock-membership).
 
 <a id="face-edge-selection"></a>

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>LienCAM Mobile Pendant</title>
-  <link rel="stylesheet" href="app.css?v=10">
+  <link rel="stylesheet" href="app.css?v=12">
 </head>
 <body>
   <div id="app">
@@ -135,18 +135,20 @@
           <details class="card diagram-card" open>
             <summary class="card-title" id="diagram-title">ROUTINE DIAGRAM</summary>
             <div id="probe-diagram" class="probe-diagram"></div>
+            <p id="probe-where" class="probe-where"></p>
+            <p id="probe-setup" class="probe-where"></p>
           </details>
           <details class="card" id="params-card">
             <summary class="card-title" id="params-title">CYCLE PARAMETERS</summary>
             <div class="form-grid">
-              <div class="field"><label for="inp-feed">Probe Feed (mm/min)</label><input id="inp-feed" type="number" value="80"></div>
-              <div class="field"><label for="inp-travel">Search Travel (mm)</label><input id="inp-travel" type="number" value="20"></div>
-              <div class="field"><label for="inp-tip">Tip Radius (mm)</label><input id="inp-tip" type="number" value="2" step="0.1"></div>
-              <div class="field" id="field-size"><label for="inp-size">Nominal Dia (mm)</label><input id="inp-size" type="number" value="30"></div>
+              <div class="field" id="field-feed"><label for="inp-feed">Probe Feed (mm/min)</label><input id="inp-feed" type="number" value="80"></div>
+              <div class="field" id="field-travel"><label for="inp-travel">Search Travel (mm)</label><input id="inp-travel" type="number" value="20"></div>
+              <div class="field"><label for="inp-tip">Tip Radius (mm)</label><input id="inp-tip" type="number" value="1.5" step="0.1"></div>
+              <div class="field" id="field-size"><label for="inp-size" id="lbl-size">Nominal Dia (mm)</label><input id="inp-size" type="number" value="25"></div>
               <div class="field" id="field-edge"><label for="sel-edge">Edge Direction</label>
                 <select id="sel-edge">
-                  <option value="X-">X- (Left)</option>
                   <option value="X+">X+ (Right)</option>
+                  <option value="X-">X- (Left)</option>
                   <option value="Y-">Y- (Front)</option>
                   <option value="Y+">Y+ (Back)</option>
                 </select>
@@ -291,6 +293,6 @@
 
     </main>
   </div>
-  <script type="module" src="app.js?v=10"></script>
+  <script type="module" src="app.js?v=12"></script>
 </body>
 </html>

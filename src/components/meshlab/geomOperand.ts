@@ -14,6 +14,8 @@
 // createLocalGeomService + geom-service types (read + call only, per the WO's file
 // boundary) and never edits src/store, src/mesh/**, src/doc/**, or src/geom/worker/**
 // wiring.
+import { textFor } from '../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { createLocalGeomService, type GeomClient } from '../../geom'
 import type { ExtrudeRequest, ProfileRegion } from '../../geom/geom-service'
 import type { TessellatedBrepBuffers } from '../../mesh'
@@ -72,7 +74,7 @@ export function createGeomOperandClient(createClient: () => GeomClient = createL
 
   async function buildPrimitive(params: BrepPrimitiveParams, tolerance: number): Promise<BuiltBrepOperand> {
     if (!Number.isFinite(tolerance) || tolerance <= 0) {
-      throw new Error('brep tessellation tolerance must be a positive finite number')
+      throw new Error(workbenchText('geomOperand.brepTessellationToleranceMustBeAPositiveFiniteNumber'))
     }
     await init()
     const t0 = performance.now()
@@ -89,7 +91,7 @@ export function createGeomOperandClient(createClient: () => GeomClient = createL
     if (!result.ok || result.body === undefined) {
       // FAIL-LOUD (ADR-0003): surface the kernel's own diagnostics, never a
       // generic "something went wrong".
-      throw new Error(`failed to build ${params.shape} brep primitive: ${JSON.stringify(result.diagnostics)}`)
+      throw new Error(workbenchText('geomOperand.failedToBuildBrepPrimitive', { shape: String(params.shape), value2: String(JSON.stringify(result.diagnostics)) }))
     }
     try {
       const tess = await client.tessellate(result.body, { deflection: tolerance, angularDeflection: Math.PI })

@@ -25,6 +25,7 @@ export function AboutModal({ isOpen, onClose, credits = creditsData }: {
   const [view, setView] = useState<View>('about')
   const [licences, setLicences] = useState<LicenceText[] | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [linkError, setLinkError] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
 
@@ -97,6 +98,22 @@ export function AboutModal({ isOpen, onClose, credits = creditsData }: {
             <div className="about-summary">
               <img className="about-wordmark" src={wordmark} alt="LienCAM" />
               <p className="about-version">Version {APP_VERSION}</p>
+              <p style={{ display: 'flex', gap: 20, justifyContent: 'center' }}>
+                {[
+                  ['GitHub project', 'https://github.com/eclsnowman/LienCAM'],
+                  ['Releases', 'https://github.com/eclsnowman/LienCAM/releases'],
+                ].map(([label, url]) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-active)' }}
+                  onClick={(event) => {
+                    const host = (globalThis as typeof globalThis & {
+                      liencamHost?: { openProjectLink?: (url: string) => Promise<void> }
+                    }).liencamHost
+                    if (!host?.openProjectLink) return
+                    event.preventDefault()
+                    setLinkError(null)
+                    void host.openProjectLink(url).catch(() => setLinkError('Could not open the system browser.'))
+                  }}>{label}</a>)}
+              </p>
+              {linkError && <p role="alert">{linkError}</p>}
               <dl className="about-build">
                 <dt>Build commit</dt><dd>{GIT_COMMIT_LABEL}</dd>
                 <dt>Build date</dt><dd>{BUILD_DATE}</dd>

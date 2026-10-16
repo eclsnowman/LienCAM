@@ -16,7 +16,7 @@ import { outputPinAssigned } from './machineOutputs'
 export const outputPinKey = (pin: Pick<PinRef, 'port' | 'pin'>): string => `${pin.port}:${pin.pin}`
 
 /**
- * IS THIS OUTPUT ON, AS THE CONTROLLER LAST READ IT BACK? Null when the output
+ * IS THIS OUTPUT ON, FROM THE LAST RAW LEVEL AND ITS OWN POLARITY? Null when the output
  * has no pin to read, or its pin has not been read this session - the caller
  * keeps its own fallback for that and only for that.
  */
@@ -25,7 +25,8 @@ export function outputReadbackOn(
   pins: Readonly<Record<string, boolean>>,
 ): boolean | null {
   if (!output || !outputPinAssigned(output.pin)) return null
-  return pins[outputPinKey(output.pin)] ?? null
+  const level = pins[outputPinKey(output.pin)]
+  return level === undefined ? null : level !== (output.pin.negate ?? false)
 }
 
 /** A controller that can READ one output back, read-only, with the

@@ -5,13 +5,16 @@
 // palette's settings sit in foldable groups named after the rail groups whose
 // tools they set (Start from, Edit form, Topology, Openings, Symmetry, Display).
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { Children, useMemo, type ReactNode } from 'react'
+import { catalogChildren } from '../catalogChildren'
 import { ChevronDown, ChevronRight, Spline } from 'lucide-react'
 import { DockedPanel } from '../workbench/DockedPanel'
 import { useToolPaletteLayout, type ToolPaletteLayout } from '../../common/useToolPaletteLayout'
 import { NumericInput } from '../../ui/NumericInput'
 import { circularCount } from '../../../form/symmetry'
-import { useFormStore, type FlattenOnto } from '../../../form/formStore'
+import { useFormStore, type FlattenOnto, type RotationPick } from '../../../form/formStore'
 import { selectionPoints } from '../../../form/topology'
 import { MAX_SKIN_LEVEL, skinLevels } from '../../../form/formOverlay'
 import type { StarterKind } from '../../../form/starters'
@@ -21,18 +24,26 @@ import './form.css'
 /** Which segment counts each starter reads, and what they are called. */
 const SEGMENT_FIELDS: Record<StarterKind, Array<{ axis: 'x' | 'y' | 'z'; label: string; min: number }>> = {
   box: [{ axis: 'x', label: 'X', min: 1 }, { axis: 'y', label: 'Y', min: 1 }, { axis: 'z', label: 'Z', min: 1 }],
-  cylinder: [{ axis: 'x', label: 'Around', min: 3 }, { axis: 'z', label: 'Along', min: 1 }],
-  sphere: [{ axis: 'x', label: 'Per side', min: 1 }],
-  torus: [{ axis: 'x', label: 'Around', min: 3 }, { axis: 'z', label: 'Tube', min: 3 }],
+  cylinder: [{ axis: 'x', get label() { return workbenchText('FormPanel.around') }, min: 3 }, { axis: 'z', get label() { return workbenchText('FormPanel.along') }, min: 1 }],
+  sphere: [{ axis: 'x', get label() { return workbenchText('FormPanel.perSide') }, min: 1 }],
+  torus: [{ axis: 'x', get label() { return workbenchText('FormPanel.around') }, min: 3 }, { axis: 'z', get label() { return workbenchText('FormPanel.tube') }, min: 3 }],
   plane: [{ axis: 'x', label: 'X', min: 1 }, { axis: 'y', label: 'Y', min: 1 }],
 }
 const MAX_SEGMENTS = 32
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
+function plural(n: number, word: 'point' | 'edge' | 'face' | 'creased edge' | 'weighted edge'): string {
+  const keys = {
+    point: ['FormPanel.pointCount', 'FormPanel.pointsCount'],
+    edge: ['FormPanel.edgeCount', 'FormPanel.edgesCount'],
+    face: ['FormPanel.faceCount', 'FormPanel.facesCount'],
+    'creased edge': ['FormPanel.creasedEdgeCount', 'FormPanel.creasedEdgesCount'],
+    'weighted edge': ['FormPanel.weightedEdgeCount', 'FormPanel.weightedEdgesCount'],
+  } as const
+  return workbenchText(keys[word][n === 1 ? 0 : 1], { n })
 }
 
 export function FormPanel({ session }: { session: FormSession }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const thickness = useFormStore((s) => s.thickness)
   const softRadius = useFormStore((s) => s.softRadius)
   const weldDistance = useFormStore((s) => s.weldDistance)
@@ -64,6 +75,11 @@ export function FormPanel({ session }: { session: FormSession }) {
   const segments = useFormStore((s) => s.starterSegments[s.starterKind])
   const selection = useFormStore((s) => s.selection)
   const transformMode = useFormStore((s) => s.transformMode)
+  const rotationAxis = useFormStore((s) => s.rotationAxis)
+  const rotationPick = useFormStore((s) => s.rotationPick)
+  const rotationAngle = useFormStore((s) => s.rotationAngle)
+  const rotationCentreAxis = useFormStore((s) => s.rotationCentreAxis)
+  const dragging = useFormStore((s) => s.dragging)
   const notice = useFormStore((s) => s.notice)
   const editing = useFormStore((s) => s.featureId !== null)
   const skinLevel = useFormStore((s) => s.skinLevel)
@@ -74,12 +90,12 @@ export function FormPanel({ session }: { session: FormSession }) {
     selection.faces.length > 0 ? plural(selection.faces.length, 'face') : null,
   ].filter(Boolean).join(', ')
   const selectionPrompt = {
-    translate: 'Move: click a point, edge or face to select it; Shift adds.',
-    rotate: 'Rotate: click a point, edge or face to rotate it',
-    scale: 'Scale: click a point, edge or face to scale it',
+    translate: workbenchText('FormPanel.moveSelectionPrompt'),
+    rotate: workbenchText('FormPanel.rotateSelectionPrompt'),
+    scale: workbenchText('FormPanel.scaleSelectionPrompt'),
   }[transformMode]
   // the box-select hint follows on the same line (Selected: ... or the mode's sentence)
-  const lineHead = selected ? `Selected: ${selected}` : selectionPrompt
+  const lineHead = selected ? workbenchText('FormPanel.selected', { selected }) : selectionPrompt
 
   // groups fold, remembered per viewer (the rail's layout hook)
   const layout = useToolPaletteLayout('form-palette')
@@ -91,31 +107,31 @@ export function FormPanel({ session }: { session: FormSession }) {
       id="form-palette"
       testId="form-palette-shell"
       className="form-palette-shell"
-      title={editing ? `Edit form - ${name}` : 'Form'}
+      title={editing ? workbenchText('FormPanel.editForm', { name: String(name) }) : workbenchText('FormPanel.form')}
       icon={<Spline size={14} />}
       width={300}
       onClose={session.cancel}
-      closeLabel="Cancel form"
+      closeLabel={workbenchText('FormPanel.cancelForm')}
       closeTestId="form-close"
       footer={<>
         <div className="form-status" data-testid="form-status">
-          <div>Cage: {plural(cage.positions.length, 'point')}, {plural(cage.faces.length, 'face')}{cage.creases.length > 0 ? `, ${plural(cage.creases.length, 'creased edge')}` : ''}{cage.weights ? `, ${plural(Object.keys(cage.weights).length, 'weighted edge')}` : ''}</div>
+          <div>{catalogChildren(workbenchText('FormPanel.cage', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000' }), { value1: plural(cage.positions.length, 'point'), value2: plural(cage.faces.length, 'face'), value3: cage.creases.length > 0 ? `, ${plural(cage.creases.length, 'creased edge')}` : '', value4: cage.weights ? `, ${plural(Object.keys(cage.weights).length, 'weighted edge')}` : '' })}</div>
           <div>
             <span data-testid="form-selection">{lineHead}</span>
             {lineHead.endsWith('.') ? ' ' : '. '}
-            <span data-testid="form-select-hint">Drag a box to select many points; Shift adds, Ctrl removes.</span>
+            <span data-testid="form-select-hint">{workbenchText('FormPanel.boxSelectionHint')}</span>
           </div>
           {notice && <div className="form-notice" data-testid="form-notice" title={notice}>{notice}</div>}
         </div>
         <div className="form-actions">
-          <button type="button" className="modal-btn modal-btn-ghost" data-testid="form-cancel" onClick={session.cancel}>Cancel</button>
-          <button type="button" className="modal-btn modal-btn-primary" data-testid="form-finish" onClick={session.finish}>Finish Form</button>
+          <button type="button" className="modal-btn modal-btn-ghost" data-testid="form-cancel" onClick={session.cancel}>{workbenchText('FormPanel.cancel')}</button>
+          <button type="button" className="modal-btn modal-btn-primary" data-testid="form-finish" onClick={session.finish}>{workbenchText('FormPanel.finishForm')}</button>
         </div>
       </>}
     >
       <div className="form-palette" data-testid="form-palette">
         <label className="form-row">
-          <span className="form-row-label">Name</span>
+          <span className="form-row-label">{workbenchText('FormPanel.name')}</span>
           <input
             className="form-text"
             data-testid="form-name"
@@ -123,9 +139,9 @@ export function FormPanel({ session }: { session: FormSession }) {
             onChange={(e) => useFormStore.getState().setName(e.target.value)}
           />
         </label>
-        <PaletteGroup id="start" title="Start from" layout={layout}>
+        <PaletteGroup id="start" title={workbenchText('FormPanel.startFrom')} layout={layout}>
           <div className="form-row">
-            <span className="form-row-label">Segments</span>
+            <span className="form-row-label">{workbenchText('FormPanel.segments')}</span>
             {SEGMENT_FIELDS[starterKind].map(({ axis, label, min }) => (
               <span key={axis} className="form-seg" data-testid={`form-segments-${axis}`}>
                 <span className="form-seg-label">{label}</span>
@@ -135,8 +151,8 @@ export function FormPanel({ session }: { session: FormSession }) {
                   max={MAX_SEGMENTS}
                   step={1}
                   decimals={0}
-                  ariaLabel={`${label} segments`}
-                  tooltip={`${label} segments for the next ${starterKind} start (${min} to ${MAX_SEGMENTS})`}
+                  ariaLabel={workbenchText('FormPanel.segments2', { label: String(label) })}
+                  tooltip={workbenchText('FormPanel.segmentsForTheNextStartTo', { label: String(label), starterKind: String(starterKind), min: String(min), MAX_SEGMENTS: String(MAX_SEGMENTS) })}
                   onChange={(n) => useFormStore.getState().setStarterSegments(starterKind, { ...segments, [axis]: Math.round(n) })}
                   style={{ width: '3.2rem' }}
                 />
@@ -144,7 +160,7 @@ export function FormPanel({ session }: { session: FormSession }) {
             ))}
           </div>
           <div className="form-row">
-            <span className="form-row-label">Extrude</span>
+            <span className="form-row-label">{workbenchText('FormPanel.extrude')}</span>
             <span className="form-seg" data-testid="form-profile-height">
               <NumericInput
                 value={profileHeight}
@@ -152,16 +168,16 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={1000}
                 step={1}
                 decimals={2}
-                ariaLabel="Extrude height"
-                tooltip="How far Extrude takes the selected sketch's profile along its plane's normal (negative: the other way)"
+                ariaLabel={workbenchText('FormPanel.extrudeHeight')}
+                tooltip={workbenchText('FormPanel.howFarExtrudeTakesTheSelectedSketchSProfile')}
                 onChange={(n) => useFormStore.getState().setProfileHeight(n)}
                 style={{ width: '4.5rem' }}
               />
-              <span className="form-seg-label">mm tall</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.mmTall')}</span>
             </span>
           </div>
           <div className="form-row">
-            <span className="form-row-label">Pipe</span>
+            <span className="form-row-label">{workbenchText('FormPanel.pipe')}</span>
             <span className="form-seg" data-testid="form-pipe-radius">
               <NumericInput
                 value={pipeRadius}
@@ -169,16 +185,16 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={1000}
                 step={0.5}
                 decimals={2}
-                ariaLabel="Pipe radius"
-                tooltip="The tube radius Pipe makes; 0: automatic (a twelfth of the path, well inside its tightest bend)"
+                ariaLabel={workbenchText('FormPanel.pipeRadius')}
+                tooltip={workbenchText('FormPanel.theTubeRadiusPipeMakes0AutomaticATwelfth')}
                 onChange={(n) => useFormStore.getState().setPipeRadius(n)}
                 style={{ width: '4.5rem' }}
               />
-              <span className="form-seg-label">{pipeRadius > 0 ? 'mm radius' : 'mm radius (0: auto)'}</span>
+              <span className="form-seg-label">{pipeRadius > 0 ? workbenchText('FormPanel.mmRadius') : workbenchText('FormPanel.mmRadius0Auto')}</span>
             </span>
           </div>
           <div className="form-row">
-            <span className="form-row-label">Revolve</span>
+            <span className="form-row-label">{workbenchText('FormPanel.revolve')}</span>
             <span className="form-seg" data-testid="form-revolve-angle">
               <NumericInput
                 value={revolveAngle}
@@ -186,12 +202,12 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={360}
                 step={15}
                 decimals={1}
-                ariaLabel="Revolve angle"
-                tooltip="How far Revolve turns the selected sketch's profile (1 to 360 degrees); short of a full turn a closed profile gets flat end caps"
+                ariaLabel={workbenchText('FormPanel.revolveAngle')}
+                tooltip={workbenchText('FormPanel.howFarRevolveTurnsTheSelectedSketchSProfile')}
                 onChange={(n) => useFormStore.getState().setRevolveAngle(n)}
                 style={{ width: '3.6rem' }}
               />
-              <span className="form-seg-label">deg</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.deg')}</span>
             </span>
             <span className="form-seg" data-testid="form-revolve-segments">
               <NumericInput
@@ -200,18 +216,48 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={64}
                 step={1}
                 decimals={0}
-                ariaLabel="Revolve segments"
-                tooltip="Cage spans round the revolve (3 to 64)"
+                ariaLabel={workbenchText('FormPanel.revolveSegments')}
+                tooltip={workbenchText('FormPanel.cageSpansRoundTheRevolve3To64')}
                 onChange={(n) => useFormStore.getState().setRevolveSegments(n)}
                 style={{ width: '3rem' }}
               />
-              <span className="form-seg-label">round</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.round')}</span>
             </span>
           </div>
         </PaletteGroup>
-        <PaletteGroup id="edit" title="Edit form" layout={layout}>
+        <PaletteGroup id="edit" title={workbenchText('FormPanel.editForm2')} layout={layout}>
+          {transformMode === 'rotate' && <>
+            <div className="form-row">
+              <span className="form-row-label">{workbenchText('FormPanel.axis')}</span>
+              <select className="form-text" data-testid="form-rotation-axis" aria-label={workbenchText('FormPanel.rotationAxis')}
+                disabled={dragging} value={rotationPick ?? (rotationAxis ? 'picked' : 'centre')}
+                onChange={(e) => useFormStore.getState().chooseRotationAxis(e.target.value === 'centre' ? null : e.target.value as RotationPick)}>
+                <option value="centre">{workbenchText('FormPanel.selectionCentre')}</option>
+                {rotationAxis && <option value="picked">{rotationAxis.label}</option>}
+                <option value="edge">{workbenchText('FormPanel.pickCageEdge')}</option>
+                <option value="x">{workbenchText('FormPanel.xThroughPoint')}</option>
+                <option value="y">{workbenchText('FormPanel.yThroughPoint')}</option>
+                <option value="z">{workbenchText('FormPanel.zThroughPoint')}</option>
+              </select>
+            </div>
+            {rotationPick && <div data-testid="form-rotation-prompt">{workbenchText('FormPanel.rotationPickPrompt', { target: rotationPick === 'edge' ? workbenchText('FormPanel.aCageEdge') : workbenchText('FormPanel.aCagePoint') })}</div>}
+            <div className="form-row" style={{ gap: 'var(--space-1)' }}>
+              <span className="form-row-label" style={{ width: 'auto', flexShrink: 0 }}>{workbenchText('FormPanel.rotate')}</span>
+              {!rotationAxis && !rotationPick && <select className="form-text" aria-label={workbenchText('FormPanel.centreRotationAxis')}
+                style={{ flex: '0 0 3.2rem', minWidth: '3.2rem' }}
+                value={rotationCentreAxis} onChange={(e) => useFormStore.getState().setRotationCentreAxis(e.target.value as 'x' | 'y' | 'z')}>
+                <option value="x">X</option><option value="y">Y</option><option value="z">Z</option>
+              </select>}
+              <NumericInput value={rotationAngle} step={15} decimals={2} ariaLabel={workbenchText('FormPanel.rotationAngle')}
+                tooltip={workbenchText('FormPanel.rotationAngleHint')}
+                onChange={(n) => useFormStore.getState().setRotationAngle(n)} style={{ width: '3.6rem' }} />
+              <span className="form-seg-label">{workbenchText('FormPanel.deg')}</span>
+              <button type="button" className="modal-btn modal-btn-ghost" data-testid="form-rotation-apply"
+                disabled={dragging || rotationPick !== null || !selected} onClick={() => useFormStore.getState().rotateSelection()}>{workbenchText('FormPanel.apply')}</button>
+            </div>
+          </>}
           <div className="form-row">
-            <span className="form-row-label">Soft</span>
+            <span className="form-row-label">{workbenchText('FormPanel.soft')}</span>
             <span className="form-seg" data-testid="form-soft-radius">
               <NumericInput
                 value={softRadius}
@@ -219,32 +265,32 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={500}
                 step={1}
                 decimals={1}
-                ariaLabel="Soft move radius"
-                tooltip="Points within this distance of the selection follow a move part of the way, fading to nothing at the radius (0 = only the selection moves)"
+                ariaLabel={workbenchText('FormPanel.softMoveRadius')}
+                tooltip={workbenchText('FormPanel.pointsWithinThisDistanceOfTheSelectionFollowA')}
                 onChange={(n) => useFormStore.getState().setSoftRadius(n)}
                 style={{ width: '4.5rem' }}
               />
-              <span className="form-seg-label">mm radius</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.mmRadius')}</span>
             </span>
           </div>
           <div className="form-row">
-            <span className="form-row-label">Flatten</span>
+            <span className="form-row-label">{workbenchText('FormPanel.flatten')}</span>
             <span className="form-seg">
               <select
                 className="form-text"
                 data-testid="form-flatten-onto"
-                aria-label="Flatten onto"
-                title="The plane Flatten puts the selected points on: their best fit, an X, Y or Z plane, the first selected face's plane, or the mirror plane"
+                aria-label={workbenchText('FormPanel.flattenOnto')}
+                title={workbenchText('FormPanel.thePlaneFlattenPutsTheSelectedPointsOnTheir')}
                 value={flattenOnto === 'mirror' && (symmetry === null || circularCount(symmetry) !== null) ? 'fit' : flattenOnto}
                 onChange={(e) => useFormStore.getState().setFlattenOnto(e.target.value as FlattenOnto)}
                 style={{ width: '5.6rem' }}
               >
-                <option value="fit">best fit</option>
-                <option value="x">X plane</option>
-                <option value="y">Y plane</option>
-                <option value="z">Z plane</option>
-                <option value="face">face</option>
-                {symmetry !== null && circularCount(symmetry) === null && <option value="mirror">mirror</option>}
+                <option value="fit">{workbenchText('FormPanel.bestFit')}</option>
+                <option value="x">{workbenchText('FormPanel.xPlane')}</option>
+                <option value="y">{workbenchText('FormPanel.yPlane')}</option>
+                <option value="z">{workbenchText('FormPanel.zPlane')}</option>
+                <option value="face">{workbenchText('FormPanel.face')}</option>
+                {symmetry !== null && circularCount(symmetry) === null && <option value="mirror">{workbenchText('FormPanel.mirror')}</option>}
               </select>
             </span>
             {(flattenOnto === 'x' || flattenOnto === 'y' || flattenOnto === 'z') && (
@@ -255,19 +301,19 @@ export function FormPanel({ session }: { session: FormSession }) {
                   max={10000}
                   step={1}
                   decimals={3}
-                  ariaLabel="Flatten plane position"
-                  tooltip={`Where the ${flattenOnto.toUpperCase()} plane sits: through the centre of the selected points until a value is typed`}
+                  ariaLabel={workbenchText('FormPanel.flattenPlanePosition')}
+                  tooltip={workbenchText('FormPanel.whereThePlaneSitsThroughTheCentreOfThe', { value1: String(flattenOnto.toUpperCase()) })}
                   onChange={(n) => useFormStore.getState().setFlattenAt(n)}
                   style={{ width: '3.6rem' }}
                 />
-                <span className="form-seg-label">mm</span>
+                <span className="form-seg-label">{workbenchText('FormPanel.mm')}</span>
               </span>
             )}
           </div>
         </PaletteGroup>
-        <PaletteGroup id="topology" title="Topology" layout={layout}>
+        <PaletteGroup id="topology" title={workbenchText('FormPanel.topology')} layout={layout}>
           <div className="form-row">
-            <span className="form-row-label">Crease</span>
+            <span className="form-row-label">{workbenchText('FormPanel.crease')}</span>
             <span className="form-seg" data-testid="form-crease-weight">
               <NumericInput
                 value={creaseWeight}
@@ -275,16 +321,16 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={10}
                 step={0.5}
                 decimals={1}
-                ariaLabel="Crease weight"
-                tooltip="How sharp Crease makes an edge: 0 = fully sharp; a weight keeps it sharp for that many subdivision steps, then smooth (0.5 to 3 give soft to firm edges)"
+                ariaLabel={workbenchText('FormPanel.creaseWeight')}
+                tooltip={workbenchText('FormPanel.howSharpCreaseMakesAnEdge0FullySharp')}
                 onChange={(n) => useFormStore.getState().setCreaseWeight(n)}
                 style={{ width: '3.6rem' }}
               />
-              <span className="form-seg-label">{creaseWeight === 0 ? 'weight (sharp)' : 'weight'}</span>
+              <span className="form-seg-label">{creaseWeight === 0 ? workbenchText('FormPanel.weightSharp') : workbenchText('FormPanel.weight')}</span>
             </span>
           </div>
           <div className="form-row">
-            <span className="form-row-label">Loop at</span>
+            <span className="form-row-label">{workbenchText('FormPanel.loopAt')}</span>
             <span className="form-seg" data-testid="form-loop-position">
               <NumericInput
                 value={loopPosition}
@@ -292,8 +338,8 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={0.99}
                 step={0.05}
                 decimals={2}
-                ariaLabel="Insert loop position"
-                tooltip="Where Insert loop cuts each edge of the ring: 0.5 is the middle; less is nearer the selected edge's lower end (then its -Y, then -X end)"
+                ariaLabel={workbenchText('FormPanel.insertLoopPosition')}
+                tooltip={workbenchText('FormPanel.whereInsertLoopCutsEachEdgeOfTheRing')}
                 onChange={(n) => useFormStore.getState().setLoopPosition(n)}
                 style={{ width: '3.6rem' }}
               />
@@ -302,8 +348,8 @@ export function FormPanel({ session }: { session: FormSession }) {
               type="range"
               className="form-range"
               data-testid="form-loop-slider"
-              aria-label="Loop position slider"
-              title="Where Insert loop cuts each edge; right after Insert loop, sliding it moves that loop"
+              aria-label={workbenchText('FormPanel.loopPositionSlider')}
+              title={workbenchText('FormPanel.whereInsertLoopCutsEachEdgeRightAfterInsert')}
               min={0.01}
               max={0.99}
               step={0.01}
@@ -313,7 +359,7 @@ export function FormPanel({ session }: { session: FormSession }) {
             />
           </div>
           <div className="form-row">
-            <span className="form-row-label">Weld</span>
+            <span className="form-row-label">{workbenchText('FormPanel.weld')}</span>
             <span className="form-seg" data-testid="form-weld-distance">
               <NumericInput
                 value={weldDistance}
@@ -321,18 +367,18 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={100}
                 step={0.5}
                 decimals={2}
-                ariaLabel="Weld close distance"
-                tooltip="Weld close joins points this close to one another (among the selection, or across the form when nothing is selected)"
+                ariaLabel={workbenchText('FormPanel.weldCloseDistance')}
+                tooltip={workbenchText('FormPanel.weldCloseJoinsPointsThisCloseToOneAnother')}
                 onChange={(n) => useFormStore.getState().setWeldDistance(n)}
                 style={{ width: '4.5rem' }}
               />
-              <span className="form-seg-label">mm apart</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.mmApart')}</span>
             </span>
           </div>
         </PaletteGroup>
-        <PaletteGroup id="openings" title="Openings" layout={layout}>
+        <PaletteGroup id="openings" title={workbenchText('FormPanel.openings')} layout={layout}>
           <div className="form-row">
-            <span className="form-row-label">Bridge</span>
+            <span className="form-row-label">{workbenchText('FormPanel.bridge')}</span>
             <span className="form-seg" data-testid="form-bridge-segments">
               <NumericInput
                 value={bridgeSegments}
@@ -340,12 +386,12 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={32}
                 step={1}
                 decimals={0}
-                ariaLabel="Bridge segments"
-                tooltip="How many rings of faces long Bridge makes the band between the two openings or face sets"
+                ariaLabel={workbenchText('FormPanel.bridgeSegments')}
+                tooltip={workbenchText('FormPanel.howManyRingsOfFacesLongBridgeMakesThe')}
                 onChange={(n) => useFormStore.getState().setBridgeSegments(n)}
                 style={{ width: '3.2rem' }}
               />
-              <span className="form-seg-label">long</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.long')}</span>
             </span>
             <span className="form-seg" data-testid="form-bridge-twist">
               <NumericInput
@@ -354,17 +400,17 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={64}
                 step={1}
                 decimals={0}
-                ariaLabel="Bridge twist"
-                tooltip="How many points round a bridge between two closed openings or face sets turns, so the band spirals (0: lined up)"
+                ariaLabel={workbenchText('FormPanel.bridgeTwist')}
+                tooltip={workbenchText('FormPanel.howManyPointsRoundABridgeBetweenTwoClosed')}
                 onChange={(n) => useFormStore.getState().setBridgeTwist(n)}
                 style={{ width: '3.2rem' }}
               />
-              <span className="form-seg-label">twist</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.twist')}</span>
             </span>
           </div>
           {open && (
             <div className="form-row">
-              <span className="form-row-label">Thicken</span>
+              <span className="form-row-label">{workbenchText('FormPanel.thicken')}</span>
               <span className="form-seg" data-testid="form-thickness">
                 <NumericInput
                   value={thickness}
@@ -372,20 +418,20 @@ export function FormPanel({ session }: { session: FormSession }) {
                   max={50}
                   step={0.5}
                   decimals={2}
-                  ariaLabel="Thicken wall thickness"
-                  tooltip="Wall thickness Thicken gives an open form (0.1 to 50 mm)"
+                  ariaLabel={workbenchText('FormPanel.thickenWallThickness')}
+                  tooltip={workbenchText('FormPanel.wallThicknessThickenGivesAnOpenForm01')}
                   onChange={(n) => useFormStore.getState().setThickness(n)}
                   style={{ width: '4.5rem' }}
                 />
-                <span className="form-seg-label">mm wall</span>
+                <span className="form-seg-label">{workbenchText('FormPanel.mmWall')}</span>
               </span>
             </div>
           )}
         </PaletteGroup>
-        <PaletteGroup id="symmetry" title="Symmetry" layout={layout}>
+        <PaletteGroup id="symmetry" title={workbenchText('FormPanel.symmetry')} layout={layout}>
           {symmetry !== null && circularCount(symmetry) === null && (
             <div className="form-row">
-              <span className="form-row-label">Mirror</span>
+              <span className="form-row-label">{workbenchText('FormPanel.mirror2')}</span>
               <span className="form-seg" data-testid="form-mirror-at">
                 <NumericInput
                   value={symmetryAt}
@@ -393,18 +439,18 @@ export function FormPanel({ session }: { session: FormSession }) {
                   max={10000}
                   step={1}
                   decimals={3}
-                  ariaLabel="Mirror plane position"
-                  tooltip={symmetry === 'p' ? 'Where the placed mirror plane sits along its normal: moving it pairs the points mirrored across the new plane' : `Where the mirror plane sits on ${symmetry.toUpperCase()}: moving it pairs the points mirrored across the new plane`}
+                  ariaLabel={workbenchText('FormPanel.mirrorPlanePosition')}
+                  tooltip={symmetry === 'p' ? workbenchText('FormPanel.whereThePlacedMirrorPlaneSitsAlongItsNormal') : workbenchText('FormPanel.whereTheMirrorPlaneSitsOnMovingItPairs', { value1: String(symmetry.toUpperCase()) })}
                   onChange={(n) => useFormStore.getState().setSymmetryAt(n)}
                   style={{ width: '5rem' }}
                 />
-                <span className="form-seg-label">{symmetry === 'p' ? 'mm offset' : `mm on ${symmetry.toUpperCase()}`}</span>
+                <span className="form-seg-label">{symmetry === 'p' ? workbenchText('FormPanel.mmOffset') : workbenchText('FormPanel.mmOn', { value1: String(symmetry.toUpperCase()) })}</span>
               </span>
             </div>
           )}
           {symmetry !== null && circularCount(symmetry) !== null && (
             <div className="form-row">
-              <span className="form-row-label">Circular</span>
+              <span className="form-row-label">{workbenchText('FormPanel.circular')}</span>
               <span className="form-seg" data-testid="form-circular-copies">
                 <NumericInput
                   value={circularCopies}
@@ -412,19 +458,19 @@ export function FormPanel({ session }: { session: FormSession }) {
                   max={24}
                   step={1}
                   decimals={0}
-                  ariaLabel="Circular copies"
-                  tooltip="How many copies round the Z axis circular symmetry keeps in step"
+                  ariaLabel={workbenchText('FormPanel.circularCopies')}
+                  tooltip={workbenchText('FormPanel.howManyCopiesRoundTheZAxisCircularSymmetry')}
                   onChange={(n) => useFormStore.getState().setCircularCopies(n)}
                   style={{ width: '3.6rem' }}
                 />
-                <span className="form-seg-label">copies</span>
+                <span className="form-seg-label">{workbenchText('FormPanel.copies')}</span>
               </span>
             </div>
           )}
         </PaletteGroup>
-        <PaletteGroup id="display" title="Display" layout={layout}>
+        <PaletteGroup id="display" title={workbenchText('FormPanel.display')} layout={layout}>
           <div className="form-row">
-            <span className="form-row-label">Tolerance</span>
+            <span className="form-row-label">{workbenchText('FormPanel.tolerance')}</span>
             <span className="form-seg" data-testid="form-tolerance">
               <NumericInput
                 value={tolerance}
@@ -432,16 +478,16 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={1}
                 step={0.005}
                 decimals={3}
-                ariaLabel="Finished body chord tolerance"
-                tooltip="How far the finished body's facets may stray from the smooth surface (0.001 to 1 mm)"
+                ariaLabel={workbenchText('FormPanel.finishedBodyChordTolerance')}
+                tooltip={workbenchText('FormPanel.howFarTheFinishedBodySFacetsMayStray')}
                 onChange={(n) => useFormStore.getState().setTolerance(n)}
                 style={{ width: '4.5rem' }}
               />
-              <span className="form-seg-label">mm chord</span>
+              <span className="form-seg-label">{workbenchText('FormPanel.mmChord')}</span>
             </span>
           </div>
           <div className="form-row">
-            <span className="form-row-label">Smooth</span>
+            <span className="form-row-label">{workbenchText('FormPanel.smooth')}</span>
             <span className="form-seg" data-testid="form-skin-level">
               <NumericInput
                 value={skinLevel}
@@ -449,18 +495,18 @@ export function FormPanel({ session }: { session: FormSession }) {
                 max={MAX_SKIN_LEVEL}
                 step={1}
                 decimals={0}
-                ariaLabel="Smooth skin display level"
-                tooltip={`Subdivision level the smooth skin is drawn at (1 to ${MAX_SKIN_LEVEL}; 0 = automatic). Display only: the finished body is exact either way`}
+                ariaLabel={workbenchText('FormPanel.smoothSkinDisplayLevel')}
+                tooltip={workbenchText('FormPanel.subdivisionLevelTheSmoothSkinIsDrawnAt1', { MAX_SKIN_LEVEL: String(MAX_SKIN_LEVEL) })}
                 onChange={(n) => useFormStore.getState().setSkinLevel(n)}
                 style={{ width: '3.2rem' }}
               />
-              <span className="form-seg-label">{skinLevel === 0 ? 'level (auto)' : 'level'}</span>
+              <span className="form-seg-label">{skinLevel === 0 ? workbenchText('FormPanel.levelAuto') : workbenchText('FormPanel.level')}</span>
             </span>
           </div>
         </PaletteGroup>
         <div className="form-static-status">
-          <div>Smooth skin: level {levels.rest} at rest, {levels.drag} while dragging</div>
-          <div className="form-hint">Alt-drag a move arrow to extrude the selected faces.{symmetry !== null && !symmetry.startsWith('c') ? ' Drag the mirror plane to slide it.' : ''}</div>
+          <div>{catalogChildren(workbenchText('FormPanel.combinedSmoothSkinLevelAtRestWhileDragging', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: levels.rest, value2: levels.drag })}</div>
+          <div className="form-hint">{workbenchText('FormPanel.altDragAMoveArrowToExtrudeTheSelected', { value1: String((symmetry !== null && !symmetry.startsWith('c') ? workbenchText('FormPanel.dragTheMirrorPlaneToSlideIt') : '')) })}</div>
         </div>
       </div>
     </DockedPanel>
@@ -472,6 +518,7 @@ export function FormPanel({ session }: { session: FormSession }) {
  * (remembered per viewer); a group with no row showing has no header either, so nothing is left empty.
  */
 function PaletteGroup({ id, title, layout, children }: { id: string; title: string; layout: ToolPaletteLayout; children: ReactNode }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   if (Children.toArray(children).length === 0) return null
   const folded = layout.isCollapsed(id)
   return (
@@ -481,7 +528,7 @@ function PaletteGroup({ id, title, layout, children }: { id: string; title: stri
         className="form-group-header"
         data-testid={`form-group-toggle-${id}`}
         aria-expanded={!folded}
-        data-tooltip={folded ? `Show the ${title} settings` : `Hide the ${title} settings`}
+        data-tooltip={folded ? workbenchText('FormPanel.showTheSettings', { title: String(title) }) : workbenchText('FormPanel.hideTheSettings', { title: String(title) })}
         onClick={() => layout.toggleSection(id)}
       >
         {folded ? <ChevronRight size={12} /> : <ChevronDown size={12} />}

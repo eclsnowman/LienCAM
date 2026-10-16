@@ -7,7 +7,8 @@ import { execFileSync } from 'node:child_process'
 import { captureSourceProvenance } from '../lib/provenance.mjs'
 
 export const ROOT = process.cwd()
-export const OUT = path.resolve(ROOT, 'src/tests/evidence/WO-2709/candidates')
+// WIKI_GAPS_EVIDENCE: a later picture run (WO-2848) keeps its candidates in its own evidence.
+export const OUT = path.resolve(ROOT, process.env.WIKI_GAPS_EVIDENCE || 'src/tests/evidence/WO-2709', 'candidates')
 fs.mkdirSync(OUT, { recursive: true })
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))

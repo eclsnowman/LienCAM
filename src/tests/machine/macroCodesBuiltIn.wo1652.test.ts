@@ -41,6 +41,7 @@ const {
   __resetEstopInterlockForTest,
   cancelGuidedToolChange,
   connectMachine,
+  continueClampPause,
   disconnectMachine,
   getMachineController,
   loadGcodeTextToolpathProgram,
@@ -69,7 +70,11 @@ function sameAsMain(machine: string, sends: string[], cappedRapid?: { from: numb
     return
   }
   expect(existsSync(evidence(machine))).toBe(true)
-  const recorded = JSON.parse(readFileSync(evidence(machine), 'utf8')) as string[]
+  // WO-2773: main's run pressed CYCLE START at the parked clamp card (its one
+  // `cycleResume` press); the card's Continue is now the one door, and every
+  // call the session sends from there on is main's.
+  const recorded = (JSON.parse(readFileSync(evidence(machine), 'utf8')) as string[])
+    .filter((call) => call !== 'cycleResume([])')
   const main = cappedRapid
     ? recorded.map((call) => call.split(`"feedMmMin":${cappedRapid.from},"rapid":true`)
       .join(`"feedMmMin":${cappedRapid.to},"rapid":true`))
@@ -194,7 +199,7 @@ async function runToBoundary(name: string, text: string): Promise<void> {
   await advance(10_000)
 }
 
-/** The whole clamp-pause run of `text`: to the clamp card, CYCLE START, to the end. */
+/** The whole clamp-pause run of `text`: to the clamp card, its Continue, to the end. */
 async function clampRun(name: string, text: string, park: { x: number; y: number; z: number }): Promise<string[]> {
   const sends = recordSends()
   await runToBoundary(name, text)
@@ -204,9 +209,9 @@ async function clampRun(name: string, text: string, park: { x: number; y: number
   expect(paused.mpos?.x).toBeCloseTo(park.x, 1)
   expect(paused.mpos?.y).toBeCloseTo(park.y, 1)
   expect(paused.mpos?.z).toBeCloseTo(park.z, 1)
-  // WO-2437 fix round (architect, rehearsal 2026-10-02): at the parked clamp
-  // pause CYCLE START is the card's Continue - one release, the same calls.
-  expect(await executeOperatorCycleStart()).toBe(true)
+  // WO-2773 (Operator 2026-10-13, "A - Continue on both"): the card's Continue is
+  // the one door at the parked clamp pause - one release, the same calls.
+  expect(continueClampPause()).toBe(true)
   expect(useMachineControl.getState().toolChange).toBeNull()
   await advance(10_000)
   expect(useMachineControl.getState().job.phase).toBe('complete')
@@ -481,9 +486,9 @@ describe('WO-1652 toolChange(): a macro runs the programmed tool change', () => 
     return { cards, off }
   }
 
-  function loadAndStart(name: string, code: string): void {
+  function loadAndStart(name: string, code: string, program = toolProgram(code)): void {
     render(createElement(ProgramPanel))
-    const loaded = loadGcodeTextToolpathProgram(name, toolProgram(code))
+    const loaded = loadGcodeTextToolpathProgram(name, program)
     expect(loaded.ok, loaded.reason ?? '').toBe(true)
     expect(getMachineController().startJob()).toBe(true)
   }
@@ -623,7 +628,9 @@ describe('WO-1652 toolChange(): a macro runs the programmed tool change', () => 
     selectToolMachine([M6_PRELUDE])
     await connectToolMachine()
     const sends = recordSends()
-    loadAndStart('tool-change.nc', 'M6')
+    // WO-2764: WO-2478 runs the M6 macro at the same-tool T1 M6 too; preselect T1 so the
+    // prelude under test is the one at the T2 change.
+    loadAndStart('tool-change.nc', 'M6', toolProgram('M6').replace('T1 M6', 'T1'))
     // The prelude's move ends at its point before the change parks.
     let sawPrelude = false
     for (let i = 0; i < 400 && useMachineControl.getState().toolChange?.step !== 'parking'; i += 1) {

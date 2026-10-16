@@ -85,7 +85,7 @@ await withExampleDriver({ outDir: evidence }, async driver => {
     await driver.page.setViewportSize({ width: 1920, height: 1080 })
     await driver.page.getByTestId('mode-tab-toolpath').click()
     const state = await compute('Reopened recipe: Generate all')
-    assert.equal(state.toolLibrary.find(t => t.name === '3 mm flat end mill').fluteLength, 15)
+    assert.equal(state.toolLibrary.find(t => t.name === '3 mm flat end mill, 15 mm flutes').fluteLength, 15)
     assert.equal(state.project.setups[0].operations[0].params.cycleType, 'peck')
     assert.equal(state.project.setups[0].operations[0].params.peckDepth, 3)
     assert.deepEqual(state.project.workholding, saved.workholding)

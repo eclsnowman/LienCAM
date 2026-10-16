@@ -79,10 +79,11 @@ async function openDesktop(userData?: string, chromiumUserData?: string): Promis
     // backdrop nodes by hand later crashed the renderer on the Control tab
     // ("insertBefore ... not a child", WO-2650/WO-2652).
     await page.locator('#liencam-splash').waitFor({ state: 'detached', timeout: 30_000 })
-    const picker = page.locator('.modal-backdrop').filter({ hasText: 'Try an example' })
+    // WO-2764: WO-2725 made it the shared "Open a project" picker; its header Close is the same answer.
+    const picker = page.locator('.modal-backdrop.project-picker-backdrop').filter({ hasText: 'Open a project' })
     try {
       await picker.first().waitFor({ state: 'visible', timeout: 10_000 })
-      await picker.first().getByRole('button', { name: 'Close example picker' }).click()
+      await picker.first().getByRole('button', { name: 'Close project picker' }).click()
       await picker.first().waitFor({ state: 'detached', timeout: 10_000 })
     } catch (error) {
       if (await picker.count()) throw error

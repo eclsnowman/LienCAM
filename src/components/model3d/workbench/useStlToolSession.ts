@@ -1,3 +1,4 @@
+import { parseHoleMove } from '../dialogs/MoveHoleEntry'
 // WO-1936: one Model-tool edit of an STL part's features, from pick to Apply.
 //
 // The Model screen's Defeature, Resize Hole, Push/Pull and Fillet tools render
@@ -18,10 +19,12 @@
 // state census is untouched: nothing here is document state - the journal the
 // edits land in is the CAM row's, owned by the store.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { CommandHistory } from '../../../doc'
 import type { FeatureVerdict } from '../../../geom/geom-service'
-import { primeBoringKernel, type BooleanBodyParameters, type MeshEditRecord } from '../../../mesh/edit'
+import { createMeshEditRecord, MOVE_HOLE_KIND, MOVE_FLAT_FACE_KIND, resolveEditedStlMesh, primeBoringKernel, type BooleanBodyParameters, type MeshEditRecord } from '../../../mesh/edit'
 import type { MeshBuffers } from '../../../mesh/types'
 import { useCamStore } from '../../../store'
 import type { FaceFrame } from '../gizmos'
@@ -32,6 +35,7 @@ import {
   planStlShapeEdit,
   stlDefeatureVerdicts,
   stlEditRefusalLine,
+  stlCounterboreStep,
   stlHoleDepth,
   StlMeshEditCommand,
   stlToolAccepts,
@@ -40,7 +44,10 @@ import {
   type StlEditTool,
   type StlFeatureEditRequest,
 } from './stlFeatureEdits'
-import { stlFeatureCentroid, type StlModelBodyPresentation, type StlModelFeature, type StlModelPick } from './stlModelBody'
+import { loadCachedSTL } from '../../../lib/stlCache'
+import { RewriteStlMeshEditCommand, rewriteStlJournalTail } from './stlJournalRewrite'
+import { enqueueStlJournalMutation } from './stlJournalQueue'
+import { buildStlModelBodyModel, stlFeatureCentroid, type StlModelBodyPresentation, type StlModelFeature, type StlModelPick } from './stlModelBody'
 
 /** The preview's state, in the Defeature dialog's own four words. */
 export interface StlToolPreview {
@@ -66,9 +73,14 @@ export type StlToolSession =
       preview: StlToolPreview
       /** WO-2117: Hole depth - the field is the hole's depth, not its diameter */
       depth?: { currentMm: number; through: boolean }
+      /** WO-2762: the counterbore wall was picked - currentDiameter is the
+       *  counterbore's and only that step is bored */
+      step?: 'counterbore'
     }
+  | { kind: 'move-hole'; featureId: string; draft: string; preview: StlToolPreview }
   | { kind: 'push-pull'; featureId: string; frame: FaceFrame; draft: string; preview: StlToolPreview }
   | { kind: 'fillet'; featureIds: string[]; initialRadius: number; radius: number | null; preview: StlToolPreview }
+  | { kind: 'chamfer'; featureIds: string[]; initialRadius: number; radius: number | null; preview: StlToolPreview }
   /** WO-1961: Boolean with the STL as its target; `shape` is its tool (null
    *  while the dialog's fields do not hold one) */
   | { kind: 'boolean'; shape: BooleanBodyParameters | null; preview: StlToolPreview }
@@ -79,7 +91,7 @@ type SessionPlan =
   | { ok: true; edits: PlannedStlEdit[]; mesh: MeshBuffers }
   | { ok: false; reason: string; line: string }
 
-const IDLE_DEFEATURE: StlToolPreview = { kind: 'idle', message: 'Select a feature to preview its removal.' }
+const IDLE_DEFEATURE: StlToolPreview = { kind: 'idle', get message() { return workbenchText('useStlToolSession.selectAFeatureToPreviewItsRemoval') } }
 
 export interface StlToolSessionOptions {
   presentationRef: MutableRefObject<StlModelBodyPresentation | null>
@@ -105,8 +117,10 @@ export interface StlToolSessionApi {
   /** the picked feature this tool edits, or null when the pick is not one */
   acceptedFeature(tool: StlEditTool, pick: StlModelPick | null): StlModelFeature | null
   /** open `tool` on the STL, optionally with a feature already picked.
-   *  WO-2117: Resize Hole with `field` 'depth' is Hole depth. */
-  start(tool: StlEditTool, feature: StlModelFeature | null, field?: 'depth'): void
+   *  WO-2117: Resize Hole with `field` 'depth' is Hole depth.
+   *  WO-2762: `facet` is the displayed facet the pick hit - Resize Hole on a
+   *  counterbore's wider wall opens on that step. */
+  start(tool: StlEditTool, feature: StlModelFeature | null, field?: 'depth', facet?: number): void
   /** a viewport pick while a session is open; true when it was used */
   pick(pick: StlModelPick | null): boolean
   /** the hover highlight for `tool` - only features the tool edits light up */
@@ -125,6 +139,7 @@ export interface StlToolSessionApi {
   /** Apply the session: its refusal/error sentence, or undefined when it landed */
   apply(): Promise<string | undefined>
   close(): void
+  reopen(editId: string): Promise<void>
 }
 
 /** Where Resize Hole's entry anchors: the hole's upper opening (the centre of
@@ -150,7 +165,16 @@ function holeOpening(
   return { x: c.x + axis[0] * reach, y: c.y + axis[1] * reach, z: c.z + axis[2] * reach }
 }
 
-const mm = (value: number): string => `${Number(value.toFixed(3))} mm`
+/** WO-2762: 'counterbore' when displayed facet `facet` of `body` lies on the
+ *  wider wall of the counterbore `feature` - the step a Resize Hole pick there
+ *  edits. Undefined = the hole's pilot, as before. */
+function counterboreStepAt(body: StlModelBodyPresentation['model'], feature: StlModelFeature, facet: number | undefined): 'counterbore' | undefined {
+  if (facet === undefined) return undefined
+  const counterbore = stlCounterboreStep(feature)
+  return counterbore !== null && counterbore.wallSourceFacetIds.includes(body.sourceFacetIds[facet]) ? 'counterbore' : undefined
+}
+
+const mm = (value: number): string => workbenchText('useStlToolSession.mm', { value1: String(Number(value.toFixed(3))) })
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`
 
 /** WO-2120: the line an applied STL edit prints, in the kernel route's own
@@ -167,51 +191,60 @@ export function stlAppliedLine(
       return undefined
     case 'defeature':
       return defeatureRemovedLine(session.verdicts.filter((v) => session.selected.has(v.featureKey)), part)
+    case 'move-hole': return workbenchText('MoveHoleEntry.appliedOn', { translation: session.draft, part })
     case 'resize-hole': {
       if (session.depth !== undefined) {
         const depth = validateHoleDepth(session.draft, session.depth.currentMm, session.depth.through)
         if (!depth.ok) return undefined
-        const was = session.depth.through ? 'through' : `${mm(session.depth.currentMm)} deep`
-        const now = depth.newDepth === 'through' ? 'through' : `${mm(depth.newDepth)} deep`
-        return `Hole depth ${depth.newDepth === 'through' ? 'through' : mm(depth.newDepth)} applied on ${part}: ${was} -> ${now}.`
+        const was = session.depth.through ? 'through' : workbenchText('useStlToolSession.deep2', { value1: String(mm(session.depth.currentMm)) })
+        const now = depth.newDepth === 'through' ? 'through' : workbenchText('useStlToolSession.deep2', { value1: String(mm(depth.newDepth)) })
+        return workbenchText('useStlToolSession.holeDepthAppliedOn', { value1: String(depth.newDepth === 'through' ? 'through' : mm(depth.newDepth)), part: String(part), was: String(was), now: String(now) })
       }
       const valid = validateResizeDiameter(session.draft, session.currentDiameter)
       if (!valid.ok) return undefined
-      return `Resize hole to ${mm(valid.newDiameter)} applied on ${part}: ${mm(session.currentDiameter)} -> ${mm(valid.newDiameter)}.`
+      return workbenchText(session.step === 'counterbore' ? 'useStlToolSession.resizeCounterboreToAppliedOn' : 'useStlToolSession.resizeHoleToAppliedOn', { value1: String(mm(valid.newDiameter)), part: String(part), value3: String(mm(session.currentDiameter)), value4: String(mm(valid.newDiameter)) })
     }
     case 'push-pull': {
       const distance = Number(session.draft)
       const face = featureById(session.featureId)
-      return `Push/Pull ${distance > 0 ? '+' : ''}${mm(distance)} applied on ${part}${face === undefined ? '' : `: the ${face.label}`}.`
+      return workbenchText('useStlToolSession.pushPullAppliedOn', { value1: String(distance > 0 ? '+' : ''), value2: String(mm(distance)), part: String(part), value4: String(face === undefined ? '' : workbenchText('useStlToolSession.the', { value1: String(face.label) })) })
     }
+    case 'chamfer':
+      return session.radius === null ? undefined : `Chamfer applied on ${part}: ${mm(session.initialRadius)} -> ${mm(session.radius)}.`
     case 'fillet':
       return session.radius === null ? undefined
-        : `Fillet ${mm(session.radius)} applied on ${part}: ${plural(session.featureIds.length, 'fillet')}, ${mm(session.initialRadius)} -> ${mm(session.radius)}.`
+        : workbenchText('useStlToolSession.filletAppliedOn', { value1: String(mm(session.radius)), part: String(part), value3: String(plural(session.featureIds.length, 'fillet')), value4: String(mm(session.initialRadius)), value5: String(mm(session.radius)) })
     case 'boolean': {
       const shape = session.shape
       if (shape === null) return undefined
       switch (shape.shape) {
         case 'chamfer':
-          return `Chamfer ${mm(shape.distanceMm ?? 0)} applied on ${part}: ${plural(shape.edges?.length ?? 0, 'edge')}.`
+          return workbenchText('useStlToolSession.chamferAppliedOn', { value1: String(mm(shape.distanceMm ?? 0)), part: String(part), value3: String(plural(shape.edges?.length ?? 0, 'edge')) })
         case 'hole': {
           const size = shape.diameterMm === undefined ? '' : `, ${mm(shape.diameterMm)}`
-          const deep = shape.through === true ? ' through' : shape.lengthMm === undefined ? '' : `, ${mm(shape.lengthMm)} deep`
-          return `Hole applied on ${part}: ${plural(shape.points?.length ?? 1, 'hole')}${size}${deep}.`
+          const deep = shape.through === true ? workbenchText('useStlToolSession.through') : shape.lengthMm === undefined ? '' : workbenchText('useStlToolSession.deep', { value1: String(mm(shape.lengthMm)) })
+          return workbenchText('useStlToolSession.holeAppliedOn', { part: String(part), value2: String(plural(shape.points?.length ?? 1, 'hole')), size: String(size), deep: String(deep) })
         }
         case 'shell':
-          return `Shell ${mm(shape.thicknessMm ?? 0)} applied on ${part}: ${plural(shape.faces?.length ?? 0, 'face')} opened.`
+          return workbenchText('useStlToolSession.shellAppliedOnOpened', { value1: String(mm(shape.thicknessMm ?? 0)), part: String(part), value3: String(plural(shape.faces?.length ?? 0, 'face')) })
         case 'draft':
-          return `Draft ${Number((shape.angleDeg ?? 0).toFixed(3))} deg applied on ${part}: ${plural(shape.faces?.length ?? 0, 'face')}.`
+          return workbenchText('useStlToolSession.draftDegAppliedOn', { value1: String(Number((shape.angleDeg ?? 0).toFixed(3))), part: String(part), value3: String(plural(shape.faces?.length ?? 0, 'face')) })
         default:
-          return `Boolean ${shape.operation === 'add' ? 'add' : 'cut'} applied on ${part}: a ${shape.shape}.`
+          return workbenchText('useStlToolSession.booleanAppliedOnA', { value1: String(shape.operation === 'add' ? 'add' : 'cut'), part: String(part), shape: String(shape.shape) })
       }
     }
   }
 }
 
 export function useStlToolSession(options: StlToolSessionOptions): StlToolSessionApi {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [session, setSessionState] = useState<StlToolSession>({ kind: 'none' })
   const sessionRef = useRef<StlToolSession>(session)
+  const editRef = useRef<{
+    body: StlModelBodyPresentation['model']; bytes: ArrayBuffer;
+    journal: readonly MeshEditRecord[]; index: number
+  } | null>(null)
+  const reopenGenerationRef = useRef(0)
   const generationRef = useRef(0)
   const hoverKeyRef = useRef<string | null>(null)
   const optionsRef = useRef(options)
@@ -222,7 +255,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     setSessionState(next)
   }, [])
 
-  const model = (): StlModelBodyPresentation['model'] | null => optionsRef.current.presentationRef.current?.model ?? null
+  const model = (): StlModelBodyPresentation['model'] | null => editRef.current?.body ?? optionsRef.current.presentationRef.current?.model ?? null
   const featureById = (id: string): StlModelFeature | undefined => model()?.features.find((f) => f.id === id)
 
   /** The requests the open session stands for right now, or null when its
@@ -239,6 +272,11 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
           .filter((f): f is StlModelFeature => f !== undefined)
         return picked.length > 0 ? picked.map((feature) => ({ tool: 'defeature' as const, feature })) : null
       }
+      case 'move-hole': {
+        const feature = featureById(current.featureId)
+        const valid = parseHoleMove(current.draft)
+        return feature !== undefined && valid.ok ? [{ tool: 'move-hole', feature, translation: valid.translation }] : null
+      }
       case 'resize-hole': {
         const feature = featureById(current.featureId)
         if (current.depth !== undefined) {
@@ -248,7 +286,9 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
             : null
         }
         const valid = validateResizeDiameter(current.draft, current.currentDiameter)
-        return feature !== undefined && valid.ok ? [{ tool: 'resize-hole', feature, diameterMm: valid.newDiameter }] : null
+        return feature !== undefined && valid.ok
+          ? [{ tool: 'resize-hole', feature, diameterMm: valid.newDiameter, ...(current.step !== undefined ? { step: current.step } : {}) }]
+          : null
       }
       case 'push-pull': {
         const feature = featureById(current.featureId)
@@ -257,12 +297,15 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
           ? [{ tool: 'push-pull', feature, distanceMm: distance }]
           : null
       }
+      case 'chamfer':
       case 'fillet': {
         const picked = current.featureIds.map(featureById).filter((f): f is StlModelFeature => f !== undefined)
-        // The radius the blend already has is no edit (the dialog opens on it).
+        // The measured radius/distance is no edit (the dialog opens on it).
         return picked.length > 0 && current.radius !== null && current.radius > 0 &&
           Math.abs(current.radius - current.initialRadius) > 1e-9
-          ? picked.map((feature) => ({ tool: 'fillet' as const, feature, radiusMm: current.radius as number }))
+          ? picked.map((feature) => current.kind === 'chamfer'
+            ? { tool: 'chamfer' as const, feature, distanceMm: current.radius as number }
+            : { tool: 'fillet' as const, feature, radiusMm: current.radius as number })
           : null
       }
     }
@@ -273,7 +316,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
   const plan = async (requests: readonly StlFeatureEditRequest[]): Promise<StlEditPlan | null> => {
     const body = model()
     if (body === null) return null
-    if (requests.some((r) => r.tool === 'resize-hole')) await primeBoringKernel()
+    if (requests.some((r) => r.tool === 'resize-hole' || r.tool === 'move-hole')) await primeBoringKernel()
     try {
       return planStlFeatureEdits(body, requests)
     } catch (err) {
@@ -302,9 +345,20 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     return async () => {
       const planned = await plan(requests)
       if (planned === null) return null
-      return planned.ok
-        ? planned
-        : { ok: false, reason: planned.reason, line: stlEditRefusalLine(partName, planned.feature, planned.reason) }
+      if (!planned.ok) return { ok: false, reason: planned.reason, line: stlEditRefusalLine(partName, planned.feature, planned.reason) }
+      const editing = editRef.current
+      if (editing !== null) {
+        const record = createMeshEditRecord(editing.body.mesh, {
+          ...planned.edits[0].edit, id: editing.journal[editing.index].id,
+          sourceFacetIds: editing.body.sourceFacetIds,
+        })
+        const replayed = resolveEditedStlMesh(editing.bytes, [
+          ...editing.journal.slice(0, editing.index), record, ...editing.journal.slice(editing.index + 1),
+        ])
+        if (replayed.stopped) return { ok: false, reason: replayed.stopped.reason, line: replayed.stopped.reason }
+        return { ...planned, mesh: replayed.mesh }
+      }
+      return planned
     }
   }
 
@@ -318,10 +372,10 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     if (planner === null) {
       presentation?.setPreview(null)
       optionsRef.current.requestRender()
-      setSession(withPreview(next, next.kind === 'defeature' ? IDLE_DEFEATURE : { kind: 'idle', message: 'Enter a value to preview it.' }))
+      setSession(withPreview(next, next.kind === 'defeature' ? IDLE_DEFEATURE : { kind: 'idle', message: workbenchText('useStlToolSession.enterAValueToPreviewIt') }))
       return
     }
-    setSession(withPreview(next, { kind: 'building', message: 'Building the preview...' }))
+    setSession(withPreview(next, { kind: 'building', message: workbenchText('useStlToolSession.buildingThePreview') }))
     void (async () => {
       let result: SessionPlan | null
       try {
@@ -336,7 +390,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
         live?.setPreview(result.mesh)
         setSession(withPreview(sessionRef.current, {
           kind: 'ready',
-          message: `Preview: ${result.edits.length} edit${result.edits.length === 1 ? '' : 's'} on "${optionsRef.current.partName}".`,
+          message: workbenchText('useStlToolSession.previewEditOn', { length: String(result.edits.length), value2: String(result.edits.length === 1 ? '' : 's'), partName: String(optionsRef.current.partName) }),
         }))
       } else {
         live?.setPreview(null)
@@ -351,6 +405,8 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
 
   const close = useCallback((): void => {
     generationRef.current++
+    reopenGenerationRef.current++
+    editRef.current = null
     hoverKeyRef.current = null
     const presentation = optionsRef.current.presentationRef.current
     presentation?.setPreview(null)
@@ -366,11 +422,18 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
 
   const acceptedFeature = useCallback((tool: StlEditTool, pick: StlModelPick | null): StlModelFeature | null => {
     if (pick === null || pick.kind !== 'feature') return null
-    const feature = optionsRef.current.presentationRef.current?.model.features[pick.featureIndex]
+    const body = optionsRef.current.presentationRef.current?.model
+    // A floor may belong to a hole for resting selection, but Push/Pull,
+    // Shell and Draft need the recogniser's planar target at the actual hit.
+    const feature = tool === 'push-pull' && pick.facet !== undefined
+      ? body?.features.find((f) => f.target.family === 'flat' && f.facets.includes(pick.facet!))
+      : body?.features[pick.featureIndex]
     return feature !== undefined && stlToolAccepts(tool, feature) ? feature : null
   }, [])
 
-  const start = useCallback((tool: StlEditTool, feature: StlModelFeature | null, field?: 'depth'): void => {
+  const start = useCallback((tool: StlEditTool, feature: StlModelFeature | null, field?: 'depth', facet?: number): void => {
+    editRef.current = null
+    reopenGenerationRef.current++
     const body = optionsRef.current.presentationRef.current?.model
     if (body === undefined) return
     generationRef.current++
@@ -378,7 +441,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     const picked = feature !== null && stlToolAccepts(tool, feature) ? feature : null
     if (tool === 'defeature') {
       const verdicts = stlDefeatureVerdicts(body.features)
-      optionsRef.current.notify('info', `Pick features to remove on "${optionsRef.current.partName}" - ${verdicts.length} can be removed. Clicking a feature selects it whole.`)
+      optionsRef.current.notify('info', workbenchText('useStlToolSession.pickFeaturesToRemoveOnCanBeRemovedClicking', { partName: String(optionsRef.current.partName), length: String(verdicts.length) }))
       showPreview({
         kind: 'defeature',
         verdicts,
@@ -390,7 +453,9 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     }
     if (picked === null) return
     const target = picked.target
-    if (tool === 'resize-hole' && target.family === 'round' && field === 'depth') {
+    if (tool === 'move-hole' && target.family === 'round') {
+      setSession({kind: 'move-hole', featureId: picked.id, draft: '0,0,0', preview: {kind: 'idle', message: workbenchText('MoveHoleEntry.hint')}})
+    } else if (tool === 'resize-hole' && target.family === 'round' && field === 'depth') {
       // WO-2117: the depth from the hole's opening, as the kernel route's card
       // shows it. A hole neither end of which opens still opens the card; its
       // preview then says why the depth cannot change.
@@ -402,18 +467,22 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
         currentDiameter: Number(target.feature.diameterMm.toFixed(3)),
         anchor: holeOpening(body, picked, target.feature.axis.direction),
         draft: String(currentMm),
-        preview: { kind: 'idle', message: 'Type the new depth, or "through".' },
+        preview: { kind: 'idle', message: workbenchText('useStlToolSession.typeTheNewDepthOrThrough') },
         depth: { currentMm, through: facts?.through ?? target.feature.kind === 'through-hole' },
       })
     } else if (tool === 'resize-hole' && target.family === 'round') {
-      const draft = String(Number(target.feature.diameterMm.toFixed(3)))
+      // WO-2762: a pick on a counterbore's wider wall edits that step.
+      const counterbore = counterboreStepAt(body, picked, facet) === 'counterbore' ? stlCounterboreStep(picked) : null
+      const onCounterbore = counterbore !== null
+      const diameter = Number((counterbore?.diameterMm ?? target.feature.diameterMm).toFixed(3))
       setSession({
         kind: 'resize-hole',
         featureId: picked.id,
-        currentDiameter: Number(target.feature.diameterMm.toFixed(3)),
+        currentDiameter: diameter,
         anchor: holeOpening(body, picked, target.feature.axis.direction),
-        draft,
-        preview: { kind: 'idle', message: 'Type the new diameter.' },
+        draft: String(diameter),
+        preview: { kind: 'idle', message: workbenchText('useStlToolSession.typeTheNewDiameter') },
+        ...(onCounterbore ? { step: 'counterbore' as const } : {}),
       })
     } else if (tool === 'push-pull' && target.family === 'flat') {
       const [nx, ny, nz] = target.face.plane.normal
@@ -422,20 +491,55 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
         featureId: picked.id,
         frame: { origin: stlFeatureCentroid(body, picked), normal: { x: nx, y: ny, z: nz } },
         draft: '0',
-        preview: { kind: 'idle', message: 'Drag or type how far.' },
+        preview: { kind: 'idle', message: workbenchText('useStlToolSession.dragOrTypeHowFar') },
       })
-    } else if (tool === 'fillet' && target.family === 'blend') {
-      const radius = Number((target.blend.radiusMm ?? 0).toFixed(3))
+    } else if ((tool === 'fillet' || tool === 'chamfer') && target.family === 'blend') {
+      const radius = Number((tool === 'chamfer' ? target.blend.setbackMm?.[0] ?? 0 : target.blend.radiusMm ?? 0).toFixed(3))
       setSession({
-        kind: 'fillet',
+        kind: tool,
         featureIds: [picked.id],
         initialRadius: radius,
         radius: null,
-        preview: { kind: 'idle', message: 'Type the new radius.' },
+        preview: { kind: 'idle', message: tool === 'chamfer' ? 'Type the new chamfer distance.' : workbenchText('useStlToolSession.typeTheNewRadius') },
       })
     }
-    optionsRef.current.notify('info', `Selected ${picked.label} on "${optionsRef.current.partName}".`)
+    optionsRef.current.notify('info', workbenchText('useStlToolSession.selectedOn', { label: String(picked.label), partName: String(optionsRef.current.partName) }))
   }, [setSession, showPreview])
+
+  const reopen = useCallback(async (editId: string): Promise<void> => {
+    close()
+    const token = ++reopenGenerationRef.current
+    const { geoId, partName, notify } = optionsRef.current
+    if (geoId === null) return
+    const journal = useCamStore.getState().project.geometry.find((g) => g.id === geoId)?.meshEdits
+    const index = journal?.findIndex((record) => record.id === editId) ?? -1
+    if (journal === undefined || index < 0 || ![MOVE_FLAT_FACE_KIND, MOVE_HOLE_KIND].includes(journal[index].kind)) return
+    const bytes = await loadCachedSTL(geoId)
+    if (token !== reopenGenerationRef.current || geoId !== optionsRef.current.geoId) return
+    if (bytes === null) { notify('error', workbenchText('useStlToolSession.sourceUnavailable')); return }
+    const liveJournal = useCamStore.getState().project.geometry.find((g) => g.id === geoId)?.meshEdits
+    if (liveJournal !== journal) return
+    const body = buildStlModelBodyModel({ geoId, name: partName, bytes, meshEdits: journal.slice(0, index) })
+    const record = journal[index]
+    const source = new Set(record.sourceFacets ?? record.facets.map((f) => body.sourceFacetIds[f]))
+    const feature = body.features.find((f) => f.target.family === (record.kind === MOVE_HOLE_KIND ? 'round' : 'flat') &&
+      f.sourceFacetIds.length === source.size && f.sourceFacetIds.every((id) => source.has(id)))
+    if (body.stopped || feature === undefined) {
+      notify('warning', workbenchText('useStlToolSession.storedFaceUnavailable')); return
+    }
+    editRef.current = { body, bytes, journal, index }
+    if (record.kind === MOVE_HOLE_KIND) {
+      setSession({kind: 'move-hole', featureId: feature.id, draft: (record.parameters.translation as number[]).join(','), preview: {kind: 'idle', message: workbenchText('MoveHoleEntry.hint')}})
+      return
+    }
+    if (feature.target.family !== 'flat') return
+    const [x, y, z] = feature.target.face.plane.normal
+    setSession({ kind: 'push-pull', featureId: feature.id,
+      frame: { origin: stlFeatureCentroid(body, feature), normal: { x, y, z } },
+      draft: String(record.parameters.distanceMm),
+      preview: { kind: 'idle', message: workbenchText('useStlToolSession.dragOrTypeHowFar') },
+    })
+  }, [close, setSession])
 
   const toggleDefeatureKey = useCallback((featureKey: string): void => {
     const current = sessionRef.current
@@ -446,7 +550,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     const included = !selected.has(featureKey)
     if (included) selected.add(featureKey)
     else selected.delete(featureKey)
-    optionsRef.current.notify('info', `${included ? 'Included' : 'Excluded'} ${defeatureVerdictLabel(verdict)} ${included ? 'in' : 'from'} the removal (${selected.size} selected).`)
+    optionsRef.current.notify('info', workbenchText('useStlToolSession.theRemovalSelected', { value1: String(included ? workbenchText('useStlToolSession.included') : workbenchText('useStlToolSession.excluded')), value2: String(defeatureVerdictLabel(verdict)), value3: String(included ? 'in' : 'from'), size: String(selected.size) }))
     showPreview({ ...current, selected })
   }, [showPreview])
 
@@ -459,14 +563,20 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     if (feature === null) return false
     if (current.kind === 'defeature') {
       toggleDefeatureKey(feature.id)
-    } else if (current.kind === 'fillet') {
+    } else if (current.kind === 'fillet' || current.kind === 'chamfer') {
       const featureIds = current.featureIds.includes(feature.id)
         ? current.featureIds.filter((id) => id !== feature.id)
         : [...current.featureIds, feature.id]
-      optionsRef.current.notify('info', `${featureIds.includes(feature.id) ? 'Added' : 'Removed'} ${feature.label} (${featureIds.length} selected).`)
+      optionsRef.current.notify('info', workbenchText('useStlToolSession.selected', { value1: String(featureIds.includes(feature.id) ? workbenchText('useStlToolSession.added') : workbenchText('useStlToolSession.removed')), label: String(feature.label), length: String(featureIds.length) }))
       showPreview({ ...current, featureIds })
+    } else if (current.kind === 'resize-hole') {
+      // WO-2762: the same counterbore picked on its other step re-opens on that step.
+      const facet = hit?.kind === 'feature' ? hit.facet : undefined
+      const body = optionsRef.current.presentationRef.current?.model
+      const step = current.depth === undefined && body !== undefined ? counterboreStepAt(body, feature, facet) : undefined
+      if (feature.id !== current.featureId || step !== current.step) start(tool, feature, current.depth !== undefined ? 'depth' : undefined, facet)
     } else if (feature.id !== current.featureId) {
-      start(tool, feature, current.kind === 'resize-hole' && current.depth !== undefined ? 'depth' : undefined)
+      start(tool, feature)
     }
     return true
   }, [acceptedFeature, showPreview, start, toggleDefeatureKey])
@@ -478,13 +588,13 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     const key = feature?.id ?? null
     if (key === hoverKeyRef.current) return
     hoverKeyRef.current = key
-    presentation.setHover(feature !== null && hit !== null ? hit : null)
+    presentation.setHover(feature !== null && hit !== null ? { ...hit, kind: 'feature', featureIndex: presentation.model.features.indexOf(feature) } : null)
     const current = sessionRef.current
     if (current.kind === 'defeature') {
       setSession({ ...current, hoverKey: key })
       const verdict = current.verdicts.find((v) => v.featureKey === key)
       if (verdict !== undefined) {
-        optionsRef.current.notify('info', `${defeatureVerdictLabel(verdict)} - click to ${current.selected.has(verdict.featureKey) ? 'exclude from' : 'include in'} removal.`)
+        optionsRef.current.notify('info', workbenchText('useStlToolSession.clickToRemoval', { value1: String(defeatureVerdictLabel(verdict)), value2: String(current.selected.has(verdict.featureKey) ? workbenchText('useStlToolSession.excludeFrom') : workbenchText('useStlToolSession.includeIn')) }))
       }
     }
     optionsRef.current.requestRender()
@@ -503,7 +613,16 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
 
   const setDraft = useCallback((draft: string): void => {
     const current = sessionRef.current
-    if (current.kind === 'resize-hole') {
+    if (current.kind === 'move-hole') {
+      const valid = parseHoleMove(draft)
+      if (valid.ok) showPreview({...current,draft})
+      else {
+        generationRef.current++
+        optionsRef.current.presentationRef.current?.setPreview(null)
+        optionsRef.current.requestRender()
+        setSession({...current,draft,preview:{kind:'failed',message:valid.reason}})
+      }
+    } else if (current.kind === 'resize-hole') {
       const valid = current.depth !== undefined
         ? validateHoleDepth(draft, current.depth.currentMm, current.depth.through)
         : validateResizeDiameter(draft, current.currentDiameter)
@@ -527,7 +646,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
 
   const setFilletRadius = useCallback((radius: number | null): void => {
     const current = sessionRef.current
-    if (current.kind !== 'fillet' || current.radius === radius) return
+    if ((current.kind !== 'fillet' && current.kind !== 'chamfer') || current.radius === radius) return
     showPreview({ ...current, radius })
   }, [showPreview])
 
@@ -541,7 +660,7 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     showPreview({
       kind: 'boolean',
       shape,
-      preview: current.kind === 'boolean' ? current.preview : { kind: 'idle', message: 'Enter a shape to preview it.' },
+      preview: current.kind === 'boolean' ? current.preview : { kind: 'idle', message: workbenchText('useStlToolSession.enterAShapeToPreviewIt') },
     })
   }, [close, showPreview])
 
@@ -549,27 +668,60 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     const current = sessionRef.current
     const { geoId, partName, notify, history } = optionsRef.current
     const planner = planSession(current)
-    if (geoId === null || planner === null) return 'Nothing to apply yet.'
+    if (geoId === null || planner === null) return workbenchText('useStlToolSession.nothingToApplyYet')
     const appliedLine = stlAppliedLine(current, partName, featureById)
     generationRef.current++
     const planned = await planner()
-    if (planned === null) return 'The part is not open.'
+    if (planned === null) return workbenchText('useStlToolSession.thePartIsNotOpen')
     if (!planned.ok) {
       notify('warning', planned.line)
       return planned.reason
     }
     const store = useCamStore.getState()
+    const editing = editRef.current
+    if (editing !== null) {
+      if (store.project.geometry.find((g) => g.id === geoId)?.meshEdits !== editing.journal) return workbenchText('useStlToolSession.historyChanged')
+      const replacement = createMeshEditRecord(editing.body.mesh, {
+        ...planned.edits[0].edit, id: editing.journal[editing.index].id,
+        sourceFacetIds: editing.body.sourceFacetIds,
+      })
+      const before = editing.journal.slice(editing.index)
+      const after = [replacement, ...editing.journal.slice(editing.index + 1)]
+      const port = {
+        addMeshEdit: (id: string, record: MeshEditRecord) => useCamStore.getState().addMeshEdit(id, record),
+        removeMeshEdit: (id: string, recordId: string) => useCamStore.getState().removeMeshEdit(id, recordId),
+        fail: (message: string) => optionsRef.current.notify('error', message),
+      }
+      optionsRef.current.onJournalWrite?.(geoId, 'start')
+      try {
+        await rewriteStlJournalTail(port, geoId, before, after)
+      } catch (error) {
+        optionsRef.current.onJournalWrite?.(geoId, 'done')
+        const reason = error instanceof Error ? error.message : String(error)
+        notify('error', reason)
+        return reason
+      }
+      optionsRef.current.onJournalWrite?.(geoId, 'done')
+      history.execute(new RewriteStlMeshEditCommand(port, geoId, before, after))
+      optionsRef.current.onStepPushed()
+      editRef.current = null
+      setSession({ kind: 'none' })
+      if (appliedLine !== undefined) notify('success', appliedLine)
+      return undefined
+    }
     const recorded: MeshEditRecord[] = []
     let failure: string | undefined
     optionsRef.current.onJournalWrite?.(geoId, 'start')
-    for (const step of planned.edits) {
-      try {
-        recorded.push(await store.addMeshEdit(geoId, step.edit))
-      } catch (err) {
-        failure = err instanceof Error ? err.message : String(err)
-        break
+    await enqueueStlJournalMutation(geoId, async () => {
+      for (const step of planned.edits) {
+        try {
+          recorded.push(await store.addMeshEdit(geoId, step.edit))
+        } catch (err) {
+          failure = err instanceof Error ? err.message : String(err)
+          break
+        }
       }
-    }
+    })
     optionsRef.current.onJournalWrite?.(geoId, recorded.length === 0 ? 'none' : 'done')
     if (recorded.length > 0) {
       history.execute(new StlMeshEditCommand(
@@ -606,9 +758,9 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     if (body === undefined) return []
     const ids = session.kind === 'defeature'
       ? [...session.selected]
-      : session.kind === 'fillet'
+      : (session.kind === 'fillet' || session.kind === 'chamfer')
         ? session.featureIds
-        : session.kind === 'resize-hole' || session.kind === 'push-pull'
+        : session.kind === 'move-hole' || session.kind === 'resize-hole' || session.kind === 'push-pull'
           ? [session.featureId]
           : []
     return ids.map((id) => body.features.findIndex((f) => f.id === id)).filter((i) => i >= 0)
@@ -629,5 +781,6 @@ export function useStlToolSession(options: StlToolSessionOptions): StlToolSessio
     setBooleanShape,
     apply,
     close,
+    reopen,
   }
 }

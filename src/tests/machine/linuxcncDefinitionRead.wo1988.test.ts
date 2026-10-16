@@ -6,9 +6,10 @@
 // simulator), the same pattern WO-1987's own coverage uses.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { once } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { platform, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ControllerEvents } from '../../lib/machine/controller'
 import { LinuxcncGatewayTransport, linuxcncGatewayUrl } from '../../lib/machine/linuxcnc/gatewayTransport'
@@ -20,15 +21,53 @@ const PYTHON = process.env.LIENCAM_PYTHON || (platform() === 'win32' ? 'python' 
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const running: ChildProcess[] = []
+
+// WO-2682: retain exact ownership even if a later allocation or gateway start fails.
+const temporaryDirectories = new Map<string, string>()
+function makeTemporaryDirectory(prefix: string): string {
+  const root = resolve(tmpdir())
+  const directory = mkdtempSync(join(root, prefix))
+  temporaryDirectories.set(directory, root)
+  return directory
+}
+
+async function cleanupGatewayFixtures(): Promise<void> {
+  const stopped = await Promise.allSettled(running.map(async (child) => {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(5000) })
+    const errors: unknown[] = []
+    try { child.kill() } catch (error) { errors.push(error) }
+    try { await exited } catch (error) { errors.push(error) }
+    if (errors.length) throw new AggregateError(errors, 'Gateway termination failed')
+  }))
+  const stopErrors = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+  // A process that may still write keeps its directories; never race it with removal.
+  if (stopErrors.length) throw new AggregateError(stopErrors, 'Gateway shutdown failed; owned temporary directories retained')
+  running.length = 0
+  const errors: unknown[] = []
+  for (const [directory, root] of temporaryDirectories) {
+    try {
+      if (dirname(resolve(directory)) !== root) throw new Error('Temporary directory escaped its recorded parent')
+      rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+      temporaryDirectories.delete(directory)
+    } catch (error) { errors.push(error) }
+  }
+  if (errors.length) throw new AggregateError(errors, 'Owned gateway temporary directory cleanup failed')
+}
 const controllers: LinuxCncController[] = []
 
 afterEach(async () => {
-  for (const c of controllers.splice(0)) await c.disconnect()
-  for (const p of running.splice(0)) p.kill()
+  const errors: unknown[] = []
+  const attempt = async (action: () => unknown): Promise<void> => {
+    try { await action() } catch (error) { errors.push(error) }
+  }
+  for (const controller of controllers.splice(0)) await attempt(() => controller.disconnect())
+  await attempt(() => cleanupGatewayFixtures())
+  if (errors.length) throw new AggregateError(errors, 'LinuxCNC fixture teardown failed')
 })
 
 function startGateway(env: Record<string, string> = {}): Promise<number> {
-  const programDir = mkdtempSync(join(tmpdir(), 'wo1988-'))
+  const programDir = makeTemporaryDirectory('wo1988-')
   const proc = spawn(PYTHON, [join(GATEWAY_DIR, 'gateway.py'), '--port', '0', '--program-dir', programDir], {
     env: { ...process.env, PYTHONPATH: FAKE_DIR, PYTHONDONTWRITEBYTECODE: '1', ...env },
     windowsHide: true,

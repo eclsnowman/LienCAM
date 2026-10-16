@@ -113,6 +113,8 @@ export interface OperationRequestContext {
    *  it did not, those payloads must omit bottomHeight exactly as before. */
   readonly chamferBottomResolved: boolean
   readonly engraveBottomResolved: boolean
+  /** Adaptive clearing: the project machine rate used by runtime/post execution. */
+  readonly machineRapidRate?: number
   /** Adaptive clearing: authored XY placement per source loop. */
   readonly loopOrigins?: Record<string, { x: number; y: number }>
   /** Contour only; resolved by the store because it can refuse first. */
@@ -342,6 +344,7 @@ export const OPERATION_MANIFEST = {
         payload: {
           ...ctx.basePayload,
           params: ctx.op.params as unknown as ACParams,
+          machineRapidRate: ctx.machineRapidRate,
           loopOrigins: ctx.loopOrigins,
         },
       }),

@@ -66,9 +66,15 @@ describe('WO-2402 authorized naming remainder', () => {
   })
 
   it('preserves every executable adaptive-engine token', () => {
+    // WO-2784 RE-PIN: this invariant belongs to the scrub commit (363a1b0f8a, the only WO-2402
+    // edit to these files), not to whatever main holds later. WO-2752 (02bbb81663, owner 10-11:
+    // "This is an important bug to fix") legitimately changed processFeature.ts; comparing main
+    // against the frozen pre-scrub baseline made that product fix read as a scrub violation.
+    // Same rule as WO-2356's historical-invariant test.
+    const scrubbed = '363a1b0f8a'
     for (const file of ['emit.ts', 'processFeature.ts']) {
       const path = `src/lib/cam/adaptiveClearing2d/engine/${file}`
-      expect(tokens(path, read(path)), path).toEqual(tokens(path, git('show', `${discovery.baseline}:${path}`)))
+      expect(tokens(path, git('show', `${scrubbed}:${path}`)), path).toEqual(tokens(path, git('show', `${discovery.baseline}:${path}`)))
     }
   })
 

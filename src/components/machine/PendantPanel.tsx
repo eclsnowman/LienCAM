@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronRight, Copy, Link2, Link2Off, RefreshCw, Smartphone, X } from 'lucide-react'
@@ -12,6 +16,7 @@ function newPairingToken(): string {
 }
 
 export function PendantPanel() {
+  useText('control-screens-not-probing')
   const snapshot = useSyncExternalStore(pendantBridge.subscribe, pendantBridge.snapshot, pendantBridge.snapshot)
   const machineConnected = useMachineControl((state) => state.connectionPhase === 'connected')
   const connectionKind = useMachineControl((state) => state.connectionKind)
@@ -116,7 +121,7 @@ export function PendantPanel() {
 
   const pendantStateLabel = snapshot.enabled
     ? snapshot.phase === 'connected'
-      ? `${snapshot.connectedPendants} phone${snapshot.connectedPendants === 1 ? '' : 's'}`
+      ? controlText('PendantPanel.text001', { value1: String(snapshot.connectedPendants), value2: String(snapshot.connectedPendants === 1 ? '' : 's') })
       : snapshot.phase
     : 'off'
   const pendantButtonValue = snapshot.enabled
@@ -136,17 +141,17 @@ export function PendantPanel() {
         ref={popoverRef}
         className="pendant-popover"
         role="dialog"
-        aria-label="Mobile pendant pairing"
+        aria-label={controlText('PendantPanel.text002')}
         style={popoverPosition
           ? { left: popoverPosition.left, top: popoverPosition.top }
           : { visibility: 'hidden' }}
       >
         <div className="pendant-popover-header">
-          <span>{snapshot.enabled ? 'Phone pairing' : 'Enable phone control'}</span>
+          <span>{snapshot.enabled ? controlText('PendantPanel.text003') : controlText('PendantPanel.text004')}</span>
           <button
             className="pendant-popover-close"
             type="button"
-            aria-label="Close mobile pendant pairing"
+            aria-label={controlText('PendantPanel.text005')}
             onClick={() => {
               setPopoverOpen(false)
               triggerRef.current?.focus()
@@ -162,9 +167,7 @@ export function PendantPanel() {
                 <>
                   <div className="pendant-warning" role="note">
                     <Smartphone size={15} aria-hidden="true" />
-                    <span>
-                      Remote controls can move the machine. Stay beside it with the physical E-stop within reach.
-                    </span>
+                    <span>{controlText('PendantPanel.text006')}</span>
                   </div>
                   <label className="pendant-confirm-row">
                     <input
@@ -172,7 +175,7 @@ export function PendantPanel() {
                       checked={warningAccepted}
                       onChange={(event) => setWarningAccepted(event.currentTarget.checked)}
                     />
-                    <span>I will stay by the machine while remote control is enabled.</span>
+                    <span>{controlText('PendantPanel.text007')}</span>
                   </label>
                 </>
               )}
@@ -184,13 +187,13 @@ export function PendantPanel() {
                   disabled={!machineConnected || hostBusy || (connectionKind !== 'simulator' && !warningAccepted)}
                   onClick={() => void enableRemoteControl()}
                 >
-                  <Link2 size={13} /> {hostBusy ? 'Starting...' : 'Enable remote control'}
+                  <Link2 size={13} /> {hostBusy ? 'Starting...' : controlText('PendantPanel.text008')}
                 </button>
                 <button
                   className="modal-btn modal-btn-ghost pendant-icon-btn"
                   type="button"
-                  data-tooltip="Generate a new pairing code"
-                  aria-label="Generate a new pairing code"
+                  data-tooltip={controlText('PendantPanel.text009')}
+                  aria-label={controlText('PendantPanel.text010')}
                   disabled={hostBusy}
                   onClick={rotatePairingCode}
                 >
@@ -198,7 +201,7 @@ export function PendantPanel() {
                 </button>
               </div>
               {!machineConnected && (
-                <div className="control-connect-detail">Connect the machine or simulator before enabling the pendant.</div>
+                <div className="control-connect-detail">{controlText('PendantPanel.text011')}</div>
               )}
               {hostError && (
                 <div className="control-connect-error" data-testid="pendant-host-error">{hostError}</div>
@@ -207,17 +210,17 @@ export function PendantPanel() {
           ) : (
             <>
               {snapshot.phase === 'connecting' && (
-                <div className="pendant-status-line">Connecting to the machine-local broker...</div>
+                <div className="pendant-status-line">{controlText('PendantPanel.text012')}</div>
               )}
               {pairingUrl && (
                 <>
                   <div className="pendant-qr-wrap">
                     <LocalQrCode value={pairingUrl} />
-                    <span>Scan to connect</span>
+                    <span>{controlText('PendantPanel.text013')}</span>
                   </div>
                   {snapshot.lanIps.length > 1 && (
                     <label className="pendant-field">
-                      <span>Phone network</span>
+                      <span>{controlText('PendantPanel.text014')}</span>
                       <select
                         className="mform-input"
                         value={lanIp ?? ''}
@@ -227,23 +230,23 @@ export function PendantPanel() {
                       </select>
                     </label>
                   )}
-                  <div className="pendant-pair-label">Open this address on a phone connected to this LAN:</div>
+                  <div className="pendant-pair-label">{controlText('PendantPanel.text015')}</div>
                   <div className="pendant-url-row">
-                    <input className="mform-input pendant-url" readOnly value={pairingUrl} aria-label="Pendant pairing URL" />
+                    <input className="mform-input pendant-url" readOnly value={pairingUrl} aria-label={controlText('PendantPanel.text016')} />
                     <button
                       className="modal-btn modal-btn-ghost pendant-copy-btn"
                       type="button"
                       data-testid="pendant-copy-url"
                       onClick={() => void copyPairingUrl()}
                     >
-                      <Copy size={13} /> {copied ? 'Copied' : 'Copy'}
+                      <Copy size={13} /> {copied ? controlText('PendantPanel.text017') : controlText('PendantPanel.text018')}
                     </button>
                   </div>
-                  <div className="pendant-pair-code">Session code {snapshot.pairingToken.slice(0, 8)}</div>
+                  <div className="pendant-pair-code">{catalogChildren(controlText('PendantPanel.text019', { value1: '\u0000value1\u0000' }), { value1: snapshot.pairingToken.slice(0, 8) })}</div>
                 </>
               )}
               {snapshot.phase === 'connected' && snapshot.lanIps.length === 0 && (
-                <div className="control-connect-error">No LAN IPv4 address was found for phone pairing.</div>
+                <div className="control-connect-error">{controlText('PendantPanel.text020')}</div>
               )}
               {snapshot.lastError && (
                 <div className="control-connect-error" data-testid="pendant-error">{snapshot.lastError}</div>
@@ -258,7 +261,7 @@ export function PendantPanel() {
                 disabled={hostBusy}
                 onClick={() => void disableRemoteControl()}
               >
-                <Link2Off size={13} /> {hostBusy ? 'Stopping...' : 'Disable remote control'}
+                <Link2Off size={13} /> {hostBusy ? 'Stopping...' : controlText('PendantPanel.text021')}
               </button>
             </>
           )}
@@ -278,13 +281,13 @@ export function PendantPanel() {
         className={`pendant-status-button pendant-status-${snapshot.phase}`}
         type="button"
         data-testid="pendant-status-button"
-        aria-label={`Remote pendant: ${pendantStateLabel}`}
+        aria-label={controlText('PendantPanel.text022', { value1: String(pendantStateLabel) })}
         aria-expanded={popoverOpen}
         aria-controls="pendant-pairing-popover"
         onClick={() => setPopoverOpen((open) => !open)}
       >
         <Smartphone size={12} aria-hidden="true" />
-        <span className="pendant-status-label">Pendant</span>
+        <span className="pendant-status-label">{controlText('PendantPanel.text023')}</span>
         <span className="pendant-status-dot" aria-hidden="true" />
         <span className="pendant-status-value">{pendantButtonValue}</span>
         <ChevronRight size={12} className={popoverOpen ? 'pendant-chevron-open' : ''} aria-hidden="true" />

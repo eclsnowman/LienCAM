@@ -20,10 +20,11 @@
 //   4. a genesis exception ROTS -- it grows a target body       -> fixture D
 //   5. a new aliasLineage consumer appears undisposed           -> fixture E
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { describe, it, expect, beforeAll } from 'vitest'
 import {
   PRODUCER_FILES, ALIAS_MODULE, FOLD_FUNCTION,
-  ALIAS_PRODUCER_CENSUS, PRODUCER_NAMED_EXCEPTIONS, ALIAS_CONSUMER_CENSUS,
+  ALIAS_PRODUCER_CENSUS as BASE_PRODUCER_CENSUS, PRODUCER_NAMED_EXCEPTIONS, ALIAS_CONSUMER_CENSUS,
   extractDeltaProducerSites, deriveProducers, extractFoldCallSites,
   extractCallsByFunction, extractModifiedBindings, extractMintSites,
   auditProducerClassification, auditProducerFold, auditProducerDelegation,
@@ -36,6 +37,16 @@ import {
   discoverAliasImporters, discoverAliasImportGraph, isProductionSource, resolveSpecifier, REPO_ROOT,
   type AliasProgram, type DiscoveredImporter, type UnresolvableDynamicImport,
 } from './aliasProgramDerivation.ts'
+
+// WO-2804: the granted census test owns this new producer's disposition.
+// It delegates the complete assignment, including inherited aliases, exactly
+// as the Resize core does. The runtime census independently drives the route.
+const ALIAS_PRODUCER_CENSUS = [...BASE_PRODUCER_CENSUS, {
+  id: 'P-hole-move', file: 'src/geom/worker/geom-engine.ts' as const,
+  name: '#moveRecognizedHole', disposition: 'delegates' as const,
+  delegatesTo: '#assignEditedIds',
+  note: 'Exact-void Move composes #assignEditedIds and retains rec.aliases; runtime hole-move recipe runs on an inherited-alias body.',
+}]
 
 /** Repo-relative `src/...` path -> a URL resolvable from THIS test file's own
  *  location (`src/tests/geom/`, two directories below `src/`). */
@@ -86,7 +97,11 @@ beforeAll(() => {
     ...syntacticSites,
     ...checked.map((c) => ({ file: c.file, line: c.line, name: c.name, via: 'return-type' as const, text: c.typeText })),
   ]
-  producers = deriveProducers(allSites)
+  // WO-2799's cutCavity returns raw numerical OCCT face history, not stable
+  // ElementMapDelta IDs. Discover it, then prove the named disposition below.
+  // Its enclosing construction route still has the existing delegation audit.
+  producers = deriveProducers(allSites).filter((p) =>
+    !(p.file === 'src/geom/worker/geom-engine.ts' && p.name === 'cutCavity'))
   const graph = discoverAliasImportGraph(ap)
   importers = graph.importers
   unreadableDynamicImports = graph.unresolvable
@@ -114,13 +129,14 @@ describe('UI-57-R2 tier 1: every ElementMapDelta producer is classified, and eve
 
   it('#census-checker-half-live: the CHECKER derivation really contributes to the domain on the REAL files (the half the R2 census lacked -- if it silently stops resolving, the imported-shape blind spot is back and nothing else would notice)', () => {
     const checked = deriveCheckedReturnProducers(ap, PRODUCER_FILES)
-    // The six the checker resolves today, INCLUDING the #private methods and the
+    // The seven the checker resolves today include raw-history cutCavity,
+    // the #private methods and the
     // two named-assignment-type producers (CutAssignment / ShellAssignment --
     // the latter only via `extends`). A checker that resolved nothing would make
     // the union silently collapse back to the R2 syntactic sweep, which is
     // exactly the state the auditor bypassed.
     expect(checked.map((c) => c.name).sort(), 'the checker resolved a different producer set than the tree declares -- if this is a real code change, update this pin; if it is empty/short, the Program or the checker broke')
-      .toEqual(['#assignEditedIds', '#assignHealedIds', '#pairHealedFaces', 'assignCutFaceIds', 'assignShellFaceIds', 'debugAssignEditedIdsForTest'])
+      .toEqual(['#assignEditedIds', '#assignHealedIds', '#pairHealedFaces', 'assignCutFaceIds', 'assignShellFaceIds', 'cutCavity', 'debugAssignEditedIdsForTest'])
     // The checker must be resolving TYPE NAMES, not just inline literals: these
     // two are declared `: CutAssignment` / `: ShellAssignment` and are the
     // reason a same-file-only derivation ever seemed sufficient.
@@ -128,8 +144,37 @@ describe('UI-57-R2 tier 1: every ElementMapDelta producer is classified, and eve
     expect(checked.find((c) => c.name === 'assignShellFaceIds')?.typeText).toBe('ShellAssignment')
   }, 120_000)
 
+  it('#census-cutCavity: the named numerical kernel-history producer is not a stable-ID delta and is converted by the censused Shell owner', () => {
+    const sf = ap.program.getSourceFile(`${REPO_ROOT}/src/geom/worker/geom-engine.ts`)!
+    let found = 0
+    function visit(node: ts.Node): void {
+      if (ts.isVariableDeclaration(node) && node.name.getText(sf) === 'cutCavity' && node.initializer && ts.isArrowFunction(node.initializer)) {
+        found++
+        const signature = ap.checker.getSignatureFromDeclaration(node.initializer)!
+        const ret = ap.checker.getNonNullableType(ap.checker.getReturnTypeOfSignature(signature))
+        // A rename or a change to stable/string IDs must reopen this disposition.
+        expect(ap.checker.typeToString(ret)).toBe('EvolutionData')
+        for (const field of ['modified', 'generated', 'deleted']) {
+          const symbol = ret.getProperty(field)!
+          expect(ap.checker.typeToString(ap.checker.getTypeOfSymbolAtLocation(symbol, node))).toBe('number[]')
+        }
+        let owner: ts.Node = node
+        while (owner.parent && !ts.isMethodDeclaration(owner)) owner = owner.parent
+        expect(ts.isMethodDeclaration(owner) && owner.name.getText(sf)).toBe('#applyShellByConstruction')
+        expect(node.initializer.body.getText(sf)).toContain('k.cutWithHistory(source, cavity, inputHashes, HM)')
+        expect(node.initializer.body.getText(sf)).toContain('return cut')
+        expect(owner.getText(sf)).toContain('decodeEvolution(evo.modified)')
+        expect(owner.getText(sf)).toContain('assignShellFaceIds(req.featureId, target.faceMap, removedRecords, spawnedRecords, this.#faceProbes(result), target.aliases)')
+      }
+      node.forEachChild(visit)
+    }
+    visit(sf)
+    expect(found).toBe(1)
+    expect(deriveProducers(allSites).filter((p) => p.name === 'cutCavity')).toHaveLength(1)
+  })
+
   it('#census-unclassified: every derived producer is classified EXACTLY ONCE -- an unclassified one is RED (the fail-closed domain the whole ruling turns on)', () => {
-    const problems = auditProducerClassification(producers)
+    const problems = auditProducerClassification(producers, ALIAS_PRODUCER_CENSUS)
     if (problems.length > 0) {
       const detail = problems.map((p) => `  ${p.file}:${p.line} ${p.name} -- ${p.kind}\n      form: ${p.form}`).join('\n')
       throw new Error(
@@ -144,7 +189,7 @@ describe('UI-57-R2 tier 1: every ElementMapDelta producer is classified, and eve
   })
 
   it('#census-fold: every censused CARRIES-FORWARD producer positively routes through the shared fold (the check that would have caught the R1 blocker at commit time)', () => {
-    const violations = auditProducerFold(foldCalls)
+    const violations = auditProducerFold(foldCalls, ALIAS_PRODUCER_CENSUS)
     if (violations.length > 0) {
       const detail = violations.map((v) => `  ${v.producerId} (${v.file} :: ${v.name}) -- ${v.kind}`).join('\n')
       throw new Error(
@@ -155,7 +200,7 @@ describe('UI-57-R2 tier 1: every ElementMapDelta producer is classified, and eve
   })
 
   it('#census-delegation: every DELEGATES producer really calls its carries-forward delegate AND passes its record through (never re-writing modified: {})', () => {
-    const violations = auditProducerDelegation(calls, bindings)
+    const violations = auditProducerDelegation(calls, bindings, ALIAS_PRODUCER_CENSUS)
     if (violations.length > 0) {
       const detail = violations.map((v) => `  ${v.producerId} (${v.file}:${v.line} ${v.name}) -- ${v.kind}: ${v.detail}`).join('\n')
       throw new Error(`${violations.length} delegation(s) do not hold:\n${detail}`)

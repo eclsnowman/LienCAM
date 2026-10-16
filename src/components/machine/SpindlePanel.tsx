@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // SpindlePanel - manual spindle and coolant control (MACHINE-CONTROL Tier 0,
 // stage 9 rewire). NOTHING here hardcodes a code: every button resolves
 // through the machine-action abstraction (user override -> controller
@@ -135,6 +139,7 @@ export function rpmWithin(value: number, minRpm: number, maxRpm: number | undefi
 }
 
 export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
+  useText('control-screens-not-probing')
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const jobPhase = useMachineControl((s) => s.job.phase)
   // WO-2237: a program paused at rest takes the spindle and the outputs (the
@@ -322,9 +327,9 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     if (hidden.length === 0) return
     useMachineControl.getState().pushConsole(
       'rx',
-      `This machine's definition says it has no ${hidden.join(' and no ')} coolant, `
-        + `so ${hidden.length === 1 ? 'that button is' : 'those buttons are'} not shown. `
-        + 'Change that under Coolant in the machine definition.',
+      controlText('SpindlePanel.text001', { value1: String(hidden.join(' and no ')) })
+        + controlText('SpindlePanel.text004', { value1: String(hidden.length === 1 ? controlText('SpindlePanel.text002') : controlText('SpindlePanel.text003')) })
+        + controlText('SpindlePanel.text005'),
       'info',
     )
     // THE ANSWER IS THE DEPENDENCY. `hidden` is a fresh array on every render
@@ -352,7 +357,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     if (showVacuum || vacuumAnswer !== false) return
     useMachineControl.getState().pushConsole(
       'rx',
-      "This machine's definition says it has no vacuum, so the Vacuum button is not shown. Change that under Coolant in the machine definition.",
+      controlText('SpindlePanel.text006'),
       'info',
     )
     // The primitive answer/show tuple is the dependency; see the coolant
@@ -581,7 +586,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
       })
       useMachineControl.getState().pushConsole(
         'tx',
-        `${UNDECLARED_CONTROLLER_REASON} The shared accessory stop was sent, but no other accessory was restored.`,
+        controlText('SpindlePanel.text007', { value1: String(UNDECLARED_CONTROLLER_REASON) }),
         'error',
       )
       return { result: stopResult, stopLines, restored: [] }
@@ -612,11 +617,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
         return next
       })
       const refusedDetail = refusedRestoreLines.length > 0
-        ? ` Refused restore lines: ${refusedRestoreLines.join(', ')}.`
+        ? controlText('SpindlePanel.text008', { value1: String(refusedRestoreLines.join(', ')) })
         : ''
       useMachineControl.getState().pushConsole(
         'tx',
-        `${restoreResult.reason} The shared accessory stop was sent, so stopped or unrestored channels are now shown off.${refusedDetail}`,
+        controlText('SpindlePanel.text009', { value1: String(restoreResult.reason), value2: String(refusedDetail) }),
         'error',
       )
       return {
@@ -661,7 +666,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     if (refusal !== null) {
       useMachineControl.getState().pushConsole(
         'tx',
-        `${refusal} The shared accessory stop was sent, so the outputs it could not restore are now shown off.`,
+        controlText('SpindlePanel.text010', { value1: String(refusal) }),
         'error',
       )
       return { ok: false, sent, reason: refusal }
@@ -689,14 +694,14 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
       const result = run('coolantFlood', [output.onCode], false)
       if (!result.ok) return refused(result.reason)
       setListedRunning((current) => ({ ...current, [output.onCode]: true }))
-      return say(`${output.name} switched on with ${output.onCode}, the word this machine's definition gives it.`)
+      return say(controlText('SpindlePanel.text011', { value1: String(output.name), value2: String(output.onCode) }))
     }
     const ownStop = stopOutputWithOwnWord(output)
     if (ownStop !== null) {
       const { offCode, result } = ownStop
       if (!result.ok) return refused(result.reason)
       setListedRunning((current) => ({ ...current, [output.onCode]: false }))
-      return say(`${output.name} switched off with ${offCode}, its own off word.`)
+      return say(controlText('SpindlePanel.text012', { value1: String(output.name), value2: String(offCode) }))
     }
     const stopLines = actionLines('coolantOff')
     const stop = run('coolantOff', stopLines ?? undefined, true)
@@ -724,23 +729,23 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     ]
     if (!listed.ok) return
     say(
-      `${output.name} stopped with ${stopLines?.join(' then ') ?? 'the Coolant Off action'}`
-      + `${restoredNames.length > 0 ? ` then restored ${restoredNames.join(' and ')}` : ''}`
-      + ' - this output has no off word of its own, so it stops with the shared accessory stop.',
+      controlText('SpindlePanel.text014', { value1: String(output.name), value2: String(stopLines?.join(' then ') ?? controlText('SpindlePanel.text013')) })
+      + `${restoredNames.length > 0 ? controlText('SpindlePanel.text015', { value1: String(restoredNames.join(' and ')) }) : ''}`
+      + controlText('SpindlePanel.text016'),
     )
   }
 
   const pressCoolant = (channel: 'mist' | 'flood', action: BuiltinActionId) => {
-    const label = channel === 'mist' ? 'Mist' : 'Flood'
+    const label = channel === 'mist' ? controlText('SpindlePanel.text017') : controlText('SpindlePanel.text018')
     if (running(channel)) {
       const { result, stopLines, restored } = stopAccessory(channel)
       if (result.ok) {
         const restoreReason = restored.length > 0
-          ? ` then restored ${restored.map((entry) => entry.channel).join(' and ')}`
+          ? controlText('SpindlePanel.text019', { value1: String(restored.map((entry) => entry.channel).join(' and ')) })
           : ''
         useMachineControl.getState().pushConsole(
           'tx',
-          `${label} stopped with ${stopLines?.join(' then ') ?? 'the Coolant Off action'}${restoreReason} because each accessory channel keeps its own state.`,
+          controlText('SpindlePanel.text021', { value1: String(label), value2: String(stopLines?.join(' then ') ?? controlText('SpindlePanel.text020')), value3: String(restoreReason) }),
           'info',
         )
       }
@@ -751,7 +756,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     if (result.ok) {
       useMachineControl.getState().pushConsole(
         'tx',
-        `${label} started with ${startLines?.join(' then ') ?? `the ${label} action`} because that channel was switched on.`,
+        controlText('SpindlePanel.text023', { value1: String(label), value2: String(startLines?.join(' then ') ?? controlText('SpindlePanel.text022', { value1: String(label) })) }),
         'info',
       )
     }
@@ -773,7 +778,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
         setCommandedAccessories((current) => ({ ...current, vacuum: false }))
         useMachineControl.getState().pushConsole(
           'tx',
-          `Vacuum stopped with ${ownStop.offCode}, its own off word from this machine's definition.`,
+          controlText('SpindlePanel.text024', { value1: String(ownStop.offCode) }),
           'info',
         )
         return
@@ -781,11 +786,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
       const { result, stopLines, restored } = stopAccessory('vacuum')
       if (result.ok) {
         const restoreReason = restored.length > 0
-          ? ` then restored ${restored.map((entry) => entry.channel).join(' and ')}`
+          ? controlText('SpindlePanel.text025', { value1: String(restored.map((entry) => entry.channel).join(' and ')) })
           : ''
         useMachineControl.getState().pushConsole(
           'tx',
-          `Vacuum off (${stopLines?.join(' then ') ?? 'the Coolant Off action'})${restoreReason}.`,
+          controlText('SpindlePanel.text027', { value1: String(stopLines?.join(' then ') ?? controlText('SpindlePanel.text026')), value2: String(restoreReason) }),
           'info',
         )
       }
@@ -801,7 +806,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     if (result.ok) {
       useMachineControl.getState().pushConsole(
         'tx',
-        `Vacuum on (${startLines?.join(' then ') ?? vacuum.onCode}).`,
+        controlText('SpindlePanel.text028', { value1: String(startLines?.join(' then ') ?? vacuum.onCode) }),
         'info',
       )
     }
@@ -872,11 +877,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
    *  controller that refuses G-code is how an operator ends up believing a
    *  button was sent when it was not. */
   const spindleTip = (action: BuiltinActionId, what: string) => {
-    if (route === 'calls') return `${what} (sent directly to the spindle link)`
+    if (route === 'calls') return controlText('SpindlePanel.text029', { value1: String(what) })
     const lines = actionLines(action)
     if (route === 'text' && lines) return `${what} (${lines.join(' | ')})`
     if (route === 'text') return what
-    return `${what} - this controller has no spindle control`
+    return controlText('SpindlePanel.text030', { value1: String(what) })
   }
 
   const coolantTip = (action: BuiltinActionId, what: string) => {
@@ -947,16 +952,16 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
   // re-derived by whoever reads this next.
   const dirText = ownsAccessories
     ? accessories.spindle === 'off'
-      ? 'Off'
+      ? controlText('SpindlePanel.text031')
       : accessories.spindle.toUpperCase()
     : latched === null
       ? // The honest case: the machine says it is TURNING and we did not start
         // it, so we know it is on and we do not know which way. The drive
         // reports direction backwards (VFD-COMMISSIONING.md 4.9), so naming one
         // would be a guess and "Off" would be the lie WO-959 exists to remove.
-        'Turning'
+        controlText('SpindlePanel.text032')
       : latched === 'off'
-        ? 'Off'
+        ? controlText('SpindlePanel.text033')
         : latched.toUpperCase()
 
   const activeAccessories = ACCESSORY_CHANNELS.filter(running)
@@ -964,21 +969,18 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     ...activeAccessories.map((channel) => channel[0].toUpperCase() + channel.slice(1)),
     ...listedRunningNames,
   ]
-  const coolantText = activeNames.length > 0 ? activeNames.join('+') : 'Off'
+  const coolantText = activeNames.length > 0 ? activeNames.join('+') : controlText('SpindlePanel.text034')
 
   return (
     <section className="panel control-panel">
       <div className="panel-header">
-        {/* WO-965: a title is a claim too. With both channels stated absent
-            there is no coolant on this panel and no coolant on this machine,
-            and a header saying otherwise is the same small lie the buttons
-            were. No new element - the existing title tells the truth. */}
-        <span className="panel-title">
-          {(showCoolant && showVacuum) || listedButtons.length > 0
-            ? 'Spindle / Accessories'
-            : showCoolant
-              ? 'Spindle / Coolant'
-              : showVacuum ? 'Spindle / Vacuum' : 'Spindle'}
+        {/* WO-2836 (the operator, 2026-10-15): the title is just "Spindle"
+            on every machine. "It's pretty obvious that it's there. That's
+            where the buttons are." The "/ Coolant", "/ Vacuum" and
+            "/ Accessories" variants (WO-965's title choice) were what
+            wrapped the header against the live rpm. One line, nowrap. */}
+        <span className="panel-title control-spindle-title">
+          {controlText('SpindlePanel.text038')}
         </span>
         {/* WO-116: the live rpm readout stays visible even collapsed - a
             running spindle's speed is never folded out of sight.
@@ -988,9 +990,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
             comes straight from the store's reportedAccessories, so it keeps
             ticking with every A: report.
             WO-184: that cluster now renders BELOW the header (see the
-            compact row after this div) - in the header it did not fit. */}
+            compact row after this div) - in the header it did not fit.
+            WO-2836: EXPANDED, the rpm stays here; with the short title the
+            two no longer overlap. */}
         {!collapsed && (
-          <span className="control-version">{spindleRpm ? `${Math.round(spindleRpm)} rpm` : ''}</span>
+          <span className="control-version">{spindleRpm ? controlText('SpindlePanel.text039', { value1: String(Math.round(spindleRpm)) }) : ''}</span>
         )}
         {/* WO-184: the gear is a CONTROL, so it folds with the body - and it
             was also stealing 24px the longest title on the page could not
@@ -1001,8 +1005,8 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
             className="panel-action-btn"
             data-testid="control-spindle-gear"
             onClick={onOpenActions}
-            data-tooltip="Configure what these buttons send (machine actions)"
-            aria-label="Configure machine actions"
+            data-tooltip={controlText('SpindlePanel.text040')}
+            aria-label={controlText('SpindlePanel.text041')}
           >
             <Settings2 size={13} />
           </button>
@@ -1010,8 +1014,8 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
         <ControlPanelCollapseToggle
           panel="spindle"
           testId="control-spindle-toggle"
-          collapseTip="Collapse spindle and coolant controls"
-          expandTip="Show spindle and coolant controls"
+          collapseTip={controlText('SpindlePanel.text042')}
+          expandTip={controlText('SpindlePanel.text043')}
         />
       </div>
       {/* WO-184: "SPINDLE / COOLANT" is the longest rail title there is; with
@@ -1025,10 +1029,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
       {collapsed && (
         <div className="panel-body">
           <div className="control-live-row">
-            <span data-testid="control-spindle-collapsed-state">
-              {spindleRpm === null ? '---' : Math.round(spindleRpm)} rpm {dirText}
-              {showAccessories ? ` | ${coolantText}` : ''}
-            </span>
+            <span data-testid="control-spindle-collapsed-state">{catalogChildren(controlText('SpindlePanel.text044', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: spindleRpm === null ? '---' : Math.round(spindleRpm), value2: dirText, value3: showAccessories ? ` | ${coolantText}` : '' })}</span>
           </div>
         </div>
       )}
@@ -1038,7 +1039,7 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
             three-across group (UI-CONTROL-PAGE-POLISH): as one row they
             overran the card and wrapped "Off" onto a ragged second line. */}
         <div className="control-jog-config-row">
-          <span className="control-field-label">RPM</span>
+          <span className="control-field-label">{controlText('SpindlePanel.text045')}</span>
           <NumCell
             className="mform-input mform-input-sm control-rpm-input"
             shown={String(rpm)}
@@ -1059,20 +1060,18 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
             className={`control-spindle-btn ${latched === 'cw' ? 'control-latched' : ''}`}
             data-testid="control-spindle-cw"
             disabled={spindleDisabled}
-            data-tooltip={startTip('spindleCw', 'Spindle on clockwise')}
+            data-tooltip={startTip('spindleCw', controlText('SpindlePanel.text046'))}
             onClick={() => runSpindle('cw', 'spindleCw')}
           >
-            <Fan size={13} /> CW
-          </button>
+            <Fan size={13} />{controlText('SpindlePanel.text047')}</button>
           <button
             className={`control-spindle-btn ${latched === 'ccw' ? 'control-latched' : ''}`}
             data-testid="control-spindle-ccw"
             disabled={spindleDisabled}
-            data-tooltip={startTip('spindleCcw', 'Spindle on counter-clockwise')}
+            data-tooltip={startTip('spindleCcw', controlText('SpindlePanel.text048'))}
             onClick={() => runSpindle('ccw', 'spindleCcw')}
           >
-            <Fan size={13} /> CCW
-          </button>
+            <Fan size={13} />{controlText('SpindlePanel.text049')}</button>
           {/* WO-964: Operator keeps the spindle's Off, and only the spindle's.
               `disabled` is the spindleStop gate and NOT `spindleDisabled` - a
               stop is never gated on having a route, because a stop that cannot
@@ -1081,11 +1080,10 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
             className={`control-spindle-btn ${latched === 'off' ? 'control-latched' : ''}`}
             data-testid="control-spindle-off"
             disabled={spindleStopDisabled}
-            data-tooltip={spindleTip('spindleOff', 'Spindle stop')}
+            data-tooltip={spindleTip('spindleOff', controlText('SpindlePanel.text050'))}
             onClick={() => runSpindle('off', 'spindleOff')}
           >
-            <CircleOff size={13} /> Off
-          </button>
+            <CircleOff size={13} />{controlText('SpindlePanel.text051')}</button>
         </div>
         {/* WO-442: decoded VFD spindle telemetry - the three measurements Operator
             reads: volts, amps, torque. `null` per field means the inverter
@@ -1122,11 +1120,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
             {' | '}
             {telemetry.amps === null ? '-- A' : `${telemetry.amps.toFixed(1)} A`}
             {' | '}
-            {telemetry.torque === null ? 'torque --' : `torque ${telemetry.torque}`}
+            {telemetry.torque === null ? controlText('SpindlePanel.torqueUnavailable') : controlText('SpindlePanel.text052', { value1: String(telemetry.torque) })}
           </span>
           {telemetry.upToSpeed === null ? null : (
             <span data-testid="control-spindle-up-to-speed">
-              {telemetry.upToSpeed ? 'up to speed' : 'ramping'}
+              {telemetry.upToSpeed ? controlText('SpindlePanel.text053') : controlText('SpindlePanel.ramping')}
             </span>
           )}
         </div>
@@ -1151,22 +1149,20 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
                   className={`control-spindle-btn ${running('mist') ? 'control-latched' : ''}`}
                   data-testid="control-coolant-mist"
                   disabled={accessoryDisabled}
-                  data-tooltip={coolantTip('coolantMist', 'Mist on')}
+                  data-tooltip={coolantTip('coolantMist', controlText('SpindlePanel.text054'))}
                   onClick={() => pressCoolant('mist', 'coolantMist')}
                 >
-                  <Droplets size={13} /> Mist
-                </button>
+                  <Droplets size={13} />{controlText('SpindlePanel.text055')}</button>
               )}
               {showChannel('flood') && (
                 <button
                   className={`control-spindle-btn ${running('flood') ? 'control-latched' : ''}`}
                   data-testid="control-coolant-flood"
                   disabled={accessoryDisabled}
-                  data-tooltip={coolantTip('coolantFlood', 'Flood on')}
+                  data-tooltip={coolantTip('coolantFlood', controlText('SpindlePanel.text056'))}
                   onClick={() => pressCoolant('flood', 'coolantFlood')}
                 >
-                  <Droplets size={13} /> Flood
-                </button>
+                  <Droplets size={13} />{controlText('SpindlePanel.text057')}</button>
               )}
               {showVacuum && (
                 <button
@@ -1175,12 +1171,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
                   data-vacuum-code={vacuum?.onCode}
                   disabled={accessoryDisabled}
                   data-tooltip={vacuum
-                    ? `Vacuum on (${vacuum.onCode}); press again for ${vacuumOutput?.offCode ?? 'M9'} off`
-                    : 'Vacuum is running; press for M9 off'}
+                    ? controlText('SpindlePanel.text058', { value1: String(vacuum.onCode), value2: String(vacuumOutput?.offCode ?? 'M9') })
+                    : controlText('SpindlePanel.text059')}
                   onClick={pressVacuum}
                 >
-                  <Fan size={13} /> Vacuum
-                </button>
+                  <Fan size={13} />{controlText('SpindlePanel.text060')}</button>
               )}
               {listedButtons.map((output) => (
                 <button
@@ -1188,8 +1183,8 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
                   className={`control-spindle-btn ${listedRunning[output.onCode] === true ? 'control-latched' : ''}`}
                   data-testid={`control-output-${output.onCode}`}
                   disabled={accessoryDisabled}
-                  data-tooltip={`${output.name} on (${output.onCode}); press again for `
-                    + `${output.offCode ?? 'M9'} off`}
+                  data-tooltip={controlText('SpindlePanel.text061', { value1: String(output.name), value2: String(output.onCode) })
+                    + controlText('SpindlePanel.text062', { value1: String(output.offCode ?? 'M9') })}
                   onClick={() => pressListedOutput(output)}
                 >
                   <Fan size={13} /> {output.name}

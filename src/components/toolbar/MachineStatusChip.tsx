@@ -12,6 +12,7 @@ export function MachineStatusChip() {
   const machineState = useMachineControl((s) => s.machineState)
   const job = useMachineControl((s) => s.job)
   const toolChange = useMachineControl((s) => s.toolChange)
+  const probeRunStopped = useMachineControl((s) => s.probeRunStopped)
   // Subscribe only to schedule datum repaints; the controller resolver below
   // remains the authority for which axes are homed.
   useMachineControl((s) => s.homed)
@@ -20,7 +21,7 @@ export function MachineStatusChip() {
   // header. Once connected, machineSession necessarily owns the live one.
   const datumResolver = connectionPhase === 'connected' ? getMachineController() : null
   const chip = deriveMachineChip({ connectionPhase, machineState, jobPhase: job.phase, datumResolver,
-    programM0Held: programM0HoldLine() !== null,
+    programM0Held: programM0HoldLine() !== null, probeRunStopped,
     toolChangeWaiting: toolChange?.mode === 'toolChange'
       && (toolChange.step === 'awaiting-swap' || toolChange.step === 'ready') })
   const label = machineStateLabel(chip.label)
@@ -35,6 +36,8 @@ export function MachineStatusChip() {
       role="status"
       aria-label={accessibleLabel}
       aria-live="polite"
+      // WO-2774: a stopped probe run reads in its stop line's red.
+      style={chip.state === 'stopped' ? { color: 'var(--accent-red)' } : undefined}
     >
       <span className="machine-status-dot" aria-hidden="true" />
       <span className="machine-status-label">{label}</span>
@@ -50,6 +53,7 @@ function machineStateLabel(value: string): string {
     case 'Running': return shellText('MachineStatusChip.running')
     case 'Held': return shellText('MachineStatusChip.held')
     case 'Alarm': return shellText('MachineStatusChip.alarm')
+    case 'Stopped': return shellText('MachineStatusChip.stopped')
     default: return value
   }
 }

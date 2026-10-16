@@ -1,3 +1,7 @@
+import { catalogChildren } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type ReactNode } from 'react'
 import { hasNativeMachinePathPicker } from '../../../lib/machine/bridgeHost'
 import { activeVfdPortLink } from '../../../lib/machine/bridgeTransport'
@@ -10,7 +14,7 @@ import { LinuxcncConfigFacts } from './LinuxcncConfigFacts'
 import { BuiltinCommandsSection } from './BuiltinCommandsSection'
 
 
-export function SetupReadout({ label, value, testId, absent = 'unset' }: {
+export function SetupReadout({ label, value, testId, absent = controlText('ControllerSetupSection.unset') }: {
   label: string
   value: unknown
   testId: string
@@ -38,7 +42,7 @@ export function SetupReadout({ label, value, testId, absent = 'unset' }: {
   )
 }
 
-export function SetupField({ label, testId, running, value, children, currentLabel = 'Running now', alwaysShowCurrent = false, note }: {
+export function SetupField({ label, testId, running, value, children, currentLabel = controlText('ControllerSetupSection.text001'), alwaysShowCurrent = false, note }: {
   label: string
   testId: string
   running: unknown
@@ -87,12 +91,13 @@ type ControllerSetupSectionProps = Pick<MachineDefinitionPanelState, 'bridgeActi
  *  (a future gateway, or another controller reusing this reader) overrides
  *  that with a named link. */
 function describeLinuxcncSpindle(vfd: LinuxcncHello['vfd'], ownsSpindle: boolean): string | undefined {
-  if (vfd?.present) return vfd.name ? `${vfd.name} (LinuxCNC-owned)` : 'configured on LinuxCNC (unnamed)'
-  if (ownsSpindle) return 'LinuxCNC-owned (spindle commands go through LinuxCNC itself)'
+  if (vfd?.present) return vfd.name ? controlText('ControllerSetupSection.text002', { value1: String(vfd.name) }) : controlText('ControllerSetupSection.text003')
+  if (ownsSpindle) return controlText('ControllerSetupSection.text004')
   return undefined
 }
 
 export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeHello, bridgePort, bridgeProcessState, bridgeTextBlurred, bridgeTextFocused, connectionBusy, connectionKind, connectionPhase, controllerSetupHighlighted, controllerSetupRef, def, detectedInstallRoot, draft, editDraft, handleBridgeAction, legacyBridgeStatusHost, linuxcncHello, linuxcncJoints, linuxcncOwnsSpindle, localLink, noteBridgeSettingChanged, rememberBridgeSetting, rememberPickedPath, serialBaud, setMachineBridgePort, setSkewTyped, setupKind, skewTyped, source, spindleLink, uccnc }: ControllerSetupSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div
           ref={controllerSetupRef}
@@ -119,10 +124,8 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
             display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap',
             marginBottom: setupKind === 'serial' ? 2 : 10,
           }}>
-            <strong data-testid="machine-controller-setup-title">Controller - this computer</strong>
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-              Stored on this computer, not in the machine profile
-            </span>
+            <strong data-testid="machine-controller-setup-title">{controlText('ControllerSetupSection.text005')}</strong>
+            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text006')}</span>
           </div>
 
           {setupKind === 'bridge' && (
@@ -135,9 +138,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                   needs, and wrap when they run out of room. */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 24px', alignItems: 'start' }}>
                 <label style={{ minWidth: 96 }}>
-                  <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                    Bridge port
-                  </span>
+                  <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text007')}</span>
                   <input
                     className="mform-input mform-input-mono"
                     data-testid="machine-controller-bridge-port"
@@ -157,13 +158,13 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                 </label>
                 {legacyBridgeStatusHost ? (
                   <SetupReadout
-                    label="Bridge process"
+                    label={controlText('ControllerSetupSection.text008')}
                     value="Started outside the app - the desktop app can restart it."
                     testId="machine-controller-bridge-unhosted"
                   />
                 ) : bridgeProcessState.kind === 'unavailable' ? (
                   <SetupReadout
-                    label="Bridge process"
+                    label={controlText('ControllerSetupSection.text009')}
                     value={bridgeCapability === 'hosted'
                       ? 'The desktop app could not read the bridge process status.'
                       : 'Install the bridge supervisor once from the LienCAM bridge setup folder.'}
@@ -171,24 +172,20 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                   />
                 ) : bridgeProcessState.kind === 'checking' ? (
                   <SetupReadout
-                    label="Bridge process"
+                    label={controlText('ControllerSetupSection.text010')}
                     value="Checking the bridge on this computer..."
                     testId="machine-controller-bridge-state"
                   />
                 ) : bridgeProcessState.kind === 'building' ? (
                   <SetupReadout
-                    label="Bridge process"
+                    label={controlText('ControllerSetupSection.text011')}
                     value="Building the machine connection for your UCCNC install..."
                     testId="machine-controller-bridge-state"
                   />
                 ) : bridgeProcessState.kind === 'missing-install' ? (
                   <div style={{ width: 360, minWidth: 360 }}>
-                    <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                      Bridge process
-                    </span>
-                    <div data-testid="machine-controller-bridge-state" style={{ marginBottom: 4 }}>
-                      UCCNC was not found. Choose its install folder below.
-                    </div>
+                    <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text012')}</span>
+                    <div data-testid="machine-controller-bridge-state" style={{ marginBottom: 4 }}>{controlText('ControllerSetupSection.text013')}</div>
                     <button
                       type="button"
                       className="control-chip-btn"
@@ -196,17 +193,13 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       disabled={bridgeAction !== null}
                       onClick={() => { void handleBridgeAction('restart') }}
                     >
-                      {bridgeAction === 'restart' ? 'Building...' : 'Build machine connection'}
+                      {bridgeAction === 'restart' ? 'Building...' : controlText('ControllerSetupSection.text014')}
                     </button>
                   </div>
                 ) : bridgeProcessState.kind === 'build-failed' ? (
                   <div style={{ width: 520, minWidth: 420 }}>
-                    <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                      Bridge process
-                    </span>
-                    <div data-testid="machine-controller-bridge-state" style={{ marginBottom: 4 }}>
-                      Machine connection build failed: {bridgeProcessState.reason}. Log: {bridgeProcessState.status.setup?.logPath}
-                    </div>
+                    <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text015')}</span>
+                    <div data-testid="machine-controller-bridge-state" style={{ marginBottom: 4 }}>{catalogChildren(controlText('ControllerSetupSection.text016', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: bridgeProcessState.reason, value2: bridgeProcessState.status.setup?.logPath })}</div>
                     <button
                       type="button"
                       className="control-chip-btn"
@@ -214,7 +207,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       disabled={bridgeAction !== null}
                       onClick={() => { void handleBridgeAction('restart') }}
                     >
-                      {bridgeAction === 'restart' ? 'Building...' : 'Build again'}
+                      {bridgeAction === 'restart' ? 'Building...' : controlText('ControllerSetupSection.text017')}
                     </button>
                   </div>
                 ) : (
@@ -222,20 +215,18 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     width: bridgeProcessState.kind === 'failing' ? 420 : 250,
                     minWidth: bridgeProcessState.kind === 'failing' ? 420 : 250,
                   }}>
-                    <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                      Bridge process
-                    </span>
+                    <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text018')}</span>
                     <div
                       data-testid="machine-controller-bridge-state"
                       style={{ color: 'var(--text-primary)', marginBottom: 4 }}
                     >
                       {bridgeProcessState.kind === 'not-running'
-                        ? 'Bridge is not running.'
+                        ? controlText('ControllerSetupSection.text019')
                         : bridgeProcessState.kind === 'not-configured'
-                          ? 'liencam-bridge.exe is missing or not configured on this computer.'
+                          ? controlText('ControllerSetupSection.text020')
                         : bridgeProcessState.kind === 'failing'
-                          ? `Bridge needs recovery: ${bridgeProcessState.reason}`
-                          : 'Bridge is running and ready.'}
+                          ? controlText('ControllerSetupSection.text021', { value1: String(bridgeProcessState.reason) })
+                          : controlText('ControllerSetupSection.text022')}
                     </div>
                     {bridgeProcessState.kind === 'not-configured' ? (
                       bridgeCapability === 'hosted' ? (
@@ -244,10 +235,8 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                           className="control-chip-btn"
                           data-testid="machine-controller-restart-bridge"
                           disabled
-                          title="The machine bridge executable is not configured in this desktop app."
-                        >
-                          Restart bridge
-                        </button>
+                          title={controlText('ControllerSetupSection.text023')}
+                        >{controlText('ControllerSetupSection.text024')}</button>
                       ) : null
                     ) : bridgeProcessState.kind === 'not-running' ? (
                       <button
@@ -257,7 +246,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                         disabled={bridgeAction !== null}
                         onClick={() => { void handleBridgeAction('start') }}
                       >
-                        {bridgeAction === 'start' ? 'Starting...' : 'Start bridge'}
+                        {bridgeAction === 'start' ? 'Starting...' : controlText('ControllerSetupSection.text025')}
                       </button>
                     ) : bridgeProcessState.kind === 'failing' || bridgeCapability === 'hosted' ? (
                       <button
@@ -267,7 +256,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                         disabled={bridgeAction !== null}
                         onClick={() => { void handleBridgeAction('restart') }}
                       >
-                        {bridgeAction === 'restart' ? 'Restarting...' : 'Restart bridge'}
+                        {bridgeAction === 'restart' ? 'Restarting...' : controlText('ControllerSetupSection.text026')}
                       </button>
                     ) : (
                       <button
@@ -276,24 +265,24 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                         data-testid="machine-controller-stop-bridge"
                         disabled={bridgeAction !== null || connectionPhase !== 'disconnected'}
                         title={connectionPhase !== 'disconnected'
-                          ? 'Disconnect the controller before shutting down its bridge.'
-                          : 'Shut down the bridge process on this computer.'}
+                          ? controlText('ControllerSetupSection.text027')
+                          : controlText('ControllerSetupSection.text028')}
                         onClick={() => { void handleBridgeAction('stop') }}
                       >
-                        {bridgeAction === 'stop' ? 'Shutting down...' : 'Shut down bridge'}
+                        {bridgeAction === 'stop' ? controlText('ControllerSetupSection.text029') : controlText('ControllerSetupSection.text030')}
                       </button>
                     )}
                   </div>
                 )}
                 {connectionKind === undefined ? (
                   <SetupReadout
-                    label="Install folder"
+                    label={controlText('ControllerSetupSection.text031')}
                     value={uccnc?.installRoot}
-                    absent={uccnc ? 'not configured' : 'unset'}
+                    absent={uccnc ? controlText('ControllerSetupSection.notConfigured') : controlText('ControllerSetupSection.unset')}
                     testId="machine-controller-uccnc-install"
                   />
                 ) : <SetupField
-                  label="Install folder"
+                  label={controlText('ControllerSetupSection.text032')}
                   running={uccnc?.installRoot}
                   value={localLink?.installRoot ?? detectedInstallRoot}
                   testId="machine-controller-uccnc-install"
@@ -304,7 +293,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     data-wired=""
                     type="text"
                     value={localLink?.installRoot ?? detectedInstallRoot ?? ''}
-                    placeholder="Not chosen"
+                    placeholder={controlText('ControllerSetupSection.text033')}
                     onFocus={(event) => bridgeTextFocused('installRoot', event.currentTarget.value)}
                     onChange={(event) => rememberBridgeSetting('installRoot', event.currentTarget.value || undefined)}
                     onBlur={(event) => bridgeTextBlurred('installRoot', event.currentTarget.value)}
@@ -315,19 +304,17 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       className="control-chip-btn"
                       data-testid="machine-controller-uccnc-install-browse"
                       onClick={() => { void rememberPickedPath('installRoot', 'install-root') }}
-                    >
-                      Browse
-                    </button>
+                    >{controlText('ControllerSetupSection.text034')}</button>
                   )}
                 </SetupField>}
                 {connectionKind === undefined ? (
                   <SetupReadout
-                    label="Profile"
+                    label={controlText('ControllerSetupSection.text035')}
                     value={uccnc?.profile}
                     testId="machine-controller-uccnc-profile"
                   />
                 ) : <SetupField
-                  label="Profile"
+                  label={controlText('ControllerSetupSection.text036')}
                   running={uccnc?.profile}
                   value={localLink?.profile}
                   testId="machine-controller-uccnc-profile"
@@ -346,7 +333,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                         noteBridgeSettingChanged()
                       }}
                     >
-                      <option value="">Not chosen</option>
+                      <option value="">{controlText('ControllerSetupSection.text037')}</option>
                       {Array.from(new Set([
                         ...(uccnc?.profiles ?? []),
                         localLink?.profile,
@@ -361,7 +348,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       data-wired=""
                       type="text"
                       value={localLink?.profile ?? ''}
-                      placeholder="Not chosen"
+                      placeholder={controlText('ControllerSetupSection.text038')}
                       onFocus={(event) => bridgeTextFocused('profile', event.currentTarget.value)}
                       onChange={(event) => rememberBridgeSetting('profile', event.currentTarget.value || undefined)}
                       onBlur={(event) => bridgeTextBlurred('profile', event.currentTarget.value)}
@@ -370,12 +357,12 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                 </SetupField>}
                 {connectionKind === undefined ? (
                   <SetupReadout
-                    label="Board"
+                    label={controlText('ControllerSetupSection.text039')}
                     value={uccnc?.board}
                     testId="machine-controller-uccnc-board"
                   />
                 ) : <SetupField
-                  label="Board"
+                  label={controlText('ControllerSetupSection.text040')}
                   running={uccnc?.board}
                   value={localLink?.board}
                   testId="machine-controller-uccnc-board"
@@ -393,7 +380,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       const raw = event.currentTarget.value.trim()
                       const parsed = Number(raw)
                       if (raw.toLowerCase() !== 'auto' && (!Number.isInteger(parsed) || raw === '')) {
-                        event.currentTarget.setCustomValidity('Enter auto or a whole-number board id.')
+                        event.currentTarget.setCustomValidity(controlText('ControllerSetupSection.text041'))
                         event.currentTarget.reportValidity()
                         return
                       }
@@ -403,10 +390,10 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     }}
                   />
                 </SetupField>}
-                <SetupReadout label="UC100 DLL" value={uccnc?.uc100Dll} absent={uccnc ? 'beside the bridge' : 'unset'} testId="machine-controller-uccnc-uc100-dll" />
-                <SetupReadout label="FTD2XX DLL" value={uccnc?.ftd2xxDll} absent={uccnc ? 'beside the bridge' : 'unset'} testId="machine-controller-uccnc-ftd2xx-dll" />
+                <SetupReadout label={controlText('ControllerSetupSection.text042')} value={uccnc?.uc100Dll} absent={uccnc ? controlText('ControllerSetupSection.besideBridge') : controlText('ControllerSetupSection.unset')} testId="machine-controller-uccnc-uc100-dll" />
+                <SetupReadout label={controlText('ControllerSetupSection.text043')} value={uccnc?.ftd2xxDll} absent={uccnc ? controlText('ControllerSetupSection.besideBridge') : controlText('ControllerSetupSection.unset')} testId="machine-controller-uccnc-ftd2xx-dll" />
                 {connectionKind !== undefined && <SetupField
-                  label="Spindle definition"
+                  label={controlText('ControllerSetupSection.text044')}
                   running={bridgeHello?.vfd?.name}
                   value={localLink?.vfdDefinition}
                   testId="machine-controller-vfd-definition"
@@ -417,7 +404,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     data-wired=""
                     type="text"
                     value={localLink?.vfdDefinition ?? ''}
-                    placeholder="Not chosen"
+                    placeholder={controlText('ControllerSetupSection.text045')}
                     onFocus={(event) => bridgeTextFocused('vfdDefinition', event.currentTarget.value)}
                     onChange={(event) => rememberBridgeSetting('vfdDefinition', event.currentTarget.value || undefined)}
                     onBlur={(event) => bridgeTextBlurred('vfdDefinition', event.currentTarget.value)}
@@ -428,9 +415,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       className="control-chip-btn"
                       data-testid="machine-controller-vfd-definition-browse"
                       onClick={() => { void rememberPickedPath('vfdDefinition', 'vfd-definition') }}
-                    >
-                      Browse
-                    </button>
+                    >{controlText('ControllerSetupSection.text046')}</button>
                   )}
                 </SetupField>}
               </div>
@@ -441,9 +426,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                   now as wide as the control, so the message sits beside it. */}
               <div style={{ marginTop: 12, display: 'flex', alignItems: 'end', gap: 10, flexWrap: 'wrap' }}>
                 <label style={{ minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                    Spindle COM port
-                  </span>
+                  <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text047')}</span>
                   <select
                     className="mform-input mform-input-mono"
                     data-testid="machine-controller-vfd-port"
@@ -453,7 +436,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     onFocus={() => { void activeVfdPortLink()?.listPorts() }}
                     onChange={(event) => { void activeVfdPortLink()?.selectPort(event.currentTarget.value) }}
                   >
-                    <option value="">unset</option>
+                    <option value="">{controlText('ControllerSetupSection.text048')}</option>
                     {Array.from(new Set([
                       ...(spindleLink.ports ?? []),
                       spindleLink.reportedPort,
@@ -482,7 +465,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     style={{ color: 'var(--warning)' }}
                   >
                     {/does not know the method/.test(spindleLink.error)
-                      ? 'This bridge cannot list COM ports yet - the spindle port is whatever the bridge was started with.'
+                      ? controlText('ControllerSetupSection.text049')
                       : spindleLink.error}
                   </span>
                 )}
@@ -502,16 +485,14 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                   taking a labelled value row of its own. */}
               <span
                 data-testid="machine-controller-serial-port"
-                data-tooltip="Chosen in the browser when Connect is pressed - this controller uses whichever COM port you pick when you press Connect."
+                data-tooltip={controlText('ControllerSetupSection.text050')}
                 style={{
                   display: 'inline-flex', alignItems: 'center', fontSize: 'var(--font-size-sm)',
                   color: 'var(--text-muted)',
                 }}
-              >
-                COM port: Chosen in the browser when Connect is pressed
-              </span>
+              >{controlText('ControllerSetupSection.text051')}</span>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>Baud</span>
+                <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text052')}</span>
                 <select
                   className="mform-input mform-input-mono"
                   data-testid="machine-controller-serial-baud"
@@ -542,9 +523,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
           )}
 
           {setupKind === 'simulator' && (
-            <div data-testid="machine-controller-setup-simulator" style={{ color: 'var(--text-secondary)' }}>
-              The simulator has nothing to configure. Machine dimensions live in the Machine Library.
-            </div>
+            <div data-testid="machine-controller-setup-simulator" style={{ color: 'var(--text-secondary)' }}>{controlText('ControllerSetupSection.text053')}</div>
           )}
 
           {/* WO-1988: this machine's own facts, read live from LinuxCNC
@@ -557,9 +536,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
               {/* WO-2101: LienCAM on one PC, LinuxCNC on another. Stored on
                   the machine; the next Connect uses it. Blank = this PC. */}
               <label style={{ display: 'block', marginBottom: 12, maxWidth: 320 }}>
-                <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                  LinuxCNC PC address
-                </span>
+                <span style={{ display: 'block', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('ControllerSetupSection.text054')}</span>
                 <input
                   className="mform-input mform-input-mono"
                   data-testid="machine-controller-gateway-address"
@@ -567,7 +544,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                   type="text"
                   spellCheck={false}
                   value={draft.linuxcncGatewayAddress ?? ''}
-                  placeholder="this PC (127.0.0.1)"
+                  placeholder={controlText('ControllerSetupSection.text055')}
                   onChange={(event) => {
                     const typed = event.currentTarget.value
                     editDraft((m) => ({ ...m, linuxcncGatewayAddress: typed.trim() ? typed : undefined }))
@@ -578,38 +555,35 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                 <div
                   data-testid="machine-controller-gateway-not-connected"
                   style={{ color: 'var(--text-secondary)' }}
-                >
-                  Not connected to LinuxCNC. Its axes, homing and spindle link are read live from
-                  its own gateway once connected - LienCAM stores nothing here to show instead.
-                </div>
+                >{controlText('ControllerSetupSection.text056')}</div>
               ) : (
                 <>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 24px', alignItems: 'start' }}>
                     <SetupReadout
-                      label="LinuxCNC"
+                      label={controlText('ControllerSetupSection.text057')}
                       value={linuxcncHello.linuxcncVersion}
                       absent="version not reported"
                       testId="machine-controller-gateway-version"
                     />
                     <SetupReadout
-                      label="INI file"
+                      label={controlText('ControllerSetupSection.text058')}
                       value={linuxcncHello.ini}
                       absent="not reported"
                       testId="machine-controller-gateway-ini"
                     />
                     <SetupReadout
-                      label="Joints (TRAJ COORDINATES)"
+                      label={controlText('ControllerSetupSection.text059')}
                       value={linuxcncHello.coordinates}
                       testId="machine-controller-gateway-coordinates"
                     />
                     <SetupReadout
-                      label="Spindle"
+                      label={controlText('ControllerSetupSection.text060')}
                       value={describeLinuxcncSpindle(linuxcncHello.vfd, linuxcncOwnsSpindle)}
                       absent="not reported"
                       testId="machine-controller-gateway-spindle"
                     />
                     <SetupReadout
-                      label="Read-only"
+                      label={controlText('ControllerSetupSection.text061')}
                       value={linuxcncHello.readOnly ? 'yes' : 'no'}
                       testId="machine-controller-gateway-readonly"
                     />
@@ -620,7 +594,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                       data-testid="machine-controller-gateway-joints"
                       style={{ marginTop: 12 }}
                     >
-                      <thead><tr><th>Joint</th><th>Axis</th><th>Position</th><th>Homed</th></tr></thead>
+                      <thead><tr><th>{controlText('ControllerSetupSection.text062')}</th><th>{controlText('ControllerSetupSection.text063')}</th><th>{controlText('ControllerSetupSection.text064')}</th><th>{controlText('ControllerSetupSection.text065')}</th></tr></thead>
                       <tbody>
                         {linuxcncJoints.map((joint) => (
                           <tr key={joint.index} data-testid={`machine-controller-gateway-joint-${joint.index}`}>
@@ -640,10 +614,7 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                 <div
                   data-testid="machine-controller-gateway-io-note"
                   style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}
-                >
-                  Axis limits, the spindle RPM range and I/O links come from LinuxCNC's own INI and
-                  HAL on its own PC, read through the gateway once connected.
-                </div>
+                >{controlText('ControllerSetupSection.text066')}</div>
               )}
             </div>
           )}

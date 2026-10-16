@@ -115,7 +115,8 @@ describe('WO-047 mode tab strip relocation (header-native)', () => {
   })
 
   it('keeps right utilities icon-only through the last clipped width', () => {
-    // WO-2473 allows Linux Chromium's font metrics before restoring labels.
-    expect(headerCss).toMatch(/@media \(max-width: 1649px\)\s*\{\s*\.toolbar-section-right \.tb-btn span\s*\{\s*display:\s*none/)
+    // WO-2831 (9cc6a9968b): About raises full-label width to 1727px;
+    // retain WO-2473's 3px margin, restoring utility labels at 1730px.
+    expect(headerCss).toMatch(/@media \(max-width: 1729px\)\s*\{\s*\.toolbar-section-right \.tb-btn span\s*\{\s*display:\s*none/)
   })
 })

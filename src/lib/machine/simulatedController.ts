@@ -70,7 +70,7 @@ import {
   type MachineEnvelope,
 } from './machineEnvelope'
 import type { ResolvedMachineMotion } from './resolvedMachineMotion'
-import { prepareProgram } from '../gcode/text'
+import { prepareProgram, stripGcodeComments } from '../gcode/text'
 import type { StreamLine } from '../gcode/text'
 import type { VfdDefinition } from './vfd/vfdDefinition'
 import { vfdIsUpToSpeed } from './vfd/vfdRuntime'
@@ -212,6 +212,11 @@ export interface SimulatedControllerOptions {
    *  machine's stated probing.toolSetter; absent or null, there is no setter
    *  and every probe meets what it met before. */
   toolSetter?: SimulatedToolSetter | null
+  /** WO-2779: the radius of the probe tip, read on every probe tick so a tool
+   *  change applies to the next touch. Production passes the tool in the
+   *  spindle's radius (machineSession.ts). Absent: 0, a point - the touch every
+   *  probe test before WO-2779 depends on. */
+  probeTipRadiusMm?: () => number
   /** WO-2024: the machine definition's accelerations and axis velocities
    *  (machineCutTimeMotion). When supplied, each program move runs at the
    *  average speed the cut-time planner gives it, so a run takes the time the
@@ -241,6 +246,8 @@ export const SIMULATOR_SPINDLE_RAMP_MS = 500
 /** Machine Z where the virtual probe pad triggers when no part is placed -
  *  the pre-WO-416 flat-pad behaviour every probe test before it depended on. */
 const PROBE_PAD_Z = -40
+/** The E-STOP's alarm, and the answer to a probe it abandoned. */
+const SIMULATED_ESTOP_MESSAGE = 'Emergency stop. Motion was abandoned; reset before moving again.'
 /** mm/min this class integrates a rapid (G0, or a bare G28's move to the
  *  reference position) at. G-code carries no feed word for a rapid; matches
  *  SimulatedGrblTransport's RAPID_RATE so both backends move rapids at the
@@ -340,6 +347,8 @@ interface LineEffect {
    *  A program's G56 used to change only the parse, so a G56 program's DRO
    *  and the path check's samples read in whatever frame was selected before. */
   wcs?: WcsId
+  /** WO-2878: the T word on this line - the tool $G reports from here on. */
+  tool?: number
 }
 
 export class SimulatedController implements MachineController {
@@ -447,11 +456,15 @@ export class SimulatedController implements MachineController {
    *  Mutable like the part, so a rehearsal can take the setter off the table
    *  (unplugged, knocked over) and see what a measure then says. */
   private toolSetter: SimulatedToolSetter | null
+  /** WO-2779: where the probe tip's radius comes from (see the option). */
+  private probeTipRadiusSource: () => number
 
   private queue: RunningMove[] = []
   private executingMoveId: number | null = null
   private nextSyntheticId = -1
   private probeResolvers = new Map<number, (touch: ProbeTouch) => void>()
+  /** WO-2800: see setNativeBoardStandIn. */
+  private nativeBoardStandIn = false
   private lastProbe: ProbeTouch = { ok: false, at: null }
 
   // ---- WO-434: MDI (sendCommand) modal state and plumbing ----
@@ -463,6 +476,11 @@ export class SimulatedController implements MachineController {
   private mdiUnitsScale = 1 // mm; 25.4 under G20
   private mdiDistanceMode: 'absolute' | 'incremental' = 'absolute'
   private mdiFeed = 0
+  /** WO-2878: the last T word executed, from the program stream or a typed
+   *  line - what real GRBL's $G reports as T. GRBL boots and soft-resets it
+   *  to 0 (gc_init); a program end leaves it. parserState() used to hard-code
+   *  0, so any refresh (a units click) replaced a finished program's T2. */
+  private toolNumber = 0
   /** G43.1 dynamic tool length offset (Z), mm - ported from
    *  SimulatedGrblTransport.tlo. Written through the text door (G43.1/G49):
    *  the MDI line, and the session applying a loaded file's `G43 H<n>` from
@@ -559,6 +577,7 @@ export class SimulatedController implements MachineController {
     this.spindle = options.spindle ?? null
     this.part = options.part ?? null
     this.toolSetter = options.toolSetter ?? null
+    this.probeTipRadiusSource = options.probeTipRadiusMm ?? (() => 0)
     this.refusedAxes = new Set(
       (['x', 'y', 'z'] as const).filter((axis) => {
         const state = options.motion?.axes[axis].definitionState
@@ -656,6 +675,9 @@ export class SimulatedController implements MachineController {
     this.statusTimer = null
     this.phase = 'disconnected'
     this.state = 'unknown'
+    // WO-2800 fix round 2: nothing will ever finish a move now, so a probe
+    // call or G38 line still waiting is answered.
+    this.answerAbandonedProbes('The simulator was disconnected.')
     this.events.onConnectionPhase?.('disconnected', null)
     this.events.onClose?.(null)
   }
@@ -940,9 +962,26 @@ export class SimulatedController implements MachineController {
   }
 
   jogCancel(): void {
-    this.queue = this.queue.filter((m) => m.asState !== 'jog')
+    // WO-2800: standing in for the native board, its stop (StopNow) also ends
+    // a probe call in flight - where it stands, no contact.
+    const stopped = this.nativeBoardStandIn ? this.queue.filter((m) => this.probeResolvers.has(m.id)) : []
+    this.queue = this.queue.filter((m) => m.asState !== 'jog' && !stopped.includes(m))
     this.lastEnqueuedTarget = this.queue.length > 0 ? this.queue[this.queue.length - 1].target : { ...this.pos }
-    if (this.state === 'jog') this.setState(this.queue.length > 0 ? 'run' : 'idle')
+    for (const move of stopped) {
+      const resolve = this.probeResolvers.get(move.id)
+      this.probeResolvers.delete(move.id)
+      resolve?.({ ok: false, at: null })
+    }
+    if (stopped.length > 0 && this.queue.length === 0) this.executingMoveId = null
+    if (this.state === 'jog' || (stopped.length > 0 && this.state === 'run')) this.setState(this.queue.length > 0 ? 'run' : 'idle')
+  }
+
+  /** WO-2800: the session runs a feature routine (WO-2811: also Tool Z and a
+   *  custom probe routine) through this simulator as the native-probe board
+   *  its machine definition names (UCCNC). There a probe() that meets nothing ends quietly at its target (the guarded
+   *  descent's way of arriving), and jogCancel stops one in flight. */
+  setNativeBoardStandIn(on: boolean): void {
+    this.nativeBoardStandIn = on
   }
 
   /**
@@ -1057,6 +1096,7 @@ export class SimulatedController implements MachineController {
     this.spindleRampRpmPerMs = 0
     this.hardLimitTripped = null
     this.softLimitTripped = false
+    this.toolNumber = 0
     this.setState(this.estopTripped ? 'alarm' : 'idle')
     this.resetInProgressFlag = false
     this.resetListeners.forEach((fn) => fn())
@@ -1124,14 +1164,24 @@ export class SimulatedController implements MachineController {
     // before it, so both events are raised only now, with the machine already
     // stopped and its queue already drained.
     this.flushAbandoned()
+    // WO-2800 fix round 2: a probe call or G38 line the E-STOP abandoned is
+    // answered, never left waiting - a routine awaiting it ends here.
+    this.answerAbandonedProbes(SIMULATED_ESTOP_MESSAGE)
     // No code: this controller is software and has no firmware alarm numbers,
     // and contract v3 types `code` as nullable for exactly that. Position is
     // NOT lost - the model kept integrating it - so re-homing is not demanded.
-    this.events.onAlarm?.(
-      null,
-      'Emergency stop. Motion was abandoned; reset before moving again.',
-      false,
-    )
+    this.events.onAlarm?.(null, SIMULATED_ESTOP_MESSAGE, false)
+  }
+
+  /** WO-2800 fix round 2: every probe call and G38 line still waiting ends,
+   *  not touched, with `reason`. */
+  private answerAbandonedProbes(reason: string): void {
+    const calls = [...this.probeResolvers.values()]
+    const lines = [...this.mdiProbeAwaiters.values()]
+    this.probeResolvers.clear()
+    this.mdiProbeAwaiters.clear()
+    for (const resolve of calls) resolve({ ok: false, at: null, reason })
+    for (const resolve of lines) resolve({ ok: false, message: reason })
   }
 
   /**
@@ -1210,7 +1260,7 @@ export class SimulatedController implements MachineController {
       this.lastEnqueuedTarget = target
       const id = this.mintId()
       this.probeResolvers.set(id, resolve)
-      this.queue.push({ id, kind: 'probe', target, feedMmMin, program: false, asState: 'run' })
+      this.queue.push({ id, kind: 'probe', target, feedMmMin, program: false, asState: 'run', probeMissAllowed: this.nativeBoardStandIn })
       if (this.state === 'idle') this.setState('run')
     })
   }
@@ -1258,6 +1308,19 @@ export class SimulatedController implements MachineController {
 
   getSimulatedToolSetter(): SimulatedToolSetter | null {
     return this.toolSetter
+  }
+
+  /** WO-2779: give the probe tip a fixed radius (0 makes it a point again).
+   *  Takes effect on the next probe tick, as setSimulatedPart does. */
+  setSimulatedProbeTipRadius(radiusMm: number): void {
+    this.probeTipRadiusSource = () => radiusMm
+  }
+
+  /** WO-2779: the radius the probe touches the part with now - 0 for anything
+   *  that is not a finite, positive number. */
+  simulatedProbeTipRadius(): number {
+    const r = this.probeTipRadiusSource()
+    return Number.isFinite(r) && r > 0 ? r : 0
   }
 
   /** Deterministic per-XY pseudo-random value in [-amplitude, amplitude] - a
@@ -1309,7 +1372,12 @@ export class SimulatedController implements MachineController {
 
   /** The nearest crossing (bore wall, boss wall, or a block face) AHEAD of
    *  `from` along one horizontal axis, at the fixed (other-axis, z) - or null
-   *  when nothing lies ahead. `dir` is +1 or -1. */
+   *  when nothing lies ahead. `dir` is +1 or -1.
+   *  WO-2779: `tipR` is the probe tip's radius. A real probe closes when the
+   *  ball's side reaches a wall, so its centre stops one radius short: the
+   *  bore wall is met R - r from the bore's centre, the boss wall R + r, and a
+   *  block face r out from it (round past a corner, as the ball is). The Z
+   *  bands stay the centre's height. With r = 0 every crossing is the wall. */
   private horizontalThreshold(
     part: SimulatedPart,
     axis: 'x' | 'y',
@@ -1317,6 +1385,7 @@ export class SimulatedController implements MachineController {
     z: number,
     from: number,
     dir: 1 | -1,
+    tipR = 0,
   ): number | null {
     const candidates: number[] = []
     const zTopNominal = part.topZ
@@ -1326,8 +1395,9 @@ export class SimulatedController implements MachineController {
       const withinBoreZ = z <= zTopNominal + 1e-9 && z >= zTopNominal - bore.depth - 1e-9
       const c = axis === 'x' ? bore.cx : bore.cy
       const otherC = axis === 'x' ? bore.cy : bore.cx
-      if (withinBoreZ) {
-        const rr = (bore.diameter / 2) ** 2
+      // WO-2779: a ball as wide as the bore fits nowhere in it; no wall to meet.
+      if (withinBoreZ && (tipR === 0 || bore.diameter / 2 > tipR)) {
+        const rr = (bore.diameter / 2 - tipR) ** 2
         const dOtherSq = (other - otherC) ** 2
         if (dOtherSq <= rr) {
           const half = Math.sqrt(rr - dOtherSq)
@@ -1341,7 +1411,7 @@ export class SimulatedController implements MachineController {
       const c = axis === 'x' ? boss.cx : boss.cy
       const otherC = axis === 'x' ? boss.cy : boss.cx
       if (withinBossZ) {
-        const rr = (boss.diameter / 2) ** 2
+        const rr = (boss.diameter / 2 + tipR) ** 2
         const dOtherSq = (other - otherC) ** 2
         if (dOtherSq <= rr) {
           const half = Math.sqrt(rr - dOtherSq)
@@ -1350,14 +1420,17 @@ export class SimulatedController implements MachineController {
       }
     }
     const withinBlockZ = z <= zTopNominal + 1e-9 && z >= zBottom - 1e-9
-    const withinOtherFootprint =
-      axis === 'x'
-        ? other >= part.origin.y - 1e-9 && other <= part.origin.y + part.sizeY + 1e-9
-        : other >= part.origin.x - 1e-9 && other <= part.origin.x + part.sizeX + 1e-9
+    const otherMin = axis === 'x' ? part.origin.y : part.origin.x
+    const otherMax = otherMin + (axis === 'x' ? part.sizeY : part.sizeX)
+    const withinOtherFootprint = other >= otherMin - tipR - 1e-9 && other <= otherMax + tipR + 1e-9
     if (withinBlockZ && withinOtherFootprint) {
       const min = axis === 'x' ? part.origin.x : part.origin.y
       const size = axis === 'x' ? part.sizeX : part.sizeY
-      candidates.push(min, min + size)
+      // WO-2779: beside the face, a full radius out; past its corner, the ball
+      // meets the corner edge, so less.
+      const past = Math.max(0, otherMin - other, other - otherMax)
+      const out = tipR > 0 ? Math.sqrt(Math.max(0, tipR * tipR - past * past)) : 0
+      candidates.push(min - out, min + size + out)
     }
     // WO-2004: `from` is where THIS TICK starts, not where the probe started.
     // A tick that ends a float epsilon short of the wall (318.99999999999994
@@ -1406,7 +1479,7 @@ export class SimulatedController implements MachineController {
     // that (probeContactPoint never finds it from below or from the side), so
     // the pin closes on it, not anywhere under it.
     if (!part) return p.z <= PROBE_PAD_Z + 1e-6 && p.z >= PROBE_PAD_Z - reach
-    return [
+    const atTip = [
       p,
       { ...p, x: p.x + reach },
       { ...p, x: p.x - reach },
@@ -1414,6 +1487,33 @@ export class SimulatedController implements MachineController {
       { ...p, y: p.y - reach },
       { ...p, z: p.z - reach },
     ].some((q) => this.solidAt(part, q))
+    // WO-2779: a tip with a radius also closes when its side reaches a wall -
+    // where probeContactPoint stops it, one radius short.
+    const tipR = this.simulatedProbeTipRadius()
+    return atTip || (tipR > 0 && this.sideGapToSolid(part, p) <= tipR + reach)
+  }
+
+  /** WO-2779: how far (XY) `p` is from the part's nearest wall at its own
+   *  height, over the same walls and Z bands horizontalThreshold meets: the
+   *  boss, the block's faces, and the bore's wall from inside it. 0 inside
+   *  material; Infinity with no wall at that height. */
+  private sideGapToSolid(part: SimulatedPart, p: MachineVec3): number {
+    let gap = Number.POSITIVE_INFINITY
+    const top = part.topZ
+    const boss = part.boss
+    if (boss && p.z <= top + boss.height + 1e-9 && p.z >= top - 1e-9) {
+      gap = Math.min(gap, Math.max(0, Math.hypot(p.x - boss.cx, p.y - boss.cy) - boss.diameter / 2))
+    }
+    if (p.z > top + 1e-9 || p.z < top - part.height - 1e-9) return gap
+    const dx = Math.max(0, part.origin.x - p.x, p.x - (part.origin.x + part.sizeX))
+    const dy = Math.max(0, part.origin.y - p.y, p.y - (part.origin.y + part.sizeY))
+    if (dx > 0 || dy > 0) return Math.min(gap, Math.hypot(dx, dy))
+    const bore = part.bore
+    if (bore && p.z >= top - bore.depth - 1e-9) {
+      const fromAxis = Math.hypot(p.x - bore.cx, p.y - bore.cy)
+      if (fromAxis < bore.diameter / 2) return Math.min(gap, bore.diameter / 2 - fromAxis)
+    }
+    return 0
   }
 
   /** Where (if anywhere) this probe move crosses a surface between `prev`
@@ -1480,14 +1580,14 @@ export class SimulatedController implements MachineController {
     }
     if (dx !== 0 && Math.abs(dx) >= Math.abs(dy)) {
       const dir: 1 | -1 = dx > 0 ? 1 : -1
-      const threshold = this.horizontalThreshold(part, 'x', prev.y, prev.z, prev.x, dir)
+      const threshold = this.horizontalThreshold(part, 'x', prev.y, prev.z, prev.x, dir, this.simulatedProbeTipRadius())
       if (threshold === null) return null
       const crossed = dir === 1 ? next.x >= threshold : next.x <= threshold
       return crossed ? { x: threshold, y: next.y, z: next.z } : null
     }
     if (dy !== 0) {
       const dir: 1 | -1 = dy > 0 ? 1 : -1
-      const threshold = this.horizontalThreshold(part, 'y', prev.x, prev.z, prev.y, dir)
+      const threshold = this.horizontalThreshold(part, 'y', prev.x, prev.z, prev.y, dir, this.simulatedProbeTipRadius())
       if (threshold === null) return null
       const crossed = dir === 1 ? next.y >= threshold : next.y <= threshold
       return crossed ? { x: next.x, y: threshold, z: next.z } : null
@@ -1585,7 +1685,24 @@ export class SimulatedController implements MachineController {
     return null
   }
 
+  /** WO-2878: a typed T word becomes the reported tool only when its line is
+   *  accepted. GRBL runs nothing of an errored line (docs/machine/
+   *  GRBL-PROTOCOL.md:11), so a refused line - wherever below it is refused -
+   *  leaves `$G`'s T where it was. One commit point covers every return. */
   private executeMdiLine(
+    rawText: string,
+  ): { ok: true; awaiter?: Promise<{ ok: boolean; message: string | null }> } | { ok: false; message: string } {
+    let typedTool: number | undefined
+    // A T inside a comment - (T9) or ; T7 - selects nothing (audit 10-16 round 5).
+    for (const w of tokenizeWords(stripGcodeComments(rawText).trim())) if (w.letter === 'T') typedTool = w.value
+    const outcome = this.interpretMdiLine(rawText)
+    if (outcome.ok && typedTool !== undefined && Number.isInteger(typedTool) && typedTool >= 0) {
+      this.toolNumber = typedTool
+    }
+    return outcome
+  }
+
+  private interpretMdiLine(
     rawText: string,
   ): { ok: true; awaiter?: Promise<{ ok: boolean; message: string | null }> } | { ok: false; message: string } {
     const text = rawText.trim()
@@ -1627,6 +1744,8 @@ export class SimulatedController implements MachineController {
       if (gWords.includes(Number(id.slice(1)))) this.activeWcs = id
     }
     if (wWords.has('F')) this.mdiFeed = wWords.get('F')!
+    // The typed T word is taken by executeMdiLine once this line is accepted.
+    const typedTool = wWords.get('T')
 
     let accessoriesChanged = false
     if (mWords.includes(3) || mWords.includes(4)) {
@@ -1807,8 +1926,9 @@ export class SimulatedController implements MachineController {
     }
 
     // Non-motion line: units, distance mode, WCS select, spindle/coolant
-    // (already applied above) - plain ok, like real GRBL.
-    if (gWords.length > 0 || mWords.length > 0) return { ok: true }
+    // (already applied above) - plain ok, like real GRBL. WO-2878: so is a
+    // bare T word - GRBL takes "T5" and reports it as T in $G.
+    if (gWords.length > 0 || mWords.length > 0 || typedTool !== undefined) return { ok: true }
     return { ok: false, message: `'${text}' is not part of the manual-command vocabulary.` }
   }
 
@@ -2319,6 +2439,18 @@ export class SimulatedController implements MachineController {
     // the same way the totals above do.
     this.programFailed = false
     this.executingMoveId = this.queue[0]?.id ?? null
+    // WO-2863 (sweep G3): GRBL's Stop ends in a soft reset (grbl/controller.ts
+    // stopJob), and a soft reset turns the spindle off. This one left it
+    // turning, so Control read "10000 rpm" at Idle beside a lit Off button.
+    // It stops here as reset() stops it; UCCNC's own stopJob is not this code.
+    const spindleWasOn = this.spindleRunning || this.spindleRpm > 0
+    this.spindleRunning = false
+    this.spindleRpm = 0
+    this.spindleTargetRpm = 0
+    this.spindleRampRpmPerMs = 0
+    if (spindleWasOn) {
+      this.events.onAccessories?.({ spindle: 'off', flood: this.floodOn, mist: this.mistOn })
+    }
     if (this.state !== 'alarm') this.setState('idle')
     if (!loaded) return
     this.events.onJobEvent?.('stopped', null)
@@ -2863,6 +2995,7 @@ export class SimulatedController implements MachineController {
       })
     }
     if (effect.wcs) this.activeWcs = effect.wcs
+    if (effect.tool !== undefined) this.toolNumber = effect.tool
     if (effect.pause && this.state !== 'alarm') this.setState('hold')
   }
 
@@ -3024,7 +3157,7 @@ export class SimulatedController implements MachineController {
       units: this.mdiUnitsScale === 25.4 ? 'inch' : 'mm',
       distanceMode: this.mdiDistanceMode,
       motionMode: 'G0',
-      tool: 0,
+      tool: this.toolNumber,
       spindle: this.spindleRunning ? this.spindleDir : 'off',
       coolant: this.floodOn ? 'flood' : this.mistOn ? 'mist' : 'off',
       feed: 0,
@@ -3196,6 +3329,8 @@ export class SimulatedController implements MachineController {
       if (listed.length > 0 && this.outputWords.size > 0) effect = { ...effect, outputs: listed }
       if (mWords.includes(0)) effect = { ...effect, pause: true }
       if (WCS_IDS.some((id) => gWords.includes(Number(id.slice(1))))) effect = { ...effect, wcs: activeWcs }
+      const tw = firstWord(words, 'T')
+      if (tw && Number.isInteger(tw.value) && tw.value >= 0) effect = { ...effect, tool: tw.value }
 
       // WO-2037: the G43.1 length in force is part of where an absolute work Z
       // lands - the register status() subtracts to report WPos, and the one

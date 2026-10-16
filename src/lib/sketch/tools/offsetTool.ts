@@ -36,26 +36,14 @@
 // for v1 (noted in PLAN 3.5). Construction entities never chain or
 // offset (same exclusion as the bake).
 //
-// ASSOCIATIVITY (WO-1859): the committed entities ALSO carry a durable
-// `offsetLink` (types.ts SketchOffsetLink) naming the source chain, the
-// distance and the side. It is DATA, not a constraint -- nothing about it
-// reaches planegcs, so the "no constraint to the source" rule above is
-// untouched. After every solve, entitiesFromSolved calls recomputeOffsetLinks
-// here, which re-runs THIS SAME computeOffset from the SOLVED source geometry
-// and rewrites the linked entities IN PLACE (same ids, same constraints, no
-// second chain). That is what makes dragging a source line, or driving a
-// source dimension, carry the offset in the same solve.
-//
-// The in-place rewrite needs the recomputed shape to have the SAME topology
-// (the same loop partition, hence the same piece count and kinds) as the
-// entity set it is written onto -- the document arrays an entity rewrite may
-// return cannot grow or shrink without orphaning the offset's own coincident
-// constraints. When the source moves far enough to change that topology --
-// a corner flipping convex/concave, a neck collapsing into the disjoint
-// regions of the WO-1475 rule -- the offset keeps the geometry it has and
-// ONE console line says what the software could not carry (LIENCAM rule 11:
-// the operator is never stopped from editing the source, and never shown a
-// crossed loop).
+// ASSOCIATIVITY (WO-1859, strengthened by WO-2616): offsetLink stores the
+// source chain, distance, side and generated joint ownership. The staged
+// dependency solver solves the source, evaluates THIS computeOffset, then
+// solves downstream geometry against the result. Copy drags do not move;
+// incompatible driving constraints are refused with Edit/Break guidance.
+// Pure replay helpers remain available to preview distance/source edits. Their
+// notes explain topology changes; the solver never publishes a stale offset
+// when its stored piece topology can no longer represent the result.
 //
 // PURE module following the toolMachine pattern: clicks RETURN a commit;
 // the store applies it as one undo step.
@@ -846,6 +834,7 @@ export function offsetCommit(
         distance: source.distance,
         side: source.side,
         loopSizes: geo.loops.map((l) => l.pieces.length),
+        constraintIds: [] as string[],
       }
     : null
   let pieceIndex = 0
@@ -870,6 +859,7 @@ export function offsetCommit(
       })
     }
   })
+  if (link) link.constraintIds.push(...constraints.map(c => c.id))
   return { entities: perLoop.flat(), constraints }
 }
 
@@ -1050,6 +1040,25 @@ export interface OffsetLinkRecompute {
 export function recomputeOffsetLinks(
   entities: readonly SketchEntity[],
 ): OffsetLinkRecompute {
+  // WO-2616: missing sources remove their dependent geometry. Explicit Break
+  // remains the operation that converts an offset to independent geometry.
+  const liveIds = new Set(entities.map(e => e.id))
+  const removed = new Set<string>()
+  let found = true
+  while (found) {
+    found = false
+    for (const e of entities) if (e.offsetLink && !removed.has(e.id) &&
+      e.offsetLink.source.some(ref => !liveIds.has(ref.entityId) || removed.has(ref.entityId))) {
+      removed.add(e.id)
+      found = true
+    }
+  }
+  if (removed.size) {
+    const result = recomputeOffsetLinks(entities.filter(e => !removed.has(e.id)))
+    return { ...result, notes: [...result.notes, ...[...new Set(entities.filter(e => removed.has(e.id)).map(e => e.offsetLink!.id))].map(linkId => ({
+      linkId, outcome: 'dropped' as const, message: `Offset link ${linkId}: source removed; dependent copies removed.`,
+    }))] }
+  }
   const groups = new Map<string, { link: SketchOffsetLink; at: number[] }>()
   entities.forEach((e, i) => {
     if (!e.offsetLink) return

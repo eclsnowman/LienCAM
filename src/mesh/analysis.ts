@@ -514,6 +514,24 @@ export function analyzeAndMeasure(
   };
 }
 
+/**
+ * WO-2763: the mesh without its zero-area (or repeated-vertex) triangles -
+ * the same test analysis and repair use. `keptTriangles[i]` is the input
+ * triangle output triangle `i` came from. With nothing to drop it returns the
+ * input mesh object itself, so a clean mesh is untouched.
+ */
+export function dropZeroAreaTriangles(mesh: MeshBuffers): { mesh: MeshBuffers; keptTriangles: Uint32Array | null; dropped: number } {
+  const kept: number[] = [];
+  for (const ref of triangleRefs(mesh)) {
+    if (!isDegenerate(mesh, ref)) kept.push(ref.tri);
+  }
+  const dropped = mesh.indices.length / 3 - kept.length;
+  if (dropped === 0) return { mesh, keptTriangles: null, dropped: 0 };
+  const indices = new Uint32Array(kept.length * 3);
+  kept.forEach((tri, i) => indices.set(mesh.indices.subarray(tri * 3, tri * 3 + 3), i * 3));
+  return { mesh: { positions: mesh.positions, indices }, keptTriangles: Uint32Array.from(kept), dropped };
+}
+
 function cleanedMesh(mesh: MeshBuffers): { mesh: MeshBuffers; dropped: number } {
   const positions = new Float32Array(mesh.positions);
   const indices: number[] = [];

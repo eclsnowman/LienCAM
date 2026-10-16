@@ -1,4 +1,5 @@
 import type { PostConfig } from './types'
+import { safeFilenameComponent } from '../saveFile'
 
 // Download file extension chosen by CONTROLLER IDENTITY (the post dialect id),
 // NOT by comment style. A GRBL config that uses parenthesis comments is still
@@ -33,4 +34,15 @@ export function downloadFilenameForConfig(
   const trimmed = (projectName ?? '').trim()
   const baseName = (trimmed || 'program').replace(/\s+/g, '_')
   return `${baseName}.${extForConfig(config)}`
+}
+
+/** An untouched field keeps the historical default byte for byte. Operator names
+ * keep spaces and explicit extensions; an extensionless name follows the post. */
+export function operatorDownloadFilename(
+  name: string | undefined, defaultFilename: string, config: PostConfig,
+): string {
+  if (name === undefined || !name.trim()) return defaultFilename
+  const clean = safeFilenameComponent(name, '')
+  if (!clean) return defaultFilename
+  return /\.[^ .]+$/.test(clean) ? clean : `${clean}.${extForConfig(config)}`
 }

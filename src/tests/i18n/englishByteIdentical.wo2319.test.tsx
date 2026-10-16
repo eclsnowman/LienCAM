@@ -38,7 +38,9 @@ vi.mock('../../components/viewport/Viewport', () => typedMock<typeof import('../
 const { default: App } = await import('../../App')
 const { useCamStore } = await import('../../store')
 
-const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '../evidence/WO-2685/english-main.wo2319.json')
+// WO-2724/2725 add About and opening preferences; WO-2672 adds move colors.
+// Preserve the complete rendered-English pin for those intentional additions.
+const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '../evidence/WO-2805/english-main.wo2319.json')
 const RECORD = process.env.WO2319_RECORD === '1'
 
 // Added by this order on purpose; everything else must be main's text.

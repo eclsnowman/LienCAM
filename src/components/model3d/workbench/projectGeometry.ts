@@ -1,3 +1,5 @@
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { Loop2D } from '../../../types'
 import type {
   ExpectedProjectSource,
@@ -354,14 +356,14 @@ function expectedSourceRefusal(
     expected.sourceIdentity.bodyId === actual.sourceIdentity.bodyId
     && expected.sourceIdentity.cacheVersion !== actual.sourceIdentity.cacheVersion
   ) {
-    return refusal('stale-source-version', 'Project: source geometry changed; move the pointer and try again')
+    return refusal('stale-source-version', workbenchText('projectGeometry.projectSourceGeometryChangedMoveThePointerAndTry'))
   }
   if (
     expected.stablePickKey !== actual.stablePickKey
     || expected.sourceIdentity.bodyId !== actual.sourceIdentity.bodyId
     || expected.sourceIdentity.stableId !== actual.sourceIdentity.stableId
   ) {
-    return refusal('source-key-changed', 'Project: the source under the pointer changed; try again')
+    return refusal('source-key-changed', workbenchText('projectGeometry.projectTheSourceUnderThePointerChangedTryAgain'))
   }
   return null
 }
@@ -369,7 +371,7 @@ function expectedSourceRefusal(
 function extractionRefusal(reason: string, detail?: string): ProjectResolveResult {
   return refusal(
     reason,
-    `Project: source geometry refused (${reason})${detail === undefined ? '' : `. ${detail}`}`,
+    workbenchText('projectGeometry.projectSourceGeometryRefused', { reason: String(reason), value2: String(detail === undefined ? '' : `. ${detail}`) }),
   )
 }
 
@@ -381,11 +383,11 @@ function extractionRefusal(reason: string, detail?: string): ProjectResolveResul
 export function resolveProjectGeometry(input: ResolveProjectGeometryInput): ProjectResolveResult {
   const invalidInput = invalidProjectInput(input)
   if (invalidInput !== null) {
-    return refusal('invalid-project-input', `Project: invalid resolver input (${invalidInput})`)
+    return refusal('invalid-project-input', workbenchText('projectGeometry.projectInvalidResolverInput', { invalidInput: String(invalidInput) }))
   }
   const depthTolerance = input.edgeDepthTolerance ?? DEFAULT_EDGE_DEPTH_TOLERANCE
   if (!finiteRay(input.ray) || !Number.isFinite(depthTolerance) || depthTolerance < 0) {
-    return refusal('invalid-pick-input', 'Project: ray or depth tolerance is invalid')
+    return refusal('invalid-pick-input', workbenchText('projectGeometry.projectRayOrDepthToleranceIsInvalid'))
   }
 
   const pierce = input.pierce === true
@@ -407,8 +409,8 @@ export function resolveProjectGeometry(input: ResolveProjectGeometryInput): Proj
     : hit
   if (selectedHit === null) {
     return pierce
-      ? refusal('miss', 'Pierce: no model edge under the pointer - click the edge that crosses the sketch plane')
-      : refusal('miss', 'Project: no visible vertex, edge, or face under the pointer')
+      ? refusal('miss', workbenchText('projectGeometry.pierceNoModelEdgeUnderThePointerClickThe'))
+      : refusal('miss', workbenchText('projectGeometry.projectNoVisibleVertexEdgeOrFaceUnderThe'))
   }
 
   const body = input.cache.get(selectedHit.bodyId)
@@ -483,8 +485,8 @@ export function resolveProjectGeometry(input: ResolveProjectGeometryInput): Proj
       ? 'model-vertex'
       : selectedHit.kind === 'edge' ? 'model-edge' : 'model-face',
     sourceLabel: selectedHit.kind === 'vertex'
-      ? 'Model vertex'
-      : `${selectedHit.kind === 'edge' ? 'Edge' : 'Face'} ${selectedHit.id}`,
+      ? workbenchText('projectGeometry.modelVertex')
+      : selectedHit.kind === 'edge' ? workbenchText('projectGeometry.edge') : workbenchText('projectGeometry.face'),
     stablePickKey: key.stablePickKey,
     sourceIdentity: key.sourceIdentity,
     ...(pierceEdge !== undefined ? { pierceEdge } : {}),
@@ -600,13 +602,13 @@ function resolveVertex(body: CachedBody, stableId: string): Vec3 | null {
 export function resolveProjectionLinkSource(input: ResolveProjectionLinkInput): ProjectionSourceGeometry {
   if (!input.body.ok) return { ok: false, reason: input.body.reason }
   const body = input.cache.get(input.body.bodyId)
-  if (body === undefined) return { ok: false, reason: 'cache-entry-missing' }
+  if (body === undefined) return { ok: false, reason: "cache-entry-missing" }
   const toLocal = (point: Vec3) => worldToLocal(input.frame, point)
   const layerId = `model:${input.body.bodyId}`
   const { link } = input
   if (link.sourceKind === 'model-edge') {
     const live = liveEdgeId(body, link.stableId)
-    if (live === null) return { ok: false, reason: 'edge-lost' }
+    if (live === null) return { ok: false, reason: "edge-lost" }
     const extracted = edgePolyline(body, live, toLocal)
     if (!extracted.ok) return { ok: false, reason: extracted.reason }
     return {
@@ -619,7 +621,7 @@ export function resolveProjectionLinkSource(input: ResolveProjectionLinkInput): 
     }
   }
   if (link.sourceKind === 'model-face') {
-    if (!body.faceIds.includes(link.stableId)) return { ok: false, reason: 'face-lost' }
+    if (!body.faceIds.includes(link.stableId)) return { ok: false, reason: "face-lost" }
     const extracted = faceBoundaryLoops(body, link.stableId, toLocal)
     if (!extracted.ok) return { ok: false, reason: extracted.reason }
     return {
@@ -635,9 +637,9 @@ export function resolveProjectionLinkSource(input: ResolveProjectionLinkInput): 
     }
   }
   const vertex = resolveVertex(body, link.stableId)
-  if (vertex === null) return { ok: false, reason: 'vertex-lost' }
+  if (vertex === null) return { ok: false, reason: "vertex-lost" }
   const local = toLocal(vertex)
-  if (!Number.isFinite(local.x) || !Number.isFinite(local.y)) return { ok: false, reason: 'non-finite-point' }
+  if (!Number.isFinite(local.x) || !Number.isFinite(local.y)) return { ok: false, reason: "non-finite-point" }
   return { ok: true, paths: [], points: [local] }
 }
 
@@ -662,10 +664,10 @@ export interface ResolvePierceInput {
 export function resolvePierceCrossing(input: ResolvePierceInput): PierceCrossing {
   if (!input.body.ok) return { ok: false, reason: input.body.reason }
   const body = input.cache.get(input.body.bodyId)
-  if (body === undefined) return { ok: false, reason: 'cache-entry-missing' }
+  if (body === undefined) return { ok: false, reason: "cache-entry-missing" }
   const live = liveEdgeId(body, input.source.stableId)
-  if (live === null) return { ok: false, reason: 'edge-lost' }
+  if (live === null) return { ok: false, reason: "edge-lost" }
   const points = edgeLocal3(body, live, input.frame)
-  if (points === null) return { ok: false, reason: 'degenerate-edge' }
+  if (points === null) return { ok: false, reason: "degenerate-edge" }
   return edgePlaneCrossing(points, input.near)
 }

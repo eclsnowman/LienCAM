@@ -1,3 +1,5 @@
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useMemo, useState, type MouseEvent } from 'react'
 import { useCamStore } from '../../../store'
 import {
@@ -35,9 +37,9 @@ const DIM_BADGE_TEXT: Record<SketchDimensionKind, string> = {
   angle3: 'a3',
   radius: 'r',
   diameter: 'dia',
-  arcLength: 'Lar',
-  majorRadius: 'Ra',
-  minorRadius: 'Rb',
+  get arcLength() { return workbenchText('ConstraintBrowser.lar') },
+  get majorRadius() { return workbenchText('ConstraintBrowser.ra') },
+  get minorRadius() { return workbenchText('ConstraintBrowser.rb') },
   focusDistance: '2c',
   d1xd2: 'd1xd2',
 }
@@ -78,9 +80,10 @@ export function BrowserRowView({
   actionTitle: string
   onAction: (row: BrowserRow) => void
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const statusClass =
-    row.status === 'conflicting' || row.unresolved !== undefined ? ' sketch-browser-row-conflict'
-    : row.status === 'redundant' ? ' sketch-browser-row-redundant'
+    row.status === 'conflicting' || row.unresolved !== undefined ? workbenchText('ConstraintBrowser.sketchBrowserRowConflict')
+    : row.status === 'redundant' ? workbenchText('ConstraintBrowser.sketchBrowserRowRedundant')
     : ''
   return (
     <div
@@ -90,22 +93,22 @@ export function BrowserRowView({
       onClick={(e: MouseEvent) => onSelect(row, e.shiftKey)}
       onMouseEnter={() => viewportHandle()?.setSketchHover?.(row.id)}
       onMouseLeave={() => viewportHandle()?.setSketchHover?.(null)}
-      data-tooltip={row.unresolved ?? `${row.label}: ${row.operands}`}
+      data-tooltip={row.unresolved ?? workbenchText('ConstraintBrowser.value', { label: String(row.label), operands: String(row.operands) })}
       data-row-id={row.id}
       data-unresolved={row.unresolved !== undefined ? 'true' : undefined}
     >
       <code className="sketch-browser-glyph">{rowGlyph(row)}</code>
       <span className="sketch-browser-operands">
         {row.operands}
-        {row.reference && <em> ref</em>}
+        {row.reference && <em>{workbenchText('ConstraintBrowser.ref')}</em>}
       </span>
       {row.status !== 'ok' && (
         <span className="sketch-browser-flag">
-          {row.status === 'conflicting' ? 'conflict' : 'redundant'}
+          {row.status === 'conflicting' ? workbenchText('ConstraintBrowser.conflict') : workbenchText('ConstraintBrowser.redundant')}
         </span>
       )}
       {row.status === 'ok' && row.unresolved !== undefined && (
-        <span className="sketch-browser-flag">unresolved</span>
+        <span className="sketch-browser-flag">{workbenchText('ConstraintBrowser.unresolved')}</span>
       )}
       <button
         className="sketch-browser-trash"
@@ -135,6 +138,7 @@ export function BrowserRowView({
 // same one the workbench rail calls, so the two hosts cannot diverge.
 
 function OffsetLinkSection() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeSketch = useCamStore((s) => s.activeSketch)
   const selectedIds = useCamStore((s) => s.sketchSelectedIds)
   const setSketchSelection = useCamStore((s) => s.setSketchSelection)
@@ -158,27 +162,26 @@ function OffsetLinkSection() {
 
   return (
     <div className="sketch-browser-group" data-testid="sketch-browser-offset-links">
-      <div className="sketch-browser-group-title">Offsets ({links.length})</div>
+      <div className="sketch-browser-group-title">{workbenchText('ConstraintBrowser.offsets', { length: String((links.length) ?? '') })}</div>
       {links.map(([linkId, link]) => {
         const selected = link.ids.every((id) => selectedIds.includes(id))
         const label =
-          `${link.distance} mm from ${link.sources} source ` +
+          workbenchText('ConstraintBrowser.mmFromSource', { distance: String(link.distance), sources: String(link.sources) }) +
           `entit${link.sources === 1 ? 'y' : 'ies'}`
         return (
           <div
             key={linkId}
             className={`sketch-browser-row${selected ? ' sketch-browser-row-selected' : ''}`}
             onClick={() => setSketchSelection(link.ids)}
-            data-tooltip={`Offset: ${label}. Edit the source and this follows it.`}
+            data-tooltip={workbenchText('ConstraintBrowser.offsetEditTheSourceAndThisFollowsIt', { label: String(label) })}
           >
-            <code className="sketch-browser-glyph">off</code>
+            <code className="sketch-browser-glyph">{workbenchText('ConstraintBrowser.off')}</code>
             <span className="sketch-browser-operands">
-              {label} - {link.ids.length} piece{link.ids.length === 1 ? '' : 's'}
-            </span>
+              {workbenchText('ConstraintBrowser.piece', { label: String((label) ?? ''), length: String((link.ids.length) ?? ''), value3: String((link.ids.length === 1 ? '' : 's')) })}</span>
             <button
               className="sketch-browser-trash"
-              data-tooltip="Break this link - the offset stays exactly where it is"
-              aria-label="Break this offset link"
+              data-tooltip={workbenchText('ConstraintBrowser.breakThisLinkTheOffsetStaysExactlyWhereIt')}
+              aria-label={workbenchText('ConstraintBrowser.breakThisOffsetLink')}
               onClick={(e) => {
                 e.stopPropagation()
                 setSketchSelection(link.ids)
@@ -212,13 +215,14 @@ export function ProjectionReferenceSection({
   selectedIds: readonly string[]
   onSelect: (ids: string[]) => void
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const rows = useMemo(() => buildReferenceRows(sketch?.entities ?? []), [sketch])
   if (rows.length === 0) return null
   const unresolved = rows.filter((row) => row.status === 'unresolved').length
   return (
     <div className="sketch-browser-group" data-testid="sketch-browser-references">
       <div className="sketch-browser-group-title">
-        References ({rows.length}){unresolved > 0 && ` - ${unresolved} unresolved`}
+        {workbenchText('ConstraintBrowser.references', { length: String((rows.length) ?? '') })}{unresolved > 0 && workbenchText('ConstraintBrowser.unresolved2', { unresolved: String(unresolved) })}
       </div>
       {rows.map((row) => (
         <div
@@ -232,16 +236,15 @@ export function ProjectionReferenceSection({
           onClick={() => onSelect([row.entityId])}
           data-tooltip={row.detail}
         >
-          <code className="sketch-browser-glyph">ref</code>
-          <span className="sketch-browser-operands">
-            {row.entityLabel} - {row.sourceLabel ?? 'not linked'}
+          <code className="sketch-browser-glyph">{workbenchText('ConstraintBrowser.ref2')}</code>
+          <span className="sketch-browser-operands">{workbenchText('ConstraintBrowser.combinedundefined', { value1: String((row.entityLabel) ?? '') })}{row.sourceLabel ?? workbenchText('ConstraintBrowser.notLinked')}
           </span>
-          {row.status === 'unresolved' && <span className="sketch-browser-flag">unresolved</span>}
+          {row.status === 'unresolved' && <span className="sketch-browser-flag">{workbenchText('ConstraintBrowser.unresolved')}</span>}
           {row.status !== 'not-linked' && (
             <button
               className="sketch-browser-trash"
-              data-tooltip="Break this link - the geometry stays exactly where it is"
-              aria-label="Break this model link"
+              data-tooltip={workbenchText('ConstraintBrowser.breakThisLinkTheGeometryStaysExactlyWhereIt')}
+              aria-label={workbenchText('ConstraintBrowser.breakThisModelLink')}
               onClick={(e) => {
                 e.stopPropagation()
                 onSelect([row.entityId])
@@ -275,6 +278,7 @@ export function PierceSection({
   onSelect: (ids: string[]) => void
   onDelete: (id: string) => void
 }) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const rows = useMemo(() => {
     if (sketch === null) return []
     const ids = sketch.constraints.filter((c) => c.kind === 'pierce').map((c) => c.id)
@@ -285,7 +289,7 @@ export function PierceSection({
   return (
     <div className="sketch-browser-group" data-testid="sketch-browser-pierces">
       <div className="sketch-browser-group-title">
-        Pierce ({rows.length}){unresolved > 0 && ` - ${unresolved} unresolved`}
+        {workbenchText('ConstraintBrowser.pierce', { length: String((rows.length) ?? '') })}{unresolved > 0 && workbenchText('ConstraintBrowser.unresolved2', { unresolved: String(unresolved) })}
       </div>
       {rows.map((row) => (
         <BrowserRowView
@@ -302,6 +306,7 @@ export function PierceSection({
 }
 
 function CamProjectionReferenceSection() {
+  useText('sketch-and-model-workbench')
   const activeSketch = useCamStore((s) => s.activeSketch)
   const selectedIds = useCamStore((s) => s.sketchSelectedIds)
   const setSketchSelection = useCamStore((s) => s.setSketchSelection)
@@ -317,6 +322,7 @@ function CamProjectionReferenceSection() {
 // ---- Browser section ---------------------------------------------------------
 
 export function ConstraintBrowser() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const activeSketch = useCamStore((s) => s.activeSketch)
@@ -366,13 +372,12 @@ export function ConstraintBrowser() {
         onClick={() => setCollapsed((c) => !c)}
       >
         <span>
-          Browser
-          <span className="sketch-browser-count">
-            {` ${model.constraintCount} / ${model.dimensionCount} dim`}
+          {workbenchText('ConstraintBrowser.browser')}<span className="sketch-browser-count">
+            {workbenchText('ConstraintBrowser.dim', { constraintCount: String(model.constraintCount), dimensionCount: String(model.dimensionCount) })}
             {model.conflictingCount > 0 &&
-              ` - ${model.conflictingCount} conflicting`}
+              workbenchText('ConstraintBrowser.conflicting', { conflictingCount: String(model.conflictingCount) })}
             {model.redundantCount > 0 &&
-              ` - ${model.redundantCount} redundant`}
+              workbenchText('ConstraintBrowser.redundant2', { redundantCount: String(model.redundantCount) })}
           </span>
         </span>
         <span className="tree-section-header-chevron">
@@ -383,7 +388,7 @@ export function ConstraintBrowser() {
       {!collapsed && (
         <div className="sketch-browser">
           {total === 0 && (
-            <div className="sketch-browser-empty">No constraints yet</div>
+            <div className="sketch-browser-empty">{workbenchText('ConstraintBrowser.noConstraintsYet')}</div>
           )}
           {/* WO-1859: offsets that still follow their source. */}
           <OffsetLinkSection />
@@ -398,9 +403,7 @@ export function ConstraintBrowser() {
             const hidden = group.rows.length - rows.length
             return (
               <div key={group.kind} className="sketch-browser-group">
-                <div className="sketch-browser-group-title">
-                  {group.title} ({group.rows.length})
-                </div>
+                <div className="sketch-browser-group-title">{workbenchText('ConstraintBrowser.combinedundefined2', { value1: String((group.title) ?? ''), value2: String((group.rows.length) ?? '') })}</div>
                 {rows.map((row) => (
                   <BrowserRowView
                     key={row.id}
@@ -416,16 +419,14 @@ export function ConstraintBrowser() {
                     className="sketch-browser-more"
                     onClick={() => toggleGroupExpand(group.kind)}
                   >
-                    Show all {group.rows.length}
-                  </button>
+                    {workbenchText('ConstraintBrowser.showAll', { length: String((group.rows.length) ?? '') })}</button>
                 )}
                 {expanded && group.rows.length > GROUP_RENDER_CAP && (
                   <button
                     className="sketch-browser-more"
                     onClick={() => toggleGroupExpand(group.kind)}
                   >
-                    Show fewer
-                  </button>
+                    {workbenchText('ConstraintBrowser.showFewer')}</button>
                 )}
               </div>
             )

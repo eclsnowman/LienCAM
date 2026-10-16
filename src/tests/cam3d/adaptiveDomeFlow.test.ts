@@ -45,7 +45,9 @@ describe('3D dome-to-square adaptive flow', () => {
         console.log(`dome square-base travel z=${z.toFixed(1)}: ${length.toFixed(2)} mm`)
         expect(length).toBeGreaterThan(300)
         expect(length).toBeLessThan(500)
-        expect(length).toBeCloseTo(435.52, 1)
+        // WO-2752: the material-side-correct tangent changes the entry seam by
+      // 0.424 mm; preserve the path-length pin and all coverage/direction guards.
+      expect(length).toBeCloseTo(435.10, 1)
       }
       expect(ir.meta?.params?.smoothingSafetyFallback).toBe(false)
       expect(ir.meta?.params?.wallCleanupSafetyFallback).toBe(false)

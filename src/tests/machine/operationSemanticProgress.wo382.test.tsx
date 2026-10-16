@@ -460,6 +460,10 @@ describe('WO-382: operation-semantic progress through the real simulator session
     })
     await act(async () => { fireEvent.click(screen.getByTestId('control-runfrom-plan')) })
     await settle(100)
+    // WO-2810: the operation review follows the explicit unknown-tool choice.
+    expect(useMachineControl.getState().armedFromLine).toBeNull()
+    await act(async () => { fireEvent.click(screen.getByTestId('control-runfrom-toolask-now')) })
+    await settle(100)
     expect(screen.getByTestId('control-runfrom-planbox')).toBeTruthy()
     expect(screen.getByTestId('control-runfrom-operation').textContent).toBe(`Starts in ${LABEL.op2}.`)
     expect(useMachineControl.getState().armedFromLine).toBe(target)

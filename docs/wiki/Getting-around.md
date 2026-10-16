@@ -63,14 +63,18 @@ See also: [What LienCAM is](Getting-around#welcome-overview), [Setup and WCS](Se
 Projects save as self-contained .camproject files that carry your parts, tools, models, and toolpaths inside them.
 
 1. Click Save in the header. The project is saved as a .camproject file named after the project, with spaces turned into underscores. In a browser it goes to your normal download folder; when LienCAM runs as a desktop program, a Save window asks where to put it.
-2. Click Open in the header and pick a .camproject file. While it opens, the header and the status bar show "Opening" with what is being loaded.
+2. Click Open in the header to open the project picker. Choose an example, a recent project in the desktop app, or Browse... to pick a .camproject file. While it opens, the header and the status bar show "Opening" with what is being loaded.
 3. Click New in the header to start a fresh project. Your machines, tool library, and settings stay as they are - only the project is replaced.
 
 A .camproject file is self-contained. It carries the imported STL and STEP parts, the tools your operations use (with their libraries and holders), and any models built in the Model workspace. You can move the file to another computer or send it to someone else and it opens complete - the original import files are not needed again.
 
 Computed toolpaths are saved in the file too, so a saved project reopens with its operations ready. When a project uses tools your tool library does not have, opening it adds them to your library and the status bar says how many were added; tools you already have are never replaced. Settings and your machine library belong to this computer, not to the file.
 
+The desktop picker shows recent projects with their folder and last-opened time. Remove from list removes only the recent entry; a moved or missing file stays listed but cannot be opened from that entry. Examples show part previews and open with the sample hobby router. Help \> Open an example project opens the Examples section again. Tick Always go straight to the file browser in the picker or Settings \> Opening projects to make Open go straight to Browse instead.
+
 ![The New, Open, and Save buttons in the header](images/projects-save-open/file-buttons.webp)
+
+When the project is empty, the picker offers Start with an empty project. Choose it to close the picker and begin drawing; it does not replace a project that already has work in it.
 
 See also: [Your first toolpath](Getting-around#first-toolpath), [Operation generation failures](Toolpaths-2.5D#generation-failures), [The machine prompt when opening a project](Control#machine-choice).
 
@@ -80,7 +84,7 @@ See also: [Your first toolpath](Getting-around#first-toolpath), [Operation gener
 
 Display units change what you see and type; export units set whether posted G-code uses G21 or G20.
 
-1. Click Settings in the header. The Units section is second from the top.
+1. Click Settings in the header and find the Units section below STL Projection.
 2. Set Display units to mm or in. This changes the units shown and typed everywhere in the app, and the status bar shows the current choice. Values are kept in millimeters inside the app, so switching back and forth never changes your part.
 3. Set Export units to mm or in. This controls the posted G-code only: G21 for millimeters, G20 for inches.
 
@@ -125,7 +129,7 @@ The header, design tree, 3D view, properties panel, and console with status bar 
 
 The CAM screen is divided into five regions. The left and right panels can be resized by dragging their inner edges.
 
-1. Header (top): New, Open, and Save on the left; the tabs in the middle (Tool Library, Setup, Sketch, Model, Toolpath, Simulate, Post Process, Control); Undo, Redo, Settings, Help, and the machine status (Offline, Not homed, Ready, Running, or Alarm) on the right. In a narrow window the buttons show only their icons - hover over one to see its name.
+1. Header (top): New, Open, and Save on the left; the tabs in the middle (Tool Library, Setup, Sketch, Model, Toolpath, Simulate, Post Process, Control); Undo, Redo, Settings, Help, About, and the machine status (Offline, Not homed, Ready, Running, or Alarm) on the right. In a narrow window the buttons show only their icons - hover over one to see its name.
 2. Design tree (left panel): everything in the project, in three sections - Stock, Geometry, and Setups. The buttons on each section header add new items, and right-clicking a row opens its menu.
 3. 3D view (center): your parts, stock, and toolpaths. The badge in its top-left corner names the current view, the machine name in its top-right corner opens the Machine Library, the buttons at its top show or hide things, and the view cube sits in its bottom-left corner.
 4. Properties panel (right panel): the details of whatever is selected - a part, stock, setup, or operation - with most values editable in place.
@@ -188,7 +192,7 @@ See also: [CAM and Model workspaces](Getting-around#cam-vs-model-workspace), [Re
 
 The mouse orbits, pans, and zooms the 3D view under a scheme you pick in Settings, and the view cube or the right-click menu snaps to standard views.
 
-With the default mouse scheme, LienCAM default (left-orbit), left-drag orbits, right-drag pans, and the wheel or middle-drag zooms. Settings \> Navigation offers six other schemes; most keep the left button free for selecting and put orbit, pan, and zoom on the middle or right button, some with Shift or Ctrl held. Two checkboxes there reverse the zoom and pan directions. On a touch screen, one finger orbits and two fingers pinch-zoom and pan. The same scheme applies in the CAM 3D view and in the Model workspace.
+With the default mouse scheme, LienCAM default (left-orbit), left-drag orbits, right-drag pans, and the wheel or middle-drag zooms. Settings \> Navigation offers six other schemes; most keep the left button free for selecting and put orbit, pan, and zoom on the middle or right button, some with Shift or Ctrl held. Two checkboxes there reverse the zoom and pan directions. A plain right-click opens the view menu. If your browser opens it as you press the right button, dragging more than 10 pixels dismisses it while the pan continues; the menu does not stay over the moving view. On a touch screen, one finger orbits and two fingers pinch-zoom and pan. The same scheme applies in the CAM 3D view and in the Model workspace.
 
 1. Click a face of the view cube in the bottom-left corner (TOP, FRONT, RIGHT, BACK, LEFT, BOT) to turn the view to that side. The X, Y, and Z arrows on the cube show which way the axes point.
 2. Or right-click an empty spot in the 3D view: Fit all zooms to fit the imported 3D parts (STL and STEP) in view, Isometric view gives the three-quarter overview, and Top view looks straight down.

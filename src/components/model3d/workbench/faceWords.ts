@@ -5,6 +5,8 @@
 // middle is, which way a flat one looks) and, when known, the body's extent,
 // so the one flat face at the body's very top reads as the "top face".
 
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { GeometrySnapshot } from '../../../geom/geom-service'
 
 export interface BodyExtent {
@@ -18,13 +20,13 @@ const AXIS_COS = 0.999
 const EXTENT_MM = 1e-3
 
 const SURFACE_WORDS: Record<GeometrySnapshot['surfaceType'], string> = {
-  plane: 'flat face',
-  cylinder: 'round face',
-  cone: 'cone-shaped face',
-  sphere: 'ball-shaped face',
-  torus: 'rounded ring face',
-  bspline: 'curved face',
-  other: 'curved face',
+  get plane() { return workbenchText('faceWords.flatFace') },
+  get cylinder() { return workbenchText('faceWords.roundFace') },
+  get cone() { return workbenchText('faceWords.coneShapedFace') },
+  get sphere() { return workbenchText('faceWords.ballShapedFace') },
+  get torus() { return workbenchText('faceWords.roundedRingFace') },
+  get bspline() { return workbenchText('faceWords.curvedFace') },
+  get other() { return workbenchText('faceWords.curvedFace') },
 }
 
 const AXES = [
@@ -41,28 +43,28 @@ export function describeFaceSnapshot(snapshot: GeometrySnapshot, extent?: BodyEx
   if (snapshot.surfaceType !== 'plane' || n === undefined) {
     const a = snapshot.axis
     const along = a === undefined ? undefined : AXES.find(({ axis }) => Math.abs(a[axis]) >= AXIS_COS)
-    return along === undefined ? kind : `${kind} along ${along.label}`
+    return along === undefined ? kind : workbenchText('faceWords.along', { value1: String(kind), value2: String(along.label) })
   }
   const length = Math.hypot(n.x, n.y, n.z)
   if (!(length > 0)) return kind
   const unit = { x: n.x / length, y: n.y / length, z: n.z / length }
   const c = snapshot.centroid
-  const at = (axis: 'x' | 'y' | 'z', label: string): string => `at ${label} ${c[axis].toFixed(2)} mm`
+  const at = (axis: 'x' | 'y' | 'z', label: string): string => workbenchText('faceWords.atMm', { label: String(label), value2: String(c[axis].toFixed(2)) })
   if (unit.z >= AXIS_COS) {
-    if (extent !== undefined && Math.abs(c.z - extent.max.z) <= EXTENT_MM) return 'top face'
-    return `flat face facing up ${at('z', 'Z')}`
+    if (extent !== undefined && Math.abs(c.z - extent.max.z) <= EXTENT_MM) return workbenchText('faceWords.topFace')
+    return workbenchText('faceWords.flatFaceFacingUp', { value1: String(at('z', 'Z')) })
   }
   if (unit.z <= -AXIS_COS) {
-    if (extent !== undefined && Math.abs(c.z - extent.min.z) <= EXTENT_MM) return 'bottom face'
-    return `flat face facing down ${at('z', 'Z')}`
+    if (extent !== undefined && Math.abs(c.z - extent.min.z) <= EXTENT_MM) return workbenchText('faceWords.bottomFace')
+    return workbenchText('faceWords.flatFaceFacingDown', { value1: String(at('z', 'Z')) })
   }
   for (const { axis, label } of AXES) {
     if (Math.abs(unit[axis]) < AXIS_COS) continue
     const sign = unit[axis] > 0 ? '+' : '-'
     const edge = unit[axis] > 0 ? extent?.max[axis] : extent?.min[axis]
-    if (edge !== undefined && Math.abs(c[axis] - edge) <= EXTENT_MM) return `side face facing ${sign}${label}`
-    return `flat face facing ${sign}${label} ${at(axis, label)}`
+    if (edge !== undefined && Math.abs(c[axis] - edge) <= EXTENT_MM) return workbenchText('faceWords.sideFaceFacing', { sign: String(sign), label: String(label) })
+    return workbenchText('faceWords.flatFaceFacing', { sign: String(sign), label: String(label), value3: String(at(axis, label)) })
   }
   const tiltDeg = (Math.acos(Math.min(1, Math.abs(unit.z))) * 180) / Math.PI
-  return `flat face tilted ${tiltDeg.toFixed(0)} deg from flat`
+  return workbenchText('faceWords.flatFaceTiltedDegFromFlat', { value1: String(tiltDeg.toFixed(0)) })
 }

@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // ToolGlance - the at-a-glance TOOL readout in the left column's TOOL panel
 // (WO-048, from the WO-036 uix=12 prototype Operator approved): current tool,
 // the program's used-tools chips in first-use order, and a Change tool
@@ -12,6 +16,7 @@ import { useMachineControl } from '../../store/machineControlStore'
 import { useMachineToolTable } from '../../store/machineToolTableStore'
 import { EMPTY_TOOL_TABLE, findTool } from '../../lib/machine/toolTable'
 import { authorize } from '../../lib/machine/operatorAuthority'
+import { currentToolOf } from '../../lib/machine/currentTool'
 
 /**
  * Which tool is in the spindle right now, and what the table says about it.
@@ -21,20 +26,17 @@ import { authorize } from '../../lib/machine/operatorAuthority'
  * below would drift the moment one of them was touched.
  */
 export function useCurrentTool() {
-  const activeTool = useMachineControl((s) => s.activeTool)
+  // Mid-run the truth is the last T word the stream has passed - the
+  // controller's $G tool report is only polled between jobs, so the store's
+  // activeTool lags while a program is running/held. Outside a job the newer
+  // of the two wins, by event stamp (WO-2878: MDI T3 M6 or Measure T3 after a
+  // finished program reads T3, even when the store already said 3).
+  const currentTool = useMachineControl(currentToolOf)
   const toolChanges = useMachineControl((s) => s.job.toolChanges)
   const ackedLine = useMachineControl((s) => s.job.ackedSourceLine)
   const machineId = useCamStore((s) => controlMachine(s).id ?? 'default')
   const table = useMachineToolTable((s) => s.byMachine[machineId]?.table ?? EMPTY_TOOL_TABLE)
 
-  // Mid-run the truth is the last T word the stream has passed - the
-  // controller's $G tool report is only polled between jobs, so the store's
-  // activeTool lags while a program is running/held.
-  let programTool: number | null = null
-  for (const tc of toolChanges) {
-    if (tc.tool !== null && tc.sourceLine <= ackedLine) programTool = tc.tool
-  }
-  const currentTool = programTool ?? activeTool
   return {
     currentTool,
     entry: currentTool !== null ? findTool(table, currentTool) : undefined,
@@ -50,6 +52,7 @@ export function toolDescription(entry: ReturnType<typeof useCurrentTool>['entry'
 }
 
 export function ToolGlance({ onChangeTool }: { onChangeTool: () => void }) {
+  useText('control-screens-not-probing')
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const { currentTool, entry, toolChanges, ackedLine } = useCurrentTool()
   // WO-1979: the button only opens the Tools tab; it keeps the "Change tool"
@@ -68,7 +71,7 @@ export function ToolGlance({ onChangeTool }: { onChangeTool: () => void }) {
 
   return (
     <div className="control-tool-glance" data-testid="control-tool-glance">
-      <span className="control-tool-glance-label">Tool</span>
+      <span className="control-tool-glance-label">{controlText('ToolGlance.text001')}</span>
       <span className="control-tool-glance-current" data-testid="control-tool-glance-current">
         {currentTool !== null ? `T${currentTool}` : '--'}
       </span>
@@ -77,7 +80,7 @@ export function ToolGlance({ onChangeTool }: { onChangeTool: () => void }) {
       )}
       {used.length > 0 && (
         <span className="control-tool-glance-used" data-testid="control-tool-glance-used">
-          <span className="control-tool-glance-usedlabel">used</span>
+          <span className="control-tool-glance-usedlabel">{controlText('ToolGlance.text002')}</span>
           {used.map((t) => {
             const change = toolChanges.find((tc) => tc.tool === t)
             const upcoming = change !== undefined && change.sourceLine > ackedLine
@@ -89,14 +92,12 @@ export function ToolGlance({ onChangeTool }: { onChangeTool: () => void }) {
                 }`}
                 data-tooltip={
                   t === currentTool
-                    ? `T${t} is in the spindle`
+                    ? controlText('ToolGlance.text004', { value1: String(t) })
                     : upcoming
-                      ? `T${t} comes up at line ${change.sourceLine}`
-                      : `T${t} - done`
+                      ? controlText('ToolGlance.text005', { value1: String(t), value2: String(change.sourceLine) })
+                      : controlText('ToolGlance.text006', { value1: String(t) })
                 }
-              >
-                T{t}
-              </span>
+              >{catalogChildren(controlText('ToolGlance.text003', { value1: '\u0000value1\u0000' }), { value1: t })}</span>
             )
           })}
         </span>
@@ -105,10 +106,10 @@ export function ToolGlance({ onChangeTool }: { onChangeTool: () => void }) {
         className="modal-btn modal-btn-ghost control-tool-glance-change"
         data-testid="control-tool-glance-change"
         disabled={authorize('toolGlance', { connected }).disabled}
-        data-tooltip="Swap the tool - measurement and the full table live in Tools / Probe"
+        data-tooltip={controlText('ToolGlance.text007')}
         onClick={onChangeTool}
       >
-        <Replace size={13} /> {toolChangeHold ? 'Change tool' : 'Open tool table'}
+        <Replace size={13} /> {toolChangeHold ? controlText('ToolGlance.text008') : controlText('ToolGlance.text009')}
       </button>
     </div>
   )

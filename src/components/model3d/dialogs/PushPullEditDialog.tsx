@@ -20,6 +20,7 @@
 // on Apply. `normal` and `ownerId` are creation-fixed identity/topology and are
 // preserved untouched.
 
+import { useText } from '../../../i18n'
 import { useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -56,6 +57,7 @@ export interface PushPullEditDialogProps {
 const DEFAULT_DISTANCE = 5
 
 export function PushPullEditDialog({ dag, history, featureId, onApplied, onClose }: PushPullEditDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const existing = dag.getNode(featureId)?.payload as Record<string, unknown> | undefined
   const priorDelta = typeof existing?.delta === 'number' && Number.isFinite(existing.delta) ? (existing.delta as number) : DEFAULT_DISTANCE
   const [magnitude, setMagnitude] = useState<number>(Math.abs(priorDelta) < 1e-9 ? DEFAULT_DISTANCE : Math.abs(priorDelta))
@@ -65,11 +67,11 @@ export function PushPullEditDialog({ dag, history, featureId, onApplied, onClose
   const handleApply = (): void => {
     const node = dag.getNode(featureId)
     if (node === undefined) {
-      setApplyError(`Push/Pull feature '${featureId}' no longer exists.`)
+      setApplyError(workbenchText('PushPullEditDialog.pushPullFeatureNoLongerExists', { featureId: String(featureId) }))
       return
     }
     if (!Number.isFinite(magnitude) || magnitude <= 0) {
-      setApplyError('Distance must be a positive number.')
+      setApplyError(workbenchText('PushPullEditDialog.distanceMustBeAPositiveNumber'))
       return
     }
     setApplyError(undefined)
@@ -82,10 +84,10 @@ export function PushPullEditDialog({ dag, history, featureId, onApplied, onClose
   }
 
   return (
-    <DialogShell title="Edit push/pull" onApply={handleApply} onCancel={onClose} applyDisabled={magnitude <= 0}>
+    <DialogShell title={workbenchText('PushPullEditDialog.editPushPull')} onApply={handleApply} onCancel={onClose} applyDisabled={magnitude <= 0}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Direction</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('PushPullEditDialog.direction')}</span>
           <select
             data-testid="pushpull-direction-select"
             value={direction}
@@ -93,19 +95,17 @@ export function PushPullEditDialog({ dag, history, featureId, onApplied, onClose
             style={{ flex: 1 }}
           >
             <option value="outward" data-testid="pushpull-direction-option-outward">
-              Outward (along face normal)
-            </option>
+              {workbenchText('PushPullEditDialog.outwardAlongFaceNormal')}</option>
             <option value="inward" data-testid="pushpull-direction-option-inward">
-              Inward (into the body)
-            </option>
+              {workbenchText('PushPullEditDialog.inwardIntoTheBody')}</option>
           </select>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Distance</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('PushPullEditDialog.distance')}</span>
           <span data-testid="pushpull-distance" style={{ flex: 1 }}>
             <NumericInput value={magnitude} onChange={setMagnitude} min={0.001} style={{ width: '100%' }} />
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('PushPullEditDialog.mm')}</span>
         </label>
         {applyError !== undefined && (
           <div data-testid="pushpull-apply-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>

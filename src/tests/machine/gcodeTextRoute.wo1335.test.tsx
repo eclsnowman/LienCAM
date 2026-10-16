@@ -917,24 +917,31 @@ describe('WO-1335: what a posted file refuses before the first move', () => {
     expect(useMachineControl.getState().programReadiness.reason).toContain('line 3')
   })
 
-  it('leaves the loaded program alone when a later file is refused', async () => {
+  // WO-2833 (the operator, 10-15: "a refused Load disarms A too - Cycle
+  // Start greyed until a file is armed") replaces WO-2686 fix round 6's "the
+  // accepted file keeps its readiness, untouched" for a file that is armed.
+  it('a later file the reader refuses stages nothing and disarms the armed file: CYCLE START greyed', async () => {
     await connect('bridge')
     await operatorOpensFile('two-setup.nc', TWO_SETUP_NC)
-    const readinessBefore = useMachineControl.getState().programReadiness
-    expect(readinessBefore.ready).toBe(true)
+    expect(useMachineControl.getState().programReadiness.ready).toBe(true)
+    expect(currentOperatorTransport().cycleStartEnabled).toBe(true)
     const stagedBefore = socket().wireOrder()
     const lastId = useMachineControl.getState().consoleLines.at(-1)?.id ?? 0
 
     // G91 IS NOW CONVERTED and G28 runs homed or not (WO-1644), so the
     // refusing word here is one the dialect's word table does not carry.
     await operatorOpensFile('bad.nc', 'G21 G90 G54\nG33 X1\nG0 X1\nM30\n')
+    // Nothing of bad.nc reaches the board.
     expect(socket().wireOrder()).toEqual(stagedBefore)
-    // WO-2686 fix round 6/7: the refusal is one red console line; the accepted
-    // two-setup.nc keeps its readiness, untouched.
-    expect(useMachineControl.getState().programReadiness).toBe(readinessBefore)
+    // The refusal is one red console line.
     const said = useMachineControl.getState().consoleLines
       .filter((line) => line.id > lastId && line.text.includes('G33 is not in the'))
     expect(said.map((line) => line.severity)).toEqual(['error'])
+    expect(useMachineControl.getState().programReadiness.ready).toBe(false)
+    // two-setup.nc is disarmed: nothing is armed, and CYCLE START is greyed.
+    expect(useMachineControl.getState().job.name).toBeNull()
+    expect(useMachineControl.getState().job.phase).not.toBe('ready')
+    expect(currentOperatorTransport()).toMatchObject({ cycleStartEnabled: false, cycleStartDetail: 'No program is armed.' })
   })
 
   it('refuses a file on a controller with no program route at all', async () => {
@@ -1994,7 +2001,9 @@ describe('WO-1345: streaming load lines state the program without inventing a ce
       'fusion-liencnc-v2-sample.nc',
       readFileSync('src/tests/fixtures/foreign-gcode/fusion-liencnc-v2-sample.nc', 'utf8'),
     )
-    expect(sampleMachine).toContain('Program "fusion-liencnc-v2-sample.nc" loaded: 110615 moves in 5 sections')
+    // WO-2764: WO-2478 (2fe053181) gives the file's M9 after its M2001 park macro its own
+    // command section, so the M9 is sent even if the macro changed coolant.
+    expect(sampleMachine).toContain('Program "fusion-liencnc-v2-sample.nc" loaded: 110615 moves in 6 sections')
     expect(sampleMachine).not.toMatch(/4,?09[56]|board holds|board can only hold/i)
 
     const report = [
@@ -2016,7 +2025,10 @@ describe('WO-1345: streaming load lines state the program without inventing a ce
       mkdirSync('src/tests/evidence/WO-2474/baselines', { recursive: true })
       writeFileSync(evidencePath, report)
     }
-    expect(readFileSync(evidencePath, 'utf8').replace(/\r\n/g, '\n')).toBe(report)
+    // WO-2764: the one change since the baseline is WO-2478's sixth section (the M9 after M2001).
+    expect(readFileSync(evidencePath, 'utf8').replace(/\r\n/g, '\n')
+      .replace('110615 moves in 5 sections - G54, then G54, then G54, then G54, then G54 -',
+        '110615 moves in 6 sections - G54, then G54, then G54, then G54, then G54, then G54 -')).toBe(report)
   })
 })
 
@@ -2186,8 +2198,12 @@ describe('WO-1335 acceptance item 1: every word, proven on the wire it reaches',
         if (useMachineControl.getState().job.phase === 'complete') break
         // THE BOARD REPORTS ITSELF IDLE WHERE THE LAST STAGED MOVE LEFT IT, in
         // machine coordinates - which is the frame a boundary's clearance check
-        // reads, and the frame the file's own numbers are NOT in.
-        const last = socket().loadMovesFrames().at(-1)?.moves.at(-1)?.to
+        // reads, and the frame the file's own numbers are NOT in. A dwell has
+        // no endpoint and moves nothing, so the board stays where the last
+        // move with one left it - WO-2478 stages a motionless macro section as
+        // one zero dwell (WO-2764).
+        const last = socket().loadMovesFrames().flatMap((frame) => frame.moves)
+          .filter((move) => move.to !== undefined).at(-1)?.to
         const offset = useMachineControl.getState().activeWcs === 'G55' ? G55_OFFSET : G54_OFFSET
         emitStatus({
           ...idleBridgeStatus((last?.z ?? 0) + offset.z),

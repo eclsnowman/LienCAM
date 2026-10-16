@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Run before the existing site build:
-//   node tools/release/site-releases.mjs [releases.json | --latest]
+//   node tools/release/site-releases.mjs [releases.json | --latest | --tag v...]
 //   npm run build:site
 // --output writes a copy of the page for isolated fixture builds. No network
 // is used by default. GitHub's /latest omits alpha releases, so --latest reads
@@ -39,18 +39,24 @@ export function validateRelease(data) {
   return data
 }
 
-export async function readReleaseData({ file, latest = false, fetchImpl = fetch } = {}) {
-  if (file && latest) throw new Error('Choose a file or --latest')
-  if (!latest) return validateRelease(JSON.parse(await readFile(file ?? fixturePath, 'utf8')))
+export async function readReleaseData({ file, latest = false, tag, fetchImpl = fetch } = {}) {
+  if ([Boolean(file), latest, tag !== undefined].filter(Boolean).length > 1) throw new Error('Choose a file, --latest or --tag')
+  if (tag !== undefined && !/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('Invalid release tag')
+  if (!latest && tag === undefined) return validateRelease(JSON.parse(await readFile(file ?? fixturePath, 'utf8')))
   const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
   // Keep the token on API requests only; release asset downloads are public.
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
-  const list = await fetchImpl('https://api.github.com/repos/eclsnowman/LienCAM/releases?per_page=100', { headers, signal: AbortSignal.timeout(30_000) })
+  const endpoint = tag === undefined ? '?per_page=100' : `/tags/${encodeURIComponent(tag)}`
+  const list = await fetchImpl(`https://api.github.com/repos/eclsnowman/LienCAM/releases${endpoint}`, { headers, signal: AbortSignal.timeout(30_000) })
   if (!list.ok) throw new Error(`GitHub release list: HTTP ${list.status}`)
-  const releases = await list.json()
+  const payload = await list.json()
+  const releases = tag === undefined ? payload : [payload]
   if (!Array.isArray(releases)) throw new Error('Invalid GitHub release list')
-  const release = releases.filter(item => !item.draft && item.published_at)
+  const release = releases.filter(item => item && !item.draft && item.published_at)
     .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at))[0]
+  // At tag creation the assets still belong to a draft. Never substitute an
+  // older release or preview data for the tag the workflow actually checked out.
+  if (tag !== undefined && (!release || release.tag_name !== tag)) throw new Error(`Release ${tag} is not published or does not match the requested tag`)
   const metadata = release?.assets?.find(asset => asset.name === 'releases.json')
   if (!metadata) throw new Error('Newest published release has no releases.json')
   const url = new URL(metadata.browser_download_url)
@@ -72,9 +78,12 @@ export function renderRelease(data, { preview = false } = {}) {
             <p class="file-size">${escape(asset.arch ?? 'Python')} - ${asset.size.toLocaleString('en-US')} bytes</p>
             <p class="checksum">SHA-256 <code>${escape(asset.sha256)}</code></p>
           </div>`).join('\n')
+      // WO-2730: keep app installation help with the generated download rows.
+      const guide = assets.length && platform === 'linux' && ['appimage', 'archive'].includes(kind)
+        ? `\n          <p><a href="${repository}/wiki/Install-on-Linux">Linux installation guide</a></p>` : ''
       return `<div class="download-cell${assets.length ? '' : ' missing'}" data-platform="${platform}" data-kind="${kind}" data-available="${assets.length > 0}">
           <h3>${title}</h3>
-          ${assets.length ? files : '<p class="not-built">not built yet</p>'}
+          ${assets.length ? files : '<p class="not-built">not built yet</p>'}${guide}
         </div>`
     }).join('\n')
     return `<div class="platform-group" aria-labelledby="platform-${platform}"><h2 id="platform-${platform}">${label}</h2>${cells}</div>`
@@ -84,12 +93,12 @@ export function renderRelease(data, { preview = false } = {}) {
       <div class="download-grid">${groups}</div>`
 }
 
-export async function writeDownloadPage({ file, latest = false, output = pagePath, fetchImpl } = {}) {
-  const data = await readReleaseData({ file, latest, fetchImpl })
+export async function writeDownloadPage({ file, latest = false, tag, output = pagePath, fetchImpl } = {}) {
+  const data = await readReleaseData({ file, latest, tag, fetchImpl })
   const template = await readFile(pagePath, 'utf8')
   const marker = /<!-- releases:start -->[\s\S]*?<!-- releases:end -->/
   if (!marker.test(template)) throw new Error('Download page has no release data markers')
-  const preview = !latest && (!file || resolve(file) === fixturePath || resolve(file) === resolve(root, 'test_fixtures/site/releases.windows-only.fixture.json'))
+  const preview = !latest && tag === undefined && (!file || resolve(file) === fixturePath || resolve(file) === resolve(root, 'test_fixtures/site/releases.windows-only.fixture.json'))
   const eol = template.includes('\r\n') ? '\r\n' : '\n'
   const region = `<!-- releases:start -->\n      ${renderRelease(data, { preview })}\n      <!-- releases:end -->`.replaceAll('\n', eol)
   const html = template.replace(marker, () => region)
@@ -99,15 +108,16 @@ export async function writeDownloadPage({ file, latest = false, output = pagePat
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    let file, output, latest = false
+    let file, output, tag, latest = false
     const args = process.argv.slice(2)
     for (let index = 0; index < args.length; index++) {
       if (args[index] === '--latest') latest = true
+      else if (args[index] === '--tag' && args[index + 1]) tag = args[++index]
       else if (args[index] === '--output' && args[index + 1]) output = args[++index]
       else if (!args[index].startsWith('-') && !file) file = args[index]
-      else throw new Error('Usage: site-releases.mjs [releases.json | --latest] [--output download.html]')
+      else throw new Error('Usage: site-releases.mjs [releases.json | --latest | --tag v...] [--output download.html]')
     }
-    const data = await writeDownloadPage({ file, latest, output })
+    const data = await writeDownloadPage({ file, latest, tag, output })
     console.log(`Wrote Download page: ${data.tag}, ${data.assets.length} assets`)
   } catch (error) {
     console.error(error.message)

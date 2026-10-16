@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import './referenceImage2d.css'
 import { useEffect, useMemo, useState } from 'react'
 import { create } from 'zustand'
@@ -11,13 +12,14 @@ import { decodeReferenceImage, referenceImageSize } from '../../model3d/referenc
 import { fileDataUrl } from '../../../referenceImage/imageData'
 import { REFERENCE_IMAGE_2D_FRAME as frame, type ReferenceImagePayload } from '../../../referenceImage/referenceImage'
 import type { ReferenceImageRuntime } from '../../../referenceImage/runtime'
-import { resolveSketchEditorOffset } from '../../../lib/viewport/sketchEditorOffset'
+import { resolveSketchEditorPose } from '../../../lib/sketch/sketchEditorPose'
 
 type Host = { runtime: ReferenceImageRuntime; canvas: HTMLCanvasElement }
 /** UI session only. Original bytes and every authored property live in Project. */
 export const referenceImage2dUi = create<{ host: Host | null; id: string | null; calibrating: boolean; preview?: ReferenceImagePreview | null }>(() => ({ host: null, id: null, calibrating: false }))
 
 export function ReferenceImage2dInsert({ onInserted }: { onInserted(): void }) {
+  useText('sketch-and-model-workbench')
   const host = referenceImage2dUi((s) => s.host)
   const insert = async (file: File) => {
     if (!host) return
@@ -39,6 +41,7 @@ export function ReferenceImage2dInsert({ onInserted }: { onInserted(): void }) {
 }
 
 export function ReferenceImage2dControls() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const images = useCamStore((s) => s.project.referenceImages2d)
   const units = useCamStore((s) => s.appSettings.displayUnits)
   const { id, preview } = referenceImage2dUi()
@@ -47,16 +50,15 @@ export function ReferenceImage2dControls() {
     if (selected) useCamStore.getState().updateReferenceImage2d(selected.id, { payload: { ...selected.payload, ...value } })
   }
   if (!images?.length) return null
-  return <aside style={{ position: 'fixed' }} className="reference-image2d-controls" aria-label="Reference image controls">
-    <label className="reference-image2d-picker">Edit image
-      <select aria-label="Edit reference image" value={selected?.id ?? ''} onChange={(e) => referenceImage2dUi.setState({ id: e.target.value || null, calibrating: false })}>
-        <option value="">Choose image...</option>
+  return <aside style={{ position: 'fixed' }} className="reference-image2d-controls" aria-label={workbenchText('ReferenceImage2d.referenceImageControls')}>
+    <label className="reference-image2d-picker">{workbenchText('ReferenceImage2d.editImage')}<select aria-label={workbenchText('ReferenceImage2d.editReferenceImage')} value={selected?.id ?? ''} onChange={(e) => referenceImage2dUi.setState({ id: e.target.value || null, calibrating: false })}>
+        <option value="">{workbenchText('ReferenceImage2d.chooseImage')}</option>
         {images?.map((image) => <option key={image.id} value={image.id}>{image.payload.name}</option>)}
       </select>
     </label>
     {selected && <ReferenceImagePanel embedded payload={preview?.id === selected.id ? { ...selected.payload, ...preview } : selected.payload} units={units}
       visibility={<label className="relief-row"><input type="checkbox" data-testid="reference-image-visible" checked={!selected.hidden}
-        onChange={() => { referenceImage2dUi.setState({ calibrating: false }); useCamStore.getState().updateReferenceImage2d(selected.id, { hidden: !selected.hidden }) }} />Show image</label>}
+        onChange={() => { referenceImage2dUi.setState({ calibrating: false }); useCamStore.getState().updateReferenceImage2d(selected.id, { hidden: !selected.hidden }) }} />{workbenchText('ReferenceImage2d.showImage')}</label>}
       onPlace={patch} onOpacity={(opacity) => patch({ opacity })} onRename={(name) => patch({ name })}
       onCalibrate={() => referenceImage2dUi.setState({ calibrating: true })}
       onToggleLock={() => { referenceImage2dUi.setState({ calibrating: false }); patch({ scaleLocked: !selected.payload.scaleLocked }) }}
@@ -65,6 +67,7 @@ export function ReferenceImage2dControls() {
 }
 
 export function ReferenceImage2dScene({ host, active }: { host: Host | null; active: boolean }) {
+  useText('sketch-and-model-workbench')
   const images = useCamStore((s) => s.project.referenceImages2d)
   const units = useCamStore((s) => s.appSettings.displayUnits)
   const sketch = useCamStore((s) => s.activeSketch)
@@ -82,7 +85,7 @@ export function ReferenceImage2dScene({ host, active }: { host: Host | null; act
     if (!active) referenceImage2dUi.setState({ id: null, calibrating: false })
   }, [active])
   const line = selectedIds.length === 1 ? sketch?.entities.find((entity) => entity.id === selectedIds[0]) : undefined
-  const offset = sketch ? resolveSketchEditorOffset(useCamStore.getState().project.geometry, sketch.layerId) : undefined
+  const offset = sketch ? resolveSketchEditorPose(useCamStore.getState().project.geometry, sketch) : undefined  // WO-2854: same pose the editor draws at
   const angle = (offset?.rotationDeg ?? 0) * Math.PI / 180
   const initialPoints = line?.kind === 'line' ? [line.start, line.end].map((point) => ({
     x: (offset?.x ?? 0) + point.x * Math.cos(angle) - point.y * Math.sin(angle),

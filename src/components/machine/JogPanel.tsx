@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // JogPanel - manual machine motion (MACHINE-CONTROL plan, stage 5).
 //
 // Color contract: every control in this panel MOVES THE MACHINE, so nothing
@@ -89,25 +92,15 @@ const STEP_CHOICES: Record<'mm' | 'inch', number[]> = {
   inch: [0.001, 0.01, 0.1, 1, 2, 4],
 }
 
-/**
- * WO-1005: THE PRECONDITION EVERY HOME CONTROL NOW CARRIES.
- *
- * Operator's Z endstop was physically damaged on 2026-08-25 by homing into a
- * switch the axis was already sitting on. A homing cycle drives each axis
- * TOWARDS its switch; homing leaves it parked ON that switch with no positive
- * travel left. Power cycle from there and the app comes up unhomed with the
- * machine still on every switch - and every home control in this panel used to
- * invite the press without a word about it.
- *
- * `src/` CANNOT SEE THE SWITCH. Only the bridge can, and reading it is
- * WO-1004's job. So this sentence states the condition and says outright that
- * the app cannot check it. It must never be reworded into a claim that a
- * switch is clear - that would be worse than the silence it replaced.
+/** WO-2817: shared Home guidance, not an off-switch prerequisite.
+ * Revert 313b6a630cfe records two normal re-homes from the resting switches.
+ * The controller owns the cycle; these words must not add an operator step.
+ * Keep the exported name for existing consumers of the shared hint.
  */
 export const HOME_PRECONDITION =
-  'FIRST: a homing cycle drives the axis TOWARDS its switch, so an axis already '
-  + 'on its switch gets driven into it. This app cannot see the switches - check '
-  + 'the axis is off its home switch before you press this.'
+  controlText('JogPanel.text001')
+  + controlText('JogPanel.text002')
+  + controlText('JogPanel.text003')
 
 /** The axis colour tokens the rest of the app already uses. Operator chose the
  *  coloured form on sight (2026-08-24) over the plain one this seat
@@ -171,6 +164,7 @@ function JogPanelView({
 }: {
   selectedConnectionKind?: 'serial' | 'simulator' | 'bridge' | 'gateway'
 } = {}) {
+  useText('control-screens-not-probing')
   const machineState = useMachineControl((s) => s.machineState)
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const connectionPhase = useMachineControl((s) => s.connectionPhase)
@@ -256,10 +250,10 @@ function JogPanelView({
     ? null
     : presence.socket === 'closed'
       ? canOwnBridge
-        ? 'Jog refused: not connected to the bridge. Use Reconnect before moving.'
-        : 'Jog refused: not connected to the bridge. Close the bridge window and start it again, then reconnect before moving.'
+        ? controlText('JogPanel.text004')
+        : controlText('JogPanel.text005')
       : canOwnBridge && (presence.process === 'stopped' || presence.process === 'gave-up')
-        ? 'Jog refused: the bridge process is not running. Use Reconnect before moving.'
+        ? controlText('JogPanel.text006')
         : null
   // WO-914 SAFETY: HOME ALL PASSES THIS MACHINE'S OWN ORDER.
   //
@@ -380,14 +374,14 @@ function JogPanelView({
     // saying otherwise in the tooltip would be a lie.
     if (ctrl.capabilities.perAxisHoming && typeof ctrl.homeAxes === 'function') {
       if (!ctrl.homeAxes(homingOrder)) {
-        say(homeRefusal(ctrl, 'Home All was refused by the controller - nothing was homed.'), 'error')
+        say(homeRefusal(ctrl, controlText('JogPanel.text007')), 'error')
       } else {
         markHomingRequested()
       }
       return
     }
     if (!ctrl.home()) {
-      say('Home All was refused by the controller - nothing was homed.', 'error')
+      say(controlText('JogPanel.text008'), 'error')
     } else {
       markHomingRequested()
     }
@@ -416,20 +410,20 @@ function JogPanelView({
 
     if (!ctrl.capabilities.perAxisHoming || typeof ctrl.homeAxes !== 'function') {
       say(
-        `This controller cannot home one axis at a time - it only runs its own whole ` +
-        `homing cycle ($H), and it chooses the axis order itself. Use Home All. ` +
-        `${axis} was NOT homed and nothing moved.`,
+        controlText('JogPanel.text009') +
+        controlText('JogPanel.text010') +
+        controlText('JogPanel.text011', { value1: String(axis) }),
         'error',
       )
       return
     }
 
     if (!ctrl.homeAxes([axis])) {
-      say(homeRefusal(ctrl, `Home ${axis} was refused by the controller - nothing was homed.`), 'error')
+      say(homeRefusal(ctrl, controlText('JogPanel.text012', { value1: String(axis) })), 'error')
       return
     }
     markHomingRequested()
-    say(`Homing ${axis}.`, 'info')
+    say(controlText('JogPanel.text013', { value1: String(axis) }), 'info')
   }
 
   const stopContinuous = () => {
@@ -525,14 +519,14 @@ function JogPanelView({
     saidUnhomed.current = true
     useMachineControl.getState().pushConsole(
       'tx',
-      `This machine is NOT HOMED, so it does not know where it is. Soft limits are `
-      + `measured from the home datum, and without one the controller applies them to `
-      + `the counters as they were at power-up - which on this machine is also a `
-      + `limit - so a jog can stop after a fraction of a millimetre and look like a `
-      + `dead axis. THIS JOG IS STILL ALLOWED, on purpose: a relative jog is how you `
-      + `back an axis off a limit switch. What stays refused until you home is every `
-      + `move to a COORDINATE - go-to, safe Z, and starting a program. `
-      + `Home ${homingOrder.join(', ')} to clear this.`,
+      controlText('JogPanel.text014')
+      + controlText('JogPanel.text015')
+      + controlText('JogPanel.text016')
+      + controlText('JogPanel.text017')
+      + controlText('JogPanel.text018')
+      + controlText('JogPanel.text019')
+      + controlText('JogPanel.text020')
+      + controlText('JogPanel.text021', { value1: String(homingOrder.join(', ')) }),
       'info',
     )
   }
@@ -573,13 +567,13 @@ function JogPanelView({
       data-jog-axis={axis}
       data-jog-sign={sign}
       type="button"
-      aria-label={`Jog ${label}`}
+      aria-label={controlText('JogPanel.text022', { value1: String(label) })}
       // WO-931: this button jogs, and that is ALL it does. It used to
       // advertise a hidden Alt-click home in its hover text; the home controls
       // are explicit buttons now and nothing about a jog button is a secret.
       // WO-1330: at a tool-change hold the lockout is lifted, so the tooltip
       // must not still announce it - the operator is being ASKED to jog here.
-      data-tooltip={jogGate.refusal ?? `Jog ${label}`}
+      data-tooltip={jogGate.refusal ?? controlText('JogPanel.text023', { value1: String(label) })}
       // Keep the bridge-failure refusal reachable: a native disabled button
       // receives no pointer event and would recreate the silent-dead-jog
       // defect. The handler above refuses before reading any controller.
@@ -605,28 +599,28 @@ function JogPanelView({
         data-jog-axis={axis}
         data-jog-sign={sign}
         type="button"
-        aria-label={`Jog ${label} in degrees`}
+        aria-label={controlText('JogPanel.text024', { value1: String(label) })}
         data-tooltip={jogGate.refusal
-          ?? `Jog ${label} by ${jogContinuous ? 'continuous motion' : `${jogStep} deg`}`}
+          ?? controlText('JogPanel.text027', { value1: String(label), value2: String(jogContinuous ? controlText('JogPanel.text025') : controlText('JogPanel.text026', { value1: String(jogStep) })) })}
         disabled={jogGate.disabled}
         onPointerDown={() => pressJog(axis, sign)}
         onPointerUp={stopContinuous}
         onPointerLeave={stopContinuous}
         onPointerCancel={stopContinuous}
       >
-        {label} {jogContinuous ? 'cont' : `${jogStep} deg`}
+        {label} {jogContinuous ? controlText('JogPanel.continuousShort') : controlText('JogPanel.text028', { value1: String(jogStep) })}
       </button>
     )
   }
 
   const stepLabel = jogContinuous
-    ? 'cont'
+    ? controlText('JogPanel.continuousShort')
     : `${fmtMachineLength(jogStep, units)} ${unitLabel(units)}`
 
   return (
     <section className="panel control-panel">
       <div className="panel-header">
-        <span className="panel-title">Jog</span>
+        <span className="panel-title">{controlText('JogPanel.text029')}</span>
         {/* WO-184: folded, Jog used to show NOTHING - Operator's annotated shot
             left it expanded for exactly that reason ("Jog collapsed is total
             currently, so showing as open"). The D-pad is a CONTROL and stays
@@ -641,8 +635,8 @@ function JogPanelView({
         <ControlPanelCollapseToggle
           panel="jog"
           testId="control-jog-toggle"
-          collapseTip="Collapse the jog controls"
-          expandTip="Show the jog controls"
+          collapseTip={controlText('JogPanel.text030')}
+          expandTip={controlText('JogPanel.text031')}
         />
       </div>
       {!collapsed && (
@@ -660,8 +654,8 @@ function JogPanelView({
               <div className="control-jog-pad">
                 {hasYJog && jogBtn('Y', 1, 'Y+', 'control-jog-y-plus', 'control-jog-wedge wedge-n')}
                 {hasXJog && jogBtn('X', 1, 'X+', 'control-jog-x-plus', 'control-jog-wedge wedge-e')}
-                {hasYJog && jogBtn('Y', -1, 'Y-', 'control-jog-y-minus', 'control-jog-wedge wedge-s')}
-                {hasXJog && jogBtn('X', -1, 'X-', 'control-jog-x-minus', 'control-jog-wedge wedge-w')}
+                {hasYJog && jogBtn('Y', -1, controlText('JogPanel.text032'), 'control-jog-y-minus', 'control-jog-wedge wedge-s')}
+                {hasXJog && jogBtn('X', -1, controlText('JogPanel.text033'), 'control-jog-x-minus', 'control-jog-wedge wedge-w')}
                 <svg className="control-jog-seams" viewBox="0 0 176 176" preserveAspectRatio="none" aria-hidden="true">
                   <path className="control-jog-seam" d="M 0 0 L 176 176 M 176 0 L 0 176" />
                 </svg>
@@ -672,7 +666,7 @@ function JogPanelView({
             {hasZJog && (
               <div className="control-jog-zcol">
                 {jogBtn('Z', 1, 'Z+', 'control-jog-z-plus', 'control-jog-btn control-jog-zbtn')}
-                {jogBtn('Z', -1, 'Z-', 'control-jog-z-minus', 'control-jog-btn control-jog-zbtn')}
+                {jogBtn('Z', -1, controlText('JogPanel.text034'), 'control-jog-z-minus', 'control-jog-btn control-jog-zbtn')}
               </div>
             )}
           </div>
@@ -717,13 +711,13 @@ function JogPanelView({
                 data-home-axis={axis}
                 disabled={homeGate.disabled}
                 onClick={() => homeOneAxis(axis)}
-                aria-label={homingInFlight ? 'Homing cycle in progress' : `Home ${axis} only`}
+                aria-label={homingInFlight ? controlText('JogPanel.text035') : controlText('JogPanel.text036', { value1: String(axis) })}
                 aria-busy={homingInFlight}
                 style={{ color: axisHomeColour(axis) }}
                 data-tooltip={
                   homeGate.refusal ??
-                  `Home ${axis} ALONE - the machine picks the direction, not this `
-                  + `button. The full cycle is Home All (${homingOrder.join(', ')}). `
+                  controlText('JogPanel.text037', { value1: String(axis) })
+                  + controlText('JogPanel.text038', { value1: String(homingOrder.join(', ')) })
                   + HOME_PRECONDITION
                 }
               >
@@ -742,12 +736,12 @@ function JogPanelView({
             onClick={homeAll}
             data-tooltip={
               homeGate.refusal ?? (perAxisHoming
-                ? `Run the homing cycle - homes ${homingOrder.join(', ')} in that order. `
-                : 'Run the homing cycle - this controller chooses its own axis order ($H). ')
+                ? controlText('JogPanel.text039', { value1: String(homingOrder.join(', ')) })
+                : controlText('JogPanel.text040'))
               + HOME_PRECONDITION
             }
           >
-            <Home size={13} /> {homingInFlight ? 'Homing...' : 'Home All'}
+            <Home size={13} /> {homingInFlight ? 'Homing...' : controlText('JogPanel.text041')}
           </button>
           <button
             className="control-jog-btn control-jog-sidebtn control-motion-outline"
@@ -759,20 +753,18 @@ function JogPanelView({
             }}
             data-tooltip={
               safeZGate.refusal
-                ?? `Move Z to the machine's safe Z (machine Z${safeZ}) - a jog, so soft limits apply`
+                ?? controlText('JogPanel.text042', { value1: String(safeZ) })
             }
           >
-            <ArrowUpToLine size={13} /> Safe Z
-          </button>
+            <ArrowUpToLine size={13} />{controlText('JogPanel.text043')}</button>
           <button
             className="modal-btn modal-btn-ghost control-jog-sidebtn"
             data-testid="control-unlock"
             disabled={unlockGate.disabled}
             onClick={() => getMachineController().unlock()}
-            data-tooltip={unlockGate.refusal ?? 'Clear the alarm lock ($X) - confirm position is safe first'}
+            data-tooltip={unlockGate.refusal ?? controlText('JogPanel.text044')}
           >
-            <Unlock size={13} /> Unlock
-          </button>
+            <Unlock size={13} />{controlText('JogPanel.text045')}</button>
         </div>
         {/* WO-993: THE "Set machine position" BUTTON WAS DELETED HERE, and it
             is deleted rather than moved. Operator, 2026-08-25, at the machine:
@@ -825,20 +817,16 @@ function JogPanelView({
               // default mode, layout or handler change rides on this line.
               data-testid="control-jog-step-mode"
               onClick={() => setPref({ machineJogContinuous: false })}
-            >
-              Step
-            </button>
+            >{controlText('JogPanel.text046')}</button>
             <button
               className={`control-chip-btn ${jogContinuous ? 'control-chip-active' : ''}`}
               data-testid="control-jog-continuous"
               onClick={() => setPref({ machineJogContinuous: true })}
-            >
-              Cont
-            </button>
+            >{controlText('JogPanel.text047')}</button>
             <select
               className="mform-select"
               data-testid="control-jog-step-select"
-              aria-label="Jog step size"
+              aria-label={controlText('JogPanel.text048')}
               disabled={jogContinuous}
               style={{ flex: '0 0 auto', width: 52, padding: '3px 2px' }}
               value={String(

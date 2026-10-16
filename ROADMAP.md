@@ -71,6 +71,7 @@ Have a request? Open an idea in [Discussions](https://github.com/eclsnowman/Lien
 | R-036 | Full DXF block support | Nested, scaled and mirrored blocks import correctly | **Planned** - Partial: blocks read; some are skipped with a note | Later |
 | R-037 | Photo to relief with AI help | Turn a photo into a good relief | **Planned** - Not started | Later |
 | R-038 | Locating parts, stock and workholding by mates | Snap models, stock and clamps together by faces | **Planned** - Proposal only | Later |
+| R-115 | Associative technical drawings | Make dimensioned drawings of modeled parts with templates, tolerances, linked or freely placed views, detail views and balloons; update with the model, repair stale references, and export PDF/DXF. | **Planned** - WO-2750: held future feature; low priority; discovery and implementation not started; no deadline | Later |
 
 ## Setup, stock and tools
 

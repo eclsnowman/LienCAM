@@ -25,9 +25,11 @@ import { assertToolFluteReach } from '../../toolFluteReach'
 import { directionForTool } from '../../../tool/cutHand'
 import { ensureEngineClipperReady, pointInPolygon, type Loop } from './clipperEngine'
 import { centroid } from './geom'
-import { processFeature, type Feature, type ProcessParams } from './processFeature'
+import { processFeature, reportRepositionChoices, restoreFeatureStats, snapshotFeatureStats, type Feature, type FeatureResult, type FeatureStatsSnapshot, type ProcessParams, type RepositionChoiceTrace } from './processFeature'
 import { emitFeature, type EmitContext } from './emit'
+import type { RepositionTimeModel } from './repositionTime'
 import { withOperatorNotices } from './operatorNotices'
+import { estimateRuntimeMs } from '../../runtime'
 import { ensureClipperReady } from '../../face2d/clipperOffset'
 import { clearanceAllowanceMmOf, type ToolReachInputs } from '../../holderClearanceGate'
 import {
@@ -156,7 +158,7 @@ export async function buildAdaptiveClearingToolpath(
     bottomZ: deepestCutZ,
     fluteLength: tool.fluteLength,
   })
-  const feeds = resolveFeedrates(tool, payload.feedrateOverride)
+  const feeds = resolveFeedrates(tool, payload.feedrateOverride, payload.machineRapidRate)
   const emitCtx: EmitContext = {
     heights: emitHeights,
     feeds,
@@ -171,6 +173,16 @@ export async function buildAdaptiveClearingToolpath(
   }
 
   const floorFinishDepth = params.floorFinish === true ? resolvedHeights.bottomZ : undefined
+  // WO-2787 round 5: timing and emission share execution's one feed resolver. G0
+  // uses the dispatch-time machine rapid; a stay-down fast_traverse uses the
+  // separately resolved (possibly slower) feed. Older direct-engine requests
+  // without machine data retain their historical fast-traverse fallback.
+  // WO-2787 round 6: the model is the feature's own emit context, so each candidate is
+  // priced at the roles emit writes it with on every level, floor replay included.
+  const repositionTimeFor = (ctx: EmitContext): RepositionTimeModel => ({
+    ctx,
+    rapidRate: payload.machineRapidRate ?? ctx.feeds.fastTraverseRate,
+  })
   const runs = await featureRunsAroundWorkholding(pickedFeatures, payload, {
     topZ: emitHeights.topZ,
     roughBottomZ: emitHeights.bottomZ,
@@ -192,7 +204,13 @@ export async function buildAdaptiveClearingToolpath(
       ? (frac: number) => onProgress(featureBase + featureSpan * frac, 'Clearing region')
       : undefined
     const { origin, ...feature } = features[f]
-    const result = withOperatorNotices(notify, () => processFeature(feature, procParams, onPassProgress))
+    const run = runs[f]
+    const runCtx: EmitContext = run.topZ === undefined ? emitCtx : {
+      ...emitCtx,
+      heights: { ...emitHeights, topZ: run.topZ, bottomZ: run.bottomZ as number },
+      floorFinishDepth: run.floorFinish ? floorFinishDepth : undefined,
+    }
+    const result = await processFeatureFastest(feature, procParams, repositionTimeFor(runCtx), runCtx, notify, onPassProgress)
     // ADR-0003: surface a partial/aborted feature; do not silently swallow it.
     if (result.stats.aborted) {
       console.warn(`[ac-engine] feature ${f} aborted: ${result.stats.aborted} (emitting ${result.passes.length} partial passes)`)
@@ -202,18 +220,12 @@ export async function buildAdaptiveClearingToolpath(
         `the ${result.passes.length} pass(es) planned before that are kept.`,
       )
     }
+    const featureMoves = withOperatorNotices(notify, () => emitFeature(result, runCtx))
     // emitFeature can return tens of thousands of moves for a full-stock region.
     // `push(...bigArray)` spreads every element as a separate call argument, which
     // overflows the (smaller) Web Worker stack -- "Maximum call stack size
     // exceeded" -- even though node's larger stack survives the same call. Append
     // iteratively instead: O(n), no spread, no per-element stack frame.
-    const run = runs[f]
-    const runCtx: EmitContext = run.topZ === undefined ? emitCtx : {
-      ...emitCtx,
-      heights: { ...emitHeights, topZ: run.topZ, bottomZ: run.bottomZ as number },
-      floorFinishDepth: run.floorFinish ? floorFinishDepth : undefined,
-    }
-    const featureMoves = withOperatorNotices(notify, () => emitFeature(result, runCtx))
     if (origin.x === 0 && origin.y === 0) {
       for (let i = 0; i < featureMoves.length; i++) allMoves.push(featureMoves[i])
     } else {
@@ -279,17 +291,35 @@ function extractFeatures(
 
   const boundaries = closed.filter(l => l.type !== 'hole')
   if (boundaries.length === 0) {
-    let outerIdx = 0
-    let outerAbsArea = -Infinity
-    for (let i = 0; i < closed.length; i++) {
-      const area = closed[i].localAbsArea
-      if (area > outerAbsArea) { outerAbsArea = area; outerIdx = i }
+    // Largest first: it is the outer, and a loop inside it is its hole.
+    // WO-2859: a loop inside NO larger picked loop is a region of its own - an
+    // STL's bores carry 'hole' winding, and two picked bores (on one plate, or
+    // one on each copy) are two regions. This used to keep only the largest
+    // and silently drop the rest.
+    const byArea = closed
+      .map((_, i) => i)
+      .sort((a, b) => closed[b].localAbsArea - closed[a].localAbsArea || a - b)
+    const outers: number[] = []
+    const holesOf = new Map<number, ClassifiedLoop[]>()
+    for (const i of byArea) {
+      const candidate = closed[i]
+      const owner = outers
+        .filter(o => pointInPolygon(
+          centroid(toLocalLoop(candidate.loop, closed[o].origin)),
+          closed[o].localLoop,
+        ) >= 0)
+        .sort((a, b) => closed[a].localAbsArea - closed[b].localAbsArea)[0]
+      if (owner === undefined) {
+        outers.push(i)
+        holesOf.set(i, [])
+      } else {
+        holesOf.get(owner)!.push(candidate)
+      }
     }
-    const outer = closed[outerIdx]
-    return [toLocalFeature(
-      outer,
-      closed.filter((_, i) => i !== outerIdx).map(l => l.loop),
-    )]
+    return outers.sort((a, b) => a - b).map(o => toLocalFeature(
+      closed[o],
+      holesOf.get(o)!.sort((a, b) => a.sourceIndex - b.sourceIndex).map(l => l.loop),
+    ))
   }
 
   const holesByBoundary = new Map<number, Loop[]>()
@@ -334,6 +364,97 @@ interface DepthSchedule {
   floorFinishDepth: number | undefined
   /** The highest Z the cutter reaches while cutting: the shallowest cut plus the flute length. */
   reachTopZ: number
+}
+
+/** WO-2787 fix round 7: THE WHOLE PROGRAM DECIDES THE CLOSE CALLS. processFeature prices
+ *  each would-lift reposition as the motion emit writes for it, and charges a lift the WO-447
+ *  gap-fill ride over wall a kept-down ride would have covered. That charge is the one part it
+ *  cannot know when it decides: a later pass may cover the same wall anyway. Measured on
+ *  gt_fix8 (floor replay, finishing feed 200): the wall arc was credited 29 mm of wall, a later
+ *  pass covered 9.3 mm of it in the lifted program, and the lifted program ran 1038.8 ms
+ *  faster. So where a decision rests on that charge -- an alternative would win without it --
+ *  the feature is planned again with that alternative forced, both programs are emitted and
+ *  timed with the op card's estimate, and the faster one is kept. Every other decision is
+ *  final as made, and a feature with none plans once. The fail-loud lines, operator notices
+ *  and run counters reported are those of the program kept. */
+async function processFeatureFastest(
+  feature: Feature, procParams: ProcessParams, model: RepositionTimeModel, ctx: EmitContext,
+  notify: ((message: string) => void) | undefined, onPassProgress: ((frac: number) => void) | undefined,
+): Promise<FeatureResult> {
+  type Forced = { connStart: { x: number; y: number }; connEnd: { x: number; y: number }; rung: string }
+  type Run = { result: FeatureResult; decisions: RepositionChoiceTrace[]; warnings: unknown[][]; notices: string[]; stats: FeatureStatsSnapshot }
+  const same = (a: { x: number; y: number }, b: { x: number; y: number }): boolean => Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9
+  const plan = (forced: Forced[], trial: boolean): Run => {
+    const decisions: RepositionChoiceTrace[] = []
+    const warnings: unknown[][] = []
+    const notices: string[] = []
+    const timed: RepositionTimeModel = {
+      ...model,
+      onChoice: decided => { decisions.push(decided) },
+      ...(forced.length > 0 ? { force: (a, b) => forced.find(f => same(f.connStart, a) && same(f.connEnd, b))?.rung ?? null } : {}),
+      ...(trial ? { trial: true as const } : {}),
+    }
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => { warnings.push(args) }
+    try {
+      const result = withOperatorNotices(message => { notices.push(message) },
+        () => processFeature(feature, { ...procParams, repositionTime: timed }, trial ? undefined : onPassProgress))
+      return { result, decisions, warnings, notices, stats: snapshotFeatureStats() }
+    } catch (error) {
+      if (!trial) { console.warn = warn; report({ warnings, notices, decisions }) }
+      throw error
+    } finally {
+      console.warn = warn
+    }
+  }
+  const report = (run: Pick<Run, 'warnings' | 'notices' | 'decisions'>): void => {
+    for (const args of run.warnings) console.warn(...args)
+    for (const message of run.notices) notify?.(message)
+    reportRepositionChoices(run.decisions)
+  }
+  // Timing only: the program kept is emitted again by the caller, with its own lines.
+  const programMs = (result: FeatureResult): number => {
+    const warn = console.warn
+    console.warn = () => {}
+    try {
+      const moves = withOperatorNotices(undefined, () => emitFeature(result, ctx))
+      return estimateRuntimeMs(moves, model.rapidRate, ctx.feeds.fastTraverseRate, ctx.feeds.finishRate)
+    } finally { console.warn = warn }
+  }
+  // An alternative that would win without the gap-fill charge, cheapest first, one per route.
+  const unsettled = (d: RepositionChoiceTrace): string[] => {
+    const bare = [
+      { rung: 'lift', points: null as { x: number; y: number }[] | null, ms: d.liftMs - (d.liftCoverMs ?? 0) },
+      ...d.candidates.filter(c => c.points.length >= 2 && c.outcome !== 'refused').map(c => ({ rung: c.rung, points: c.points, ms: c.ms + (c.coverMs ?? 0) })),
+    ]
+    const chosen = bare.find(o => o.rung === d.chosen)
+    if (!chosen) return []
+    const seen = new Set<unknown>([chosen.points ?? 'lift'])
+    return bare.filter(o => o.ms < chosen.ms - 1e-6).sort((p, q) => p.ms - q.ms)
+      .filter(o => { const key = o.points ?? 'lift'; if (seen.has(key)) return false; seen.add(key); return true })
+      .map(o => o.rung)
+  }
+  const base = plan([], false)
+  const open = base.decisions.map(d => ({ d, alternatives: unsettled(d) })).filter(o => o.alternatives.length > 0)
+  if (open.length === 0) { report(base); return base.result }
+  let best = base
+  let bestMs = programMs(base.result)
+  let bestForced: Forced[] = []
+  for (const { d, alternatives } of open) {
+    for (const rung of alternatives) {
+      const forced = [...bestForced, { connStart: d.connStart, connEnd: d.connEnd, rung }]
+      // Each plan is one long synchronous run; let the worker answer its messages between them.
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      let trial: Run
+      try { trial = plan(forced, true) } catch { continue }
+      if (trial.decisions.find(k => same(k.connStart, d.connStart) && same(k.connEnd, d.connEnd))?.chosen !== rung) continue
+      const ms = programMs(trial.result)
+      if (ms < bestMs - 1e-6) { best = trial; bestMs = ms; bestForced = forced; break }
+    }
+  }
+  restoreFeatureStats(best.stats)
+  report(best)
+  return best.result
 }
 
 /** The depth levels emitFeature cuts: topZ down to the rough bottom in stepdown bites,

@@ -1,8 +1,11 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // WO UI-13A: chamfer dialog -- same shape and rationale as FilletDialog.tsx
 // (see its header), swapped for ChamferRequest's `distance` field. Equal-
 // distance chamfer only (GEO-4 v0.4's own scope; distance-angle/two-distance
 // variants are a later optional append per geom-service.ts).
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { useSelectAllOnClick } from '../../ui/selectAllOnClick'
@@ -40,6 +43,10 @@ interface ChamferDialogCommonProps {
   onPreviewIntent?: (intent: ChamferPreviewIntent | null) => void
   onApplyPreview?: (intent: ChamferPreviewIntent) => Promise<string | undefined>
   hoverReadout?: string
+  /** WO-2766: the distance a create opens on - an imported chamfer's own
+   *  measured distance, so the field starts on the truth. Defaults to
+   *  DEFAULT_DISTANCE. */
+  initialDistance?: number
 }
 
 export type ChamferDialogProps = ChamferDialogCommonProps & (
@@ -52,34 +59,35 @@ const DEFAULT_DISTANCE = 2
 function editReferenceError(dag: FeatureDag, featureId: string): string | undefined {
   const node = dag.getNode(featureId)
   if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'chamfer') {
-    return `Chamfer edit refused: '${featureId}' is not a chamfer feature`
+    return workbenchText('ChamferDialog.chamferEditRefusedIsNotAChamferFeature', { featureId: String(featureId) })
   }
   const ownerId = node.payload.ownerId
   if (typeof ownerId !== 'string' || ownerId.length === 0 || dag.getNode(ownerId) === undefined) {
-    return `Chamfer edit refused: owner '${String(ownerId)}' is not available`
+    return workbenchText('ChamferDialog.chamferEditRefusedOwnerIsNotAvailable', { value1: String(String(ownerId)) })
   }
   if (!node.consumes.includes(ownerId)) {
-    return `Chamfer edit refused: owner '${ownerId}' is missing from the feature dependencies`
+    return workbenchText('ChamferDialog.chamferEditRefusedOwnerIsMissingFromTheFeature', { ownerId: String(ownerId) })
   }
   const order = dag.featureOrder()
   if (order.indexOf(ownerId) < 0 || order.indexOf(ownerId) >= order.indexOf(featureId)) {
-    return `Chamfer edit refused: owner '${ownerId}' is not an upstream feature`
+    return workbenchText('ChamferDialog.chamferEditRefusedOwnerIsNotAnUpstreamFeature', { ownerId: String(ownerId) })
   }
   if (!Array.isArray(node.payload.edges) || node.payload.edges.length === 0 || node.payload.edges.some((id) => typeof id !== 'string' || id.length === 0)) {
-    return `Chamfer edit refused: '${featureId}' has no valid edge references`
+    return workbenchText('ChamferDialog.chamferEditRefusedHasNoValidEdgeReferences', { featureId: String(featureId) })
   }
   if (typeof node.payload.distance !== 'number' || !Number.isFinite(node.payload.distance) || node.payload.distance <= 0) {
-    return `Chamfer edit refused: '${featureId}' has an invalid distance`
+    return workbenchText('ChamferDialog.chamferEditRefusedHasAnInvalidDistance', { featureId: String(featureId) })
   }
   return undefined
 }
 
 export function ChamferDialog(props: ChamferDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const { dag, history, onApplied, onClose } = props
   const editing = props.mode === 'edit'
   const existing = editing ? dag.getNode(props.featureId) : undefined
   const edgeIds = editing ? props.selectedEdgeIds : props.edgeIds
-  const initialDistance = editing && typeof existing?.payload.distance === 'number' ? existing.payload.distance : DEFAULT_DISTANCE
+  const initialDistance = editing && typeof existing?.payload.distance === 'number' ? existing.payload.distance : (props.initialDistance ?? DEFAULT_DISTANCE)
   const [distanceDraft, setDistanceDraft] = useState(() => String(initialDistance))
   const [applyError, setApplyError] = useState<string | undefined>(undefined)
   const [applying, setApplying] = useState(false)
@@ -110,7 +118,7 @@ export function ChamferDialog(props: ChamferDialogProps) {
         propagateTangent: true,
         name: editing && typeof existing?.payload.name === 'string'
           ? existing.payload.name
-          : `Chamfer ${previewFeatureId}`,
+          : workbenchText('ChamferDialog.chamfer', { previewFeatureId: String(previewFeatureId) }),
       },
     }
   }, [distance, edgeIdsKey, editing, existing?.payload.name, invalid, previewFeatureId, previewOwnerId])
@@ -138,7 +146,7 @@ export function ChamferDialog(props: ChamferDialogProps) {
         onClose()
         return
       } catch (error) {
-        setApplyError(`Chamfer Apply refused: ${error instanceof Error ? error.message : String(error)}`)
+        setApplyError(workbenchText('ChamferDialog.chamferApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) }))
         return
       } finally {
         applyingRef.current = false
@@ -149,7 +157,7 @@ export function ChamferDialog(props: ChamferDialogProps) {
       const live = dag.getNode(props.featureId)
       const liveReferenceError = editReferenceError(dag, props.featureId)
       if (live === undefined || liveReferenceError !== undefined) {
-        setApplyError(liveReferenceError ?? `Chamfer edit refused: '${props.featureId}' is no longer available`)
+        setApplyError(liveReferenceError ?? workbenchText('ChamferDialog.chamferEditRefusedIsNoLongerAvailable', { featureId: String(props.featureId) }))
         return
       }
       try {
@@ -171,7 +179,7 @@ export function ChamferDialog(props: ChamferDialogProps) {
     const ownerId = props.ownerId
     if (ownerId === undefined) return
     const id = nextId(dag, 'F')
-    const payload = { opType: 'chamfer', ownerId, edges: props.edgeIds, distance, propagateTangent: true, name: `Chamfer ${id}` }
+    const payload = { opType: 'chamfer', ownerId, edges: props.edgeIds, distance, propagateTangent: true, name: workbenchText('ChamferDialog.chamfer2', { id: String(id) }) }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [ownerId], payload }))
     } catch (err) {
@@ -204,14 +212,13 @@ export function ChamferDialog(props: ChamferDialogProps) {
       data-testid="chamfer-workspace-palette"
       data-preview-status={props.previewState?.status ?? 'idle'}
       role="toolbar"
-      aria-label={editing ? 'Edit Chamfer command' : 'Chamfer command'}
+      aria-label={editing ? workbenchText('ChamferDialog.editChamferCommand') : workbenchText('ChamferDialog.chamferCommand')}
     >
-      <span className="sketch-confirm-title">Chamfer</span>
+      <span className="sketch-confirm-title">{workbenchText('ChamferDialog.chamfer3')}</span>
       <span className="sketch-confirm-info" data-testid="chamfer-edge-count">
-        {edgeIds.length} edge{edgeIds.length === 1 ? '' : 's'} selected
-      </span>
+        {workbenchText('ChamferDialog.edgeSelected', { length: String((edgeIds.length) ?? ''), value2: String((edgeIds.length === 1 ? '' : 's')) })}</span>
       <span className="sketch-confirm-hint" data-testid="chamfer-edge-instruction">
-        {edgeIds.length === 0 ? 'Select edges in the viewport' : 'Click edges to add or remove'}
+        {edgeIds.length === 0 ? workbenchText('ChamferDialog.selectEdgesInTheViewport') : workbenchText('ChamferDialog.clickEdgesToAddOrRemove')}
       </span>
       {props.hoverReadout !== undefined && (
         <span
@@ -223,13 +230,13 @@ export function ChamferDialog(props: ChamferDialogProps) {
         </span>
       )}
       <label className="sketch-confirm-field">
-        <span>Distance</span>
+        <span>{workbenchText('ChamferDialog.distance')}</span>
         <span data-testid="chamfer-distance">
           <input
             ref={distanceInputRef}
             type="text"
             inputMode="decimal"
-            aria-label="Chamfer distance"
+            aria-label={workbenchText('ChamferDialog.chamferDistance')}
             value={distanceDraft}
             min={0.1}
             disabled={applying}
@@ -249,47 +256,45 @@ export function ChamferDialog(props: ChamferDialogProps) {
             }}
           />
         </span>
-        <span className="sketch-confirm-unit">mm</span>
+        <span className="sketch-confirm-unit">{workbenchText('ChamferDialog.mm')}</span>
       </label>
       {referenceError !== undefined && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="chamfer-reference-error"
-          data-tooltip={referenceError}
+          data-tooltip={readableInternalIds(referenceError)}
           aria-live="polite"
         >
-          {referenceError}
+          {readableInternalIds(referenceError)}
         </span>
       )}
       {applyError !== undefined && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="chamfer-apply-error"
-          data-tooltip={applyError}
+          data-tooltip={readableInternalIds(applyError)}
           aria-live="polite"
         >
-          {applyError}
+          {readableInternalIds(applyError)}
         </span>
       )}
       {previewControlled && props.previewState?.status === 'pending' && (
         <span className="fillet-command-status" data-testid="chamfer-preview-status" data-status="pending" aria-live="polite">
-          Updating...
-        </span>
+          {workbenchText('ChamferDialog.updating')}</span>
       )}
       {previewControlled && props.previewState?.status === 'ready' && (
         <span className="fillet-command-status" data-testid="chamfer-preview-status" data-status="ready" aria-live="polite">
-          Ready
-        </span>
+          {workbenchText('ChamferDialog.ready')}</span>
       )}
       {previewControlled && props.previewState?.status === 'refused' && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="chamfer-preview-status"
           data-status="refused"
-          data-tooltip={props.previewState.message}
+          data-tooltip={readableInternalIds(props.previewState.message)}
           aria-live="polite"
         >
-          {props.previewState.message}
+          {readableInternalIds(props.previewState.message)}
         </span>
       )}
       <span className="sketch-confirm-actions">
@@ -297,24 +302,24 @@ export function ChamferDialog(props: ChamferDialogProps) {
           type="button"
           className="sketch-prompt-btn sketch-prompt-btn-confirm"
           data-testid="dialog-shell-apply"
-          aria-label="Apply Chamfer"
-          data-tooltip="Apply Chamfer (Enter)"
+          aria-label={workbenchText('ChamferDialog.applyChamfer')}
+          data-tooltip={workbenchText('ChamferDialog.applyChamferEnter')}
           disabled={applyDisabled}
           onClick={() => { void handleApply() }}
         >
           <Check size={12} aria-hidden="true" />
-          <span>Apply</span>
+          <span>{workbenchText('ChamferDialog.apply')}</span>
         </button>
         <button
           type="button"
           className="sketch-prompt-btn"
           data-testid="dialog-shell-cancel"
-          aria-label="Cancel Chamfer"
-          data-tooltip="Cancel Chamfer (Escape)"
+          aria-label={workbenchText('ChamferDialog.cancelChamfer')}
+          data-tooltip={workbenchText('ChamferDialog.cancelChamferEscape')}
           onClick={handleClose}
         >
           <X size={12} aria-hidden="true" />
-          <span>Cancel</span>
+          <span>{workbenchText('ChamferDialog.cancel')}</span>
         </button>
       </span>
     </div>

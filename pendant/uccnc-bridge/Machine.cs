@@ -1005,10 +1005,13 @@ namespace LienCAM
         int streamCreditWaits;
         int streamPeakOutstanding;
         int streamPeakPuffer;
-        /** A paced job cannot treat a CurrentID retained from before that job
-         *  as its own acknowledgement, even when that numeric id is live again.
+        /** A job cannot treat a CurrentID retained from before that job as its
+         *  own acknowledgement, even when that numeric id is live again.
          *  LoadMoves arms the gate once for the job; StreamStaged captures the
-         *  retained value before continuous submission begins. */
+         *  retained value before continuous submission begins (and, for an
+         *  unpaced job, the first STEP does - see StepJob). WO-2777: this was
+         *  paced-only, so an unpaced rerun of the same file credited the
+         *  previous run's last id the moment it was live again. */
         bool streamJobRequiresProvenance;
         bool streamJobBaselineCaptured;
         bool streamJobCurrentIdObserved;
@@ -7109,23 +7112,45 @@ namespace LienCAM
                    : UC100.SetSRO(target);
             if (rc != 0) { err = "could not set the " + kind + " override: " + Explain(rc); return false; }
 
-            double back = 0;
-            int brc;
-            lock (io.Api)
             if (kind == "rapid")
                 Report("[bridge] the \"rapid\" override channel set this controller's JOG RATE "
                      + "to " + target + "% - it has no rapid override at all. The jog rate scales "
                      + "every jog on this machine and is reported as overrides.jog.", "info");
 
-                brc = kind == "feed" ? UC100.GetFRO(ref back)
-                    : kind == "rapid" ? UC100.GetJRO(ref back)
-                    : UC100.GetSRO(ref back);
-            if (brc == 0 && Math.Abs(back - target) > 0.51)
-                note = "the controller clamped the " + kind + " override to "
-                     + back.ToString("0.#", CultureInfo.InvariantCulture) + "% (asked for "
-                     + target.ToString("0.#", CultureInfo.InvariantCulture) + "%)";
+            // WO-2770: the board applies an override a few tens of ms AFTER
+            // SetFRO returns (the test AXBB-E board 2026-10-13: status showed the new
+            // percent 16-51 ms later, 7 of 7), so a readback taken at once is
+            // the value from before the press and said "clamped" every time.
+            // Read until it shows the request; only a board still holding
+            // another value when the settle window ends has clamped it.
+            double back = 0;
+            int brc;
+            var settle = System.Diagnostics.Stopwatch.StartNew();
+            for (;;)
+            {
+                lock (io.Api)
+                    brc = kind == "feed" ? UC100.GetFRO(ref back)
+                        : kind == "rapid" ? UC100.GetJRO(ref back)
+                        : UC100.GetSRO(ref back);
+                if (brc != 0 || Math.Abs(back - target) <= 0.51) return true;
+                if (settle.ElapsedMilliseconds >= OverrideSettleMs) break;
+                // This runs on the board owner: a stop or hold queued behind
+                // it is not kept waiting for an override's wording, and a
+                // readback the window never finished judging says nothing.
+                if (BoardOwner.StopQueueDepth > 0) return true;
+                Thread.Sleep(5);
+            }
+            note = "the controller clamped the " + kind + " override to "
+                 + back.ToString("0.#", CultureInfo.InvariantCulture) + "% (asked for "
+                 + target.ToString("0.#", CultureInfo.InvariantCulture) + "%)";
             return true;
         }
+
+        /** WO-2770: how long an override readback may lag the set before a
+         *  value away from the request is the board's answer. About three
+         *  times the slowest the board measured (51 ms); an accepted press
+         *  returns the moment the readback shows it. */
+        const int OverrideSettleMs = 150;
 
         /** SetOffline(true) inhibits the outputs - a hardware dry run. Turning
          *  it OFF drives the terminals for real.
@@ -9973,7 +9998,13 @@ namespace LienCAM
                 // WO-1081 fix round 6: provenance belongs to the staged job,
                 // not to one route that happens to submit it. Arm it before a
                 // STEP can expose live wire ids to the status path.
-                streamJobRequiresProvenance = PacedJob;
+                // WO-2777: and every job, not only a paced one. An unpaced
+                // job's wire ids are its own move ids, so a rerun of the same
+                // file makes the previous run's last CurrentID live again; one
+                // status frame between the last push and the board taking move
+                // 1 credited it and retired every earlier move - the listing
+                // lit that one row. Desk kit: 8 of 29 back-to-back reruns.
+                streamJobRequiresProvenance = true;
                 streamJobBaselineCaptured = false;
                 streamJobCurrentIdObserved = false;
                 streamJobStartCurrentId = SentinelId;
@@ -10228,6 +10259,22 @@ namespace LienCAM
                 if (awaitingExecution) { err = StillExecutingText; return false; }
                 err = RefuseWhileStopping(); if (err != null) return false;
                 if (jobSent >= staged.Count) { err = "the program has no more moves"; return false; }
+                // WO-2777: an unpaced program's first STEP is its first push,
+                // so the retained CurrentID is read here, before it. A paced
+                // job keeps WO-1081's rule: STEP credits nothing until Cycle
+                // Start's stream takes its own baseline. A failed read leaves
+                // the baseline uncaptured, which withholds ids, never motion.
+                if (!PacedJob && !streamJobBaselineCaptured)
+                {
+                    UC100.Stat before = new UC100.Stat();
+                    int beforeRc;
+                    lock (io.Api) beforeRc = UC100.GetStatus(ref before);
+                    if (beforeRc == 0)
+                    {
+                        streamJobStartCurrentId = before.CurrentID;
+                        streamJobBaselineCaptured = true;
+                    }
+                }
                 string pushErr;
                 if (!PushProgramMove(staged[jobSent], jobSent, PacedJob, out pushErr))
                 {
@@ -10350,12 +10397,22 @@ namespace LienCAM
                         Report("[bridge] the program was NOT started: " + jobFailure, "error");
                     }
                 }
-                if (pacedStreaming)
+                // WO-2777: every job takes the baseline, paced or not. Only a
+                // paced job needs it to pace, so only a paced job refuses to
+                // start without it; an unpaced job runs and its ids are
+                // withheld (the gate stays armed and uncaptured).
+                if (pacedStreaming || !jobAbort)
                 {
                     UC100.Stat initial = new UC100.Stat();
                     int initialRc;
                     lock (io.Api) initialRc = UC100.GetStatus(ref initial);
-                    if (initialRc != 0)
+                    if (initialRc != 0 && !pacedStreaming)
+                    {
+                        Report("[bridge] could not read CurrentID before streaming ("
+                            + Explain(initialRc) + "); the program runs, but the listing will not "
+                            + "follow it this run", "warn");
+                    }
+                    else if (initialRc != 0)
                     {
                         jobFailure = "could not establish the CurrentID baseline before streaming: "
                             + Explain(initialRc);

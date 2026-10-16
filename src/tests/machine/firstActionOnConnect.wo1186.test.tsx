@@ -66,8 +66,9 @@ describe('WO-1186 first Control-page action after connect', () => {
     act(() => { __resetEstopInterlockForTest() })
     render(<ControlPage />)
 
+    // WO-2817, the operator's 2026-10-15 card: approved brief Home-first line, no off-switch step.
     expect(screen.getByTestId('control-next-action').textContent)
-      .toContain('Before using Home All, check each axis is off its home switch')
+      .toBe('No machine datum. Press Home All before choosing a work-coordinate action.')
     expect(screen.getByTestId('control-next-action').textContent).not.toContain('Goto XY0')
     expect(screen.getByTestId('control-home')).toBeTruthy()
     expect((screen.getByTestId('control-goto-xy0') as HTMLButtonElement).disabled).toBe(false)

@@ -141,7 +141,8 @@ async function prepareScene(page, scene, log) {
       await page.locator('[data-testid^="body-volume-"]').count() > 0)
   }
   const state = () => readAppState(page)
-  const picker = page.getByRole('dialog', { name: 'Try an example' })
+  // The first-open picker is titled 'Open a project' (was 'Try an example').
+  const picker = page.getByRole('dialog', { name: 'Open a project' })
   await picker.waitFor()
   await page.locator('#liencam-splash').waitFor({ state: 'hidden' })
   if (scene.view === 'demo') {
@@ -166,6 +167,9 @@ async function prepareScene(page, scene, log) {
     await step(`Open kit example ${scene.project}`, async () => {
       const chooser = page.waitForEvent('filechooser')
       await page.getByRole('button', { name: 'Open project', exact: true }).click()
+      // Open shows the project picker first; Browse... is the file picker.
+      const browse = page.locator('.project-picker-browse')
+      await browse.waitFor({ timeout: 3000 }).then(() => browse.click(), () => {})
       await (await chooser).setFiles(path.join(ROOT, scene.project))
     }, async () => (await state())?.project.id === project.id && !await page.getByTestId('project-open-indicator').count())
     const machine = page.getByRole('button', { name: 'Use this machine', exact: true })
@@ -209,18 +213,57 @@ async function prepareScene(page, scene, log) {
         await page.getByTestId('feature-row-sketch3d:SK1').click({ button: 'right' })
         await page.getByTestId('tree-context-menu-edit').click()
       }, () => visible('workbench-package-sketch-tools'))
+      if (scene.sketchCenter) {
+        // WO-2848: the frozen build opens the sketch centred on its origin,
+        // so the 80 mm side and both dimensions ran off the view. Pan the
+        // operator's way (Ctrl + middle drag) until the sketch's middle sits
+        // in the middle of the canvas, as the alpha.1 picture framed it.
+        const centre = () => page.evaluate(c => {
+          const h = window.__solidsWorkbenchHooks, r = document.querySelector('[data-testid="solids-workbench-canvas"]').getBoundingClientRect(), q = h.projectToCanvas(c)
+          return q && { x: r.left + q.x, y: r.top + q.y, cx: r.left + r.width / 2, cy: r.top + r.height / 2, left: r.left, top: r.top }
+        }, scene.sketchCenter)
+        const centred = async () => { const p = await centre(); return !!p && Math.hypot(p.x - p.cx, p.y - p.cy) < 4 }
+        await step('Pan the sketch into the middle of the view', async () => {
+          for (let n = 0; n < 4 && !await centred(); n++) {
+            const p = await centre()
+            if (!p) throw new Error('Sketch centre is not on the canvas')
+            log.at(-1).panFrom ??= p
+            await page.keyboard.down('Control')
+            await page.mouse.move(p.x, p.y)
+            await page.mouse.down({ button: 'middle' })
+            await page.mouse.move(p.cx, p.cy, { steps: 12 })
+            await page.mouse.up({ button: 'middle' })
+            await page.keyboard.up('Control')
+            await page.waitForTimeout(300)
+          }
+          // The drag ends over the sketch and hover-lights its diagonal;
+          // rest the pointer on empty canvas so nothing is highlighted.
+          const p = await centre()
+          await page.mouse.move(p.left + 40, p.top + 40)
+          await page.waitForTimeout(300)
+        }, centred)
+      }
       return () => visible('workbench-package-sketch-tools')
     case 'form':
       await editModel(() => visible('feature-tree'))
+      if (scene.hideBodies) {
+        // WO-2848: re-editing a finished Form draws its body under the cage
+        // (z-fighting in the frozen build). Picture the cage and its skin
+        // alone, as alpha.1 did: hide the bodies with the Bodies list's own
+        // visibility boxes first.
+        const boxes = page.locator('[data-testid^="body-visible-"]')
+        await step('Hide the finished bodies from the Bodies list', async () => {
+          for (const box of await boxes.all()) if (await box.isChecked()) await box.click()
+        }, async () => await boxes.count() > 0 && (await boxes.evaluateAll(els => els.every(el => !el.checked))))
+      }
       await step('Edit knob Form cage', async () => {
         await page.getByTestId('feature-row-FRM1').click({ button: 'right' })
         await page.getByTestId('tree-context-menu-edit').click()
       }, () => visible('form-palette'))
       return () => visible('form-palette')
-    case 'relief':
+    case 'relief': {
       await editModel(() => visible('workbench-modeling-toolbar'))
-      await step('Open Relief', () => page.getByTestId('workbench-relief').click(), () => visible('relief-palette'))
-      await step('Open approved brand picture', async () => {
+      const openBrandPicture = () => step('Open approved brand picture', async () => {
         const raster = await page.context().newPage()
         try {
           await raster.setViewportSize({ width: 256, height: 256 })
@@ -229,7 +272,56 @@ async function prepareScene(page, scene, log) {
           await raster.locator('img').evaluate(image => image.decode())
           await page.getByTestId('relief-file-input').setInputFiles({ name: 'LienCAM-mark.png', mimeType: 'image/png', buffer: await raster.screenshot() })
         } finally { await raster.close() }
-      }, () => visible('relief-file-name'))
+      }, async () => await visible('relief-file-name') && (await page.getByTestId('relief-file-name').innerText()) === 'LienCAM-mark.png')
+      if (scene.reliefFeature) {
+        // WO-2848 (the operator, 2026-10-15): the mark goes on a part made for it -
+        // the relief medallion's flat round disc - not on a narrow soft jaw.
+        // Edit keeps the relief on its face; Open another lays the mark there,
+        // fitted and centred, as an operator swapping the picture would.
+        await step(`Reopen ${scene.reliefFeature} from its design-tree row`, async () => {
+          await page.locator('[data-testid^="feature-row-"]').filter({ hasText: new RegExp(`^${scene.reliefFeature}`) }).first().click({ button: 'right' })
+          await page.getByTestId('tree-context-menu-edit').click()
+        }, async () => await visible('relief-palette') && await visible('relief-file-name'))
+        if (scene.image) await openBrandPicture()
+        // A picture fitted to the round disc's bounding square overhangs the
+        // rim; the operator types a size that keeps the square on the face.
+        if (scene.reliefWidthMm) {
+          const width = page.getByLabel('Relief width', { exact: true }), height = page.getByLabel('Relief height', { exact: true })
+          await step(`Size the relief ${scene.reliefWidthMm} mm wide`, async () => {
+            await width.fill(String(scene.reliefWidthMm))
+            await width.press('Enter')
+          }, async () => Number(await width.inputValue()) === scene.reliefWidthMm && Number(await height.inputValue()) === scene.reliefWidthMm)
+          // Typing scrolled the palette to Size; show the height map again.
+          await page.getByTestId('relief-palette-shell').evaluate(shell => [shell, ...shell.querySelectorAll('*')].forEach(el => { el.scrollTop = 0 }))
+        }
+        const shown = async () => await visible('relief-palette') && await visible('relief-file-name') &&
+          (!scene.image || (await page.getByTestId('relief-file-name').innerText()) === 'LienCAM-mark.png')
+        await step('Zoom the viewport onto the disc with the mouse wheel', async () => {
+          const ids = await page.locator('[data-testid^="body-volume-"]').evaluateAll(els => els.map(e => e.dataset.testid.slice('body-volume-'.length)))
+          const p = await page.evaluate(ids => {
+            const h = window.__solidsWorkbenchHooks, r = document.querySelector('[data-testid="solids-workbench-canvas"]').getBoundingClientRect()
+            for (const id of ids) {
+              const top = h.getBodyTopPoint(id), q = top && h.projectToCanvas(top)
+              if (q) return { id, x: r.left + q.x, y: r.top + q.y }
+            }
+            return null
+          }, ids)
+          if (!p) throw new Error('No disc body on the canvas')
+          log.at(-1).zoomPoint = p
+          await page.mouse.move(p.x, p.y)
+          for (let n = 0; n < (scene.zoomSteps ?? 0); n++) { await page.mouse.wheel(0, -100); await page.waitForTimeout(80) }
+          await page.waitForTimeout(500)
+        }, shown)
+        await step('Read back the relief settings on the disc face', async () => {}, shown)
+        log.at(-1).reliefReadback = await page.evaluate(() => ({
+          file: document.querySelector('[data-testid="relief-file-name"]')?.textContent,
+          face: document.querySelector('[data-testid="relief-face"]')?.textContent,
+          applyEnabled: !document.querySelector('[data-testid="relief-apply"]')?.disabled,
+        }))
+        return shown
+      }
+      await step('Open Relief', () => page.getByTestId('workbench-relief').click(), () => visible('relief-palette'))
+      await openBrandPicture()
       await step('Lay picture on flat jaw face', async () => {
         // WO-2708: a fixed pixel stopped landing on the jaw once the Model
         // layout moved. Ask the live viewport where each kit body's top face
@@ -254,6 +346,7 @@ async function prepareScene(page, scene, log) {
         }
       }, () => page.getByTestId('relief-apply').isEnabled())
       return () => page.getByTestId('relief-apply').isEnabled()
+    }
     case 'setup':
       await tab('setup', async () => page.getByTestId('mode-tab-setup').getAttribute('class').then(s => s.includes('mode-tab-active')))
       return async () => (await state())?.project.geometry.filter(g => g.workholding).length >= 2

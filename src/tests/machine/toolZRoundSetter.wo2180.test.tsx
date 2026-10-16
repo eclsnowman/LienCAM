@@ -159,9 +159,9 @@ describe('WO-2180 Tool Z step 1 says what it uses', () => {
     open('toolZ')
     fireEvent.click(screen.getByTestId('probing-step-chip-1'))
     const s = sentence()
-    expect(s).toMatch(/setter's saved position/)
-    expect(s).toMatch(/measures the tool length/)
-    expect(s).toMatch(/Work Z0 is not needed or changed/)
+    expect(s).toMatch(/saved setter/)
+    expect(s).toMatch(/measures its length/)
+    expect(s).toMatch(/without using or changing work Z0/)
     expect(s).not.toMatch(/no jogging/i)
     // Operator: "don't be verbose".
     expect(s.split(/\s+/).length).toBeLessThanOrEqual(32)
@@ -226,6 +226,13 @@ describe('WO-2180 Tool Z: Preview steps goes through each step once', () => {
   }, 60_000)
 })
 
+// WO-2665's explicitly changed setup wording; preserve the recorded SVG hashes
+// and all other step sentences. Do not regenerate or weaken picture baselines.
+const briefSetupWords = (row: string): string => row
+  .replace('Set Z0 on this part first (G54): the probe descends from it. Then jog', 'Set part Z0 (G54), then jog')
+  .replace(' (by eye is fine)', '')
+  .replace('Load the program. Jog up to a safe start height, clear of the clamps and less than 50 mm above the top. The routine moves over point 1 itself.', 'Load the program; jog up clear of the clamps, less than 50 mm above the top.')
+
 describe('WO-2180/2554 other pictures retain main or the approved seek-only walls, byte for byte', () => {
   for (const routine of OTHERS) {
     it(`${routine}: every step's picture and sentence match the recorded sequence`, () => {
@@ -238,11 +245,11 @@ describe('WO-2180/2554 other pictures retain main or the approved seek-only wall
       }
       expect(recorded[routine], 'recorded picture sequence').toBeDefined()
       expect(got.length).toBeGreaterThan(1)
-      expect(got).toEqual(recorded[routine])
+      expect(got).toEqual(recorded[routine].map((row, i) => i === 0 ? briefSetupWords(row) : row))
       if (path === INSIDE_PICTURES) {
         const main = JSON.parse(readFileSync(PICTURES, 'utf8')) as Record<string, string[]>
         // Setup, descent, rise and confirmation remain byte-identical to main.
-        for (const i of [0, 1, 2, 7, 8]) expect(got[i]).toBe(main[routine][i])
+        for (const i of [0, 1, 2, 7, 8]) expect(got[i]).toBe(i === 0 ? briefSetupWords(main[routine][i]) : main[routine][i])
       }
     })
   }

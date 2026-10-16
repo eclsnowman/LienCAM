@@ -93,11 +93,12 @@ describe('layer locking', () => {
 
     useCamStore.getState().updateGeometryLayer('dxf-1', 'l1', { locked: true })
     expect(layer().locked).toBe(true)
-    // Locked layers grey out in the entry chooser, with the reason named.
+    // WO-2854 (the operator 10-15 "If not why is it in there?"): a locked layer cannot
+    // be opened, so the entry chooser no longer lists it.
     const candidate = listSketchEntryCandidates(
       useCamStore.getState().project.geometry
-    ).find((c) => c.layerId === 'l1')!
-    expect(candidate.disabledReason).toBe('Layer is locked')
+    ).find((c) => c.layerId === 'l1')
+    expect(candidate).toBeUndefined()
 
     useCamStore.getState().updateGeometryLayer('dxf-1', 'l1', { locked: false })
     expect(layer().locked).toBe(false)

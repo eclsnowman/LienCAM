@@ -23,6 +23,8 @@
 //     the operator types.
 
 import type { FeatureKind } from '../../recognition/types';
+import { provePlateBosses } from '../../recognition/plateBosses';
+import { weldMesh } from '../../recognition/topology';
 import type { MeshBuffers } from '../../types';
 import { facetCount, facetVertices, vertexCount } from '../idView';
 import { registerMeshEditOperation } from '../registry';
@@ -56,6 +58,20 @@ const FEATURE_WORDS: Record<FeatureKind, string> = {
 
 const PARAMETER_KEYS = new Set(['feature', 'diameterMm']);
 
+/** WO-2802: the boss foot remains a separately pickable blend. A boss
+ * removal includes it, and the journal witnesses that complete selection. */
+function completeBossSelection(mesh: MeshBuffers, facets: readonly number[]): number[] {
+  const selected = new Set(facets);
+  for (const boss of provePlateBosses(weldMesh(mesh))) {
+    if (!boss.footFacets?.length) continue;
+    const whole = new Set(boss.facets), foot = new Set(boss.footFacets);
+    if (facets.every((f) => whole.has(f)) && boss.facets.every((f) => foot.has(f) || selected.has(f))) {
+      return boss.facets;
+    }
+  }
+  return [...facets];
+}
+
 /**
  * Delete `facets` and re-close what that opens.
  *
@@ -66,8 +82,9 @@ const PARAMETER_KEYS = new Set(['feature', 'diameterMm']);
 export function removeRoundFeature(
   mesh: MeshBuffers,
   facets: readonly number[],
+  options: { completeSelection?: boolean } = {},
 ): MeshEditApplyResult {
-  const removed = new Set(facets);
+  const removed = new Set(options.completeSelection === false ? facets : completeBossSelection(mesh, facets));
   const kept = keptFacetsOf(mesh, removed);
   if (kept.length === 0) {
     throw new Error(
@@ -104,6 +121,7 @@ export const removeRoundFeatureOperation: MeshEditOperation<RemoveRoundFeaturePa
   kind: REMOVE_ROUND_FEATURE_KIND,
   version: REMOVE_ROUND_FEATURE_VERSION,
   label: 'Remove round feature',
+  completeSelection: completeBossSelection,
 
   describe(record: MeshEditRecord): string {
     const parameters = (record.parameters ?? {}) as Partial<RemoveRoundFeatureParameters>;
@@ -149,7 +167,7 @@ export const removeRoundFeatureOperation: MeshEditOperation<RemoveRoundFeaturePa
   },
 
   apply({ mesh, facets }: MeshEditApplyInput<RemoveRoundFeatureParameters>): MeshEditApplyResult {
-    return removeRoundFeature(mesh, facets);
+    return removeRoundFeature(mesh, facets, { completeSelection: false });
   },
 };
 

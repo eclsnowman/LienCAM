@@ -151,6 +151,14 @@ function adaptivePayload(fluteLength: number, bottomHeight = -5): ACWorkerPayloa
   }
 }
 
+/** The refusal text; the operator never sees a loop's internal id (WO-2880). */
+function refusal(build: () => unknown, ids: string[]): string {
+  let message = ''
+  try { build() } catch (e) { message = e instanceof Error ? e.message : String(e) }
+  for (const id of ids) expect(message).not.toContain(`"${id}"`)
+  return message
+}
+
 describe('tool flute reach refuses incomplete 2D toolpaths', () => {
   it('keeps valid closed Contour output byte-identical at the exact reach limit', () => {
     expect(buildContourToolpath(closedContourPayload(8)))
@@ -158,8 +166,8 @@ describe('tool flute reach refuses incomplete 2D toolpaths', () => {
   })
 
   it('preflights every closed Contour loop and reports the shortfall', () => {
-    expect(() => buildContourToolpath(closedContourPayload(7))).toThrow(
-      /Contour: requested axial depth 8\.000 mm for loop "B" exceeds available flute length 7\.000 mm by 1\.000 mm\..*longer flute\/relieved length.*reduce the bottom depth/i,
+    expect(refusal(() => buildContourToolpath(closedContourPayload(7)), ['A', 'B'])).toMatch(
+      /Contour: requested axial depth 8\.000 mm exceeds available flute length 7\.000 mm by 1\.000 mm\..*longer flute\/relieved length.*reduce the bottom depth/i,
     )
   })
 
@@ -174,8 +182,8 @@ describe('tool flute reach refuses incomplete 2D toolpaths', () => {
     expect(buildContourToolpath(atLimit))
       .toEqual(buildContourToolpath({ ...atLimit, tool: tool(40) }))
 
-    expect(() => buildContourToolpath({ ...atLimit, tool: tool(5) })).toThrow(
-      /Contour: requested axial depth 6\.000 mm for loop "B" exceeds available flute length 5\.000 mm by 1\.000 mm/i,
+    expect(refusal(() => buildContourToolpath({ ...atLimit, tool: tool(5) }), ['A', 'B'])).toMatch(
+      /Contour: requested axial depth 6\.000 mm exceeds available flute length 5\.000 mm by 1\.000 mm/i,
     )
   })
 
@@ -183,8 +191,8 @@ describe('tool flute reach refuses incomplete 2D toolpaths', () => {
     const payload = closedContourPayload(20)
     payload.heights = heights(-35)
     payload.loopBottoms = undefined
-    expect(() => buildContourToolpath(payload)).toThrow(
-      /Contour: requested axial depth 35\.000 mm for loop "A" exceeds available flute length 20\.000 mm by 15\.000 mm\..*longer flute\/relieved length.*reduce the bottom depth/i,
+    expect(refusal(() => buildContourToolpath(payload), ['A', 'B'])).toMatch(
+      /Contour: requested axial depth 35\.000 mm exceeds available flute length 20\.000 mm by 15\.000 mm\..*longer flute\/relieved length.*reduce the bottom depth/i,
     )
   })
 
@@ -194,8 +202,8 @@ describe('tool flute reach refuses incomplete 2D toolpaths', () => {
   })
 
   it('preflights every Open Contour chain and reports the shortfall', () => {
-    expect(() => buildContourToolpath(openContourPayload(19))).toThrow(
-      /Open Contour: requested axial depth 20\.000 mm for chain "open-2" exceeds available flute length 19\.000 mm by 1\.000 mm\..*longer flute\/relieved length.*reduce the bottom depth/i,
+    expect(refusal(() => buildContourToolpath(openContourPayload(19)), ['open-1', 'open-2'])).toMatch(
+      /Open Contour: requested axial depth 20\.000 mm exceeds available flute length 19\.000 mm by 1\.000 mm\..*longer flute\/relieved length.*reduce the bottom depth/i,
     )
   })
 
@@ -210,8 +218,8 @@ describe('tool flute reach refuses incomplete 2D toolpaths', () => {
     expect(buildContourToolpath(atLimit))
       .toEqual(buildContourToolpath({ ...atLimit, tool: tool(40) }))
 
-    expect(() => buildContourToolpath({ ...atLimit, tool: tool(17) })).toThrow(
-      /Open Contour: requested axial depth 18\.000 mm for chain "open-2" exceeds available flute length 17\.000 mm by 1\.000 mm/i,
+    expect(refusal(() => buildContourToolpath({ ...atLimit, tool: tool(17) }), ['open-1', 'open-2'])).toMatch(
+      /Open Contour: requested axial depth 18\.000 mm exceeds available flute length 17\.000 mm by 1\.000 mm/i,
     )
   })
 

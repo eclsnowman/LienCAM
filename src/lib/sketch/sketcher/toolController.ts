@@ -19,6 +19,7 @@
 // STORE-FREE: this file imports nothing from src/store. Guarded by the capability scan in
 // src/tests/sketch/oneSketchPointerOwner.test.ts.
 import { entityLabels } from '../browserModel'
+import { appendDefinedPattern, editPattern, breakPattern as breakPatternDefinition, patternForSelection, type PatternValues } from '../patterns'
 import {
   captureSketchClipboard,
   instantiateSketchClipboard,
@@ -55,6 +56,9 @@ import {
   type ChamferCornerPick,
 } from '../tools/chamferTool'
 import { commitDrawValue } from '../tools/drawValue'
+import { formatDimensionValue } from '../tools/dimTool'
+import { formatLiveDim } from '../tools/liveDims'
+import { unitLabel } from '../../ui/unitFormat'
 import {
   filletApplyAll, filletChainMaxRadius, filletMaxUsableRadius,
   type FilletCornerPick,
@@ -552,7 +556,10 @@ export function overlayApply(): void {
     const name = (id: string): string => labels.get(id) ?? id
     const skippedNames = r.skipped.map(({ pick }) => `${name(pick.aId)} / ${name(pick.bId)}`)
     doc.notice(
-      `Filleted ${r.applied} ${r.applied === 1 ? 'corner' : 'corners'} (R${s.filletRadius})` +
+      // WO-2871 (sweep 3 H12): the radius at the dimension label's display precision and units,
+      // never the raw float (a dragged radius printed R9.47922700765105).
+      `Filleted ${r.applied} ${r.applied === 1 ? 'corner' : 'corners'} ` +
+      `(${formatDimensionValue('radius', s.filletRadius, true, doc.getDisplayUnits())})` +
       (skippedNames.length > 0 ? ` - skipped (does not fit): ${skippedNames.join(', ')}` : ''))
     return
   }
@@ -573,7 +580,8 @@ export function overlayApply(): void {
     const name = (id: string): string => labels.get(id) ?? id
     const skippedNames = r.skipped.map(({ pick }) => `${name(pick.aId)} / ${name(pick.bId)}`)
     doc.notice(
-      `Chamfered ${r.applied} ${r.applied === 1 ? 'corner' : 'corners'} (${s.chamferSetback} mm)` +
+      `Chamfered ${r.applied} ${r.applied === 1 ? 'corner' : 'corners'} ` +
+      `(${formatLiveDim(s.chamferSetback, doc.getDisplayUnits())} ${unitLabel(doc.getDisplayUnits())})` +
       (skippedNames.length > 0 ? ` - skipped (does not fit): ${skippedNames.join(', ')}` : ''))
     return
   }
@@ -596,7 +604,7 @@ export function overlayApply(): void {
     }
     doc.beginStep()
     sketcherToolStore.setState({ chain: null })
-    doc.append({ entities: r.entities, constraints: r.constraints }, [])
+    doc.replace(appendDefinedPattern(sk, r))
     const label = chain.kind === 'linpat' ? 'Linear' : 'Circular'
     doc.notice(
       `${label} pattern: created ${r.entities.length} ` +
@@ -615,7 +623,7 @@ export function overlayApply(): void {
     }
     doc.beginStep()
     sketcherToolStore.setState({ chain: null })
-    doc.append({ entities: r.entities, constraints: r.constraints }, [])
+    doc.replace(appendDefinedPattern(sk, r))
     doc.notice(
       `Path pattern: created ${r.entities.length} ` +
       `${r.entities.length === 1 ? 'entity' : 'entities'}`)
@@ -862,7 +870,9 @@ export function click(
     // overlay apply). Leaving it live made the NEXT line click re-enter selection-seeded mode and
     // silently re-mirror the stale selection: duplicate copies stacked on the first mirror (the
     // user-reported "mirror does not work correctly" pile-up).
-    doc.append(r.commit, inferred, {
+    if (r.commit.patterns?.length) doc.replace(appendDefinedPattern(sketch, { ...r.commit,
+      constraints: [...r.commit.constraints, ...inferred] }), { clearSelection: true })
+    else doc.append(r.commit, inferred, {
       openDimensionEditor: true,
       clearSelection: s.tool === 'mirror',
     })
@@ -1641,6 +1651,7 @@ export async function importFileIntoSketch(
  * functions (the interaction layer, the toolbox, the overlays, tests).
  */
 export const sketcherTools = {
+  editSelectedPattern, breakSelectedPattern,
   armTool, beginPierce, piercePending, bezierJointsInSelection, bezierPress, breakOffsetLink, breakProjectionLink, clearBezierPress, click, copySelection, cycleDimForce, commitDrawValueAt,
   conicDrawRhoValue, conicsInSelection, deleteSelection, end, escape,
   importFileIntoSketch, exportSketchSvg, exportSketchDxf, printSketch, linkedOffsetInSelection, lockCursor,
@@ -1651,6 +1662,27 @@ export const sketcherTools = {
   snap, swipeOverlay, swipeTrim, toggleConstruction, toggleMeasure, toggleRectRotated, toggleSnapFlag,
   resetForDocumentSwitch,
 } as const
+
+export function editSelectedPattern(values: PatternValues, suppressed?: string[], expressions?: Record<string, string>): void {
+  const sketch = doc?.getSketch()
+  if (!doc || !sketch) return
+  const pattern = patternForSelection(sketch, doc.getSelection())
+  if (!pattern) return
+  const result = editPattern(sketch, pattern.id, values, suppressed, undefined, expressions)
+  if (typeof result === 'string') { doc.notice(result, 'warning'); return }
+  doc.beginStep()
+  doc.replace(result)
+}
+
+export function breakSelectedPattern(): void {
+  const sketch = doc?.getSketch()
+  if (!doc || !sketch) return
+  const pattern = patternForSelection(sketch, doc.getSelection())
+  if (!pattern) return
+  doc.beginStep()
+  doc.replace(breakPatternDefinition(sketch, pattern.id))
+  doc.notice('Pattern broken: copies are now independent geometry.')
+}
 
 /**
  * The host switched documents (CAM `setActiveSketch`): "selection and armed tool never survive a

@@ -17,12 +17,16 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         steps: [
           'Connect to the machine at the top (see "Connecting to the machine").',
           'Load a program: post the selected setup straight into the sender, or open a G-code file from disk.',
-          'The safety bar is always visible: E-STOP, Feed Hold (decelerate to a controlled stop), CYCLE START (start or resume), and Stop/Reset (end the cycle). CYCLE START, Feed Hold and Stop/Reset fit side by side at the default panel width. Follow the status sentence for the next action; a tool-change card has its own Continue button.',
+          'The safety bar is always visible: E-STOP, Feed Hold (decelerate to a controlled stop), CYCLE START (start or resume), and Stop/Reset (end the cycle). CYCLE START, Feed Hold and Stop/Reset fit side by side at the default panel width. Follow the status sentence for the next action; a tool-change card has its own Continue button. That card appears where the program has an M6. A GRBL post has no M6 - it writes the change as a comment and an M0 - so no card appears: the program holds, the status sentence names the tool to fit, and CYCLE START resumes it.',
         ],
       },
       {
         kind: 'warning',
         text: 'The E-STOP button in the app depends on a working controller link. Keep your physical E-stop in reach.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Program moves are color coded by default: rapid, feed, arc, tool-change and M-code rows use distinct colors, and comments are dimmed. Settings > Theme > Color code program moves turns move colors off or on. Colors describe the listing only; they do not change G-code or establish that a move is safe.',
       },
       { kind: 'image', slot: 'control-overview' },
     ],
@@ -213,6 +217,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
+        text: 'Home starts the homing cycle, including when an axis is already on its home switch. Follow the connected controller status; there is no preliminary instruction to jog off the switch.',
+      },
+      {
+        kind: 'paragraph',
         text: 'Control\'s Offsets tab shows the quick work offsets beside the Work offset setup table. The table keeps, for this machine, a fixture name and X, Y and Z for each of G54 to G59. A value typed there is stored with an amber border (not sent yet) - it reaches the controller only when you press Push on its row. Push changed (N) sends every row whose stored values differ from the controller; N is how many rows that is. Set from position makes the machine\'s current position that row\'s zero and sends it. Rotation is held in the controller and is sent as you type it. Push and Set from position wait while a program runs or is held, and until the machine is idle.',
       },
       { kind: 'image', slot: 'jog-zero' },
@@ -269,7 +277,15 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
+        text: 'When the chosen line expects a different tool from the last known spindle tool, or that tool is unknown, a pop-up names both before anything moves. Choose Run the tool change for T<n> first, then start from line <N>, or Start from line <N> now; Cancel sends nothing. Starting part-way through is your call: Start now uses whatever tool is fitted and adds no tool change. Choosing the tool change uses the guided change and then arms the chosen line for CYCLE START. A matching tool needs no pop-up.',
+      },
+      {
+        kind: 'paragraph',
         text: 'Re-arm from start appears in the transport bar when a text file is loaded. It arms the program from line 1, exactly as if you had just opened it: the controller is first brought back to a known idle, and nothing moves until you press CYCLE START. You can use it to prepare a fresh run without starting motion. After a completed run, after resolving a failed run, or whenever the loaded program is not armed, CYCLE START itself arms the program from line 1 and runs it; the Console says "Armed from line 1." You do not need to press Re-arm first. From line and Plan preserve your chosen starting line instead. Re-arm is greyed while the program runs or is held (press Feed Hold, then Stop/Reset first) and during an alarm; the reason shows under it. A setup posted from the project or a file the controller takes as moves has no Re-arm button: CYCLE START also arms that loaded program from line 1 when it can; the status names any problem that needs resolving.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'If only a typed MDI move is running, Load waits for that line to finish and the controller to report idle, then loads the replacement without starting it. The Console names the waiting Load. A stop, fault, changed connection or a 30-second wait cancels the request and reports why; another Load replaces the waiting request. A running or held program still needs to be stopped before loading another program.',
       },
       {
         kind: 'paragraph',
@@ -277,7 +293,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'A freshly posted setup loaded from the same project reads current, with its Intended stock tied to that project. If Load refuses another program, the accepted program, its starting line and its progress stay in place. The Console prints that Load\'s refusal reason once; a later CYCLE START or Re-arm attempt reports its own result. After resolving a refused start, reconnecting or clearing E-STOP, CYCLE START can arm the loaded program from line 1. If a connection lost your chosen starting line or kept stop, choose the line again, load or Re-arm before starting.',
+        text: 'A freshly posted setup loaded from the same project reads current, with its Intended stock tied to that project. A refused replacement preserves an accepted program that is still ready or held. After a completed or failed run, a new file refused for a machine-side reason replaces that finished file; the status names the new refusal, and CYCLE START cannot run the old file. The Console prints the refusal reason once; a later CYCLE START or Re-arm attempt reports its own result. After resolving a refused start, reconnecting or clearing E-STOP, CYCLE START can arm the loaded program from line 1. If a connection lost your chosen starting line or kept stop, choose the line again, load or Re-arm before starting.',
       },
       {
         kind: 'paragraph',
@@ -297,7 +313,11 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'The Vacuum button lights from the controller\'s reported output state, whether a button, MDI, a program or a macro switched it. It goes dark when the reported output is off. Macro buttons do not yet share this indicator behavior. A program output line in the Console names the configured output and its M word, for example "Line 5: Vacuum on (M7, port 3 pin 16)."',
+        text: 'The Vacuum button lights from the controller\'s reported output state, whether a button, MDI, a program or a macro switched it. It goes dark when the reported output is off. A program output line in the Console names the configured output and its M word, for example "Line 5: Vacuum on (M7, port 3 pin 16)."',
+      },
+      {
+        kind: 'paragraph',
+        text: 'In Edit macros, Drives output is optional and starts at none. Choose an output from the machine definition and Save to keep the choice with the macro. A macro button assigned to an output lights when the connected controller reports that output on, including changes made outside the macro. It is unlit when readback is off or unavailable; an unlit button alone does not prove the physical output is off. Choosing an output does not add commands to the macro.',
       },
       {
         kind: 'paragraph',
@@ -325,6 +345,22 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       { kind: 'image', slot: 'run-job' },
       { kind: 'image', slot: 'm6-tool-change' },
+      {
+        kind: 'paragraph',
+        text: 'On UCCNC, Rapid % sends each G0 at that percentage of the machine rapid rate; G1, G2 and G3 keep their programmed cutting feeds. Feed % still applies on top. A change during a run affects moves not yet sent to the board; moves already sent keep their sent speed. Changing Rapid % before starting re-stages the loaded program, and a refused re-stage leaves the displayed percentage at the value accepted before it.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'If Load refuses a file for a machine-side reason with no active accepted program, the file stays available, including after MDI or after the previous program finished. Fix the named cause, then press CYCLE START: it runs the full Load checks again and arms that file from line 1 only if they pass. MDI used to fix the cause does not discard the file. This also applies when Load waited for a moving MDI line to finish.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Continue is the action on both the guided tool-change card and the Park + clamp card. At the clamp card CYCLE START is disabled and its hint names Continue; follow the card and press Continue to proceed.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'The shipped sample router on the built-in simulator reports its default work zero for that connection, so Load checks the program against declared travel using that zero. A move outside travel is still refused; stored work offsets and other machines keep their own zeros.',
+      },
     ],
     images: [
       {
@@ -420,6 +456,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       { kind: 'image', slot: 'probing-outside-corner' },
       {
         kind: 'paragraph',
+        text: 'The Console below the picture is shared with Main. Its compact view shows the latest line; expand it for history and MDI. Switching between Main and Probing keeps the same history and unsent MDI text. The picture gives brief step guidance; open More about this step for the detail.',
+      },
+      {
+        kind: 'paragraph',
         text: 'An early tool-setter touch shows no separate warning. After a successful fine touch, the short result gives the early contact, its difference from the tool-table prediction, the retract and the measured tool length that replaces the table value. An early contact by itself is not a completed measurement; a failed fine touch or retract leaves the previous tool length in place.',
       },
       {
@@ -437,7 +477,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
           'Save probing settings under Control > Machine > Definition > Probing and the next routine uses them without reconnecting, including Search speed, Probe speed, clearance and search bounds. Settings that must be written to the controller still need its receipt; this change applies to probing values used by LienCAM.',
           'The diagram keeps the probe in its labeled start zone before Start. When the reported probe position is within the pictured feature and its margin, Front and Right show its reported depth; its sideways place stays tied to the plan. Outside that area, or without a known position, the diagram keeps the planned picture.',
           'PROBE shows the touch input; PROBING shows that a probe cycle is in process. The Control, Probing, Tools and tool-change surfaces share the same probe reading. If the controller does not report it, the lamp says so; PROBE is not read while the spindle turns.',
-          'A refused probe start keeps the current preview. A failed or stopped probe cycle shows Stopped and the full reason in red on the probing screen; a refused start shows Did not start and its reason. A new stop or refused start replaces the previous reason. The message states what happened, without guessing a cause. If a tool-setter measurement fails on a tool-change card, Retry measure repeats the measurement without visiting the park again. The failure names the setter and the touch result; Cancel on a manual tool change reports the cancellation and keeps the recorded spindle tool.',
+          'A refused probe start keeps the current preview. A failed or stopped probe cycle shows Stopped (and the failed step when known); a refused start shows Did not start. The picture gives a brief reason; expand the Console to read the full diagnostic. A new stop or refused start replaces the previous reason. The message states what happened, without guessing a cause. If a tool-setter measurement fails on a tool-change card, Retry measure repeats the measurement without visiting the park again. The failure names the setter and the touch result; Cancel on a manual tool change reports the cancellation and keeps the recorded spindle tool.',
           'When the reference tool is measured again, the Console reports its reading change and the actual work Z offset change sent to the controller. Those can differ on a controller that stores tool length in the work offset.',
         ],
       },
@@ -457,6 +497,14 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       { kind: 'image', slot: 'routine-chooser' },
       { kind: 'image', slot: 'z-surface-setup' },
       { kind: 'image', slot: 'calibrate-plan' },
+      {
+        kind: 'paragraph',
+        text: 'Feature probing on the simulator with a UCCNC machine definition follows the same plan as native UCCNC: approach from above, then step out and down as pictured. A controller that cannot run that plan says what it lacks and moves nothing. Tool Z and custom probe routines on that simulator also include the native route\'s guarded steps. These route corrections are simulator/desk proven; they are not new hardware verification.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'The built-in simulator touches the part with the probe tip radius of the tool in the spindle, resolved the same way as the Probing screen. Bore, Boss, Edge and Corner compensation then reads the simulated part size. This changes simulated part contact only; tool-setter contact and real-controller probing keep their existing behavior.',
+      },
     ],
     images: [
       {
@@ -483,8 +531,8 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       {
         slot: 'probing-outside-corner',
         file: 'probing-outside-corner.webp',
-        alt: 'The Probing tab with Outside corner picked: its setup panel, the BEFORE START front and top views, the step strip with YOU on the steps you do, the Picture key, and Start probing',
-        captureNotes: 'Control > Probing on the built-in simulator, connected, CLEAR pressed, homed, idle; probe jogged over the simulated part near its front-right corner. Outside corner picked (corner front-right), step 1 BEFORE START. Route: node tools/capture/wiki-gaps/desktop.mjs --only=G01 (WO-2709).',
+        alt: 'Outside corner front-right setup before Start probing, with the front and top previews, Picture key, brief step guidance and expanded shared Console with history and MDI',
+        captureNotes: 'WO-2755 current capture at 1dfa75f9cc426b95b2ebc72b8496553ca7c22ff1, built-in GRBL-dialect simulator only. Outside corner, front-right, BEFORE START, expanded shared Console and MDI; no probing cycle. PNG and six empty error arrays in src/tests/evidence/WO-2755/outside-corner-01/.',
         status: 'done',
       },
       {
@@ -1085,6 +1133,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     {
       "kind": "paragraph",
       "text": "A machine with a stated fixed tool setter also has a virtual setter at that machine XY position. Its contact height uses the measured reference-tool contact when it is below the stated setter Z, otherwise the stated Z. A machine with no stated setter has none. Measure tool can touch this virtual setter; see \"The fixed tool setter\" for the measurement and reference workflow."
+    },
+    {
+      "kind": "paragraph",
+      "text": "On a fresh shipped Sample hobby router (GRBL), home is the back-right top, with machine zero at the maximum end of each axis. When G54 has no stored axes, the simulator starts its work zero at the default virtual part's front-left top. Any saved G54 axis, even an explicit zero, takes precedence; this default is not saved and applies only to the shipped sample. If you change work offsets after Load, the simulator reads the staged program against the offsets in force when you press CYCLE START."
     },
     {
       "kind": "tip",

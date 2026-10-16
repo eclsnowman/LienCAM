@@ -13,6 +13,7 @@
 // jsdom ships no 2D context backend, so getContext('2d') returns null there and the paint effect
 // simply no-ops; every piece of state a test needs to assert on (DOF chip label, conflict panel
 // entries, glyph list, selection) is also rendered as plain HTML, never canvas-only.
+import { useText } from '../../i18n'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   computeConflictPanel,
@@ -99,6 +100,7 @@ export interface Sketch3dLabPageProps {
 const DEFAULT_CANVAS_SIZE = { width: 760, height: 620 }
 
 export function Sketch3dLabPage({ createSolveService = createSketch3dSolveService }: Sketch3dLabPageProps = {}) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const solveServiceRef = useRef<Sketch3dSolveService | null>(null)
@@ -135,7 +137,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
   const dragCursorOffsetRef = useRef<Sketch3dVec2>({ x: 0, y: 0 })
 
   const [canvasSize, setCanvasSize] = useState(DEFAULT_CANVAS_SIZE)
-  const [status, setStatus] = useState('initializing solver...')
+  const [status, setStatus] = useState<string>(workbenchText('Sketch3dLabPage.initializingSolver'))
   const [document, setDocument] = useState<Sketch3dDocument>(emptyDocument())
   const [result, setResult] = useState<Sketch3dSolveResult | null>(null)
   const [tool, setTool] = useState<Sketch3dLabTool>('select')
@@ -170,7 +172,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
       solveServiceRef.current = service
       const initial = service.solve(documentRef.current)
       setResult(initial)
-      setStatus('ready')
+      setStatus(workbenchText('Sketch3dLabPage.ready'))
     })
     return () => {
       cancelled = true
@@ -484,7 +486,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
     const value = trimmed === '' ? null : Number(trimmed)
     const outcome = applyConstraintFromSelection(kind, documentRef.current, selection, nextId('c'), value)
     if (outcome.error || !outcome.document) {
-      setToolError(outcome.error ?? 'unknown constraint error')
+      setToolError(outcome.error ?? workbenchText('Sketch3dLabPage.unknownConstraintError'))
       return
     }
     setToolError(null)
@@ -690,8 +692,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
             </button>
           ))}
           <button type="button" data-testid="sketch3dlab-reset" onClick={handleReset} style={{ background: 'transparent', color: '#d8e0e8', border: '1px solid #2a3540', padding: '4px 8px', cursor: 'pointer' }}>
-            Reset
-          </button>
+            {workbenchText('Sketch3dLabPage.reset')}</button>
         </div>
         <div
           data-testid="sketch3dlab-counts"
@@ -699,13 +700,12 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
           // canvas click (see sketch3dlab-status's comment above).
           style={{ position: 'absolute', top: 60, left: 0, zIndex: 2, padding: '2px 10px', background: 'rgba(16,20,24,0.85)', color: '#8899a6', pointerEvents: 'none' }}
         >
-          entities: <span data-testid="sketch3dlab-entity-count">{document.entities.length}</span> | constraints:{' '}
-          <span data-testid="sketch3dlab-constraint-count">{document.constraints.length}</span>
+          {workbenchText('Sketch3dLabPage.entities')}<span data-testid="sketch3dlab-entity-count">{document.entities.length}</span>{workbenchText('Sketch3dLabPage.constraints')}<span data-testid="sketch3dlab-constraint-count">{document.constraints.length}</span>
         </div>
 
         {inference && (
           <div data-testid="sketch3dlab-inference-panel" style={{ position: 'absolute', top: 64, left: 8, zIndex: 3, background: 'rgba(16,20,24,0.95)', border: '1px solid #2a3540', padding: 8 }}>
-            <div>Auto-constrain suggestions:</div>
+            <div>{workbenchText('Sketch3dLabPage.autoConstrainSuggestions')}</div>
             {inference.candidates.map((candidate) => (
               // BK-58: key by the candidate's own constraint id, not `kind` - a drawn line's
               // start AND end sites are each checked independently (endpointCandidates in
@@ -718,12 +718,10 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
                 onClick={() => handleAcceptInference(candidate)}
                 style={{ display: 'block', width: '100%', textAlign: 'left', background: 'transparent', color: '#8fd694', border: 'none', cursor: 'pointer', padding: '2px 0' }}
               >
-                Apply {candidate.kind}
-              </button>
+                {workbenchText('Sketch3dLabPage.apply', { kind: String((candidate.kind) ?? '') })}</button>
             ))}
             <button type="button" data-testid="sketch3dlab-infer-skip" onClick={handleSkipInference} style={{ background: 'transparent', color: '#d8e0e8', border: 'none', cursor: 'pointer' }}>
-              Skip
-            </button>
+              {workbenchText('Sketch3dLabPage.skip')}</button>
           </div>
         )}
 
@@ -739,7 +737,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
 
       <div style={{ width: 320, borderLeft: '1px solid #2a3540', display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         <div style={{ padding: 8, borderBottom: '1px solid #2a3540' }}>
-          <div>Constraint tools:</div>
+          <div>{workbenchText('Sketch3dLabPage.constraintTools')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
             {SKETCH3DLAB_CONSTRAINT_KINDS.map((kind) => (
               <button
@@ -755,8 +753,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
           </div>
           <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center' }}>
             <label>
-              value:{' '}
-              <input
+              {workbenchText('Sketch3dLabPage.value')}<input
                 data-testid="sketch3dlab-value-input"
                 value={valueInput}
                 onChange={(ev) => setValueInput(ev.target.value)}
@@ -764,11 +761,10 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
               />
             </label>
             <button type="button" data-testid="sketch3dlab-clear-selection" onClick={handleClearSelection} style={{ background: 'transparent', color: '#d8e0e8', border: '1px solid #2a3540', cursor: 'pointer' }}>
-              Clear selection
-            </button>
+              {workbenchText('Sketch3dLabPage.clearSelection')}</button>
           </div>
           <div data-testid="sketch3dlab-selection-summary" style={{ marginTop: 4, color: '#8899a6' }}>
-            points: {selection.points.map(pointRefKey).join(', ') || '(none)'} | entities: {selection.entities.join(', ') || '(none)'}
+            {workbenchText('Sketch3dLabPage.points')}{selection.points.map(pointRefKey).join(', ') || workbenchText('Sketch3dLabPage.none')}{workbenchText('Sketch3dLabPage.entities2')}{selection.entities.join(', ') || workbenchText('Sketch3dLabPage.none')}
           </div>
           {toolError && (
             <div data-testid="sketch3dlab-tool-error" style={{ color: '#ff6b6b', marginTop: 4 }}>
@@ -778,7 +774,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
         </div>
 
         <div style={{ padding: 8, borderBottom: '1px solid #2a3540' }}>
-          <div>Constraints ({glyphs.length}):</div>
+          <div>{workbenchText('Sketch3dLabPage.constraints2', { length: String((glyphs.length) ?? '') })}</div>
           <button
             type="button"
             data-testid="sketch3dlab-delete-constraint"
@@ -786,8 +782,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
             onClick={handleDeleteSelectedGlyph}
             style={{ margin: '4px 0', background: 'transparent', color: selectedGlyphId ? '#ff6b6b' : '#556', border: '1px solid #2a3540', cursor: selectedGlyphId ? 'pointer' : 'default' }}
           >
-            Delete selected constraint
-          </button>
+            {workbenchText('Sketch3dLabPage.deleteSelectedConstraint')}</button>
           <div data-testid="sketch3dlab-glyph-list">
             {glyphs.map((glyph) => (
               <div
@@ -802,17 +797,15 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
                   background: glyph.constraintId === selectedGlyphId ? '#2a3540' : 'transparent',
                   color: glyph.state === 'conflicting' ? '#ff6b6b' : glyph.state === 'redundant' ? '#ffb703' : '#d8e0e8',
                 }}
-              >
-                [{glyph.kind}] {glyph.label}
-              </div>
+              >{workbenchText('Sketch3dLabPage.combinedundefined', { value1: String((glyph.kind) ?? ''), value2: String((glyph.label) ?? '') })}</div>
             ))}
           </div>
         </div>
 
         <div style={{ padding: 8 }} data-testid="sketch3dlab-conflict-panel">
-          <div>Conflicts / redundancies:</div>
+          <div>{workbenchText('Sketch3dLabPage.conflictsRedundancies')}</div>
           {conflictPanel?.isEmpty !== false ? (
-            <div style={{ color: '#8899a6' }}>none</div>
+            <div style={{ color: '#8899a6' }}>{workbenchText('Sketch3dLabPage.none2')}</div>
           ) : (
             <>
               {conflictPanel?.conflicting.map((entry) => (
@@ -822,8 +815,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
                   onClick={() => setSelectedGlyphId(entry.constraintId)}
                   style={{ cursor: 'pointer', color: '#ff6b6b' }}
                 >
-                  CONFLICT: {entry.label}
-                </div>
+                  {workbenchText('Sketch3dLabPage.conflict', { label: String((entry.label) ?? '') })}</div>
               ))}
               {conflictPanel?.redundant.map((entry) => (
                 <div
@@ -832,8 +824,7 @@ export function Sketch3dLabPage({ createSolveService = createSketch3dSolveServic
                   onClick={() => setSelectedGlyphId(entry.constraintId)}
                   style={{ cursor: 'pointer', color: '#ffb703' }}
                 >
-                  REDUNDANT: {entry.label}
-                </div>
+                  {workbenchText('Sketch3dLabPage.redundant', { label: String((entry.label) ?? '') })}</div>
               ))}
             </>
           )}

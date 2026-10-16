@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // OverridePanel - live feed / rapid / spindle overrides (MACHINE-CONTROL,
 // reworked per Operator ruling 2026-07-31: single-line symmetric steppers, no wrap, no
 // chip pile). Each row reads like a pendant: -10 -1 [VALUE] +1 +10, with the
@@ -18,7 +21,7 @@
 import { useEffect, useState } from 'react'
 import { useMachineControl } from '../../store/machineControlStore'
 import type { OverrideAvailability } from '../../store/machineControlStore'
-import { getMachineController } from '../../lib/machine/machineSession'
+import { appRapidOverrideNote, getMachineController } from '../../lib/machine/machineSession'
 import { authorize } from '../../lib/machine/operatorAuthority'
 import type { OverrideKind } from '../../lib/machine/controller'
 import { useSelectAllOnClick } from '../ui/selectAllOnClick'
@@ -69,6 +72,7 @@ function OverrideEntry({
   disabled: boolean
   channel: OverrideKind
 }) {
+  useText('control-screens-not-probing')
   const [draft, setDraft] = useState(String(value))
   const [editing, setEditing] = useState(false)
   // WO-287: the canonical click-selects-all contract (components/ui/
@@ -84,7 +88,7 @@ function OverrideEntry({
   const refuse = () => {
     useMachineControl.getState().pushConsole(
       'tx',
-      `${label} override was not sent: enter a whole number from 10% to 200%.`,
+      controlText('OverridePanel.text001', { value1: String(label) }),
       'error',
     )
   }
@@ -110,8 +114,8 @@ function OverrideEntry({
         <input
           className="control-ovr-value-input"
           data-testid={`control-ovr-${tip}`}
-          aria-label={`${label} override percent`}
-          data-tooltip={`Live ${tip} override - type 10 to 200 and press Enter`}
+          aria-label={controlText('OverridePanel.text002', { value1: String(label) })}
+          data-tooltip={controlText('OverridePanel.text003', { value1: String(tip) })}
           // type="text" + inputMode, NOT type="number": per the HTML spec the
           // text-selection APIs do not apply to number inputs, so the old
           // select()-on-focus here was a silent no-op and the value could not
@@ -173,10 +177,10 @@ function unavailableRow(
         className="control-ovr-stepper control-ovr-unavailable"
         data-testid={`control-ovr-${channel}`}
         data-tooltip={waiting
-          ? `Waiting for this controller to report its ${tip} override`
-          : `This controller has no ${tip} override`}
+          ? controlText('OverridePanel.text004', { value1: String(tip) })
+          : controlText('OverridePanel.text005', { value1: String(tip) })}
       >
-        {waiting ? 'waiting for report' : 'not on this controller'}
+        {waiting ? controlText('OverridePanel.text006') : controlText('OverridePanel.text007')}
       </span>
     </div>
   )
@@ -222,6 +226,7 @@ function StepperRow({
 }
 
 export function OverridePanel() {
+  useText('control-screens-not-probing')
   const overrides = useMachineControl((s) => s.overrides)
   const availability = useMachineControl((s) => s.overrideAvailability)
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
@@ -229,10 +234,12 @@ export function OverridePanel() {
   // The only three rapid levels a GRBL controller has, sent as the absolute
   // percentages they are (the backend maps them to 0x97/0x96/0x95).
   const rapidSegments = [{ pct: 25 }, { pct: 50 }, { pct: 100 }]
+  // WO-2669: where the app owns Rapid (the AXBB-E), one line says what it does.
+  const rapidNote = overrides.rapid === null ? null : appRapidOverrideNote()
   return (
     <section className="panel control-panel">
       <div className="panel-header">
-        <span className="panel-title">Overrides</span>
+        <span className="panel-title">{controlText('OverridePanel.text008')}</span>
         {/* WO-116: collapsed keeps the LIVE values visible in the header (the
             DisclosureSection summary-while-collapsed idea) - an override left
             at 50% must never be folded out of sight mid-cycle. */}
@@ -250,21 +257,21 @@ export function OverridePanel() {
         <ControlPanelCollapseToggle
           panel="overrides"
           testId="control-overrides-toggle"
-          collapseTip="Collapse the override steppers"
-          expandTip="Show the override steppers"
+          collapseTip={controlText('OverridePanel.text009')}
+          expandTip={controlText('OverridePanel.text010')}
         />
       </div>
       {!collapsed && (
       <div className="panel-body control-ovr-body">
         <StepperRow
-          label="Feed"
+          label={controlText('OverridePanel.text011')}
           value={overrides.feed}
           availability={availability.feed}
           channel="feed"
         />
-        {overrides.rapid === null ? unavailableRow('Rapid', 'rapid', availability.rapid) : (
+        {overrides.rapid === null ? unavailableRow(controlText('OverridePanel.text012'), 'rapid', availability.rapid) : (
         <div className="control-ovr-row">
-          <span className="control-field-label control-ovr-label">Rapid</span>
+          <span className="control-field-label control-ovr-label">{controlText('OverridePanel.text013')}</span>
           <span className="control-ovr-stepper control-ovr-segments" data-testid="control-ovr-rapid">
             {rapidSegments.map((seg) => (
               <button
@@ -272,7 +279,7 @@ export function OverridePanel() {
                 className={`control-chip-btn control-ovr-seg ${overrides.rapid === seg.pct ? 'control-chip-active' : ''}`}
                 data-testid={`control-ovr-rapid-${seg.pct}`}
                 disabled={authorize('override', { connected }).disabled}
-                data-tooltip={`rapid override ${seg.pct}%`}
+                data-tooltip={controlText('OverridePanel.text014', { value1: String(seg.pct) })}
                 onClick={() => getMachineController().setOverride({ kind: 'rapid', to: 'percent', percent: seg.pct })}
               >
                 {seg.pct}%
@@ -281,8 +288,17 @@ export function OverridePanel() {
           </span>
         </div>
         )}
+        {rapidNote !== null && (
+          <div
+            className="control-field-label"
+            data-testid="control-ovr-rapid-note"
+            data-tooltip="This controller has no rapid override of its own, so the app sends each G0 at this share of the machine rapid. Cutting moves keep their feed. Moves already sent to the board keep the speed they went out at."
+          >
+            {rapidNote}
+          </div>
+        )}
         <StepperRow
-          label="Spindle"
+          label={controlText('OverridePanel.text015')}
           value={overrides.spindle}
           availability={availability.spindle}
           channel="spindle"

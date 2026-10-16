@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type MachineConfig } from '../../../types'
 import { type MachineConnectionKind } from '../../../lib/machine/machineSession'
 import { getMachineController } from '../../../lib/machine/machineSession'
@@ -224,7 +227,7 @@ export function bridgePanelState(status: BridgeProcessStatus | null): BridgePane
     return {
       kind: 'build-failed',
       status,
-      reason: status.setup.error ?? 'the compiler did not produce the machine connection',
+      reason: status.setup.error ?? controlText('useMachineDefinitionPanel.text001'),
     }
   }
   if (!status.configured) return { kind: 'not-configured', status }
@@ -240,7 +243,7 @@ export function bridgePanelState(status: BridgeProcessStatus | null): BridgePane
     return {
       kind: 'failing',
       status,
-      reason: status.failureReason ?? 'the bridge process stopped unexpectedly',
+      reason: status.failureReason ?? controlText('useMachineDefinitionPanel.text002'),
     }
   }
   if (!status.running) return { kind: 'not-running', status }
@@ -285,14 +288,14 @@ export async function ensureBridgeForControl(): Promise<boolean> {
     if (state.kind === 'failing') {
       useCamStore.getState().addConsoleEvent({
         severity: 'error', source: 'machine',
-        message: `Bridge needs recovery: ${state.reason}`,
+        message: controlText('useMachineDefinitionPanel.text003', { value1: String(state.reason) }),
       })
       return false
     }
     if (state.kind === 'not-configured') {
       useCamStore.getState().addConsoleEvent({
         severity: 'error', source: 'machine',
-        message: 'liencam-bridge.exe is missing or not configured on this computer.',
+        message: controlText('useMachineDefinitionPanel.text004'),
       })
       return false
     }
@@ -306,24 +309,24 @@ export async function ensureBridgeForControl(): Promise<boolean> {
     } catch {
       useCamStore.getState().addConsoleEvent({
         severity: 'error', source: 'machine',
-        message: 'The bridge could not be started on this computer.',
+        message: controlText('useMachineDefinitionPanel.text005'),
       })
       return false
     }
     if (!result.ok) {
       const message = result.reason === 'exited'
-        ? 'The bridge did not start: it stopped again straight away.'
+        ? controlText('useMachineDefinitionPanel.text006')
         : result.reason === 'no-socket'
-          ? `The bridge started but is not answering on port ${result.port}.`
+          ? controlText('useMachineDefinitionPanel.text007', { value1: String(result.port) })
           : result.reason === 'not-configured'
-            ? 'liencam-bridge.exe is missing or not configured on this computer.'
-            : 'The bridge supervisor is not installed on this computer.'
+            ? controlText('useMachineDefinitionPanel.text008')
+            : controlText('useMachineDefinitionPanel.text009')
       useCamStore.getState().addConsoleEvent({ severity: 'error', source: 'machine', message })
       return false
     }
     useCamStore.getState().addConsoleEvent({
       severity: 'success', source: 'machine',
-      message: `Bridge started (pid ${result.pid}, port ${result.port}).`,
+      message: controlText('useMachineDefinitionPanel.text010', { value1: String(result.pid), value2: String(result.port) }),
     })
     window.dispatchEvent(new Event('liencam:bridge-lifecycle'))
     return true
@@ -391,6 +394,7 @@ export function useMachineDefinitionPanel({
   controllerSetupFocus = 0,
   machineId,
 }: MachineDefinitionPanelProps = {}) {
+  useText('control-screens-not-probing')
   const machineLibrary         = useCamStore((s) => s.machineLibrary)
   const controlledMachine      = useCamStore(controlMachine)
   // WO-1698 review fix: a pending section request (machineDefinitionSectionRequest.ts)
@@ -576,7 +580,7 @@ export function useMachineDefinitionPanel({
     addConsoleEvent({
       severity: 'info',
       source: 'machine',
-      message: 'Bridge settings changed. Restart bridge to apply them now; otherwise they take effect the next time it starts.',
+      message: controlText('useMachineDefinitionPanel.text011'),
     })
   }, [addConsoleEvent])
 
@@ -713,7 +717,7 @@ export function useMachineDefinitionPanel({
   const waitingForVfdReceipt = (): void => {
     addConsoleEvent({
       severity: 'info', source: 'machine',
-      message: 'spindle link: waiting for the bridge to confirm the previous change',
+      message: controlText('useMachineDefinitionPanel.text012'),
     })
   }
 
@@ -756,7 +760,7 @@ export function useMachineDefinitionPanel({
         vfdRefusalReported.current.add(reportKey)
         addConsoleEvent({
           severity: 'warning', source: 'machine',
-          message: `Spindle link refused ${key}: "${typed}" is not a usable value.`,
+          message: controlText('useMachineDefinitionPanel.text013', { value1: String(key), value2: String(typed) }),
         })
       }
       return
@@ -769,7 +773,7 @@ export function useMachineDefinitionPanel({
     const candidate = {
       ...changed,
       verified: false,
-      provenance: { kind: 'edited-here', source: `LienCAM machine ${source.id}` },
+      provenance: { kind: 'edited-here', source: controlText('useMachineDefinitionPanel.text014', { value1: String(source.id) }) },
     } as MachineSpindleLinkDefinition
     // WO-2009: checked as it will be SENT - a saved link that names a shipped
     // template has its missing run-state rows filled by the apply below, which
@@ -785,7 +789,7 @@ export function useMachineDefinitionPanel({
         vfdRefusalReported.current.add(reportKey)
         addConsoleEvent({
           severity: 'warning', source: 'machine',
-          message: `Spindle link refused ${key}: ${reason}`,
+          message: controlText('useMachineDefinitionPanel.text015', { value1: String(key), value2: String(reason) }),
         })
       }
       return
@@ -811,14 +815,14 @@ export function useMachineDefinitionPanel({
         clearPendingVfdValue(source.id, key)
         addConsoleEvent({
           severity: 'info', source: 'machine',
-          message: `Spindle link ${key} changed - not yet commissioned against the inverter.`,
+          message: controlText('useMachineDefinitionPanel.text016', { value1: String(key) }),
         })
       })
       .catch((error) => {
         if (waitsForMatchingBridge) clearPendingVfdValue(source.id, key)
         addConsoleEvent({
           severity: 'warning', source: 'machine',
-          message: `Spindle link refused - ${error instanceof Error ? error.message : String(error)}.`,
+          message: controlText('useMachineDefinitionPanel.text017', { value1: String(error instanceof Error ? error.message : String(error)) }),
         })
       })
   }
@@ -838,7 +842,7 @@ export function useMachineDefinitionPanel({
       directionInverted: inverted,
       directionInvertedProvenance: {
         kind: 'operator',
-        source: `LienCAM machine ${source.id} - reverse spindle direction control`,
+        source: controlText('useMachineDefinitionPanel.text018', { value1: String(source.id) }),
       },
     }
     void applyMachineSpindleLinkDefinition(source.id, candidate)
@@ -847,13 +851,13 @@ export function useMachineDefinitionPanel({
         addConsoleEvent({
           severity: 'info', source: 'machine',
           message: inverted
-            ? 'Spindle direction is now reversed: a clockwise command will send the word the drive calls reverse.'
-            : 'Spindle direction is now normal: a clockwise command will send the word the drive calls forward.',
+            ? controlText('useMachineDefinitionPanel.text019')
+            : controlText('useMachineDefinitionPanel.text020'),
         })
       })
       .catch((error) => addConsoleEvent({
         severity: 'warning', source: 'machine',
-        message: `Spindle direction change refused - ${error instanceof Error ? error.message : String(error)}.`,
+        message: controlText('useMachineDefinitionPanel.text021', { value1: String(error instanceof Error ? error.message : String(error)) }),
       }))
   }
 
@@ -1031,22 +1035,22 @@ export function useMachineDefinitionPanel({
     bridgeActionInFlight.current = true
     setBridgeAction(action)
     if (action === 'restart' && bridgeCapability === 'hosted') {
-      addConsoleEvent({ severity: 'info', source: 'machine', message: 'Restarting the bridge...' })
+      addConsoleEvent({ severity: 'info', source: 'machine', message: controlText('useMachineDefinitionPanel.text022') })
     }
     const restartReason = bridgeProcessState.kind === 'failing'
       ? bridgeProcessState.reason.replace(/[.]$/, '')
-      : 'the operator requested recovery'
+      : controlText('useMachineDefinitionPanel.text023')
     try {
       if (action === 'stop') {
         const result = await stopBridge(bridgePort)
         if (result.ok) {
-          addConsoleEvent({ severity: 'success', source: 'machine', message: 'Bridge shut down.' })
+          addConsoleEvent({ severity: 'success', source: 'machine', message: controlText('useMachineDefinitionPanel.text024') })
         } else {
           addConsoleEvent({
             severity: 'error', source: 'machine',
             message: result.reason === 'stop-timeout'
-              ? 'The bridge did not shut down in time.'
-              : 'The bridge supervisor is not installed on this computer.',
+              ? controlText('useMachineDefinitionPanel.text025')
+              : controlText('useMachineDefinitionPanel.text026'),
           })
         }
         await refreshBridgeProcessState()
@@ -1060,11 +1064,11 @@ export function useMachineDefinitionPanel({
         addConsoleEvent({
           severity: 'success', source: 'machine',
           message: action === 'start'
-            ? `Bridge started (pid ${result.pid}, port ${result.port}).`
+            ? controlText('useMachineDefinitionPanel.text027', { value1: String(result.pid), value2: String(result.port) })
             : bridgeCapability === 'hosted'
-              ? 'The bridge is running again. Home the machine before you jog - '
-                + 'a restart loses the position counter.'
-              : `Bridge restarted: ${restartReason}.`,
+              ? controlText('useMachineDefinitionPanel.text028')
+                + controlText('useMachineDefinitionPanel.text029')
+              : controlText('useMachineDefinitionPanel.text030', { value1: String(restartReason) }),
         })
         await refreshBridgeProcessState()
         if (resumeConnect || action === 'restart') resumeBridgeConnect()
@@ -1075,16 +1079,16 @@ export function useMachineDefinitionPanel({
             configured: true, running: false, pid: null, lastExit: result.lastExit,
             respawn: { attempts: 0, gaveUp: false, lastAttemptAt: null },
           },
-          reason: 'the bridge process stopped again straight away',
+          reason: controlText('useMachineDefinitionPanel.text031'),
         })
         addConsoleEvent({
           severity: 'error', source: 'machine',
-          message: 'The bridge did not come back: it stopped again straight away.',
+          message: controlText('useMachineDefinitionPanel.text032'),
         })
       } else if (result.reason === 'no-socket') {
         addConsoleEvent({
           severity: 'error', source: 'machine',
-          message: `The bridge started but is not answering on port ${result.port}.`,
+          message: controlText('useMachineDefinitionPanel.text033', { value1: String(result.port) }),
         })
       } else if (result.reason === 'not-configured') {
         setBridgeProcessState({
@@ -1096,18 +1100,18 @@ export function useMachineDefinitionPanel({
         })
         addConsoleEvent({
           severity: 'error', source: 'machine',
-          message: 'liencam-bridge.exe is missing or not configured on this computer.',
+          message: controlText('useMachineDefinitionPanel.text034'),
         })
       } else {
         addConsoleEvent({
           severity: 'error', source: 'machine',
-          message: 'The bridge was started outside the app and cannot be restarted here.',
+          message: controlText('useMachineDefinitionPanel.text035'),
         })
       }
     } catch {
       addConsoleEvent({
         severity: 'error', source: 'machine',
-        message: 'The bridge lifecycle action could not be completed on this computer.',
+        message: controlText('useMachineDefinitionPanel.text036'),
       })
     } finally {
       bridgeActionInFlight.current = false
@@ -1127,8 +1131,8 @@ export function useMachineDefinitionPanel({
     absentReported.current.add(absentTouched)
     addConsoleEvent({
       severity: 'info', source: 'machine',
-      message: `${absentTouched} is not in your profile - this machine has `
-        + 'stated no value for it. Typing one here states it.',
+      message: controlText('useMachineDefinitionPanel.text037', { value1: String(absentTouched) })
+        + controlText('useMachineDefinitionPanel.text038'),
     })
   }, [absentTouched, addConsoleEvent])
 
@@ -1147,10 +1151,10 @@ export function useMachineDefinitionPanel({
     foreignLinkReported.current.add(pair)
     addConsoleEvent({
       severity: 'info', source: 'machine',
-      message: 'The machine bridge that is connected was started for '
-        + `${spindleLinkOtherMachine ?? 'a machine it did not name'}, not for ${source.name}, so `
-        + "this page is not showing its spindle definition - it describes a different inverter. "
-        + 'Connect the bridge for this machine to read its inverter here.',
+      message: controlText('useMachineDefinitionPanel.text039')
+        + controlText('useMachineDefinitionPanel.text041', { value1: String(spindleLinkOtherMachine ?? controlText('useMachineDefinitionPanel.text040')), value2: String(source.name) })
+        + controlText('useMachineDefinitionPanel.text042')
+        + controlText('useMachineDefinitionPanel.text043'),
     })
   }, [
     spindleLinkIsForeign, spindleLink.machineId, spindleLinkOtherMachine,
@@ -1477,8 +1481,8 @@ export function useMachineDefinitionPanel({
     if (problems.length > 0) {
       addConsoleEvent({
         severity: 'warning', source: 'machine',
-        message: `${draft.name}: machine definition saved with `
-          + `${problems.length} problem${problems.length === 1 ? '' : 's'} - `
+        message: controlText('useMachineDefinitionPanel.text044', { value1: String(draft.name) })
+          + controlText('useMachineDefinitionPanel.text045', { value1: String(problems.length), value2: String(problems.length === 1 ? '' : 's') })
           + problems.join(' '),
       })
     }
@@ -1639,7 +1643,7 @@ export function useMachineDefinitionPanel({
         : {
             ok: false,
             sent: null,
-            refusal: 'Nothing was sent: this machine has no controller definition.',
+            refusal: controlText('useMachineDefinitionPanel.text046'),
             result: null,
             authorityRefusal: null,
           }
@@ -1647,7 +1651,7 @@ export function useMachineDefinitionPanel({
       lines = describeApplyOutcome(outcome)
     } catch (err) {
       lines = [{
-        text: 'The machine definition was NOT applied: '
+        text: controlText('useMachineDefinitionPanel.text047')
           + (err instanceof Error ? err.message : String(err)),
         severity: 'error',
       }]
@@ -1728,17 +1732,15 @@ export function useMachineDefinitionPanel({
   const absentAxisRow = (name: AxisName, span: number) => (
     <tr key={name} data-testid={`machine-def-panel-axis-${name}`} data-axis-absent="">
       <td className="mform-axis-label" style={{ color: axisColorVar(name) }}>{name}</td>
-      <td colSpan={span} style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-        not carried in this record
-        <button
+      <td colSpan={span} style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('useMachineDefinitionPanel.text048')}<button
           type="button"
           className="control-chip-btn"
           data-testid={`machine-def-panel-axis-add-${name}`}
-          data-tooltip={`Add a ${name} axis to this machine, with every pin unassigned`}
+          data-tooltip={controlText('useMachineDefinitionPanel.text049', { value1: String(name) })}
           onClick={() => addAxis(name)}
           style={{ marginLeft: 8 }}
         >
-          <Plus size={12} /> Add {name}
+          <Plus size={12} />{controlText('useMachineDefinitionPanel.text050')}{name}
         </button>
       </td>
     </tr>
@@ -1753,12 +1755,12 @@ export function useMachineDefinitionPanel({
   const applyIsCurrent =
     applyState !== null && applySig !== null && applyState.sig === applySig
   const applyTooltip = applying
-    ? 'Applying: waiting for the controller to accept every value and read them back.'
+    ? controlText('useMachineDefinitionPanel.text051')
     : applyIsCurrent
       ? (applyState.lines[0]?.text ?? '')
-        + (applyState.lines.length > 1 ? ' The full report is in the console.' : '')
-      : 'Save and send this shown definition to the connected machine. Runtime uses it only '
-        + 'after a matching successful controller readback.'
+        + (applyState.lines.length > 1 ? controlText('useMachineDefinitionPanel.text052') : '')
+      : controlText('useMachineDefinitionPanel.text053')
+        + controlText('useMachineDefinitionPanel.text054')
 
   const connectedHere = sessionMachine?.id === source.id
   const controllerDefinitionPending = connectedHere
@@ -1780,19 +1782,19 @@ export function useMachineDefinitionPanel({
   // because this is the more specific fact: not just unconnected, but not
   // even the record Control would apply to once something IS connected.
   const authorityText = !editsConnectedMachine
-    ? `This is ${draft.name} - not the machine connected now (${connectedMachineName}). `
-      + `Changes are saved to ${draft.name}; apply them when ${draft.name} is connected.`
+    ? controlText('useMachineDefinitionPanel.text055', { value1: String(draft.name), value2: String(connectedMachineName) })
+      + controlText('useMachineDefinitionPanel.text056', { value1: String(draft.name), value2: String(draft.name) })
     : !connectedHere
-      ? 'Saved profile. It becomes runtime authority when this machine connects.'
+      ? controlText('useMachineDefinitionPanel.text057')
       : reconnectPending
         ? controllerDefinitionPending
-          ? 'Saved changes are pending: Apply can confirm controller settings; reconnect is required for the other profile changes.'
-          : 'Saved profile changes are pending and will become live after reconnect.'
+          ? controlText('useMachineDefinitionPanel.text058')
+          : controlText('useMachineDefinitionPanel.text059')
         : controllerDefinitionPending
-          ? 'Saved controller settings are pending. They become live only after a successful Apply readback or reconnect.'
+          ? controlText('useMachineDefinitionPanel.text060')
           : authorityState === 'applied'
-            ? 'Controller-confirmed definition is live for this connected session.'
-            : 'Connection-start definition is live. Later saved edits will remain pending.'
+            ? controlText('useMachineDefinitionPanel.text061')
+            : controlText('useMachineDefinitionPanel.text062')
 
   // The import issues, BY NAME. A surface that said "3 issues" instead of
   // naming them would rebuild the exact class of defect that cost this project

@@ -993,6 +993,18 @@
       "size": "L",
       "priority": 2,
       "priorityNote": "2 - the maintainer: after the alpha release"
+    },
+    {
+      "id": "R-115",
+      "theme": "Modeling and sketching",
+      "item": "Associative technical drawings",
+      "goal": "Make dimensioned drawings of modeled parts with templates, tolerances, linked or freely placed views, detail views and balloons; update with the model, repair stale references, and export PDF/DXF.",
+      "status": "planned",
+      "note": "WO-2750: held future feature; low priority; discovery and implementation not started; no deadline",
+      "source": "WO-2750; project-owner request 2026-10-11",
+      "size": "TBD after discovery",
+      "priority": 3,
+      "priorityNote": "3 - later; intake only; first-release scope and uncluttered UI to be decided"
     }
   ]
 }

@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 // ProgramPanel - load, stream, and WATCH a g-code program.
 //
 // LAYOUT LAW (Operator 2026-07-31, HARD): the path VISUALIZATION is first-class -
@@ -22,13 +26,13 @@ import {
   type CSSProperties,
 } from 'react'
 import { ChevronDown, ChevronUp, FileUp, FolderGit2, Scan } from 'lucide-react'
-import { useText } from '../../i18n'
 import { GcodeEditor, type GcodeEditorJump, type GcodeEditorToolRequest } from '../gcode/GcodeEditor'
 import { GcodeLineMenu, type GcodeLineMenuItem } from '../gcode/GcodeLineMenu'
 import { lineChanges, markFromRefusal, readerMarks, withLineEndingsOf, type GcodeLineMark } from '../gcode/gcodeEditing'
 import { describeEdit, programContextForEdit, subscribeProgramForControl, takeProgramForControl } from '../gcode/editedProgram'
 import { saveFile } from '../../lib/saveFile'
 import { controlMachine, useCamStore } from '../../store'
+import { useUiPrefs } from '../../store/uiPrefs'
 import {
   executingProgramMoveId,
   executingProgramMoveShown,
@@ -40,6 +44,8 @@ import {
   applyToolLengthOffset,
   armEpoch,
   armProgramFromLine,
+  runFromLineToolCheck,
+  type RunFromLineToolChoice,
   beginClampPause,
   beginGuidedToolChange,
   cancelGuidedToolChangeByOperator,
@@ -139,7 +145,7 @@ import {
  *  it stays where the prelude leaves it (audit 10: Z at the prelude's own last
  *  Z move, if any) until the program moves it. */
 function resumeAxis(value: number | null, units: Units, rest: string | null = null): string {
-  return value === null ? `- (stays ${rest ?? 'where it is'})` : fmtMachineLength(value, units)
+  return value === null ? controlText('ProgramPanel.text002', { value1: String(rest ?? controlText('ProgramPanel.text001')) }) : fmtMachineLength(value, units)
 }
 
 /** The run length: start to end, never `Date.now()` - WO-2236, a readout
@@ -167,6 +173,8 @@ import {
 import { ProgramDivider, useProgramPreviewPercent } from './ProgramDivider'
 import {
   fileLinesListing,
+  listingCommentParts,
+  programListingKinds,
   listingRowIsMove,
   stagedProgramListing,
   type ProgramListingLine,
@@ -330,15 +338,15 @@ function useProgramProgressElapsedMs(
   ).elapsedMs
 }
 
-const TC_STEP_LABEL: Record<ToolChangeStep, string> = {
-  stopping: 'stopping the program',
-  parking: 'parking',
-  'awaiting-swap': 'swap the tool',
-  probing: 'probing the new tool',
-  arming: 're-arming the program',
-  ready: 'ready to resume',
-  failed: 'stopped',
-}
+const TC_STEP_LABEL: Record<ToolChangeStep, string> = liveCatalog(() => ({
+  stopping: controlText('ProgramPanel.text003'),
+  parking: controlText('ProgramPanel.parking'),
+  'awaiting-swap': controlText('ProgramPanel.text004'),
+  probing: controlText('ProgramPanel.text005'),
+  arming: controlText('ProgramPanel.text006'),
+  ready: controlText('ProgramPanel.text007'),
+  failed: controlText('ProgramPanel.stopped'),
+}))
 
 interface LoadedMeta {
   load: { lines: unknown[]; skipped: number; overlongLines: number[] }
@@ -350,7 +358,7 @@ interface LoadedMeta {
 export function stagedSetupChipLabel(
   stagedProgram: ReturnType<typeof useMachineControl.getState>['stagedProgram'],
   moveId: number | null,
-  doing = 'running',
+  doing: string = controlText('ProgramPanel.sectionRunning'),
 ): string | null {
   if (!stagedProgram || stagedProgram.setups.length < 2) return null
   if (moveId === null) return stagedProgram.setups.map(({ setupName }) => setupName).join(' + ')
@@ -361,7 +369,7 @@ export function stagedSetupChipLabel(
   const placeOf = (id: number) => (order.has(moveId) ? order.get(id) ?? Infinity : id)
   const active = stagedProgram.setups.reduce((current, candidate) =>
     placeOf(candidate.firstStepId) <= at ? candidate : current)
-  return `${active.setupName} (${active.wcs}) ${doing}`
+  return controlText('ProgramPanel.text008', { value1: String(active.setupName), value2: String(active.wcs), value3: String(doing) })
 }
 
 const stagedStepOrders = new WeakMap<object, Map<number, number>>()
@@ -403,7 +411,9 @@ let editorSeq = 0
 const nextEditorSeq = () => ++editorSeq
 
 export function ProgramPanel() {
+  const moveColours = useUiPrefs((s) => s.programListingColours) === true
   const probeSignals = useProbeSignals()
+  const t = useText('control-screens-not-probing')
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const machineState = useMachineControl((s) => s.machineState)
   const job = useMachineControl((s) => s.job)
@@ -490,6 +500,10 @@ export function ProgramPanel() {
   const runFromSelectAll = useSelectAllOnClick()
   const [runFromPlan, setRunFromPlan] = useState<RunFromLinePlan | null>(null)
   const [runFromError, setRunFromError] = useState<string | null>(null)
+  // WO-2810: the tool pop-up - the line's tool differs from the last known one.
+  const [runFromToolAsk, setRunFromToolAsk] = useState<
+    (NonNullable<ReturnType<typeof runFromLineToolCheck>> & { line: number; hadArm: boolean }) | null
+  >(null)
   const [hoverLine, setHoverLine] = useState<number | null>(null)
   const armedFromLine = useMachineControl((s) => s.armedFromLine)
   const stagedNumbering = useMachineControl((s) => s.stagedNumbering)
@@ -566,7 +580,15 @@ export function ProgramPanel() {
       && stagedProgram.sourceLines !== undefined
       ? loadedProgramText() : null
     return plainFileText === null ? staged : fileLinesListing(staged, plainFileText.split(/\r?\n/))
-  }, [programText, stagedProgram, stagedListingText, jobName])
+  }, [programText, stagedProgram, stagedListingText, jobName, t])
+  // Full-file modal context is computed only when the listing changes, never
+  // on cursor/follow updates. Comment spans are made only for visible rows.
+  const listingKinds = useMemo(() => {
+    const rawFile = jobName !== null && !jobName.endsWith(' (posted)') && !jobName.endsWith(' (toolpath)')
+      && stagedProgram?.sourceLines !== undefined && loadedProgramText() !== null
+    return programListingKinds(lines, listingShowsStaged || programText !== null || rawFile
+      ? [] : stagedProgram?.program.steps)
+  }, [lines, stagedProgram, listingShowsStaged, programText, jobName])
   const stagedRows = useMemo(() => {
     if (stagedListingText === null || programText === null) return null
     const rows = new Set<number>()
@@ -630,7 +652,7 @@ export function ProgramPanel() {
     try {
       return compareProgramContext(programContext, intentProject, programText, postConfigForProject, loadedMotionDigest)
     } catch (err) {
-      console.error('[program-context] comparison failed:', err)
+      console.error(controlText('ProgramPanel.text009'), err)
       return 'comparison-failed'
     }
   }, [programContext, intentProject, programText, loadedMotionDigest, postConfigForProject])
@@ -814,6 +836,7 @@ export function ProgramPanel() {
     seenEpoch.current = epoch
     setRunFromPlan(null)
     setRunFromError(null)
+    setRunFromToolAsk(null)
   }, [epoch])
 
   // WO-051: Back lives in the transport STEP row, but its re-arm uses this
@@ -867,6 +890,8 @@ export function ProgramPanel() {
     save = true,
     context: ProgramContextV1 | null = null,
     runThroughOffsetChanges = false,
+    // WO-2833: the editor's Apply of the loaded program is not a new Load - a refused edit keeps it.
+    editsLoadedProgram = false,
   ): { door: 'text' | 'program'; ok: boolean; reason: string | null } => {
     // WO-1335: THE FILE DOOR IS CHOSEN BY THE CONTROLLER, in the same place and
     // for the same reason `loadFromSetup` chooses the setup door.
@@ -886,7 +911,7 @@ export function ProgramPanel() {
     // WO-1977: the session picks the door - including the interpreter for a
     // file this controller's own text reader refuses but its program route
     // can run (a Fusion file on "Simulate LienCNC").
-    const outcome = loadGcodeFile(name, text, context, { runThroughOffsetChanges })
+    const outcome = loadGcodeFile(name, text, context, { runThroughOffsetChanges, editsLoadedProgram })
     if (outcome.door === 'program') {
       setMeta(null)
       setRunFromPlan(null)
@@ -928,27 +953,51 @@ export function ProgramPanel() {
   // WO-414 batch 3 (R14 Approve): the "armed from the beginning" advice is a
   // console line the moment it arises, not a box under the bar that never
   // cleared on its own. R13: a refusal is ALSO written to the console.
-  const planRunFrom = async (line: number | '' = runFromLine) => {
+  //
+  // WO-2810 (Operator 10-14): "we can inform and pause for confirmations they
+  // understand, but we don't want hard blockers." When the line's tool is not
+  // the last known one, ONE pop-up comes first and nothing is armed until the
+  // operator answers it: run the program's tool change first, or start now.
+  const planRunFrom = async (line: number | '' = runFromLine, toolChoice?: RunFromLineToolChoice) => {
+    const hadArm = runFromPlan !== null || useMachineControl.getState().armedFromLine !== null
     setRunFromError(null)
     setRunFromPlan(null)
+    setRunFromToolAsk(null)
     if (line === '' || !runFromText) return
     setRunFromLine(line)
-    const armed = await armProgramFromLine(line)
+    if (toolChoice === undefined) {
+      const check = runFromLineToolCheck(line)
+      if (check !== null) {
+        setRunFromToolAsk({ ...check, line, hadArm })
+        return
+      }
+    }
+    const armed = await armProgramFromLine(line, toolChoice)
     if (!armed.ok) {
       setRunFromError(armed.reason)
-      useMachineControl.getState().pushConsole('tx', `Run from line ${line} refused: ${armed.reason}`, 'error')
+      useMachineControl.getState().pushConsole('tx', controlText('ProgramPanel.text010', { value1: String(line), value2: String(armed.reason) }), 'error')
       return
     }
     if (armed.from === 'top') {
       useMachineControl.getState().pushConsole(
         'tx',
-        `Line ${line} is the start of the program, so it is armed from the beginning - ` +
-          'the whole program will run. Nothing moves until CYCLE START.',
+        controlText('ProgramPanel.text011', { value1: String(line) }) +
+          controlText('ProgramPanel.text012'),
         'info',
       )
       return
     }
+    // The text door's tool change runs now; its card arms the line after it.
+    if (armed.from === 'toolChange') return
     setRunFromPlan(armed.plan)
+  }
+
+  // WO-2810: Cancel on the tool pop-up sends nothing. A line armed before it
+  // was asked is put back to the whole program, as the plan's own Cancel does.
+  const cancelRunFromToolAsk = () => {
+    const ask = runFromToolAsk
+    setRunFromToolAsk(null)
+    if (ask?.hadArm) restageLoadedProgram()
   }
 
   const cancelRunFrom = () => {
@@ -967,7 +1016,7 @@ export function ProgramPanel() {
   const decodeProgramContext = (text: string): ProgramContextV1 | null => {
     const imported = importProgramContextFromGcode(text)
     if (imported.warning) {
-      console.warn(`[program-context] ${imported.warning}`)
+      console.warn(controlText('ProgramPanel.text013', { value1: String(imported.warning) }))
       useMachineControl.getState().pushConsole('rx', imported.warning, 'warn')
     }
     return imported.context
@@ -978,7 +1027,7 @@ export function ProgramPanel() {
     if (!entry) return
     void readProgram(id).then((text) => {
       if (text !== null) applyProgram(entry.name, text, false, decodeProgramContext(text))
-      else setLoadError('That saved program could not be read - it may have been evicted.')
+      else setLoadError(controlText('ProgramPanel.text014'))
     })
   }
 
@@ -1013,7 +1062,7 @@ export function ProgramPanel() {
     const st = useCamStore.getState()
     const setup = st.project.setups.find((s) => s.id === setupId)
     if (!setup) {
-      setLoadError('No setup to post.')
+      setLoadError(controlText('ProgramPanel.text015'))
       return
     }
     // WO-1267: THE DOOR IS CHOSEN BY THE CONTROLLER, ONCE, HERE.
@@ -1070,13 +1119,13 @@ export function ProgramPanel() {
         .map((d) => d.message)
         .join(' ')
       setLoadError(
-        `Setup "${setup.name}" is not ready to post: ${firstErrors || 'post refused'}. ` +
-          'Fix it in the Post Process modal, then reload here.',
+        controlText('ProgramPanel.text017', { value1: String(setup.name), value2: String(firstErrors || controlText('ProgramPanel.text016')) }) +
+          controlText('ProgramPanel.text018'),
       )
       return
     }
     if (!result.combined.operationSpans) {
-      setLoadError('The post did not return verified operation source spans. The program was not loaded.')
+      setLoadError(controlText('ProgramPanel.text019'))
       return
     }
     const context = buildProgramContext(
@@ -1089,7 +1138,7 @@ export function ProgramPanel() {
       result.combined.gcode,
       result.combined.operationSpans,
     )
-    applyProgram(`${setup.name} (posted)`, result.combined.gcode, true, context)
+    applyProgram(controlText('ProgramPanel.text020', { value1: String(setup.name) }), result.combined.gcode, true, context)
   }
 
   // WO-1323: EVERY SETUP, IN PROJECT ORDER, AS ONE PROGRAM.
@@ -1256,7 +1305,7 @@ export function ProgramPanel() {
       modelRefsVerifiedSinceLoad: st.modelRefsVerifiedSinceLoad,
     })
     if (!posted.ok || !posted.combined) {
-      const firstError = posted.diagnostics.find((d) => d.level === 'error')?.message ?? 'post refused'
+      const firstError = posted.diagnostics.find((d) => d.level === 'error')?.message ?? controlText('ProgramPanel.text016')
       return { refused: firstError }
     }
     // The setup information Load setup binds to the same post (item 9).
@@ -1335,7 +1384,7 @@ export function ProgramPanel() {
     // a setup load through the toolpath queue keeps it on the snapshot instead.
     const runThrough = loadedProgramRunsThroughOffsetChanges()
       || (!!snap && !!stagedProgram && snap.setupIds === stagedSetupIds(stagedProgram) && snap.runThrough)
-    const outcome = applyProgramRef.current(editing.name, editing.text, true, context, runThrough)
+    const outcome = applyProgramRef.current(editing.name, editing.text, true, context, runThrough, true)
     if (outcome.door === 'program' && !outcome.ok) {
       // Refused whole: the program loaded before is still the loaded one.
       useMachineControl.getState().pushConsole('tx', ed('control.refused', { reason: outcome.reason ?? '' }), 'error')
@@ -1484,15 +1533,15 @@ export function ProgramPanel() {
   const guidedBlocked = !holdingToolChange
     ? null
     : holdingToolChange.tool === null
-      ? 'The program does not say which tool - swap manually and press CYCLE START.'
+      ? controlText('ProgramPanel.text021')
       : !tcPark
-        ? 'Mark a position macro "used for tool change" on the Macros panel (park it over the probe pad).'
+        ? controlText('ProgramPanel.text022')
         : safeZ === null
-          ? 'Set this machine\'s Safe Z on the Machine tab of its definition first.'
+          ? controlText('ProgramPanel.text023')
           : !homed
-            ? 'The machine is not homed - guided changes need machine coordinates.'
+            ? controlText('ProgramPanel.text024')
             : !referenceMeasured
-              ? 'Measure a reference tool on the pad first (Tools / Probe panel).'
+              ? controlText('ProgramPanel.text025')
               : null
 
   const onGuided = () => {
@@ -1534,15 +1583,15 @@ export function ProgramPanel() {
       automaticM6ResumesTextProgram.current = false
       useMachineControl.getState().pushConsole(
         'rx',
-        `M6 on line ${holdingToolChange.sourceLine} cannot run the fixed-pad tool change: ${guidedBlocked}`,
+        controlText('ProgramPanel.text026', { value1: String(holdingToolChange.sourceLine), value2: String(guidedBlocked) }),
         'error',
       )
       return
     }
     useMachineControl.getState().pushConsole(
       'rx',
-      `M6 on line ${holdingToolChange.sourceLine}: moving to "${tcPark.label}". Fit T${holdingToolChange.tool}; `
-        + 'Continue will probe it, apply its measured length and resume the program.',
+      controlText('ProgramPanel.text027', { value1: String(holdingToolChange.sourceLine), value2: String(tcPark.label), value3: String(holdingToolChange.tool) })
+        + controlText('ProgramPanel.text028'),
       'info',
     )
     automaticM6ResumesTextProgram.current = true
@@ -1553,7 +1602,7 @@ export function ProgramPanel() {
   // records the tool and applies its length the same way.
   const applyMeasuredOffset = (tool: number | null | undefined) => (probedMachineZ: number) => {
     if (tool === null || tool === undefined) {
-      return { ok: false, reason: 'No tool number to record the measurement against.' }
+      return { ok: false, reason: controlText('ProgramPanel.text029') }
     }
     const tools = useMachineToolTable.getState()
     // WO-2042: the REFERENCE tool re-measured mid-program. Every other tool's
@@ -1577,7 +1626,7 @@ export function ProgramPanel() {
     const line = toolOffsetLine(tools.tableFor(machineId), tool)
     const applied = line.ok && applyToolLengthOffset(line.deltaMm, refShiftMm)
     if (!line.ok) return { ok: false, reason: line.reason }
-    if (!applied) return { ok: false, reason: 'The controller refused the length-offset command.' }
+    if (!applied) return { ok: false, reason: controlText('ProgramPanel.text030') }
     const mm = (v: number) => fmtMachineLength(v, units)
     const signed = (v: number) => {
       const shown = mm(v).replace(/^-(?=[0.]+$)/, '')
@@ -1590,23 +1639,23 @@ export function ProgramPanel() {
     const lengthTakenOut = write === null ? 0 : line.deltaMm - write.toolLengthPartMm
     const refSentence = previousRefZ === null
       ? ''
-      : ` T${tool} is the reference tool: its reading changed ${signed(refShiftMm)} from the last measure `
-        + `(machine Z ${mm(previousRefZ)} ${unitLabel(units)}), the work zero moves with it and every other tool's offset is unchanged.`
+      : controlText('ProgramPanel.referenceChanged', { value1: String(tool), value2: signed(refShiftMm) })
+        + controlText('ProgramPanel.referencePrevious', { value1: mm(previousRefZ), value2: unitLabel(units) })
         + (write === null
-          ? ' The work offsets are unchanged.'
-          : ` The ${write.wcs} Z offset changed ${signed(write.toZ - write.fromZ)} `
-            + `(${mm(write.fromZ)} -> ${mm(write.toZ)} ${unitLabel(units)})`
+          ? controlText('ProgramPanel.referenceOffsetsUnchanged')
+          : controlText('ProgramPanel.referenceOffsetChanged', { value1: write.wcs, value2: signed(write.toZ - write.fromZ) })
+            + controlText('ProgramPanel.referenceOffsetRange', { value1: mm(write.fromZ), value2: mm(write.toZ), value3: unitLabel(units) })
             + (Number(mm(lengthTakenOut)) === 0
               ? '.'
-              : `, which includes taking out the ${mm(lengthTakenOut)} ${unitLabel(units)} length of the tool before it - `
-                + 'this controller holds tool length in the work offset.'))
+              : controlText('ProgramPanel.referencePreviousLength', { value1: mm(lengthTakenOut), value2: unitLabel(units) })
+                + controlText('ProgramPanel.referenceControllerLength')))
     // WO-2025: the one line that says what the measure found and what was applied;
     // the session prints it once the controller has confirmed the offset.
     return {
       ok: true,
       commit: previousRefZ === null ? undefined : record,
-      report: `T${tool} measured: contact at machine Z ${mm(probedMachineZ)} ${unitLabel(units)}. `
-        + `Tool length offset ${mm(line.deltaMm)} ${unitLabel(units)} applied.`
+      report: controlText('ProgramPanel.text031', { value1: String(tool), value2: String(mm(probedMachineZ)), value3: String(unitLabel(units)) })
+        + controlText('ProgramPanel.text032', { value1: String(mm(line.deltaMm)), value2: String(unitLabel(units)) })
         + refSentence,
     }
   }
@@ -1633,7 +1682,7 @@ export function ProgramPanel() {
       // behavior. Only an M6-driven text streamer needs this final release.
       if (!resumeTextProgram || programText === null) return
       if (getMachineController().startJob()) return
-      const message = 'The tool was measured and its offset applied, but the controller refused to resume the program.'
+      const message = controlText('ProgramPanel.text035')
       useMachineControl.getState().setToolChange({
         step: 'failed',
         mode: 'toolChange',
@@ -1762,24 +1811,24 @@ export function ProgramPanel() {
     ? stagedProgram.setups.map((setup) => setup.wcs).join(' -> ')
     : ''
   const fileSectionLabel = openedFileListing
-    ? `${job.name} - ${stagedProgram.setups.length} ${stagedProgram.setups.length === 1 ? 'section' : 'sections'} (${fileSectionFrames})`
+    ? controlText(stagedProgram.setups.length === 1 ? 'ProgramPanel.fileSectionSingular' : 'ProgramPanel.fileSectionPlural', { value1: String(job.name), value2: String(stagedProgram.setups.length), value3: fileSectionFrames })
     : null
   const mergeSetupChip = postedFromSetup && contextComparison === 'current' && !!programContext
   const mergedIsMulti = mergeSetupChip && isMultiSetupProgramContext(programContext)
   const mergedChipLabel = mergeSetupChip
     ? mergedIsMulti
-      ? `${programContextSetupChipLabel(programContext)} - posted`
+      ? controlText('ProgramPanel.text036', { value1: String(programContextSetupChipLabel(programContext)) })
       : (() => {
           const only = programContextSetups(programContext)[0]
-          return `${only.setup.name} (${only.wcs.label}) - posted`
+          return controlText('ProgramPanel.text037', { value1: String(only.setup.name), value2: String(only.wcs.label) })
         })()
     : null
   const bindingSentence = mergedIsMulti
-    ? `This program is bound to the ${isMultiSetupProgramContext(programContext) ? programContext.setups.length : 0} setups it was posted from, in order.`
-    : 'This program is bound to the setup it was posted from.'
+    ? controlText('ProgramPanel.text038', { value1: String(isMultiSetupProgramContext(programContext) ? programContext.setups.length : 0) })
+    : controlText('ProgramPanel.text039')
   const mergedChipTooltip = mergeSetupChip
     ? `${mergedChipLabel}${
-        meta ? ` - ${meta.load.lines.length} lines; ${meta.load.skipped} will not be sent (comments, blanks, program markers)` : ''
+        meta ? controlText('ProgramPanel.text040', { value1: String(meta.load.lines.length), value2: String(meta.load.skipped) }) : ''
       }. ${bindingSentence}`
     : null
   // The combined-setup run exists from successful load through its final
@@ -1796,12 +1845,12 @@ export function ProgramPanel() {
   const sectionChipLabel = paused !== null && paused.cursor !== null
     ? stagedSetupChipLabel(stagedProgram, paused.cursor, paused.state)
     : job.phase === 'complete' && stagedProgram
-      ? stagedSetupChipLabel(stagedProgram, stagedProgram.program.steps.at(-1)?.id ?? null, 'finished')
+      ? stagedSetupChipLabel(stagedProgram, stagedProgram.program.steps.at(-1)?.id ?? null, controlText('ProgramPanel.sectionFinished'))
     : combinedSetupProgramActive() && !plainFileNamesItself
       // WO-2580: the section of the move the controller is at - the highlight's.
       ? stagedSetupChipLabel(stagedProgram, chipMoveId,
-          job.phase === 'paused' || machineState === 'hold' ? 'held'
-            : job.phase === 'streaming' || machineState === 'run' ? 'running' : 'ready')
+          job.phase === 'paused' || machineState === 'hold' ? controlText('ProgramPanel.sectionHeld')
+            : job.phase === 'streaming' || machineState === 'run' ? controlText('ProgramPanel.sectionRunning') : controlText('ProgramPanel.sectionReady'))
       : null
   // WO-2680 (review): while it runs, holds, pauses or finishes, the file's
   // name still leads; the section and its state follow it
@@ -1830,9 +1879,9 @@ export function ProgramPanel() {
               aria-expanded={loadMenuOpen}
               disabled={streaming}
               onClick={() => setLoadMenuOpen((v) => !v)}
-              data-tooltip="Load a program: post a setup, open a file, or pick a recent program"
+              data-tooltip={controlText('ProgramPanel.text041')}
             >
-              <FolderGit2 size={13} /> Load <ChevronDown size={12} />
+              <FolderGit2 size={13} />{controlText('ProgramPanel.text042')}<ChevronDown size={12} />
             </button>
             <input
               ref={fileInputRef}
@@ -1849,9 +1898,9 @@ export function ProgramPanel() {
             {loadMenuOpen && (
               <div className="control-load-menu" role="menu" data-testid="control-load-menu-panel">
                 <div className="control-load-menu-group" data-testid="control-load-menu-setups">
-                  <span className="control-load-menu-label">Load setup</span>
+                  <span className="control-load-menu-label">{controlText('ProgramPanel.text043')}</span>
                   {setups.length === 0 ? (
-                    <span className="control-load-menu-empty">No setups in project</span>
+                    <span className="control-load-menu-empty">{controlText('ProgramPanel.text044')}</span>
                   ) : (
                     setups.map((s) => (
                       <button
@@ -1859,7 +1908,7 @@ export function ProgramPanel() {
                         role="menuitem"
                         className="control-load-menu-item"
                         data-testid={`control-load-setup-item-${s.id}`}
-                        data-tooltip={`Post "${s.name}" and load it for sending`}
+                        data-tooltip={controlText('ProgramPanel.text045', { value1: String(s.name) })}
                         onClick={() => {
                           setLoadMenuOpen(false)
                           void loadFromSetup(s.id)
@@ -1879,27 +1928,25 @@ export function ProgramPanel() {
                       // action loads a program that does NOT hold, so it must not
                       // promise a stop the operator would then wait for.
                       data-tooltip={
-                        `Load all ${setups.length} setups as one program - each runs in its own work `
+                        controlText('ProgramPanel.text047', { value1: String(setups.length) })
                         + (continueThroughSetups
-                          ? 'offset, and the program runs straight through from one to the next '
-                            + 'without stopping'
-                          : 'offset, and the program holds between them so the work can be re-set')
+                          ? controlText('ProgramPanel.text048')
+                            + controlText('ProgramPanel.text049')
+                          : controlText('ProgramPanel.text050'))
                       }
                       onClick={() => {
                         setLoadMenuOpen(false)
                         void loadFromAllSetups()
                       }}
-                    >
-                      All {setups.length} setups
-                    </button>
+                    >{catalogChildren(controlText('ProgramPanel.text046', { value1: '\u0000value1\u0000' }), { value1: setups.length })}</button>
                   )}
                   {canLoadAllSetups && (
                     <label
                       className="control-load-menu-item"
                       data-tooltip={
-                        'Run straight from one setup into the next without stopping. Off holds the '
-                        + 'program at every boundary so the work can be re-set. A program that '
-                        + 'changes tool between setups never runs through, either way.'
+                        controlText('ProgramPanel.text051')
+                        + controlText('ProgramPanel.text052')
+                        + controlText('ProgramPanel.text053')
                       }
                     >
                       <input
@@ -1907,9 +1954,7 @@ export function ProgramPanel() {
                         data-testid="control-load-all-setups-continue"
                         checked={continueThroughSetups}
                         onChange={(e) => setContinueThroughSetups(e.target.checked)}
-                      />
-                      Continue through the setups
-                    </label>
+                      />{controlText('ProgramPanel.text054')}</label>
                   )}
                 </div>
                 <div className="control-load-menu-group control-load-menu-divider">
@@ -1917,22 +1962,21 @@ export function ProgramPanel() {
                     role="menuitem"
                     className="control-load-menu-item"
                     data-testid="control-open-file"
-                    data-tooltip="Load a g-code file from disk"
+                    data-tooltip={controlText('ProgramPanel.text055')}
                     onClick={() => {
                       setLoadMenuOpen(false)
                       fileInputRef.current?.click()
                     }}
                   >
-                    <FileUp size={13} /> Open file...
-                  </button>
+                    <FileUp size={13} />{controlText('ProgramPanel.text056')}</button>
                 </div>
                 <div
                   className="control-load-menu-group control-load-menu-divider"
                   data-testid="control-load-menu-recent"
                 >
-                  <span className="control-load-menu-label">Recent ({recent.length})</span>
+                  <span className="control-load-menu-label">{catalogChildren(controlText('ProgramPanel.text057', { value1: '\u0000value1\u0000' }), { value1: recent.length })}</span>
                   {recent.length === 0 ? (
-                    <span className="control-load-menu-empty">none yet</span>
+                    <span className="control-load-menu-empty">{controlText('ProgramPanel.text058')}</span>
                   ) : (
                     // Cap the visible list to ~7 - a scrolling wall of every
                     // program ever loaded is not a "pick something recent" menu.
@@ -1963,7 +2007,7 @@ export function ProgramPanel() {
               data-skipped={meta ? meta.load.skipped : undefined}
               data-tooltip={
                 meta
-                  ? `${job.name} - ${meta.load.lines.length} lines; ${meta.load.skipped} will not be sent (comments, blanks, program markers)`
+                  ? controlText('ProgramPanel.text059', { value1: String(job.name), value2: String(meta.load.lines.length), value3: String(meta.load.skipped) })
                   : job.name
               }
             >
@@ -1978,22 +2022,22 @@ export function ProgramPanel() {
               data-skipped={mergeSetupChip && meta ? meta.load.skipped : undefined}
               data-tooltip={
                 stagedChipLabel
-                  ? `${stagedChipLabel}. This is the setup boundary accepted by the controller.`
+                  ? controlText('ProgramPanel.text060', { value1: String(stagedChipLabel) })
                 : mergeSetupChip
                   ? mergedChipTooltip
                 : openedFileListing
-                  ? `This opened file is staged as ${stagedProgram.setups.length} controller ${stagedProgram.setups.length === 1 ? 'section' : 'sections'}, in order: ${fileSectionFrames}.`
+                  ? controlText(stagedProgram.setups.length === 1 ? 'ProgramPanel.stagedSectionSingular' : 'ProgramPanel.stagedSectionPlural', { value1: String(stagedProgram.setups.length), value3: String(fileSectionFrames) })
                 : contextComparison === 'no-context'
-                  ? 'This program was loaded from a file and carries no setup information. The app cannot tell which project or setup it came from.'
+                  ? controlText('ProgramPanel.text062')
                   : contextComparison === 'comparison-failed'
-                    ? 'The app could not compare this program with the project (an internal error, logged to the console). Do not trust it as current.'
+                    ? controlText('ProgramPanel.text063')
                   : contextComparison === 'current'
                     ? isMultiSetupProgramContext(programContext)
-                      ? `This program is bound to the ${programContext.setups.length} setups it was posted from, in order.`
-                      : 'This program is bound to the setup it was posted from.'
+                      ? controlText('ProgramPanel.text064', { value1: String(programContext.setups.length) })
+                      : controlText('ProgramPanel.text065')
                     : contextComparison === 'project-changed'
-                      ? 'The project changed after this program was posted. Reload from the setup to refresh the context.'
-                      : 'The program text no longer matches its posted context.'
+                      ? controlText('ProgramPanel.text066')
+                      : controlText('ProgramPanel.text067')
               }
             >
               {stagedChipLabel
@@ -2002,15 +2046,15 @@ export function ProgramPanel() {
               : openedFileListing
                 ? fileSectionLabel
               : contextComparison === 'no-context' || !programContext
-                ? 'No setup information'
+                ? controlText('ProgramPanel.text068')
                 : contextComparison === 'comparison-failed'
-                  ? 'Cannot verify against project'
+                  ? controlText('ProgramPanel.text069')
                 : contextComparison === 'current'
                   // WO-412: "Setup: A -> B (G54, G55)" for a multi-setup program.
                   ? programContextSetupChipLabel(programContext)
                   : contextComparison === 'project-changed'
-                    ? 'Setup changed since post'
-                    : 'Program changed since post')}
+                    ? controlText('ProgramPanel.text070')
+                    : controlText('ProgramPanel.text071'))}
             </span>
           )}
           {surfaceMesh?.active && (
@@ -2024,17 +2068,16 @@ export function ProgramPanel() {
               type="button"
               className="control-mesh-chip"
               data-testid="control-mesh-chip"
-              data-tooltip={`Surface mesh compensation active: ${surfaceMesh.pointsX} x ${surfaceMesh.pointsY} measured points. Click to view the flatness.`}
+              data-tooltip={controlText('ProgramPanel.text072', { value1: String(surfaceMesh.pointsX), value2: String(surfaceMesh.pointsY) })}
               onClick={() => useCamStore.getState().openModal('mesh-viewer')}
             >
-              <span className="control-mesh-chip-dot" aria-hidden="true" />
-              Mesh {surfaceMesh.pointsX}x{surfaceMesh.pointsY}
+              <span className="control-mesh-chip-dot" aria-hidden="true" />{controlText('ProgramPanel.text073')}{surfaceMesh.pointsX}{controlText('ProgramPanel.text074')}{surfaceMesh.pointsY}
             </button>
           )}
           <span className="control-program-actions">
             {!!runFromText && runFromLines.length > 0 && !streaming && (
               <span className="control-runfrom-inline">
-                <span className="control-field-label">From line</span>
+                <span className="control-field-label">{controlText('ProgramPanel.text075')}</span>
                 <input
                   className="mform-input mform-input-sm control-runfrom-input"
                   data-testid="control-runfrom-input"
@@ -2046,7 +2089,7 @@ export function ProgramPanel() {
                   value={runFromLine}
                   min={1}
                   max={runFromLines.length}
-                  placeholder="#"
+                  placeholder={controlText('ProgramPanel.text076')}
                   onFocus={(event) => {
                     runFromBeforeEdit.current = runFromLine
                     runFromSelectAll.onFocus(event)
@@ -2069,10 +2112,8 @@ export function ProgramPanel() {
                   data-testid="control-runfrom-plan"
                   disabled={runFromLine === ''}
                   onClick={() => void planRunFrom()}
-                  data-tooltip="Plan a start at this line (1 arms the whole program from the beginning)"
-                >
-                  Plan
-                </button>
+                  data-tooltip={controlText('ProgramPanel.text077')}
+                >{controlText('ProgramPanel.text078')}</button>
               </span>
             )}
           </span>
@@ -2144,24 +2185,20 @@ export function ProgramPanel() {
                 className="control-overlay-card control-overlay-top control-toolchange-banner"
                 data-testid="control-toolchange-banner"
               >
-                <span>
-                  Tool change - insert{' '}
-                  {holdingToolChange.tool !== null ? `T${holdingToolChange.tool}` : 'the next tool'}
+                <span>{controlText('ProgramPanel.text079')}{' '}
+                  {holdingToolChange.tool !== null ? `T${holdingToolChange.tool}` : controlText('ProgramPanel.text080')}
                   {/* WO-2016: T0 is a controller's "no tool reported", not a tool in the spindle. */}
-                  {activeTool !== null && activeTool > 0 ? ` (current: T${activeTool})` : ''}, then press CYCLE START.
-                </span>
+                  {activeTool !== null && activeTool > 0 ? controlText('ProgramPanel.text081', { value1: String(activeTool) }) : ''}{controlText('ProgramPanel.text082')}</span>
                 <button
                   className="modal-btn modal-btn-primary control-tc-guided-btn"
                   data-testid="control-guided-toolchange"
                   disabled={!!guidedBlocked}
                   data-tooltip={
                     guidedBlocked ??
-                    'Stop cleanly, park over the probe pad, swap, auto-probe the new length, and re-arm the program'
+                    controlText('ProgramPanel.text083')
                   }
                   onClick={onGuided}
-                >
-                  Guided change
-                </button>
+                >{controlText('ProgramPanel.text084')}</button>
                 {guidedBlocked && <span className="control-tc-blocked">{guidedBlocked}</span>}
               </div>
             )}
@@ -2175,10 +2212,10 @@ export function ProgramPanel() {
               >
                 <div className="control-tc-header">
                   <span className="control-tc-title">
-                    {toolChange.mode === 'clampPause' ? 'Park + clamp' : 'Guided tool change'}
+                    {toolChange.mode === 'clampPause' ? controlText('ProgramPanel.text085') : controlText('ProgramPanel.text086')}
                     {toolChange.tool !== null ? ` - T${toolChange.tool}` : ''} (
                     {toolChange.mode === 'clampPause' && toolChange.step === 'awaiting-swap'
-                      ? 'fix the clamps'
+                      ? controlText('ProgramPanel.text087')
                       : TC_STEP_LABEL[toolChange.step]}
                     )
                   </span>
@@ -2199,9 +2236,7 @@ export function ProgramPanel() {
                       className="modal-btn modal-btn-primary"
                       data-testid="control-tc-retry"
                       onClick={onGuidedRetry}
-                    >
-                      Retry measure{toolChange.tool !== null ? ` T${toolChange.tool}` : ''}
-                    </button>
+                    >{catalogChildren(controlText('ProgramPanel.text088', { value1: '\u0000value1\u0000' }), { value1: toolChange.tool !== null ? ` T${toolChange.tool}` : '' })}</button>
                   )}
                   {toolChange.mode === 'toolChange' && toolChange.step === 'ready'
                     && guidedToolMeasureState()?.measured === true && (
@@ -2209,9 +2244,7 @@ export function ProgramPanel() {
                       className="modal-btn modal-btn-primary"
                       data-testid="control-tc-continue"
                       onClick={onGuidedContinue}
-                    >
-                      Continue from the M6
-                    </button>
+                    >{controlText('ProgramPanel.text089')}</button>
                   )}
                   {toolChange.step === 'awaiting-swap' && guidedToolMeasureState() === null && (
                     <button
@@ -2223,8 +2256,8 @@ export function ProgramPanel() {
                       }}
                     >
                       {toolChange.mode === 'clampPause'
-                        ? 'Continue - re-arm program'
-                        : `Continue - probe${toolChange.tool !== null ? ` T${toolChange.tool}` : ''}`}
+                        ? controlText('ProgramPanel.text090')
+                        : controlText('ProgramPanel.text091', { value1: String(toolChange.tool !== null ? ` T${toolChange.tool}` : '') })}
                     </button>
                   )}
                   {(toolChange.step === 'awaiting-swap' ||
@@ -2238,7 +2271,7 @@ export function ProgramPanel() {
                         cancelGuidedToolChangeByOperator()
                       }}
                     >
-                      {programToolChangeCanStop() ? 'Stop program' : toolChange.step === 'failed' ? 'Close' : 'Cancel'}
+                      {programToolChangeCanStop() ? controlText('ProgramPanel.stopProgram') : toolChange.step === 'failed' ? controlText('ProgramPanel.text092') : controlText('ProgramPanel.text093')}
                     </button>
                   )}
                 </span>
@@ -2252,25 +2285,15 @@ export function ProgramPanel() {
                 }`}
                 data-testid="control-fittrace-card"
               >
-                <span className="control-tc-title">
-                  Material fit trace (
-                  {fitTrace.step === 'confirm'
-                    ? 'ready'
+                <span className="control-tc-title">{catalogChildren(controlText('ProgramPanel.text094', { value1: '\u0000value1\u0000' }), { value1: fitTrace.step === 'confirm'
+                    ? controlText('ProgramPanel.fitReady')
                     : fitTrace.step === 'tracing'
-                      ? 'tracing'
+                      ? controlText('ProgramPanel.fitTracing')
                       : fitTrace.step === 'done'
-                        ? 'finished'
-                        : 'stopped'}
-                  )
-                </span>
+                        ? controlText('ProgramPanel.fitFinished')
+                        : controlText('ProgramPanel.fitStopped') })}</span>
                 <span data-testid="control-fittrace-message">{fitTrace.message}</span>
-                <span className="control-fittrace-bounds" data-testid="control-fittrace-bounds">
-                  Outline: X {fmtMachineLength(fitTrace.bounds.minX, units)} to{' '}
-                  {fmtMachineLength(fitTrace.bounds.maxX, units)}, Y {fmtMachineLength(fitTrace.bounds.minY, units)} to{' '}
-                  {fmtMachineLength(fitTrace.bounds.maxY, units)} {unitLabel(units)} (
-                  {fmtMachineLength(fitTrace.bounds.maxX - fitTrace.bounds.minX, units)} x{' '}
-                  {fmtMachineLength(fitTrace.bounds.maxY - fitTrace.bounds.minY, units)})
-                </span>
+                <span className="control-fittrace-bounds" data-testid="control-fittrace-bounds">{catalogChildren(controlText('ProgramPanel.text095', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000', value5: '\u0000value5\u0000', value6: '\u0000value6\u0000', value7: '\u0000value7\u0000', value8: '\u0000value8\u0000', value9: '\u0000value9\u0000', value10: '\u0000value10\u0000' }), { value1: fmtMachineLength(fitTrace.bounds.minX, units), value2: ' ', value3: fmtMachineLength(fitTrace.bounds.maxX, units), value4: fmtMachineLength(fitTrace.bounds.minY, units), value5: ' ', value6: fmtMachineLength(fitTrace.bounds.maxY, units), value7: unitLabel(units), value8: fmtMachineLength(fitTrace.bounds.maxX - fitTrace.bounds.minX, units), value9: ' ', value10: fmtMachineLength(fitTrace.bounds.maxY - fitTrace.bounds.minY, units) })}</span>
                 {fitTrace.step === 'confirm' && (
                   <div className="control-runfrom-prelude">
                     {fitTrace.lines.map((cmd, i) => (
@@ -2283,7 +2306,7 @@ export function ProgramPanel() {
                 <span className="control-tc-actions">
                   {fitTrace.step === 'confirm' && (
                     <span className="control-next-action-inline">
-                      Press CYCLE START to trace the outline. Cancel to go back.
+                      {controlText('ProgramPanel.text096')}
                     </span>
                   )}
                   {fitTrace.step !== 'tracing' && (
@@ -2292,7 +2315,7 @@ export function ProgramPanel() {
                       data-testid="control-fittrace-cancel"
                       onClick={cancelMaterialFitTrace}
                     >
-                      {fitTrace.step === 'confirm' ? 'Cancel' : 'Close'}
+                      {fitTrace.step === 'confirm' ? controlText('ProgramPanel.text097') : controlText('ProgramPanel.text098')}
                     </button>
                   )}
                 </span>
@@ -2309,12 +2332,55 @@ export function ProgramPanel() {
                     with no firmware alarm numbers has no code. Say whichever
                     is actually known rather than printing "line null". */}
                 {job.error.line !== null
-                  ? `Stopped at line ${job.error.line}`
+                  ? controlText('ProgramPanel.text099', { value1: String(job.error.line) })
                   : job.error.moveId !== null
-                    ? `Stopped at move ${job.error.moveId}`
-                    : 'Stopped'}
-                {job.error.code !== null ? `: error ${job.error.code} - ` : ': '}
+                    ? controlText('ProgramPanel.text100', { value1: String(job.error.moveId) })
+                    : controlText('ProgramPanel.text101')}
+                {job.error.code !== null ? controlText('ProgramPanel.text102', { value1: String(job.error.code) }) : ': '}
                 {job.error.message}
+              </div>
+            )}
+
+            {runFromToolAsk && !runFromPlan && !streaming && (
+              <div
+                className="control-overlay-card control-overlay-bottom control-runfrom-plan"
+                data-testid="control-runfrom-toolask"
+                role="alertdialog"
+                aria-labelledby="control-runfrom-toolask-title"
+              >
+                <div className="control-runfrom-title" id="control-runfrom-toolask-title" data-testid="control-runfrom-toolask-title">
+                  {controlText('ProgramPanel.runFromToolTitle', { line: String(runFromToolAsk.startLine), tool: String(runFromToolAsk.expects) })}
+                </div>
+                <div className="control-homed-hint" data-testid="control-runfrom-toolask-lastknown">
+                  {runFromToolAsk.lastKnown === null
+                    ? controlText('ProgramPanel.runFromToolUnknown')
+                    : controlText('ProgramPanel.runFromToolLastKnown', { tool: String(runFromToolAsk.lastKnown) })}
+                </div>
+                <div className="control-homed-hint" data-testid="control-runfrom-toolask-owner">
+                  {controlText('ProgramPanel.runFromToolOwner', { line: String(runFromToolAsk.startLine) })}
+                </div>
+                {/* Both choices weigh the same: the operator owns the start. */}
+                <div className="control-runfrom-actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <button
+                    className="modal-btn modal-btn-primary"
+                    data-testid="control-runfrom-toolask-change"
+                    style={{ whiteSpace: 'normal', height: 'auto' }}
+                    onClick={() => void planRunFrom(runFromToolAsk.line, 'tool-change-first')}
+                  >
+                    {controlText('ProgramPanel.runFromToolChangeFirst', { tool: String(runFromToolAsk.expects), line: String(runFromToolAsk.startLine) })}
+                  </button>
+                  <button
+                    className="modal-btn modal-btn-primary"
+                    data-testid="control-runfrom-toolask-now"
+                    style={{ whiteSpace: 'normal', height: 'auto' }}
+                    onClick={() => void planRunFrom(runFromToolAsk.line, 'start-now')}
+                  >
+                    {controlText('ProgramPanel.runFromToolStartNow', { line: String(runFromToolAsk.startLine) })}
+                  </button>
+                  <button className="modal-btn modal-btn-ghost" data-testid="control-runfrom-toolask-cancel" onClick={cancelRunFromToolAsk}>
+                    {controlText('ProgramPanel.text110')}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2323,35 +2389,23 @@ export function ProgramPanel() {
                 className="control-overlay-card control-overlay-bottom control-runfrom-plan"
                 data-testid="control-runfrom-planbox"
               >
-                <div className="control-runfrom-title">
-                  Run from line {runFromPlan.startLine} - the machine will first:
-                </div>
+                <div className="control-runfrom-title">{catalogChildren(controlText('ProgramPanel.text103', { value1: '\u0000value1\u0000' }), { value1: runFromPlan.startLine })}</div>
                 {/* The operator must see WHAT resumes and WHERE before any motion. */}
                 <div className="control-runfrom-cmd" data-testid="control-runfrom-target">
                   {runFromPlan.startLine}: {runFromLines[runFromPlan.startLine - 1] ?? ''}
                 </div>
                 {runFromOperation && (
-                  <div className="control-homed-hint" data-testid="control-runfrom-operation">
-                    Starts in {runFromOperation}.
-                  </div>
+                  <div className="control-homed-hint" data-testid="control-runfrom-operation">{catalogChildren(controlText('ProgramPanel.text104', { value1: '\u0000value1\u0000' }), { value1: runFromOperation })}</div>
                 )}
                 {/* WO-1989: the tool the program has in the spindle at this line - a
                     later M6 in the streamed lines changes it, so it is not "the tool that cuts". */}
                 {runFromPlan.tool && (
-                  <div className="control-homed-hint" data-testid="control-runfrom-tool">
-                    Tool at this line: T{runFromPlan.tool.number} (tool change on line{' '}
-                    {runFromPlan.tool.changedOnLine}).
-                    {activeTool !== null && activeTool > 0 && activeTool !== runFromPlan.tool.number
+                  <div className="control-homed-hint" data-testid="control-runfrom-tool">{catalogChildren(controlText('ProgramPanel.text106', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000' }), { value1: runFromPlan.tool.number, value2: ' ', value3: runFromPlan.tool.changedOnLine, value4: activeTool !== null && activeTool > 0 && activeTool !== runFromPlan.tool.number
                       && runFromPlan.tool.changedOnLine < runFromPlan.startLine
-                      ? ` The machine reports T${activeTool} in the spindle.`
-                      : ''}
-                  </div>
+                      ? controlText('ProgramPanel.text105', { value1: String(activeTool) })
+                      : '' })}</div>
                 )}
-                <div className="control-homed-hint" data-testid="control-runfrom-resume">
-                  Resume position (WCS) X {resumeAxis(runFromPlan.resumePosition.x, units)} Y{' '}
-                  {resumeAxis(runFromPlan.resumePosition.y, units)} Z{' '}
-                  {resumeAxis(runFromPlan.resumePosition.z, units, runFromPlan.zRest)}
-                </div>
+                <div className="control-homed-hint" data-testid="control-runfrom-resume">{catalogChildren(controlText('ProgramPanel.text107', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000', value4: '\u0000value4\u0000', value5: '\u0000value5\u0000' }), { value1: resumeAxis(runFromPlan.resumePosition.x, units), value2: ' ', value3: resumeAxis(runFromPlan.resumePosition.y, units), value4: ' ', value5: resumeAxis(runFromPlan.resumePosition.z, units, runFromPlan.zRest) })}</div>
                 <div className="control-runfrom-prelude">
                   {runFromPlan.prelude.map((cmd, i) => (
                     <span key={i} className="control-runfrom-cmd">
@@ -2368,11 +2422,10 @@ export function ProgramPanel() {
                   {/* WO-2671: one plain next step - what to press and how to back out.
                       No direction word: CYCLE START is not "above" at every layout. */}
                   <span className="control-next-action-inline" data-testid="control-runfrom-next-step">
-                    Press CYCLE START to run from line {runFromPlan.startLine}
-                    {singleBlock ? ', one block at a time' : ''}. Cancel to go back.
+                    {catalogChildren(controlText('ProgramPanel.text109', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: runFromPlan.startLine, value2: singleBlock ? controlText('ProgramPanel.text108') : '' })}
                   </span>
                   <button className="modal-btn modal-btn-ghost" onClick={cancelRunFrom}>
-                    Cancel
+                    {controlText('ProgramPanel.text110')}
                   </button>
                 </div>
               </div>
@@ -2385,6 +2438,7 @@ export function ProgramPanel() {
             ref={listRef}
             className="control-gcode-list"
             data-testid="control-gcode-list"
+            data-move-colours={moveColours ? 'true' : 'false'}
             // Focusable by script only: the line menu hands keyboard focus back here.
             tabIndex={-1}
             style={{
@@ -2404,12 +2458,9 @@ export function ProgramPanel() {
             }}
           >
             {!hasProgram ? (
-              <div className="panel-empty">
-                Load a posted setup or open a g-code file. Everything is checked before a single
-                line is sent.
-              </div>
+              <div className="panel-empty">{controlText('ProgramPanel.text111')}</div>
             ) : lines.length === 0 ? (
-              <div className="panel-empty">This program contains no moves.</div>
+              <div className="panel-empty">{controlText('ProgramPanel.text112')}</div>
             ) : (
               visible.map((line, i) => {
                 const lineNo = line.lineNumber
@@ -2456,6 +2507,7 @@ export function ProgramPanel() {
                     onDoubleClick={() => openEditor(editLine)}
                     data-testid={lineNo !== null ? `control-gcode-line-${lineNo}` : undefined}
                     data-staged={staged ? 'true' : undefined}
+                    data-listing-kind={listingKinds[windowStart + i]}
                     onMouseEnter={() => setHoverLine(lineNo)}
                     onMouseLeave={() => setHoverLine((h) => (h === lineNo ? null : h))}
                     onContextMenu={(e) => {
@@ -2468,7 +2520,10 @@ export function ProgramPanel() {
                     }}
                   >
                     <span className="gcode-lineno">{lineNo}</span>
-                    <span className="gcode-linetext">{line.text}</span>
+                    <span className="gcode-linetext">{listingKinds[windowStart + i] === 'header' ? line.text
+                      : listingCommentParts(line.text).map((part, index) => part.comment
+                        ? <span key={index} className="gcode-comment">{part.text}</span>
+                        : <Fragment key={index}>{part.text}</Fragment>)}</span>
                     {pickable && hoverLine === lineNo && (
                       <button
                         className="modal-btn modal-btn-ghost"
@@ -2478,10 +2533,8 @@ export function ProgramPanel() {
                           e.stopPropagation()
                           if (sourceLine !== null) void planRunFrom(sourceLine)
                         }}
-                        data-tooltip="Plan a mid-program start at this line"
-                      >
-                        Run from here
-                      </button>
+                        data-tooltip={controlText('ProgramPanel.text113')}
+                      >{controlText('ProgramPanel.text114')}</button>
                     )}
                   </div>
                   {insertAfter !== null && insertAfter.listingLine === lineNo && (
@@ -2542,14 +2595,14 @@ export function ProgramPanel() {
               estopLatched
                 ? ESTOP_BLOCKS_MOTION
                 : !tcPark || safeZ === null
-                ? "Needs a park macro marked for tool change (Macros panel) and this machine's Safe Z (Machine tab of its definition)"
+                ? controlText('ProgramPanel.text115')
                 : !homed
                   ? machineHasNoHomeSwitches(machine)
                     ? noHomeSwitchesRefusal(
-                        'set the machine position first because parking uses machine coordinates.',
+                        controlText('ProgramPanel.text116'),
                       )
-                    : 'Home the machine first - parking uses machine coordinates'
-                  : 'Stop cleanly and park so you can reposition clamps, then resume where it left off'
+                    : controlText('ProgramPanel.text117')
+                  : controlText('ProgramPanel.text118')
             }
             onClick={() => {
               if (!tcPark) return
@@ -2559,9 +2612,7 @@ export function ProgramPanel() {
               const resumeLine = Math.max(2, job.ackedSourceLine)
               void beginClampPause({ resumeLine, park: tcPark, safeZMachine: safeZ })
             }}
-          >
-            Park + clamp
-          </button>
+          >{controlText('ProgramPanel.text119')}</button>
           <button
             className="modal-btn modal-btn-ghost"
             data-testid="control-fittrace"
@@ -2577,25 +2628,25 @@ export function ProgramPanel() {
             }
             data-tooltip={
               !hasProgram
-                ? 'Load a program first'
+                ? controlText('ProgramPanel.text120')
                 : safeZ === null
-                  ? "Set this machine's Safe Z on the Machine tab of its definition first."
+                  ? controlText('ProgramPanel.text121')
                   : !homed && connected
                     ? machineHasNoHomeSwitches(machine)
                       ? noHomeSwitchesRefusal(
-                          'set the machine position first because the trace raises to a machine-coordinate safe Z.',
+                          controlText('ProgramPanel.text122'),
                         )
-                      : 'Home the machine first - the trace raises to a machine-coordinate safe Z'
-                    : "Trace the job's XY outline at safe Z, pausing at each corner - verify stock and clamps before cutting"
+                      : controlText('ProgramPanel.text123')
+                    : controlText('ProgramPanel.text124')
             }
             onClick={() => {
               const rapid = controlMachine(useCamStore.getState()).rapidRate ?? 3000
               const prepared = prepareMaterialFitTrace(safeZ, defaultTraceFeed(rapid))
-              if (!prepared.ok) setLoadError(prepared.reason ?? 'The fit trace was refused.')
+              if (!prepared.ok) setLoadError(prepared.reason ?? controlText('ProgramPanel.text125'))
               else setLoadError(null)
             }}
           >
-            <Scan size={13} /> Fit trace
+            <Scan size={13} />{controlText('ProgramPanel.text126')}
           </button>
           {showProgramReadouts && <div className="control-progress">
             {operationProgress && (
@@ -2621,11 +2672,11 @@ export function ProgramPanel() {
                   data-testid="control-operation-toggle"
                   aria-expanded={operationListExpanded}
                   aria-controls="control-operation-list"
-                  aria-label={operationListExpanded ? 'Hide the operation list' : 'Show every operation'}
+                  aria-label={operationListExpanded ? controlText('ProgramPanel.text127') : controlText('ProgramPanel.text128')}
                   data-tooltip={
                     operationListExpanded
-                      ? 'Hide the operation list'
-                      : `Show all ${operationProgress.total} operations`
+                      ? controlText('ProgramPanel.text129')
+                      : controlText('ProgramPanel.text130', { value1: String(operationProgress.total) })
                   }
                   onClick={() => useMachineControl.getState().setOperationListExpanded(!operationListExpanded)}
                 >
@@ -2640,10 +2691,10 @@ export function ProgramPanel() {
               {shownTotal > 0
                 ? `${shownAcked}/${shownTotal} (${pct}%)${
                     paused === null && job.phase === 'complete' && job.startedAt !== null && job.endedAt != null
-                      ? ` done in ${runLengthSeconds(job.startedAt, job.endedAt)}s`
+                      ? controlText('ProgramPanel.text131', { value1: String(runLengthSeconds(job.startedAt, job.endedAt)) })
                       : ''
-                  }${nextToolChange ? ` | next: ${nextToolChange.label} @ line ${nextToolChange.sourceLine}` : ''}`
-                : 'no program'}
+                  }${nextToolChange ? controlText('ProgramPanel.text132', { value1: String(nextToolChange.label), value2: String(nextToolChange.sourceLine) }) : ''}`
+                : controlText('ProgramPanel.text133')}
             </span>
             <RunClock
               phase={progressPhase}
@@ -2660,7 +2711,7 @@ export function ProgramPanel() {
               id="control-operation-list"
               className="control-operation-list"
               data-testid="control-operation-list"
-              aria-label="Operations in this program"
+              aria-label={controlText('ProgramPanel.text134')}
             >
               {operationProgress.entries.map((e) => (
                 <li
@@ -2675,9 +2726,7 @@ export function ProgramPanel() {
                     {e.setup && isMultiSetupProgramContext(programContext) ? `${e.setup.name}: ` : ''}
                     {e.operation.name} ({operationKindLabel(e.operation.type)})
                   </span>
-                  <span className="control-operation-item-lines">
-                    lines {e.operation.startLine}-{e.operation.endLine}
-                  </span>
+                  <span className="control-operation-item-lines">{catalogChildren(controlText('ProgramPanel.text135', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: e.operation.startLine, value2: e.operation.endLine })}</span>
                   <span className="control-operation-item-status" data-testid="control-operation-item-status">
                     {operationItemStatus(e.status, operationProgress.state)}
                   </span>

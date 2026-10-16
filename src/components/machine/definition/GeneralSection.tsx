@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type SettingSource } from './DefinitionFields'
 import { NotSent } from './DefinitionFields'
 import { SectionHead } from './DefinitionFields'
@@ -14,52 +18,52 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
  * read already follows (`refreshPathToleranceFromMachine`). The homing
  * sequence is deliberately absent because it already lives in
  * `ControllerDefinition.homing.order` and is sent by the homing path. */
-export const GENERAL_TRAJECTORY_FIELDS = [
-  ['constant velocity mode', 'Constantvelocitymode'],
-  ['stop at angle', 'Stopatangle'],
-  ['lookahead lines', 'Lookaheadlines'],
-  ['linear error', 'Linearerror'],
-  ['corner error', 'Cornerserror'],
-  ['USB buffer size', 'USBbuffersize'],
-  ['maximum linear add length', 'MaxLinearaddlenght'],
-  ['maximum linear unification length', 'MaxLinearunificationlenght'],
-  ['arc radius tolerance', 'Arcradiustolerance'],
-  ['round G41/G42 joints', 'G41G42roundjoints'],
-] as const
+export const GENERAL_TRAJECTORY_FIELDS = liveCatalog(() => ([
+  [controlText('GeneralSection.text001'), 'Constantvelocitymode'],
+  [controlText('GeneralSection.text002'), 'Stopatangle'],
+  [controlText('GeneralSection.text003'), 'Lookaheadlines'],
+  [controlText('GeneralSection.text004'), 'Linearerror'],
+  [controlText('GeneralSection.text005'), 'Cornerserror'],
+  [controlText('GeneralSection.text006'), 'USBbuffersize'],
+  [controlText('GeneralSection.text007'), 'MaxLinearaddlenght'],
+  [controlText('GeneralSection.text008'), 'MaxLinearunificationlenght'],
+  [controlText('GeneralSection.text009'), 'Arcradiustolerance'],
+  [controlText('GeneralSection.text010'), 'G41G42roundjoints'],
+] as const))
 
-export const GENERAL_PROGRAM_FIELDS = [
-  ['tool-change behavior', 'Doontoolchange'],
-  ['safe Z', 'SafeZ'],
-  ['G73 backoff', 'G73_backoff'],
-  ['dwell values are seconds', 'Dwellinseconds'],
-  ['unknown G-code behavior', 'Runmodewhenunknowngcode'],
-  ['precheck G-code against soft limits', 'Softlimitsgcodeprecheck'],
-  ['reset G68 on file load', 'ResetG68onfileload'],
-  ['reset G51 on file load', 'ResetG51onfileload'],
-  ['reset G94 on file load', 'ResetG94onfileload'],
-  ['precompile macros on startup', 'Precompilemacrosonstartup'],
-] as const
+export const GENERAL_PROGRAM_FIELDS = liveCatalog(() => ([
+  [controlText('GeneralSection.text011'), 'Doontoolchange'],
+  [controlText('GeneralSection.text012'), 'SafeZ'],
+  [controlText('GeneralSection.text013'), 'G73_backoff'],
+  [controlText('GeneralSection.text014'), 'Dwellinseconds'],
+  [controlText('GeneralSection.text015'), 'Runmodewhenunknowngcode'],
+  [controlText('GeneralSection.text016'), 'Softlimitsgcodeprecheck'],
+  [controlText('GeneralSection.text017'), 'ResetG68onfileload'],
+  [controlText('GeneralSection.text018'), 'ResetG51onfileload'],
+  [controlText('GeneralSection.text019'), 'ResetG94onfileload'],
+  [controlText('GeneralSection.text020'), 'Precompilemacrosonstartup'],
+] as const))
 
-export const GENERAL_CONTROLLER_FIELDS = [
-  ['position DRO digits', 'POSDROsdigits'],
-  ['kernel frequency', 'Kernelfreq'],
-  ['maximize screen on startup', 'Maximisescreenonstartup'],
-] as const
+export const GENERAL_CONTROLLER_FIELDS = liveCatalog(() => ([
+  [controlText('GeneralSection.text021'), 'POSDROsdigits'],
+  [controlText('GeneralSection.text022'), 'Kernelfreq'],
+  [controlText('GeneralSection.text023'), 'Maximisescreenonstartup'],
+] as const))
 
-export const GENERAL_HOMING_POLICY_FIELDS = [
-  ['soft limits enabled', 'Softlimitsenable'],
-  ['require home before cycle start', 'CheckHomeonCycleStart'],
-  ['clear home references on reset', 'ResetDereferenceHomes'],
-  ['mandatory homing', 'Mandatoryhoming'],
-] as const
+export const GENERAL_HOMING_POLICY_FIELDS = liveCatalog(() => ([
+  [controlText('GeneralSection.text024'), 'Softlimitsenable'],
+  [controlText('GeneralSection.text025'), 'CheckHomeonCycleStart'],
+  [controlText('GeneralSection.text026'), 'ResetDereferenceHomes'],
+  [controlText('GeneralSection.text027'), 'Mandatoryhoming'],
+] as const))
 
-export const GENERAL_DEBOUNCE_FIELDS = [
-  ['general inputs', 'Debounce'],
-  ['torch height control', 'DebounceTHC'],
-  ['home switches', 'DebounceHome'],
-  ['probe 1', 'DebounceProbe1'],
-  ['probe 2', 'DebounceProbe2'],
-] as const
+export const GENERAL_DEBOUNCE_FIELDS = liveCatalog(() => ([
+  [controlText('GeneralSection.text028'), 'Debounce'],
+  [controlText('GeneralSection.text029'), 'DebounceTHC'],
+  [controlText('GeneralSection.text030'), 'DebounceHome'],
+  [controlText('GeneralSection.text031'), 'DebounceProbe1'],
+  [controlText('GeneralSection.text032'), 'DebounceProbe2'],
+] as const))
 
 export function GeneralNotSent({ label, settingKey, settings }: {
   label: string
@@ -78,10 +82,11 @@ export function GeneralNotSent({ label, settingKey, settings }: {
 type GeneralSectionProps = Pick<MachineDefinitionPanelState, 'unsent'>
 
 export function GeneralSection({ unsent }: GeneralSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div data-testid="machine-def-panel-general-motion" style={{ marginTop: 12 }}>
                   <SectionHead
-                    title="Trajectory planner"
+                    title={controlText('GeneralSection.text033')}
                     summary="Path blending, lookahead, tolerances and controller buffering"
                     testId="machine-def-panel-general-head-trajectory"
                   />
@@ -107,7 +112,7 @@ export function GeneralSection({ unsent }: GeneralSectionProps) {
 
                   <div style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Program execution"
+                      title={controlText('GeneralSection.text034')}
                       summary="File loading, tool changes, canned cycles and unknown codes"
                       testId="machine-def-panel-general-head-program"
                     />
@@ -134,7 +139,7 @@ export function GeneralSection({ unsent }: GeneralSectionProps) {
 
                   <div style={{ marginTop: 12 }}>
                     <SectionHead
-                      title="Controller display and startup"
+                      title={controlText('GeneralSection.text035')}
                       summary="Profile-level controller presentation and startup behavior"
                       testId="machine-def-panel-general-head-controller"
                     />

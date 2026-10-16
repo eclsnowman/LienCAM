@@ -41,6 +41,21 @@ function hooks(): SolidsWorkbenchHooks {
   return h
 }
 
+// WO-2858: the hover readout names the body ("Edge on Extrude F1"), never the
+// topology key. The hovered key is the one entity the pick highlight paints.
+function hoveredIds(kind: 'edge' | 'face'): string[] {
+  const ids = (kind === 'edge' ? hooks().getBodyEdgeIds('F1') : hooks().getBodyFaceIds('F1')) ?? []
+  return ids.filter((id) => hooks().getPickHighlightState(id) === 'hovered')
+}
+
+function hoveredEdgeId(): string {
+  const hovered = hoveredIds('edge')
+  if (hovered.length !== 1) throw new Error(`expected one hovered edge, got ${JSON.stringify(hovered)}`)
+  const text = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
+  expect(text).toBe('Edge on Extrude F1')
+  return hovered[0]
+}
+
 async function buildBox(): Promise<void> {
   await mintRectangleSketch({ width: '40', height: '20', offset: '10' })
   await waitFor(() => expect(screen.getByTestId('feature-row-SK1')).toBeTruthy())
@@ -301,16 +316,18 @@ describe('SolidsWorkbenchPage dress-up wiring (WO UI-13A, real occt-wasm kernel)
 
     await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
     const readoutText = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-    expect(readoutText).toMatch(/^Edge \S+ on /)
-    const hoveredEdgeId = readoutText.match(/^Edge (\S+) on/)?.[1]
-    expect(hoveredEdgeId).not.toBeUndefined()
-    // FAILS-IF: removing the hover-paint call (setHover inside handlePickHover) leaves this 'none'.
-    expect(hooks().getPickHighlightState(hoveredEdgeId!)).toBe('hovered')
+    expect(readoutText).toBe('Edge on Extrude F1')
+    // FAILS-IF: removing the hover-paint call (setHover inside handlePickHover) leaves no edge hovered.
+    const hovered = hoveredIds('edge')
+    expect(hovered).toHaveLength(1)
+    const edgeId = hovered[0]
+    expect(readoutText).not.toContain(edgeId)
+    expect(hooks().getPickHighlightState(edgeId)).toBe('hovered')
 
     // Leaving the mode (Cancel) clears both the readout and the paint state.
     fireEvent.click(screen.getByTestId('dialog-shell-cancel'))
     await waitFor(() => expect(screen.queryByTestId('solids-workbench-hover-readout')).toBeNull())
-    expect(hooks().getPickHighlightState(hoveredEdgeId!)).toBe('none')
+    expect(hooks().getPickHighlightState(edgeId)).toBe('none')
   }, 60_000)
 
   it('hover (face): pointermove while shell is armed paints the hovered face + shows a detail readout (WO UI-15 B1)', async () => {
@@ -326,13 +343,15 @@ describe('SolidsWorkbenchPage dress-up wiring (WO UI-13A, real occt-wasm kernel)
 
     await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout')).toBeTruthy())
     const readoutText = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-    expect(readoutText).toMatch(/^Face \S+ on /)
-    const hoveredFaceId = readoutText.match(/^Face (\S+) on/)?.[1]
-    expect(hoveredFaceId).not.toBeUndefined()
-    expect(hooks().getPickHighlightState(hoveredFaceId!)).toBe('hovered')
+    expect(readoutText).toBe('Top face on Extrude F1')
+    const hovered = hoveredIds('face')
+    expect(hovered).toHaveLength(1)
+    const faceId = hovered[0]
+    expect(readoutText).not.toContain(faceId)
+    expect(hooks().getPickHighlightState(faceId)).toBe('hovered')
     fireEvent.click(screen.getByTestId('dialog-shell-cancel'))
     await waitFor(() => expect(screen.queryByTestId('shell-workspace-palette')).toBeNull())
-    expect(hooks().getPickHighlightState(hoveredFaceId!)).toBe('none')
+    expect(hooks().getPickHighlightState(faceId)).toBe('none')
   }, 60_000)
 
   // WO UI-15 (B3): accumulated dress-up picks stay visibly selected, hovering an already-picked id
@@ -353,13 +372,6 @@ describe('SolidsWorkbenchPage dress-up wiring (WO UI-13A, real occt-wasm kernel)
     const rayB = { origin: { x: 50, y: 10, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
     // Edge C: top edge x=10, y:[0,20] -- midpoint (10,10,20). Never picked -- hover only.
     const rayC = { origin: { x: 10, y: 10, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
-
-    function hoveredEdgeId(): string {
-      const text = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-      const id = text.match(/^Edge (\S+) on/)?.[1]
-      if (id === undefined) throw new Error(`hover readout did not match an edge id: "${text}"`)
-      return id
-    }
 
     // --- Pick A ---
     runtime.rayOverride = rayA
@@ -404,7 +416,10 @@ describe('SolidsWorkbenchPage dress-up wiring (WO UI-13A, real occt-wasm kernel)
     // via SelectionState's own selected-beats-hovered precedence) ---
     runtime.rayOverride = rayB
     fireEvent.pointerMove(screen.getByTestId('solids-workbench-canvas'))
-    await waitFor(() => expect(hoveredEdgeId()).toBe(edgeB))
+    // C leaves hover; B, already picked, shows no hover over its selection.
+    await waitFor(() => expect(hoveredIds('edge')).toEqual([]))
+    expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe('Edge on Extrude F1')
+    expect(hooks().getPickHighlightState(edgeC)).toBe('none')
     expect(hooks().getPickHighlightState(edgeB)).toBe('selected')
 
     // --- Cancel closes the one-stage palette and clears the persistent selection. ---
@@ -438,13 +453,6 @@ describe('SolidsWorkbenchPage dress-up wiring (WO UI-13A, real occt-wasm kernel)
     // Control edge (never hovered or picked): top edge x=10, y:[0,20] -- midpoint (10,10,20). Its
     // rendered color is the "rest state" baseline the hovered/selected samples must diverge from.
     const rayControl = { origin: { x: 10, y: 10, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
-
-    function hoveredEdgeId(): string {
-      const text = screen.getByTestId('solids-workbench-hover-readout').textContent ?? ''
-      const id = text.match(/^Edge (\S+) on/)?.[1]
-      if (id === undefined) throw new Error(`hover readout did not match an edge id: "${text}"`)
-      return id
-    }
 
     // First learn the control edge's id (its own momentary hover state does not matter -- its REST
     // color is sampled below, AFTER the pointer has moved away onto edge A).

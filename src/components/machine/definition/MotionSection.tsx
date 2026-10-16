@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { SectionHead } from './DefinitionFields'
 import { AXIS_NAMES } from '../../../types'
 import { NotSentLegend } from './DefinitionFields'
@@ -27,10 +30,11 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 type MotionSectionProps = Pick<MachineDefinitionPanelState, 'absentAxisRow' | 'draft' | 'editDraft' | 'enabledAxes' | 'notAcceptedCount' | 'unsent'> & { def: NonNullable<MachineDefinitionPanelState['def']> }
 
 export function MotionSection({ absentAxisRow, def, draft, editDraft, enabledAxes, notAcceptedCount, unsent }: MotionSectionProps) {
+  useText('control-screens-not-probing')
   return (
     <><div data-testid="machine-def-group-motion">
                 <SectionHead
-                  title="Motion"
+                  title={controlText('MotionSection.text001')}
                   summary={`${enabledAxes.map((a) => a.axis).join('') || 'none'} enabled of ${AXIS_NAMES.length}`}
                   testId="machine-def-panel-head-axes"
                 />
@@ -48,10 +52,10 @@ export function MotionSection({ absentAxisRow, def, draft, editDraft, enabledAxe
                   >
                     <thead>
                       <tr>
-                        <th data-tooltip="Use this axis on this machine">Axis</th>
-                        <th data-tooltip="Rotary-axis and rollover flags read from this axis's profile section. This software cannot send them to the controller yet.">rotary profile</th>
-                        <th data-tooltip="axessettingscontrol<axis>.Compaccel - read from this machine's profile. This software cannot send it to the controller yet.">comp accel</th>
-                        <th data-tooltip="Drag-knife settings read from this axis's profile section. This software cannot send them to the controller yet.">drag knife</th>
+                        <th data-tooltip={controlText('MotionSection.text002')}>{controlText('MotionSection.text003')}</th>
+                        <th data-tooltip={controlText('MotionSection.text004')}>{controlText('MotionSection.text005')}</th>
+                        <th data-tooltip={controlText('MotionSection.text006')}>{controlText('MotionSection.text007')}</th>
+                        <th data-tooltip={controlText('MotionSection.text008')}>{controlText('MotionSection.text009')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -74,7 +78,7 @@ export function MotionSection({ absentAxisRow, def, draft, editDraft, enabledAxe
                                 fields={axisCatalogueFields(name, AXIS_ROTARY_PROFILE_FIELDS)}
                                 settings={unsent}
                                 testId={`machine-def-panel-axis-rotary-${name}`}
-                                label="rotary"
+                                label={controlText('MotionSection.text010')}
                                 collapsed={!a.enabled}
                               />
                             </td>
@@ -94,7 +98,7 @@ export function MotionSection({ absentAxisRow, def, draft, editDraft, enabledAxe
                                 fields={axisCatalogueFields(name, AXIS_DRAG_KNIFE_PROFILE_FIELDS)}
                                 settings={unsent}
                                 testId={`machine-def-panel-axis-drag-knife-${name}`}
-                                label="drag knife"
+                                label={controlText('MotionSection.text011')}
                                 collapsed
                               />
                             </td>

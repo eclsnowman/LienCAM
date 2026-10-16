@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { overviewFacts, type OverviewFacts } from '../../../lib/machine/overviewFacts'
 import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 
@@ -6,17 +10,18 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 // the one pure read over the machine record - this component only lays the
 // lines out, so it can never say something the record does not.
 
-const CARDS: { key: keyof OverviewFacts; title: string }[] = [
-  { key: 'machine', title: 'Machine' },
-  { key: 'spindle', title: 'Spindle' },
-  { key: 'outputs', title: 'Outputs & coolant' },
-  { key: 'probing', title: 'Probing' },
-  { key: 'controller', title: 'Controller' },
-]
+const CARDS: { key: keyof OverviewFacts; title: string }[] = liveCatalog(() => ([
+  { key: 'machine', title: controlText('OverviewCards.text001') },
+  { key: 'spindle', title: controlText('OverviewCards.text002') },
+  { key: 'outputs', title: controlText('OverviewCards.text003') },
+  { key: 'probing', title: controlText('OverviewCards.text004') },
+  { key: 'controller', title: controlText('OverviewCards.text005') },
+]))
 
 type OverviewCardsProps = Pick<MachineDefinitionPanelState, 'draft' | 'setSection'>
 
 export function OverviewCards({ draft, setSection }: OverviewCardsProps) {
+  useText('control-screens-not-probing')
   const facts = overviewFacts(draft)
   return (
     <div
@@ -60,9 +65,7 @@ export function OverviewCards({ draft, setSection }: OverviewCardsProps) {
             data-testid={`machine-def-overview-open-${key}`}
             style={{ alignSelf: 'flex-start' }}
             onClick={() => { setSection(key) }}
-          >
-            Open
-          </button>
+          >{controlText('OverviewCards.text006')}</button>
         </div>
       ))}
     </div>

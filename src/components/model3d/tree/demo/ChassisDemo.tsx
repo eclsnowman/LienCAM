@@ -11,6 +11,7 @@
 // GeomBridgeSession (viewport3d, read-only reference) for the worker round
 // trip -- neither file is edited by this WO.
 
+import { useText } from '../../../../i18n'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createGeomService, type GeomClient } from '../../../../geom'
@@ -46,6 +47,7 @@ export function ChassisDemo({
   createSceneRuntime = createDefaultSceneRuntime,
   onHistoryReady,
 }: ChassisDemoProps = {}) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const sessionRef = useRef<GeomBridgeSession | null>(null)
@@ -61,7 +63,7 @@ export function ChassisDemo({
     dag.insertNode({
       id: FEATURE_ID,
       kind: 'feature',
-      payload: { name: 'Demo Box', size: INITIAL_SIZE, position: { x: 0, y: 0, z: 0 } },
+      payload: { name: workbenchText('ChassisDemo.demoBox'), size: INITIAL_SIZE, position: { x: 0, y: 0, z: 0 } },
     })
     dagRef.current = dag
   }
@@ -78,7 +80,7 @@ export function ChassisDemo({
 
   const [selectedId, setSelectedId] = useState<string | null>(FEATURE_ID)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [status, setStatus] = useState('booting...')
+  const [status, setStatus] = useState<string>(workbenchText('ChassisDemo.booting'))
 
   const paint = useCallback((cachedBody: CachedBody) => {
     const runtime = runtimeRef.current
@@ -139,13 +141,13 @@ export function ChassisDemo({
     sessionRef.current = session
 
     async function boot(): Promise<void> {
-      setStatus('initializing geometry kernel...')
-      await session.init((pct, phase) => setStatus(`init: ${phase} ${pct}%`))
+      setStatus(workbenchText('ChassisDemo.initializingGeometryKernel'))
+      await session.init((pct, phase) => setStatus(workbenchText('ChassisDemo.init', { phase: String(phase), pct: String(pct) })))
       if (cancelled) return
-      setStatus('creating demo box...')
+      setStatus(workbenchText('ChassisDemo.creatingDemoBox'))
       await rebuildKernelBody(INITIAL_SIZE)
       if (cancelled) return
-      setStatus('ready')
+      setStatus(workbenchText('ChassisDemo.ready'))
     }
     void boot()
 
@@ -221,7 +223,7 @@ export function ChassisDemo({
         </div>
       </div>
       <div style={{ width: 300, flexShrink: 0, borderLeft: '1px solid var(--border-subtle, #2a3540)', padding: 10 }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Design tree</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{workbenchText('ChassisDemo.designTree')}</div>
         <FeatureTree
           key={dagVersion}
           dag={dag}
@@ -236,9 +238,7 @@ export function ChassisDemo({
           onClick={() => setDialogOpen(true)}
           className="modal-btn modal-btn-ghost"
           style={{ marginTop: 12 }}
-        >
-          Edit size...
-        </button>
+        >{workbenchText('ChassisDemo.editSize')}</button>
       </div>
       {dialogOpen && (
         <BoxSizeDialog

@@ -1,9 +1,7 @@
 // ============================================================
-// Dialect defaults + a minimal GENERIC placeholder config (C-P0)
+// Dialect defaults + the controller-neutral Generic config
 // ============================================================
-// The real UCCNC config (arcs, canned cycles, controller framing) lands in
-// C-P1. GENERIC_CONFIG here is a linear-only placeholder so the assembly
-// skeleton and tests have a concrete PostConfig to run against.
+// Generic supports arcs; the operator can disable them with Emit arcs.
 
 import type {
   PostCapabilities,
@@ -42,7 +40,7 @@ export const DEFAULT_OPTIONS: PostOptions = {
  *  LinuxCNC all emit G2/G3); the arc-collapse caps mirror theirs. */
 export const GENERIC_CONFIG: PostConfig = {
   id: 'generic',
-  label: 'Generic (linear only)',
+  label: 'Generic',
   builtin: true,
   capabilities: {
     ...DEFAULT_CAPABILITIES,
@@ -54,7 +52,7 @@ export const GENERIC_CONFIG: PostConfig = {
   },
   format: DEFAULT_FORMAT,
   framing: {
-    programStart: [],
+    programStart: ['G90 {units}'],
     programEnd: [],
     sectionComment: true,
   },

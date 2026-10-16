@@ -13,6 +13,7 @@ import {
   Send,
 } from 'lucide-react'
 import { useCamStore } from '../../store'
+import { operationGenerationIsCurrent } from '../../lib/cam/generationFingerprint'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 import {
   postProject,
@@ -62,6 +63,7 @@ import { HelpLink } from '../ui/HelpLink'
 import { ResizableSplit, SPLIT_BAR_PX } from '../common/ResizableSplit'
 import { PanelCollapseToggle, usePanelCollapsed } from '../common/CollapsiblePanel'
 import { saveFile } from '../../lib/saveFile'
+import { operatorDownloadFilename } from '../../lib/post/downloadExtension'
 import { GcodeEditor } from '../gcode/GcodeEditor'
 import { readerMarks, withLineEndingsOf, withoutContextStamp, type GcodeLineMark } from '../gcode/gcodeEditing'
 import { describeEdit, sendProgramToControl } from '../gcode/editedProgram'
@@ -155,7 +157,18 @@ export function PostProcessModal() {
   const isOpen = activeModal === 'post-process'
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
   const closeModal = useCamStore((s) => s.closeModal)
-  const project = useCamStore((s) => s.project)
+  // WO-2860: while Export stages a partial post, the store holds the staged
+  // program - stageOperationsForEmission turns every unticked operation off
+  // until restore() - not the operator's project. Read live, that program
+  // re-seeded the Output Scope (the unticked operation came back ticked, H4)
+  // and showed the operation the exclusion outdated as out of date, so the
+  // auto-recompute below computed it a second time; that compute landed after
+  // restore() and left it Outdated with its time gone from the setup (F7).
+  // The dialog reads the project as it was when Export began until the
+  // staging is restored.
+  const stagedFromRef = useRef<Project | null>(null)
+  const [, setStagingEnded] = useState(0)
+  const project = useCamStore((s) => stagedFromRef.current ?? s.project)
   // Tool library is a ROOT slice (single source of truth); fed to the pure post
   // path via a merged project at the boundary so postProject sees the live lib.
   const toolLibrary = useCamStore((s) => s.toolLibrary)
@@ -218,14 +231,16 @@ export function PostProcessModal() {
   }, [isOpen, modelRefsVerifiedSinceLoad, verifyModelReferences])
 
   // ---- Output scope (E2 multi-setup selection) --------------------------------
-  // All Operations = every setup, every enabled op, tree hidden.
-  // When OFF, the tree reveals per-setup + per-op checkboxes. Selection state:
+  // All Operations reflects every enabled child in the setup/op tree.
+  // Selection state:
   //   checkedSetups: setupId -> included in export (setup-level multi-select)
   //   checkedOps:    setupId -> Set<opId> of KEPT enabled ops within that setup
-  // Opening starts on the setup the operator is working in. "All operations"
-  // remains an explicit request for the wider project scope.
-  const [allOperations, setAllOperations] = useState(false)
+  // Opening starts on the setup the operator is working in; the master is
+  // checked only if that already includes every enabled operation.
   const [outputMode, setOutputMode] = useState<'combined' | 'separate'>('combined')
+  // App.tsx keeps this modal mounted. Names are session-only, per project and
+  // selected operations; setup identity keeps separate names off neighboring files.
+  const [exportNames, setExportNames] = useState<Record<string, string>>({})
   const [pauseBetweenSetups, setPauseBetweenSetups] = useState(false)
   const [expandedSetups, setExpandedSetups] = useState<Set<string>>(new Set())
   const [checkedSetups, setCheckedSetups] = useState<Set<string>>(new Set())
@@ -244,6 +259,12 @@ export function PostProcessModal() {
     }
     return m
   }, [isOpen, project.setups])
+
+  const selectableOpCount = Object.values(enabledOpsBySetup).reduce((n, ops) => n + ops.length, 0)
+  const checkedOpCount = Object.entries(enabledOpsBySetup).reduce((n, [setupId, ops]) =>
+    n + (checkedSetups.has(setupId) ? ops.filter(op => checkedOps[setupId]?.has(op.id)).length : 0), 0)
+  const allOperations = selectableOpCount > 0 && checkedOpCount === selectableOpCount
+  const someOperations = checkedOpCount > 0 && !allOperations
 
   // Resolve every setup through its physical stock using the SAME semantics as
   // the real post path (resolveSetupWorkOffset + findResolvedWorkOffsetConflicts).
@@ -341,7 +362,6 @@ export function PostProcessModal() {
     const activeSetupId = project.setups.some((setup) => setup.id === project.activeSetupId)
       ? project.activeSetupId
       : project.setups[0]?.id ?? null
-    setAllOperations(false)
     setExpandedSetups(new Set(activeSetupId ? [activeSetupId] : []))
     setCheckedSetups(new Set(activeSetupId ? [activeSetupId] : []))
   }, [isOpen, project.activeSetupId])
@@ -444,16 +464,10 @@ export function PostProcessModal() {
     [project.name, working],
   )
 
-  // Resolve the export scope -> the exact setup list + per-setup op selection
-  // that feeds postProject (and the live preview). All Operations ON = every
-  // setup, undefined selectedOpIds (= keep all enabled ops).
+  // Every output route follows the checked setup/op selection. The aggregate
+  // checkbox is display/action state: all enabled children can be selected while
+  // an empty or disabled-only setup remains unchecked (WO-2862 audit).
   const scope = useMemo(() => {
-    if (allOperations) {
-      return {
-        setups: project.setups,
-        selectedOpIds: undefined as Record<string, string[]> | undefined,
-      }
-    }
     const setups: Setup[] = project.setups.filter((s) => checkedSetups.has(s.id))
     const selectedOpIds: Record<string, string[]> = {}
     for (const s of setups) {
@@ -466,7 +480,7 @@ export function PostProcessModal() {
       selectedOpIds[s.id] = kept
     }
     return { setups, selectedOpIds }
-  }, [allOperations, project.setups, checkedSetups, checkedOps, enabledOpsBySetup])
+  }, [project.setups, checkedSetups, checkedOps, enabledOpsBySetup])
 
   // A pending operation has never produced toolpath bytes, so it cannot be in
   // a program. That fact does not make already-generated operations
@@ -602,6 +616,91 @@ export function PostProcessModal() {
     }
   }, [isOpen, project, toolLibrary, postableScope, exportConfig, outputMode, pauseBetweenSetups, baseName, ext, modelRefsVerifiedSinceLoad, includeContext])
 
+  // WO-2788: an out-of-date operation in scope is recomputed, not refused
+  // (rule 11). A restart is the common route: the browser copy of the project
+  // never carries toolpath moves (persistPartialize, localStorage quota), so a
+  // restored project opens with every operation out of date. Post recomputes
+  // ONLY the out-of-date operations this post includes, one at a time in setup
+  // order, so each reads its upstream's fresh result (the order Regenerate All
+  // keeps, WO-2656/2661/2662); one that goes out of date because an earlier one
+  // recomputed is recomputed when it is reached. A pending (never generated)
+  // operation is not in the post (WO-2043) and is never computed here: it stays
+  // omitted. Then ONE console line says what was recomputed. A genuine compute
+  // failure leaves that operation 'error', which the preview still refuses with
+  // its own reason. Each operation is tried once per opening, so a result that
+  // stays out of date cannot loop, and closing Post stops a run between
+  // operations.
+  const [autoRecomputing, setAutoRecomputing] = useState<ReadonlySet<string> | null>(null)
+  const autoRecomputeTried = useRef(new Set<string>())
+  const postIsOpen = useRef(isOpen)
+  // The running recompute, so Export (runFreshPost) waits for it rather than
+  // being disabled behind the operations it is computing (WO-1653's rule).
+  const autoRecomputeRun = useRef<Promise<void> | null>(null)
+  useEffect(() => {
+    postIsOpen.current = isOpen
+    if (!isOpen) autoRecomputeTried.current = new Set()
+  }, [isOpen])
+  useEffect(() => {
+    // WO-2860: Export's own staging recomputes what it posts.
+    if (!isOpen || autoRecomputing || !projectResult || stagedFromRef.current) return
+    const outdatedIds = new Set(
+      projectResult.diagnostics
+        .filter((d) => d.code === 'OP_OUTDATED' && d.opId && !autoRecomputeTried.current.has(d.opId))
+        .map((d) => d.opId!),
+    )
+    if (outdatedIds.size === 0) return
+    // The operations this post includes, per setup holding an out-of-date one.
+    const work = postableScope.setups.flatMap((setup) => {
+      const selected = postableScope.selectedOpIds?.[setup.id]
+      const included = setup.operations
+        .filter((op) => op.enabled && op.status !== 'pending')
+        .filter((op) => selected === undefined || selected.includes(op.id))
+        .map((op) => op.id)
+      return included.some((id) => outdatedIds.has(id)) ? [{ setupId: setup.id, included }] : []
+    })
+    for (const id of outdatedIds) autoRecomputeTried.current.add(id)
+    if (work.length === 0) return
+    setAutoRecomputing(new Set(work.flatMap((w) => w.included)))
+    const recomputed: string[] = []
+    const recomputeSetup = async ({ setupId, included }: (typeof work)[number]) => {
+      for (const opId of included) {
+        if (!postIsOpen.current) return
+        const state = useCamStore.getState()
+        const setup = state.project.setups.find((s) => s.id === setupId)
+        const op = setup?.operations.find((o) => o.id === opId)
+        if (!setup || !op || !op.enabled) continue
+        // Stale the way buildPostInput reads it: 'outdated', or 'ready' with a
+        // fingerprint that no longer matches its inputs.
+        const stale = op.status === 'outdated' || (op.status === 'ready' &&
+          !operationGenerationIsCurrent({ ...state.project, toolLibrary: state.toolLibrary }, setup, op))
+        if (!stale) continue
+        autoRecomputeTried.current.add(opId)
+        // A compute that throws is reported by the operation's own status.
+        await state.computeOperationToolpath(setupId, opId).catch(() => {})
+        const after = useCamStore.getState().project.setups
+          .find((s) => s.id === setupId)?.operations.find((o) => o.id === opId)
+        if (after?.status === 'ready') recomputed.push(`"${after.name}"`)
+      }
+    }
+    // Setups run side by side, as Regenerate All runs them.
+    const run = Promise.all(work.map(recomputeSetup)).then(() => {}).finally(() => {
+      if (recomputed.length > 0) {
+        addConsoleEvent({
+          severity: 'info',
+          source: 'post',
+          message: words("PostProcessModal.recomputed_out_of_date_before_posting", {
+            value1: recomputed.length,
+            value2: recomputed.length === 1 ? '' : 's',
+            value3: recomputed.join(', '),
+          }),
+        })
+      }
+      setAutoRecomputing(null)
+      autoRecomputeRun.current = null
+    })
+    autoRecomputeRun.current = run
+  }, [isOpen, autoRecomputing, projectResult, postableScope, addConsoleEvent])
+
   // WO-381: what the toggle's hint says. The orchestrator's own reason wins
   // (multi-setup, partial selection, size cap, not certified); otherwise a
   // short statement of what the block is.
@@ -630,6 +729,40 @@ export function PostProcessModal() {
   const separateFiles = useMemo(
     () => (outputMode === 'separate' ? projectResult?.files ?? [] : []),
     [outputMode, projectResult],
+  )
+
+  const filenameScope = (setup: Setup) => [
+    setup.id, (scope.selectedOpIds?.[setup.id] ?? enabledOpsBySetup[setup.id]?.map(op => op.id) ?? []).slice().sort(),
+  ]
+  const combinedNameKey = JSON.stringify([project.id, 'combined', scope.setups.map(filenameScope).sort(
+    (a, b) => String(a[0]).localeCompare(String(b[0])),
+  )])
+  const separateNameKey = (file: { filename: string; setupId?: string }) => {
+    const setup = scope.setups.find(candidate => candidate.id === file.setupId)
+    return JSON.stringify([project.id, 'separate', setup ? filenameScope(setup) : separateEditKey(file)])
+  }
+  const namedDownload = (key: string, defaultFilename: string) =>
+    operatorDownloadFilename(exportNames[key], defaultFilename, working)
+  const combinedExportFilename = namedDownload(combinedNameKey, combinedFilename)
+  const filenameField = (key: string, defaultFilename: string, label: string) => (
+    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '1 1 22rem', minWidth: 0 }}>
+      <span className="mform-label" style={{ minWidth: 'auto' }}>{label}</span>
+      <input
+        className="mform-input"
+        type="text"
+        value={exportNames[key] ?? defaultFilename}
+        onChange={event => {
+          // Replace forbidden characters visibly while typing. Trim/extension
+          // completion waits for blur so spaces and a typed dot remain editable.
+          const value = Array.from(event.target.value, char => char.charCodeAt(0) < 32 ? '-' : char)
+            .join('').replace(/[<>:"/\\|?*]/g, '-')
+          setExportNames(names => ({ ...names, [key]: value }))
+        }}
+        onBlur={() => setExportNames(names => names[key] === undefined ? names : ({
+          ...names, [key]: operatorDownloadFilename(names[key], defaultFilename, working),
+        }))}
+      />
+    </label>
   )
 
   // Keep previewFileIndex in range: reset to 0 whenever the file list shrinks
@@ -694,9 +827,11 @@ export function PostProcessModal() {
     if (!projectResult) return null
     // WO-2332: while the model-reference check runs, the footer says so; the
     // "not checked yet" refusal it is about to answer is not shown meanwhile.
-    const shown = (diags: PostDiagnostic[]): PostDiagnostic[] => modelRefCheckInFlight
-      ? diags.filter((d) => d.code !== 'OP_MODEL_REFS_UNVERIFIED')
-      : diags
+    // WO-2788: likewise, an operation Post is recomputing shows no "out of
+    // date" refusal while the recompute it is waiting on runs.
+    const shown = (diags: PostDiagnostic[]): PostDiagnostic[] => diags.filter((d) =>
+      !(modelRefCheckInFlight && d.code === 'OP_MODEL_REFS_UNVERIFIED') &&
+      !(d.code === 'OP_OUTDATED' && d.opId && autoRecomputing?.has(d.opId)))
     if (outputMode === 'combined') {
       return pendingDiagnostic
         ? shown([...(projectResult.diagnostics ?? []), pendingDiagnostic])
@@ -707,7 +842,7 @@ export function PostProcessModal() {
     )
     const fileDiags = result?.diagnostics ?? []
     return shown([...orchestrator, ...fileDiags, ...(pendingDiagnostic ? [pendingDiagnostic] : [])])
-  }, [projectResult, outputMode, result, pendingDiagnostic, modelRefCheckInFlight])
+  }, [projectResult, outputMode, result, pendingDiagnostic, modelRefCheckInFlight, autoRecomputing])
 
   // WO-2637 (Operator ruling 2026-10-06): two different tools in one program sharing a
   // tool number do not post; this screen names them and lets the operator give
@@ -924,8 +1059,8 @@ export function PostProcessModal() {
 
   // Header summary: scope of this export (driven by the selection).
   const setupCount = scope.setups.length
-  const headerScope = allOperations
-    ? words("PostProcessModal.setup_all_operations", { value1: project.setups.length, value2: project.setups.length === 1 ? '' : 's' })
+  const headerScope = allOperations && setupCount === project.setups.length
+    ? words("PostProcessModal.setup_all_operations", { value1: setupCount, value2: setupCount === 1 ? '' : 's' })
     : words("PostProcessModal.setup_operation", { value1: setupCount, value2: setupCount === 1 ? '' : 's', value3: selectedOpCount, value4: selectedOpCount === 1 ? '' : 's' })
 
   // ---- empty-selection guard: zero setups or zero ops chosen ----
@@ -965,8 +1100,10 @@ export function PostProcessModal() {
   // refuse first). Excluding it here is what makes that recompute reachable by a real
   // click; every other error (a genuinely uncomputable op, a bad WCS, a missing tool
   // number) still blocks - only a recompute-fixable staleness does not.
+  // WO-2788: neither does an operation Post's own recompute is computing -
+  // Export waits for that recompute (runFreshPost) and then decides.
   const exportBlockingDiagnostics = (projectResult?.diagnostics ?? []).filter(
-    (d) => d.level === 'error' && d.code !== 'OP_OUTDATED',
+    (d) => d.level === 'error' && d.code !== 'OP_OUTDATED' && !(autoRecomputing && d.code === 'OP_COMPUTING'),
   )
   const canExport = !!projectResult && exportBlockingDiagnostics.length === 0 && !nothingSelected && !modelRefCheckInFlight
   // WO UI-11B POST lane: generate success/refusal/error emit console events.
@@ -990,8 +1127,10 @@ export function PostProcessModal() {
   }> => {
     const restores: Array<() => void> = []
     try {
+      await autoRecomputeRun.current
       // WO-2332: never post ahead of an unfinished model-reference check.
       await useCamStore.getState().verifyModelReferences()
+      stagedFromRef.current = useCamStore.getState().project
       for (const s of postableScope.setups) {
         const staged = await stageOperationsForEmission(s.id, postableScope.selectedOpIds?.[s.id])
         restores.push(staged.restore)
@@ -1027,7 +1166,9 @@ export function PostProcessModal() {
         }
       }
     } finally {
+      stagedFromRef.current = null
       restores.forEach((restore) => restore())
+      setStagingEnded((n) => n + 1)
     }
   }
 
@@ -1051,7 +1192,7 @@ export function PostProcessModal() {
         severity: errDiag ? 'error' : 'warning',
         source: 'post',
         message: errDiag
-          ? words("PostProcessModal.post_export_blocked", { value1: errDiag.code, value2: errDiag.message })
+          ? words("PostProcessModal.post_export_blocked", { value1: errDiag.message })
           : words("PostProcessModal.post_export_refused_not_ready"),
       })
       return
@@ -1064,12 +1205,12 @@ export function PostProcessModal() {
       }
       // WO-2651: the hand-edited text is what is written, byte for byte.
       const edited = handEdits.combined
-      downloadFile(combinedFilename, edited ? edited.text : gcode)
+      downloadFile(combinedExportFilename, edited ? edited.text : gcode)
       addConsoleEvent({
         severity: 'success', source: 'post',
         message: edited
-          ? ed('post.exportedEdited', { name: combinedFilename, summary: describeEdit(edited.base, edited.text) })
-          : words("PostProcessModal.posted_lines", { value1: combinedFilename, value2: result.combined?.meta?.lineCount ?? 0 }),
+          ? ed('post.exportedEdited', { name: combinedExportFilename, summary: describeEdit(edited.base, edited.text) })
+          : words("PostProcessModal.posted_lines", { value1: combinedExportFilename, value2: result.combined?.meta?.lineCount ?? 0 }),
       })
       return
     }
@@ -1081,13 +1222,14 @@ export function PostProcessModal() {
       const f = files[i]
       if (f.result.gcode.length === 0) continue
       const edited = handEdits[separateEditKey(f)]
-      downloadFile(f.filename, edited ? edited.text : f.result.gcode)
-      if (edited) {
-        addConsoleEvent({
-          severity: 'success', source: 'post',
-          message: ed('post.exportedEdited', { name: f.filename, summary: describeEdit(edited.base, edited.text) }),
-        })
-      }
+      const filename = namedDownload(separateNameKey(f), f.filename)
+      downloadFile(filename, edited ? edited.text : f.result.gcode)
+      addConsoleEvent({
+        severity: 'success', source: 'post',
+        message: edited
+          ? ed('post.exportedEdited', { name: filename, summary: describeEdit(edited.base, edited.text) })
+          : words("PostProcessModal.posted_lines", { value1: filename, value2: f.result.meta?.lineCount ?? 0 }),
+      })
       downloaded++
       if (i < files.length - 1) {
         await new Promise((r) => setTimeout(r, 220))
@@ -1129,7 +1271,7 @@ export function PostProcessModal() {
         severity: errDiag ? 'error' : 'warning',
         source: 'post',
         message: errDiag
-          ? words("PostProcessModal.post_export_blocked", { value1: errDiag.code, value2: errDiag.message })
+          ? words("PostProcessModal.post_export_blocked", { value1: errDiag.message })
           : words("PostProcessModal.post_export_refused_no_g_code_was"),
       })
       return
@@ -1178,7 +1320,7 @@ export function PostProcessModal() {
         severity: errDiag ? 'error' : 'warning',
         source: 'post',
         message: errDiag
-          ? words("PostProcessModal.setup_sheet_refused", { value1: errDiag.code, value2: errDiag.message })
+          ? words("PostProcessModal.setup_sheet_refused", { value1: errDiag.message })
           : words("PostProcessModal.setup_sheet_refused_not_ready"),
       })
       return
@@ -1343,6 +1485,14 @@ export function PostProcessModal() {
       <div
         className="modal-container post-modal"
         onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Nested listboxes/editors consume their own Escape first. The full
+          // preview is a sibling with its own close handler, not part of this panel.
+          if (e.key !== 'Escape' || e.defaultPrevented) return
+          e.preventDefault()
+          e.stopPropagation()
+          closeModal()
+        }}
         ref={dialogFocusRef}
       >
         {/* Header */}
@@ -1450,14 +1600,37 @@ export function PostProcessModal() {
                   {/* Output scope (E2 multi-setup selection) */}
                   <div className="mform-section-header">{words("PostProcessModal.output_scope")}</div>
                   <label className="scope-master">
+                    {/* The themed checkbox (app.css) draws checked and unchecked only;
+                        a mixed scope gets the accent fill and a dash drawn here. */}
+                    <span style={{ position: 'relative', display: 'inline-flex' }}>
                     <input
                       type="checkbox"
+                      data-testid="post-scope-all"
+                      data-state={allOperations ? 'checked' : someOperations ? 'mixed' : 'unchecked'}
                       checked={allOperations}
-                      onChange={(e) => setAllOperations(e.target.checked)}
-                    />{words("PostProcessModal.all_operations")}</label>
+                      style={someOperations ? { background: 'var(--accent)', borderColor: 'var(--accent)' } : undefined}
+                      ref={(node) => { if (node) node.indeterminate = someOperations }}
+                      onChange={(e) => {
+                        const on = e.target.checked
+                        setCheckedSetups(new Set(on ? project.setups.map(setup => setup.id) : []))
+                        if (on) setCheckedOps(Object.fromEntries(
+                          Object.entries(enabledOpsBySetup).map(([id, ops]) => [id, new Set(ops.map(op => op.id))]),
+                        ))
+                      }}
+                    />
+                    {someOperations && (
+                      <span
+                        aria-hidden="true"
+                        data-testid="post-scope-all-mixed"
+                        style={{
+                          position: 'absolute', left: '25%', right: '25%', top: 'calc(50% - 1px)', height: 2,
+                          background: 'var(--text-on-accent)', pointerEvents: 'none',
+                        }}
+                      />
+                    )}
+                    </span>{words("PostProcessModal.all_operations")}</label>
 
-                  {!allOperations && (
-                    <ScopeTree
+                  <ScopeTree
                       setups={project.setups}
                       enabledOpsBySetup={enabledOpsBySetup}
                       checkedSetups={checkedSetups}
@@ -1491,8 +1664,7 @@ export function PostProcessModal() {
                           return next
                         })
                       }
-                    />
-                  )}
+                  />
 
 
                   <div className="scope-mode-row">
@@ -1992,6 +2164,19 @@ export function PostProcessModal() {
           )}
         </div>
 
+        {/* Export names stay beside the action, including on Preview/About tabs. */}
+        <div data-testid="post-export-filenames" style={{
+          display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1rem', padding: '0.7rem 0.875rem',
+          borderTop: '1px solid var(--border)', background: 'var(--bg-panel-alt)',
+          flexShrink: 0, maxHeight: '9rem', overflowY: 'auto',
+        }}>
+          {outputMode === 'combined'
+            ? filenameField(combinedNameKey, combinedFilename, words("PostProcessModal.file_name"))
+            : separateFiles.map(file => filenameField(
+              separateNameKey(file), file.filename,
+              words("PostProcessModal.separate_file_name", { name: file.filename }),
+            ))}
+        </div>
         {/* Footer */}
         <div className="modal-footer">
           <input
@@ -2077,8 +2262,8 @@ export function PostProcessModal() {
                     ? words("PostProcessModal.checking_model_references")
                     : words("PostProcessModal.fix_the_errors_below_before_exporting")
                 : outputMode === 'separate'
-                  ? words("PostProcessModal.download_files", { value1: projectResult?.files?.length ?? 0, value2: ext })
-                  : words("PostProcessModal.download", { value1: baseName, value2: ext })
+                  ? words("PostProcessModal.download_named_files", { count: projectResult?.files?.length ?? 0 })
+                  : words("PostProcessModal.download_named", { name: combinedExportFilename })
             }
           >
             <Download size={14} />
@@ -2108,8 +2293,7 @@ export function PostProcessModal() {
 // Sub-components
 // ============================================================
 
-// Collapsible setup/op selection tree (visible only when "All operations" is
-// off). One row per setup with a setup-level checkbox (multi-select + select-all
+// Collapsible setup/op selection tree. One row per setup with a setup-level checkbox (multi-select + select-all
 // of its enabled ops) and a chevron to reveal per-op checkboxes. A setup whose
 // work offset collides with another is greyed and flagged inline (export will
 // fail loud on it via DUPLICATE_WORK_OFFSET).
@@ -2423,6 +2607,7 @@ function PreviewPane({
           diags.map((d, i) => (
             <div
               key={`${d.code}-${i}`}
+              data-code={d.code}
               className={`diag-row ${
                 d.level === 'error'
                   ? 'diag-err'
@@ -2435,7 +2620,7 @@ function PreviewPane({
                 {d.level === 'error' ? '[X]' : d.level === 'warning' ? '[!]' : '[i]'}
               </span>
               <span>
-                <b>{d.code}{words("PostProcessModal.symbol_4")}</b> {d.message}
+                {d.message}
               </span>
             </div>
           ))

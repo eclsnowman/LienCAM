@@ -44,6 +44,7 @@ import {
   type WeldedMesh,
 } from './topology';
 import { inferCylinder, inspectCylinder, type CylinderSurface } from './surfaces';
+import { findWallBlends, type PreparedWallBlend } from './wallBlends';
 
 /** How far a face may bend and still be ONE flat face, mm. This is a flatness
  *  budget, not a machining tolerance: a CAD-exported flat face lands inside a
@@ -226,9 +227,26 @@ export function recognizeEdgeBlends(
   // too. Keep the widest reading of each edge and drop the readings inside it,
   // which is what "the widest thing that is actually correct" means here.
   const bands = [...found.values()];
-  const blends = bands
-    .filter(({ band }) => !bands.some((other) => other.band.length > band.length && isSubset(band, other.band)))
-    .map(({ blend }) => blend)
+  const straight = bands
+    .filter(({ band }) => !bands.some((other) => other.band.length > band.length && isSubset(band, other.band)));
+  // WO-2798: blends round a wall standing square to their face - a boss foot,
+  // a chain round a top, a pocket's floor fillets - that the straight proof
+  // above cannot read. A band it already proved keeps its reading.
+  // WO-2802: after resizing a chain, a tiny planar member can also prove as
+  // a straight blend. Maximality applies across BOTH proofs: that member
+  // must not hide the proven whole chain on the next pick/replay boundary.
+  const walls = findWallBlends(w).filter((wall) => {
+    const inWall = new Set(wall.band);
+    return straight.every(({ band }) => !band.some((f) => inWall.has(f)) ||
+      (wall.band.length > band.length && isSubset(band, wall.band)));
+  });
+  const maximalStraight = straight.filter(({ band }) =>
+    !walls.some((wall) => wall.band.length > band.length && isSubset(band, wall.band)));
+  const taken = new Set(maximalStraight.flatMap(({ band }) => band));
+  const round = walls
+    .filter((wall) => !wall.band.some((f) => taken.has(f)))
+    .map((wall) => describeWallBlend(wall, sourceFacetIds));
+  const blends = [...maximalStraight.map(({ blend }) => blend), ...round]
     .sort((x, y) => (x.sourceFacetIds[0] ?? 0) - (y.sourceFacetIds[0] ?? 0));
 
   return { blends, toleranceMm: settings.toleranceMm, facetCount };
@@ -614,6 +632,34 @@ function describeAsBlend(
     maxDeviationMm: prepared.maxDeviationMm,
     tangencyErrorMm: prepared.tangencyErrorMm,
     edgeLine: prepared.edgeLine,
+    sourceFacetIds: ids,
+  };
+}
+
+/** A wall blend as the listing names a blend. Its sharp edge is a curve; the
+ *  `edgeLine` reported is the chord across it, and `lengthMm` the curve's own
+ *  length. */
+function describeWallBlend(wall: PreparedWallBlend, sourceFacetIds?: Uint32Array): RecognizedEdgeBlend {
+  const ids = wall.band
+    .map((f) => (sourceFacetIds ? sourceFacetIds[f] : f))
+    .filter((id) => id !== undefined && id !== NO_SOURCE_FACET)
+    .sort((x, y) => x - y);
+  const feet = wall.wallRail.map((id) => wall.frames.get(id)?.foot as Vec3);
+  const first = feet[0];
+  let far = first;
+  for (const p of feet) if (length(sub(p, first)) > length(sub(far, first))) far = p;
+  const span = sub(far, first);
+  const direction: Vec3 = length(span) > 0 ? normalize(span) : normalize(cross(wall.plane.normal, [1, 0, 0]));
+  return {
+    id: `${wall.kind}-${ids[0] ?? wall.band[0]}`,
+    kind: wall.kind,
+    shape: wall.shape,
+    ...(wall.kind === 'fillet' ? { radiusMm: wall.sizeMm } : { setbackMm: [wall.sizeMm, wall.sizeMm] as [number, number], angleDeg: 45 }),
+    includedAngleDeg: 90,
+    lengthMm: wall.edgeLengthMm,
+    maxDeviationMm: wall.maxDeviationMm,
+    tangencyErrorMm: wall.maxDeviationMm,
+    edgeLine: { origin: first, direction, ends: [first, far] },
     sourceFacetIds: ids,
   };
 }

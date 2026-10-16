@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import type { MachineConfig } from '../../../../../types'
 import { CoolantCapabilitySection } from '../../CoolantCapabilitySection'
 import { OutputsSection } from '../../OutputsSection'
@@ -14,11 +17,10 @@ interface Step5Props {
 }
 
 export function Step5OutputsAndCoolant({ draft, editDraft, unsent }: Step5Props) {
+  useText('control-screens-not-probing')
   return (
     <div data-testid="setup-step-outputs">
-      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>
-        What does this machine switch, and what does each output do?
-      </p>
+      <p style={{ margin: '0 0 8px', color: 'var(--text-secondary)' }}>{controlText('Step5OutputsAndCoolant.text001')}</p>
       <CoolantCapabilitySection machine={draft} onChange={editDraft} settings={unsent} />
       <OutputsSection machine={draft} onChange={editDraft} />
     </div>

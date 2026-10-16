@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../../lib/operatorLabels'
 // WO UI-13A: fillet dialog -- INT-5's gate-premise catch found GEO-4's
 // applyFillet was never wired into the 3D modeling workspace UI. Follows the
 // established create-mode dialog contract (BooleanDialog.tsx's header), but
@@ -12,6 +13,8 @@
 // codebase's own propagateTangent lesson warns against (see geom-service.ts
 // SweepRequest's header). Only the supported value is offered.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { useSelectAllOnClick } from '../../ui/selectAllOnClick'
@@ -64,29 +67,30 @@ const DEFAULT_RADIUS = 2
 function editReferenceError(dag: FeatureDag, featureId: string): string | undefined {
   const node = dag.getNode(featureId)
   if (node === undefined || node.kind !== 'feature' || node.payload.opType !== 'fillet') {
-    return `Fillet edit refused: '${featureId}' is not a fillet feature`
+    return workbenchText('FilletDialog.filletEditRefusedIsNotAFilletFeature', { featureId: String(featureId) })
   }
   const ownerId = node.payload.ownerId
   if (typeof ownerId !== 'string' || ownerId.length === 0 || dag.getNode(ownerId) === undefined) {
-    return `Fillet edit refused: owner '${String(ownerId)}' is not available`
+    return workbenchText('FilletDialog.filletEditRefusedOwnerIsNotAvailable', { value1: String(String(ownerId)) })
   }
   if (!node.consumes.includes(ownerId)) {
-    return `Fillet edit refused: owner '${ownerId}' is missing from the feature dependencies`
+    return workbenchText('FilletDialog.filletEditRefusedOwnerIsMissingFromTheFeature', { ownerId: String(ownerId) })
   }
   const order = dag.featureOrder()
   if (order.indexOf(ownerId) < 0 || order.indexOf(ownerId) >= order.indexOf(featureId)) {
-    return `Fillet edit refused: owner '${ownerId}' is not an upstream feature`
+    return workbenchText('FilletDialog.filletEditRefusedOwnerIsNotAnUpstreamFeature', { ownerId: String(ownerId) })
   }
   if (!Array.isArray(node.payload.edges) || node.payload.edges.length === 0 || node.payload.edges.some((id) => typeof id !== 'string' || id.length === 0)) {
-    return `Fillet edit refused: '${featureId}' has no valid edge references`
+    return workbenchText('FilletDialog.filletEditRefusedHasNoValidEdgeReferences', { featureId: String(featureId) })
   }
   if (typeof node.payload.radius !== 'number' || !Number.isFinite(node.payload.radius) || node.payload.radius <= 0) {
-    return `Fillet edit refused: '${featureId}' has an invalid radius`
+    return workbenchText('FilletDialog.filletEditRefusedHasAnInvalidRadius', { featureId: String(featureId) })
   }
   return undefined
 }
 
 export function FilletDialog(props: FilletDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const { dag, history, onApplied, onClose } = props
   const editing = props.mode === 'edit'
   const existing = editing ? dag.getNode(props.featureId) : undefined
@@ -122,7 +126,7 @@ export function FilletDialog(props: FilletDialogProps) {
         propagateTangent: true,
         name: editing && typeof existing?.payload.name === 'string'
           ? existing.payload.name
-          : `Fillet ${previewFeatureId}`,
+          : workbenchText('FilletDialog.fillet', { previewFeatureId: String(previewFeatureId) }),
       },
     }
   }, [edgeIdsKey, editing, existing?.payload.name, invalid, previewFeatureId, previewOwnerId, radius])
@@ -150,7 +154,7 @@ export function FilletDialog(props: FilletDialogProps) {
         onClose()
         return
       } catch (error) {
-        setApplyError(`Fillet Apply refused: ${error instanceof Error ? error.message : String(error)}`)
+        setApplyError(workbenchText('FilletDialog.filletApplyRefused', { value1: String(error instanceof Error ? error.message : String(error)) }))
         return
       } finally {
         applyingRef.current = false
@@ -161,7 +165,7 @@ export function FilletDialog(props: FilletDialogProps) {
       const live = dag.getNode(props.featureId)
       const liveReferenceError = editReferenceError(dag, props.featureId)
       if (live === undefined || liveReferenceError !== undefined) {
-        setApplyError(liveReferenceError ?? `Fillet edit refused: '${props.featureId}' is no longer available`)
+        setApplyError(liveReferenceError ?? workbenchText('FilletDialog.filletEditRefusedIsNoLongerAvailable', { featureId: String(props.featureId) }))
         return
       }
       try {
@@ -183,7 +187,7 @@ export function FilletDialog(props: FilletDialogProps) {
     const ownerId = props.ownerId
     if (ownerId === undefined) return
     const id = nextId(dag, 'F')
-    const payload = { opType: 'fillet', ownerId, edges: props.edgeIds, radius, propagateTangent: true, name: `Fillet ${id}` }
+    const payload = { opType: 'fillet', ownerId, edges: props.edgeIds, radius, propagateTangent: true, name: workbenchText('FilletDialog.fillet2', { id: String(id) }) }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [ownerId], payload }))
     } catch (err) {
@@ -216,14 +220,13 @@ export function FilletDialog(props: FilletDialogProps) {
       data-testid="fillet-workspace-palette"
       data-preview-status={props.previewState?.status ?? 'idle'}
       role="toolbar"
-      aria-label={editing ? 'Edit Fillet command' : 'Fillet command'}
+      aria-label={editing ? workbenchText('FilletDialog.editFilletCommand') : workbenchText('FilletDialog.filletCommand')}
     >
-      <span className="sketch-confirm-title">Fillet</span>
+      <span className="sketch-confirm-title">{workbenchText('FilletDialog.fillet3')}</span>
       <span className="sketch-confirm-info" data-testid="fillet-edge-count">
-        {edgeIds.length} edge{edgeIds.length === 1 ? '' : 's'} selected
-      </span>
+        {workbenchText('FilletDialog.edgeSelected', { length: String((edgeIds.length) ?? ''), value2: String((edgeIds.length === 1 ? '' : 's')) })}</span>
       <span className="sketch-confirm-hint" data-testid="fillet-edge-instruction">
-        {edgeIds.length === 0 ? 'Select edges in the viewport' : 'Click edges to add or remove'}
+        {edgeIds.length === 0 ? workbenchText('FilletDialog.selectEdgesInTheViewport') : workbenchText('FilletDialog.clickEdgesToAddOrRemove')}
       </span>
       {props.hoverReadout !== undefined && (
         <span
@@ -235,13 +238,13 @@ export function FilletDialog(props: FilletDialogProps) {
         </span>
       )}
       <label className="sketch-confirm-field">
-        <span>Radius</span>
+        <span>{workbenchText('FilletDialog.radius')}</span>
         <span data-testid="fillet-radius">
           <input
             ref={radiusInputRef}
             type="text"
             inputMode="decimal"
-            aria-label="Fillet radius"
+            aria-label={workbenchText('FilletDialog.filletRadius')}
             value={radiusDraft}
             min={0.1}
             disabled={applying}
@@ -261,47 +264,45 @@ export function FilletDialog(props: FilletDialogProps) {
             }}
           />
         </span>
-        <span className="sketch-confirm-unit">mm</span>
+        <span className="sketch-confirm-unit">{workbenchText('FilletDialog.mm')}</span>
       </label>
       {referenceError !== undefined && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="fillet-reference-error"
-          data-tooltip={referenceError}
+          data-tooltip={readableInternalIds(referenceError)}
           aria-live="polite"
         >
-          {referenceError}
+          {readableInternalIds(referenceError)}
         </span>
       )}
       {applyError !== undefined && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="fillet-apply-error"
-          data-tooltip={applyError}
+          data-tooltip={readableInternalIds(applyError)}
           aria-live="polite"
         >
-          {applyError}
+          {readableInternalIds(applyError)}
         </span>
       )}
       {previewControlled && props.previewState?.status === 'pending' && (
         <span className="fillet-command-status" data-testid="fillet-preview-status" data-status="pending" aria-live="polite">
-          Updating...
-        </span>
+          {workbenchText('FilletDialog.updating')}</span>
       )}
       {previewControlled && props.previewState?.status === 'ready' && (
         <span className="fillet-command-status" data-testid="fillet-preview-status" data-status="ready" aria-live="polite">
-          Ready
-        </span>
+          {workbenchText('FilletDialog.ready')}</span>
       )}
       {previewControlled && props.previewState?.status === 'refused' && (
         <span
           className="fillet-command-status fillet-command-status--error"
           data-testid="fillet-preview-status"
           data-status="refused"
-          data-tooltip={props.previewState.message}
+          data-tooltip={readableInternalIds(props.previewState.message)}
           aria-live="polite"
         >
-          {props.previewState.message}
+          {readableInternalIds(props.previewState.message)}
         </span>
       )}
       <span className="sketch-confirm-actions">
@@ -309,24 +310,24 @@ export function FilletDialog(props: FilletDialogProps) {
           type="button"
           className="sketch-prompt-btn sketch-prompt-btn-confirm"
           data-testid="dialog-shell-apply"
-          aria-label="Apply Fillet"
-          data-tooltip="Apply Fillet (Enter)"
+          aria-label={workbenchText('FilletDialog.applyFillet')}
+          data-tooltip={workbenchText('FilletDialog.applyFilletEnter')}
           disabled={applyDisabled}
           onClick={() => { void handleApply() }}
         >
           <Check size={12} aria-hidden="true" />
-          <span>Apply</span>
+          <span>{workbenchText('FilletDialog.apply')}</span>
         </button>
         <button
           type="button"
           className="sketch-prompt-btn"
           data-testid="dialog-shell-cancel"
-          aria-label="Cancel Fillet"
-          data-tooltip="Cancel Fillet (Escape)"
+          aria-label={workbenchText('FilletDialog.cancelFillet')}
+          data-tooltip={workbenchText('FilletDialog.cancelFilletEscape')}
           onClick={handleClose}
         >
           <X size={12} aria-hidden="true" />
-          <span>Cancel</span>
+          <span>{workbenchText('FilletDialog.cancel')}</span>
         </button>
       </span>
     </div>

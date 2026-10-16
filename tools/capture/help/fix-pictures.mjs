@@ -1,7 +1,8 @@
 // Correct only the architect's named crops, using recorded production screenshots.
 import sharp from 'sharp'
 import fs from 'node:fs'
-const root = 'src/tests/evidence/WO-2491/routes'
+import { HELP_EVIDENCE } from './evidence-root.mjs'
+const root = HELP_EVIDENCE + '/routes'
 const only = new Set(process.argv.slice(2))
 const crop = (lane, file, box) => sharp(`${root}/${lane}/screens/${file}.png`).extract(box).png().toBuffer()
 const area = { left: 590, top: 280, width: 850, height: 710 }

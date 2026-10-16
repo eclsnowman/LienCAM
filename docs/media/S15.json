@@ -2,23 +2,23 @@
   "schemaVersion": 1,
   "shots": {
     "S15.png": {
-      "commit": "693351a7b4ee65bd73bb0d4ed8ff31e5916fb20e",
+      "commit": "da49f09f542917e68e45c1262b92b50271b135a1",
       "workingTreeDirty": false,
       "workingTreeScope": [
         "dist"
       ],
       "sourceExcludes": [],
-      "sourceHash": "e6bad37a10752ff92d16e7f5bee335cc8a86bf9625a7d92099bff8a418ab3335",
+      "sourceHash": "c39044bb9d5bf8501ae3ac5c965afb9d73b6a0514a27d02fcad4885b6a2cb529",
       "sourceHashAlgorithm": "sha256-path-and-content-v1",
-      "sourceFileCount": 231,
-      "captureCommit": "31e107e9a3ee8e3c98065d647fd21eb34d827d84",
-      "buildCommit": "693351a7b4ee65bd73bb0d4ed8ff31e5916fb20e",
-      "buildHash": "7fe5aa488dc2996b0f9bcc1b4cbd507180d9a62461db59b13e35d2431f15a069",
+      "sourceFileCount": 300,
+      "captureCommit": "a364971976a4b0b3e77ad13e3bb1bc056424c20c",
+      "buildCommit": "da49f09f542917e68e45c1262b92b50271b135a1",
+      "buildHash": "aab6afc8461e73830ffc1ab71084f1913c0026810bf78e2036994745d24d4b1f",
       "sceneId": "S15",
       "width": 1920,
       "height": 1080,
-      "screenshotBytes": 240786,
-      "screenshotSha256": "c9d88dbe5b68975eedab979cbff183e6684469384fc96082ce187435ba1cdb96"
+      "screenshotBytes": 239658,
+      "screenshotSha256": "85a72de25e0b8dbb8a99382751841384ee21e844dde71912bf46e6361fd462ec"
     }
   }
 }

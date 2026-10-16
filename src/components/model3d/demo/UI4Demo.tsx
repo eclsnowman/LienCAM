@@ -17,6 +17,7 @@
 // either; that gap-fill measure kind is proven against a real cylinder via
 // the Node kernel test suite instead, see src/tests/model3d/measureLogic*).
 
+import { useText } from '../../../i18n'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createGeomService, type GeomClient, type GeometrySnapshot } from '../../../geom'
@@ -96,6 +97,7 @@ declare global {
 }
 
 export function UI4Demo({ createClient = createGeomService, createSceneRuntime = createDefaultSceneRuntime }: UI4DemoProps = {}) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [runtime, setRuntime] = useState<SceneRuntime | null>(null)
   const [session, setSession] = useState<GeomBridgeSession | null>(null)
@@ -103,7 +105,7 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
   const bodyRef = useRef<BodyEntry | null>(null)
   const comMarkerRef = useRef<THREE.Group | null>(null)
   const snapshotsRef = useRef<Record<StableId, GeometrySnapshot>>({})
-  const [status, setStatus] = useState('booting...')
+  const [status, setStatus] = useState<string>(workbenchText('UI4Demo.booting'))
   const [ready, setReady] = useState(false)
 
   const appearanceRef = useRef(new AppearanceStore())
@@ -112,7 +114,7 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
   const dagRef = useRef<FeatureDag | null>(null)
   if (dagRef.current === null) {
     const dag = new FeatureDag()
-    dag.insertNode({ id: DEMO_BODY_ID, kind: 'body', payload: { name: 'Demo Box' } })
+    dag.insertNode({ id: DEMO_BODY_ID, kind: 'body', payload: { name: workbenchText('UI4Demo.demoBox') } })
     dagRef.current = dag
   }
   const dag = dagRef.current
@@ -277,17 +279,17 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
     setSession(sess)
 
     async function boot(): Promise<void> {
-      setStatus('initializing geometry kernel...')
+      setStatus(workbenchText('UI4Demo.initializingGeometryKernel'))
       await sess.init()
       if (cancelled) return
-      setStatus('creating demo box...')
+      setStatus(workbenchText('UI4Demo.creatingDemoBox'))
       await sess.createBox(DEMO_BODY_ID, { featureId: 'F1', size: DEMO_SIZE })
       await sess.tessellateProgressive(DEMO_BODY_ID, (_phase, cachedBody) => {
         if (cancelled) return
         paintCachedBody(rt, cachedBody)
       })
       if (cancelled) return
-      setStatus('ready')
+      setStatus(workbenchText('UI4Demo.ready'))
       setReady(true)
     }
     void boot()
@@ -471,18 +473,14 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
             aria-pressed={activeTool === 'measure'}
             onClick={() => setActiveTool('measure')}
             style={toolButtonStyle(activeTool === 'measure')}
-          >
-            Measure
-          </button>
+          >{workbenchText('UI4Demo.measure')}</button>
           <button
             type="button"
             data-testid="ui4-tool-appearance"
             aria-pressed={activeTool === 'appearance'}
             onClick={() => setActiveTool('appearance')}
             style={toolButtonStyle(activeTool === 'appearance')}
-          >
-            Appearance
-          </button>
+          >{workbenchText('UI4Demo.appearance')}</button>
           {activeTool === 'measure' &&
             (['face', 'edge', 'vertex', 'body'] as const).map((mode) => (
               <button
@@ -501,11 +499,9 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
             data-testid="ui4-regenerate"
             disabled={!ready}
             onClick={handleRegenerate}
-            data-tooltip="Re-mint the demo body under the same feature id (proves appearance survives)"
+            data-tooltip={workbenchText('UI4Demo.reMintTheDemoBodyUnderTheSameFeature')}
             style={toolButtonStyle(false)}
-          >
-            Regenerate
-          </button>
+          >{workbenchText('UI4Demo.regenerate')}</button>
         </div>
         <div style={{ position: 'absolute', top: 68, left: 8, zIndex: 2 }}>
           {activeTool === 'measure' ? (
@@ -533,7 +529,7 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
         </div>
       </div>
       <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid var(--border-subtle, #2a3540)', padding: 10, overflowY: 'auto' }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Design tree</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{workbenchText('UI4Demo.designTree')}</div>
         <FeatureTree
           dag={dag}
           visibility={{
@@ -547,7 +543,7 @@ export function UI4Demo({ createClient = createGeomService, createSceneRuntime =
             },
           }}
         />
-        <div style={{ fontWeight: 600, margin: '16px 0 8px' }}>Mass properties (BK-49)</div>
+        <div style={{ fontWeight: 600, margin: '16px 0 8px' }}>{workbenchText('UI4Demo.massPropertiesBK49')}</div>
         <MassPropertiesPanel
           bodyId={ready ? DEMO_BODY_ID : null}
           materialId={materialId}
@@ -566,7 +562,7 @@ function toolButtonStyle(active: boolean): React.CSSProperties {
   return {
     background: active ? 'var(--select-ui-bg)' : 'rgba(16,20,24,0.85)',
     color: 'var(--text-primary, #e2e8f0)',
-    border: '1px solid var(--border-subtle, #2a3540)',
+    border: "1px solid var(--border-subtle, #2a3540)",
     borderRadius: 'var(--radius-md, 4px)',
     padding: '2px 8px',
     cursor: 'pointer',

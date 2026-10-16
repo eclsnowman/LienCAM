@@ -1,3 +1,5 @@
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { Sketch, Vec2 } from '../../../lib/sketch/sketcher'
 import type { PlaneFrame } from '../../../sketch3d/planeMath'
 import { worldToLocal } from '../../../sketch3d/planeMath'
@@ -47,7 +49,7 @@ const WORLD_ORIGIN = Object.freeze({ x: 0, y: 0, z: 0 })
 export function workbenchOriginAnchorLocal(frame: PlaneFrame): Vec2 {
   const at = worldToLocal(frame, WORLD_ORIGIN)
   if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) {
-    throw new Error('Workbench origin anchor projection is not finite')
+    throw new Error(workbenchText('workbenchOriginAnchor.workbenchOriginAnchorProjectionIsNotFinite'))
   }
   return at
 }

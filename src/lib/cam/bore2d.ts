@@ -7,6 +7,7 @@ import { generateHelixArcs } from './threadHelix'
 import { resolveHeights } from './heights'
 import { directionForTool } from '../tool/cutHand'
 import { loopWindingFor } from './millingDirection'
+import { operatorLoopRef, type OperatorLoop } from './toolFluteReach'
 import {
   assertInternalCircleEnvelopeInside,
   internalCircleCenterRadius,
@@ -17,6 +18,8 @@ type Pt = { x: number; y: number }
 
 interface BoreRecord extends Pt {
   loopId: string
+  /** How messages name this hole to the operator; never the loop id. */
+  label: string
   diameter: number
   selectedDiameter: number
   circularityErr: number
@@ -77,15 +80,16 @@ function uniqueOpenPoints(points: Pt[]): Pt[] {
   return points
 }
 
-function fitCircularLoop(pointsIn: Pt[], loopId: string): CircleFit {
-  const points = uniqueOpenPoints(pointsIn)
+function fitCircularLoop(loop: OperatorLoop & { points: Pt[] }): CircleFit {
+  const label = operatorLoopRef(loop)
+  const points = uniqueOpenPoints(loop.points)
   if (points.length < 8) {
-    throw new Error(`Bore: loop "${loopId}" is not a sampled circle. Select circular hole loops or a 3D cylindrical bore face.`)
+    throw new Error(`Bore: ${label} is not a sampled circle. Select circular hole loops or a 3D cylindrical bore face.`)
   }
 
   const fit = fitCircle(points)
   if (!(fit.radius > EPS)) {
-    throw new Error(`Bore: loop "${loopId}" has no usable diameter.`)
+    throw new Error(`Bore: ${label} has no usable diameter.`)
   }
 
   const diameter = fit.radius * 2
@@ -93,7 +97,7 @@ function fitCircularLoop(pointsIn: Pt[], loopId: string): CircleFit {
 
   if (!(fit.residual <= radialTol)) {
     throw new Error(
-      `Bore: loop "${loopId}" is not round enough for circular bore milling. ` +
+      `Bore: ${label} is not round enough for circular bore milling. ` +
       'Use a circular loop or pick a 3D cylindrical bore face.'
     )
   }
@@ -286,15 +290,19 @@ export function buildBoreToolpath(
   }
 
   const records: BoreRecord[] = selectedLoops.map(loop => {
-    const fit = fitCircularLoop(loop.points, loop.id)
+    const fit = fitCircularLoop(loop)
+    // The Geometry list shows an unnamed bore loop by its diameter.
+    const label = operatorLoopRef(loop, `the ${fit.diameter.toFixed(3)} mm hole`)
     const targetDiameter = resolveInternalCircleTargetDiameter({
       operation: 'Bore',
       loopId: loop.id,
+      loop: label,
       selectedDiameter: fit.diameter,
       targetDiameter: params.targetDiameter,
     })
     return {
       loopId: loop.id,
+      label,
       x: fit.cx,
       y: fit.cy,
       diameter: targetDiameter,
@@ -323,16 +331,17 @@ export function buildBoreToolpath(
     const mappedBottom = boreBottoms?.[rec.loopId]
     if (boreBottoms !== undefined && mappedBottom == null) {
       console.warn(`bore: boreBottoms has no entry for loop "${rec.loopId}" - using op-level bottom height`)
-      note(`loop "${rec.loopId}" has no bore bottom of its own, so the operation's bottom height was used.`)
+      note(`${rec.label[0].toUpperCase()}${rec.label.slice(1)} has no bore bottom of its own, so the operation's bottom height was used.`)
     }
     const boreBottomZ = mappedBottom != null ? mappedBottom + wcsOrigin.z : bottomZ
     if (topZ <= boreBottomZ + EPS) {
-      throw new Error(`Bore: top of cut must be above bottom of cut for loop "${rec.loopId}".`)
+      throw new Error(`Bore: top of cut must be above bottom of cut for ${rec.label}.`)
     }
 
     const finalRadius = internalCircleCenterRadius({
       operation: 'Bore',
       loopId: rec.loopId,
+      loop: rec.label,
       targetDiameter: rec.diameter,
       toolDiameter: tool.diameter,
       minRadialClearance: 0.025,
@@ -340,6 +349,7 @@ export function buildBoreToolpath(
     assertInternalCircleEnvelopeInside({
       operation: 'Bore',
       loopId: rec.loopId,
+      loop: rec.label,
       centerRadius: finalRadius,
       toolDiameter: tool.diameter,
       boundaryDiameter: rec.selectedDiameter,
@@ -352,7 +362,7 @@ export function buildBoreToolpath(
     const hasFinishOrSpring = finishPasses > 0 || springPasses > 0
     if (orbitPlans.length === 0 && !hasFinishOrSpring) {
       throw new Error(
-        `Bore: stock to leave ${stockToLeave.toFixed(3)} mm leaves no valid roughing orbit for loop "${rec.loopId}". ` +
+        `Bore: stock to leave ${stockToLeave.toFixed(3)} mm leaves no valid roughing orbit for ${rec.label}. ` +
         'Reduce stock to leave or enable a finish pass.'
       )
     }

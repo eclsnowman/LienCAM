@@ -14,6 +14,7 @@ import type { VfdDefinition } from '../lib/machine/vfd'
 // here is never a runtime cycle.
 import type { MachineToolTable, ProbePadChoice, ZProbeConfig } from '../lib/machine/toolTable'
 import type { ActionColor, BuiltinActionId } from '../lib/machine/machineActions'
+import { gcodeTableDialectOf, gcodeWordEntry, gcodeWordTable, gcodeWordTableWithOutputs } from '../lib/gcode/wordTable'
 export type { ModelReference, ModelReferenceRole } from '../lib/cam/types'
 
 // --- Geometry & Math ---
@@ -2305,6 +2306,8 @@ export function newMachineMacroId(): string {
 
 /** One user macro on a machine definition (WO-1680). */
 export interface MachineMacro {
+  /** WO-2677: explicit output selection for the button readback; absent means none. */
+  drivesOutput?: string
   id: string
   name: string
   /** The M-code that runs it when typed, if the user bound one. */
@@ -3917,7 +3920,7 @@ export interface Setup {
  *  like an operation (order, drag, on/off, rename) and posts at its place.
  *  A new action type adds its kind here, its own fields beside
  *  OperatorStopAction, and its entry in MACHINE_ACTION_TYPES. */
-export type MachineActionKind = 'operator_stop'
+export type MachineActionKind = 'operator_stop' | 'run_macro'
 
 interface MachineActionBase {
   id: string
@@ -3938,12 +3941,40 @@ export interface OperatorStopAction extends MachineActionBase {
   message: string
 }
 
-export type MachineAction = OperatorStopAction
+/** Call the selected macro on the active machine by its current M-code. */
+export interface RunMacroAction extends MachineActionBase {
+  kind: 'run_macro'
+  macroId: string
+  /** The shared action update surface permits this; only Operator stop uses it. */
+  message?: string
+}
+
+export type MachineAction = OperatorStopAction | RunMacroAction
+
+/** Match the runtime's first shown binding for each M-code. A hidden macro
+ *  does not run, and a second macro on the same code cannot be addressed. */
+export function callableMachineMacros(machine: Pick<MachineConfig, 'macros' | 'controller' | 'controllerDefinition' | 'coolantCapability'>): Array<MachineMacro & { mCode: number }> {
+  const dialect = gcodeTableDialectOf(machine.controller) ?? 'generic'
+  const outputs = [...(machine.controllerDefinition?.outputs ?? [])]
+  const vacuum = machineOutputForChannel(machine, 'vacuum') === null ? machineVacuumCapability(machine)?.onCode : undefined
+  const table = gcodeWordTableWithOutputs(gcodeWordTable(dialect), vacuum
+    ? [...outputs, { name: 'vacuum', onCode: vacuum, offCode: null }] : outputs)
+  const seen = new Set<number>()
+  return (machine.macros ?? []).filter((macro): macro is MachineMacro & { mCode: number } => {
+    if (macro.hidden || typeof macro.mCode !== 'number' || !Number.isSafeInteger(macro.mCode) || macro.mCode < 0 || seen.has(macro.mCode)) return false
+    seen.add(macro.mCode)
+    // The program reader executes table/output codes as their standard
+    // actions. M6 alone also runs its bound macro, as a tool-change prelude.
+    if (macro.mCode !== 6 && gcodeWordEntry(table, 'M', macro.mCode) !== null) return false
+    return true
+  })
+}
 
 /** WO-2437: every machine action type, in the order the New operation menu's
  *  Machine actions group lists them. */
 export const MACHINE_ACTION_TYPES: ReadonlyArray<{ kind: MachineActionKind; label: string }> = [
   { kind: 'operator_stop', label: 'Operator stop' },
+  { kind: 'run_macro', label: 'Run macro' },
 ]
 
 /** WO-2437: the name a machine action type shows by. */
@@ -3956,6 +3987,8 @@ export function newMachineAction(kind: MachineActionKind, id: string, afterOpId:
   switch (kind) {
     case 'operator_stop':
       return { id, kind, name: machineActionLabel(kind), enabled: true, afterOpId, message: '' }
+    case 'run_macro':
+      return { id, kind, name: machineActionLabel(kind), enabled: true, afterOpId, macroId: '' }
   }
 }
 

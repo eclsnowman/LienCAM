@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import sharp from 'sharp'
 import { chromium } from 'playwright'
 import { withViteCaptureServer, dismissMachineModal, CHROMIUM_CAPTURE_ARGS } from '../lib/harness.mjs'
-const dir = 'src/tests/evidence/WO-2491/stock-drag'
+import { HELP_EVIDENCE } from './evidence-root.mjs'
+const dir = HELP_EVIDENCE + '/stock-drag'
 fs.mkdirSync(dir, { recursive: true })
 await withViteCaptureServer({ port: 62498, repoRoot: process.cwd(), timeoutMs: 120000 }, async ({ baseUrl }) => {
   const browser = await chromium.launch({ headless: true, args: CHROMIUM_CAPTURE_ARGS })

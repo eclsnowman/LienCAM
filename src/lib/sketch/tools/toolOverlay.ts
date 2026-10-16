@@ -33,7 +33,7 @@ import {
   linearPatternPreview, circularPatternPreview, pathPatternPreview,
 } from './patternTools'
 import { transformPreviewEntities } from './transformTools'
-import { resolveDimPlacement } from './dimPlacement'
+import { resolveDimPlacement, type DimPlacementResult } from './dimPlacement'
 import {
   arcSamplePoints,
   circleSamplePoints,
@@ -60,6 +60,9 @@ export interface ToolOverlay {
    *  being placed. Drawn like a committed dimension's leader so the
    *  preview matches the placed result. */
   dimGuides?: Vec2[][]
+  /** Retain semantic placement for camera-sized painting. Pure callers can
+   *  still inspect dimGuides; only the painter knows the current screen scale. */
+  dimPlacement?: { entities: readonly SketchEntity[]; placement: DimPlacementResult }
 }
 
 /** Document + parameter context the overlay may need (superset across
@@ -194,7 +197,7 @@ export function toolOverlay(
         { forceOrientation: state.chain.forceMode ?? null, clampInitial: true },
       )
       return placement && placement.guides.length > 0
-        ? { dimGuides: placement.guides }
+        ? { dimGuides: placement.guides, dimPlacement: { entities: ctx.entities, placement } }
         : null
     }
     case 'trim': {

@@ -131,6 +131,65 @@ export function formFromBody(mesh: BodyMesh, opts: FormFromBodyOptions = {}): Fo
   return { cage: { positions, faces, creases }, flatFaces, gridFaces: 0, curvedTriangles }
 }
 
+/**
+ * WO-2820: the faces of a bare triangle mesh (an STL has none) - `triFace` for From body. Two triangles are one
+ * face when they share an edge, meet at less than SHARP_EDGE_DEG, and every grouping in `groups` (one entry per
+ * triangle, e.g. the recognisers' feature of each facet, the flat face it lies in) puts them together. The smooth
+ * test alone would make a boss and its tangent foot fillet one face, and From body then bevels the fillet; the
+ * recognisers alone lump a counterbore's walls and floor (or four separate corner rounds) into one; together they
+ * split the mesh the way the solid it was written from was split.
+ */
+export function meshTriFaces(position: ArrayLike<number>, index: ArrayLike<number>, groups: ReadonlyArray<ArrayLike<number>> = []): Int32Array {
+  const triCount = Math.floor(index.length / 3)
+  let extent = 0
+  for (let i = 0; i < position.length; i++) extent = Math.max(extent, Math.abs(position[i]))
+  const q = 1e-6 * Math.max(1, extent)
+  const byKey = new Map<string, number>()
+  const vert = (v: number) => {
+    const key = `${Math.round(position[v * 3] / q)},${Math.round(position[v * 3 + 1] / q)},${Math.round(position[v * 3 + 2] / q)}`
+    let id = byKey.get(key)
+    if (id === undefined) { id = byKey.size; byKey.set(key, id) }
+    return id
+  }
+  const tris = Array.from({ length: triCount }, (_, t) => [vert(index[t * 3]), vert(index[t * 3 + 1]), vert(index[t * 3 + 2])])
+  const normals = tris.map((_, t) => {
+    const [a, b, c] = [index[t * 3], index[t * 3 + 1], index[t * 3 + 2]].map((v): Vec3 => [position[v * 3], position[v * 3 + 1], position[v * 3 + 2]])
+    return newell([a, b, c])
+  })
+  const byEdge = new Map<string, number[]>()
+  tris.forEach((tri, t) => {
+    for (let k = 0; k < 3; k++) {
+      const key = edgeKey(tri[k], tri[(k + 1) % 3])
+      const list = byEdge.get(key)
+      if (list) list.push(t); else byEdge.set(key, [t])
+    }
+  })
+  const cosSharp = Math.cos((SHARP_EDGE_DEG * Math.PI) / 180)
+  const together = (a: number, b: number) => {
+    const n = normals[a], m = normals[b]
+    return n[0] * m[0] + n[1] * m[1] + n[2] * m[2] >= cosSharp && groups.every((g) => g[a] === g[b])
+  }
+  const face = new Int32Array(triCount).fill(-1)
+  let faces = 0
+  for (let seed = 0; seed < triCount; seed++) {
+    if (face[seed] !== -1) continue
+    const id = faces++
+    face[seed] = id
+    const stack = [seed]
+    while (stack.length > 0) {
+      const t = stack.pop()!
+      for (let k = 0; k < 3; k++) {
+        for (const o of byEdge.get(edgeKey(tris[t][k], tris[t][(k + 1) % 3]))!) {
+          if (face[o] !== -1 || !together(t, o)) continue
+          face[o] = id
+          stack.push(o)
+        }
+      }
+    }
+  }
+  return face
+}
+
 /** The single boundary loop of a set of edge-connected triangles, in their winding; null if it is not one simple loop. */
 function boundaryLoop(tris: number[][]): number[] | null {
   const uses = new Map<string, number>()

@@ -32,6 +32,7 @@ import { resolveFeedrates } from '../../lib/cam/feedrates';
 import { spindleRotationForTool } from '../../lib/tool/cutHand';
 import type { AdaptiveMillingDirection } from '../../lib/cam/types';
 import type { Cam3dProgressCallback } from '../progress';
+import { roughEntryRefusalWords } from './roughEntryRefusalWords';
 import { toolToCutterSpec } from './cutterSpec';
 import type { ResolvedParallel3dHeights } from './parallel3dOperation';
 
@@ -728,6 +729,7 @@ export async function computeAdaptive3dMoves(
   const heights = { clearanceZ, retractZ, feedZ };
 
   const t0 = performance.now();
+  // WO-2869: an entry the engine refuses reaches the operator in machinist words.
   const roughed = await args.client.generateAdaptiveRough(
     {
       partMesh: args.partMesh,
@@ -762,7 +764,18 @@ export async function computeAdaptive3dMoves(
       ...(args.startFromStock !== undefined ? { startFromStock: args.startFromStock } : {}),
     },
     { signal: args.signal, onProgress: args.onProgress, onNotice: (message) => { notices.push(message); } },
-  );
+  ).catch((error: unknown) => {
+    const words = error instanceof Error
+      ? roughEntryRefusalWords(error.message, {
+          toolDiameter: args.tool.diameter,
+          stockTopZ: topZ,
+          partBounds: args.partMesh.bounds,
+          clearsAllStock: args.sideEntry === true,
+          clearAllStockRequested: args.params.useStockBoundary,
+        })
+      : undefined;
+    throw words === undefined ? error : new Error(words, { cause: error });
+  });
   const { ir, carvedStock, carvedStockWarning, diagnostics, carvedStockHandle } = roughed;
   const computeTimeMs = performance.now() - t0;
 

@@ -32,6 +32,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { typedMock } from '../support/typedMock'
+import { removeWo2665Wrappers, wo2665OldSetupWords } from './support/wo2665Layout'
 
 const held = vi.hoisted(() => ({ rotations: {} as Record<string, number> }))
 
@@ -324,6 +325,10 @@ const BASELINE = join(process.cwd(), 'src/tests/evidence/WO-2592/baselines/WO-21
 const hash = (text: string) => {
   const unchanged = document.createElement('div')
   unchanged.innerHTML = text
+  // WO-2764: WO-2665's center column, identity picture-scale wrapper and four shortened
+  // setup sentences are excused, nothing else.
+  removeWo2665Wrappers(unchanged)
+  unchanged.innerHTML = wo2665OldSetupWords(unchanged.innerHTML)
   unchanged.querySelector('[data-testid="control-probe-pause"]')?.remove()
   const start = unchanged.querySelector<HTMLElement>('[data-testid="control-probe-run-guided"]')
   // Only the grid span is excused; any other inline style still changes the hash.

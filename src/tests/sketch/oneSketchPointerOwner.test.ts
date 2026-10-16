@@ -79,6 +79,21 @@ const CAM_VIEWPORT_ENGINE = join(SRC_ROOT, 'lib', 'viewport', 'CNCViewport.ts')
  *  outside the component allowed to know what the right button is (rule (e)). */
 const RIGHT_BUTTON_ALLOWLIST = [join(SRC_ROOT, 'lib', 'viewport', 'navPresetController.ts')]
 
+/** WO-2784 RE-PIN (rule (d)): WO-2728 (549731e225, "Dismiss press-order context menu when
+ *  right-drag panning starts", owner 10-10: "suggesting explicitly dismissing the menu once panning
+ *  more than, say, 10px") put `dismissContextMenuOnRightDrag` in navigation. It registers window
+ *  capture `pointerup`/`pointerdown` listeners whose ONLY handler is its own `stop` -- they END the
+ *  observation of a right-drag pan (navigation's gesture, the same file rule (e) already allows),
+ *  they never start, build or own a sketch drag. The exemption is pinned to exactly that shape:
+ *  the (d) test below fails if this file registers any other press/release/contextmenu/dblclick
+ *  listener on window/document, or any with a handler other than `stop`. */
+const WINDOW_GESTURE_NAV_ALLOWLIST: Record<string, ReadonlyArray<{ event: string; handler: string }>> = {
+  [join(SRC_ROOT, 'lib', 'viewport', 'navPresetController.ts')]: [
+    { event: 'pointerup', handler: 'stop' },
+    { event: 'pointerdown', handler: 'stop' },
+  ],
+}
+
 const slash = (p: string) => p.split('\\').join('/')
 
 function collectTsFiles(dir: string, out: string[]): void {
@@ -343,14 +358,25 @@ describe('WO SKC-14: capability scan -- one sketch pointer owner, one feedback p
   })
 
   it('(d) STRUCTURAL: only the component registers window/document press+release listeners', () => {
+    const navAllow = new Set(Object.keys(WINDOW_GESTURE_NAV_ALLOWLIST).map(slash))
     const offenders = ecosystemFiles()
-      .filter((f) => !inSketcherPkg(f))
+      .filter((f) => !inSketcherPkg(f) && !navAllow.has(slash(f)))
       .filter((f) => registersWindowGesture(readFileSync(f, 'utf8')))
       .map(slash)
     // FAILS-IF: a mount grows any drag whatsoever. A drag needs a release; only this package may
     // listen for one. Name-free: it would have caught the dimension-label drag no matter what its
     // author had called it.
     expect(offenders).toEqual([])
+    // WO-2784 RE-PIN: the navigation exemption (WO-2728) holds ONLY for its exact pinned
+    // registrations -- every window/document press/release listener in the allowlisted file must
+    // be one of them, and each must still be present (no stale exemption).
+    for (const [file, pinned] of Object.entries(WINDOW_GESTURE_NAV_ALLOWLIST)) {
+      const src = stripComments(readFileSync(file, 'utf8'))
+      const found = [...src.matchAll(
+        /(?:window|document)\.addEventListener\(\s*['"](pointerdown|pointerup|contextmenu|dblclick)['"]\s*,\s*([^,)]+)/g,
+      )].map((m) => ({ event: m[1], handler: m[2].trim() }))
+      expect(found, slash(file)).toEqual(pinned)
+    }
   })
 
   it('(e) STRUCTURAL: only the component (and navigation) discriminates the right button', () => {

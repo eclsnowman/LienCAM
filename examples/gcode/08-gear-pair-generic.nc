@@ -1,4 +1,5 @@
-(LienCAM 0.36.0-alpha.1 - 08 Gear pair - generic)
+(LienCAM 0.36.0-alpha.2 - 08 Gear pair - generic)
+G90 G21
 ( Setup 1 )
 G54
 ( Bore 1 )

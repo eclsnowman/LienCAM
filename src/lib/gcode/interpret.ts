@@ -48,6 +48,7 @@
 import {
   readGcodeProgram,
   type GcodeDialect,
+  type GcodeListedOutputCommand,
   type GcodeReadRefusal,
   type GcodeReaderMove,
   type GcodeReaderOptions,
@@ -189,7 +190,7 @@ export interface GcodeStage {
    *  state is already in `coolant`; what this carries is the LINE, so the route
    *  that commands the output can name where the file asked for it instead of
    *  naming the block that happened to open the stage. */
-  coolantBefore: ({ line: number } & GcodeCoolantState) | null
+  coolantBefore: ({ line: number; standardCode?: 7 | 8 | 9; listedCommand?: GcodeListedOutputCommand } & GcodeCoolantState) | null
 }
 
 /** A word this route honours by doing nothing, and the line it fell on. Said
@@ -337,6 +338,8 @@ export function interpretGcodeProgram(
   if (!read.ok) return read
 
   const { moves, moveLines, items } = read.program
+  const boundM6Lines = new Set((read.program.tableCodeMacroBindings ?? [])
+    .filter((binding) => binding.code === 6).map((binding) => binding.line))
 
   const stages: GcodeStage[] = []
   let wcs = options.sessionWcs
@@ -368,7 +371,11 @@ export function interpretGcodeProgram(
   let pendingHold: { line: number; optional: boolean } | null = null
   let pendingMacro: { line: number; code: number; toolChange?: number } | null = null
   let pendingToolChange: { line: number; from: number; to: number } | null = null
-  let pendingCoolant: ({ line: number } & GcodeCoolantState) | null = null
+  let pendingCoolant: GcodeStage['coolantBefore'] = null
+  // Opaque macro bodies can change either channel without changing the file's
+  // parsed modal state. Only that channel's explicit command establishes it.
+  let coolantAfterMacro = false
+  const unknownCoolant = { flood: false, mist: false }
 
   // WO-2556: preserve a start between M6 and a following pause as executable
   // work, so Continue cannot also clear that pause. Without such a pause,
@@ -442,15 +449,15 @@ export function interpretGcodeProgram(
     return null
   }
 
-  // TWO BOUNDARY COMMANDS WITH NO MOTION BETWEEN THEM ARE REFUSED, BY LINE,
-  // NAMING BOTH (architect, 2026-09-11T05:09Z). One boundary is ONE hold and the
-  // operator does one thing there, so a second tool change or macro behind it
-  // cannot be represented: the hold would name one of them and silently release
-  // the motion the other was meant to come first. That is the class this route
-  // exists to avoid - being told to fit T2 for moves interpreted under T3 - so
-  // the file is turned away at the door instead of guessed at. A degenerate
-  // shape no post emits; if a real one ever does, this names the line and we
-  // decide with the evidence in hand.
+  const priorIsBoundSameToolM6 = (): boolean => {
+    const last = stages.at(-1)?.ends
+    const change = pendingToolChange ?? (last?.kind === 'tool-change' ? last : null)
+    return change !== null && change.from === change.to && boundM6Lines.has(change.line)
+  }
+
+  // Keep refusing unrelated tool-change collisions rather than merging two
+  // cutter responsibilities into one hold. WO-2478's custom macro sequences
+  // and shown same-tool M6 bindings use separate fence stages below.
   const refuseCollapsedBoundary = (
     line: number,
     what: string,
@@ -538,6 +545,8 @@ export function interpretGcodeProgram(
       }
 
       case 'macro':
+        coolantAfterMacro = true
+        unknownCoolant.flood = unknownCoolant.mist = true
         // A MACRO CALL IS A LINE THIS APP CANNOT RUN, and the architect's
         // re-scope is explicit that ignoring it silently is not safe. It is
         // also not a reason to turn away a 110,000-line Fusion file at the
@@ -552,7 +561,13 @@ export function interpretGcodeProgram(
         if (!currentHasSteps()) {
           // WO-2586: the file's stop precedes the macro. Give it a boundary
           // before any macro (including its park motion) can execute.
-          if (pendingHold !== null || stages.at(-1)?.ends.kind === 'hold') {
+          if (pendingHold !== null || stages.at(-1)?.ends.kind === 'hold'
+            || pendingMacro !== null || stages.at(-1)?.ends.kind === 'macro'
+            || priorIsBoundSameToolM6()
+            || (stages.length === 0 && priorActionBoundary() === null)) {
+            // A leading or adjacent macro gets its own motionless stage. The
+            // session's existing fence makes each incoming boundary execute
+            // once; no cutting part is released by another action's Continue.
             openStageForStep(item.line)
             closeStage({ kind: 'macro', ...macroBoundaryOf(item) })
             openLine = item.line
@@ -636,7 +651,9 @@ export function interpretGcodeProgram(
 
       case 'tool-change': {
         if (!tools.includes(item.tool)) tools.push(item.tool)
-        if (tool === null || tool === item.tool) {
+        const boundM6 = boundM6Lines.has(item.line)
+        const sameTool = tool === null || tool === item.tool
+        if (sameTool && !boundM6) {
           tool = item.tool
           break
         }
@@ -655,12 +672,18 @@ export function interpretGcodeProgram(
             + 'it, and a cutter is never fitted to a turning spindle.',
           )
         }
-        const from = tool
+        if (boundM6) {
+          coolantAfterMacro = true
+          unknownCoolant.flood = unknownCoolant.mist = true
+        }
+        const from = tool ?? item.tool
         tool = item.tool
         if (!currentHasSteps()) {
           // WO-2556: an M0 BEFORE M6 belongs to its own stop. The tool-change
           // Continue answers the tool change, never a file pause.
-          if (pendingHold !== null || stages.at(-1)?.ends.kind === 'hold') {
+          if (pendingHold !== null || stages.at(-1)?.ends.kind === 'hold'
+            || (boundM6 && sameTool && (pendingMacro !== null || stages.at(-1)?.ends.kind === 'macro' || priorIsBoundSameToolM6()))
+            || (boundM6 && stages.length === 0 && priorActionBoundary() === null)) {
             openStageForStep(item.line)
             closeStage({ kind: 'tool-change', line: item.line, from, to: item.tool })
             openLine = item.line
@@ -697,8 +720,33 @@ export function interpretGcodeProgram(
           const next: GcodeCoolantState = item.outputs === undefined
             ? { flood: item.flood, mist: item.mist }
             : { flood: item.flood, mist: item.mist, outputs: [...item.outputs] }
-          if (sameGcodeCoolantState(coolant, next)) break
+          const same = sameGcodeCoolantState(coolant, next)
+          const code = item.standardCode
+          const resolvesUnknown = code === 7 ? unknownCoolant.mist
+            : code === 8 ? unknownCoolant.flood
+              : code === 9 && (unknownCoolant.flood || unknownCoolant.mist)
+          if (code === 7 || code === 9) unknownCoolant.mist = false
+          if (code === 8 || code === 9) unknownCoolant.flood = false
+          const preserveCommand = coolantAfterMacro && (item.listedCommand !== undefined || resolvesUnknown || !same)
+          if (same && !preserveCommand) break
           coolant = next
+          if (preserveCommand) {
+            // Keep the actual command after all earlier dwell/motion. A
+            // dedicated existing command-only fence owns each explicit effect,
+            // including listed words whose parsed state survived an opaque
+            // macro. No later word or EOF may overwrite that pending effect.
+            if (currentHasSteps()) closeStage({ kind: 'coolant', line: item.line, ...coolant })
+            openLine = item.line
+            openStageForStep(item.line)
+            pendingCoolant = { line: item.line, ...coolant,
+              ...(code === undefined ? {} : { standardCode: code }),
+              ...(item.listedCommand === undefined ? {} : { listedCommand: item.listedCommand }),
+            }
+            commandOnly = true
+            closeStage({ kind: 'coolant', line: item.line, ...coolant })
+            openLine = item.line
+            break
+          }
           if (startsAfterChange) {
             openStageForStep(item.line)
             commandOnly = true
@@ -774,8 +822,11 @@ export function interpretGcodeProgram(
     // WO-2556: a final M0/M1 still waits for Cycle Start. An empty final
     // stage gives the machine route a stop boundary without adding motion.
     const last = stages.at(-1)
-    if (pendingHold !== null || last?.ends.kind === 'hold') {
-      openStageForStep(pendingHold?.line ?? (last!.ends as { line: number }).line)
+    const pendingBoundM6 = pendingToolChange !== null && boundM6Lines.has(pendingToolChange.line) ? pendingToolChange : null
+    const finalBoundM6 = last?.ends.kind === 'tool-change' && boundM6Lines.has(last.ends.line) ? last.ends : null
+    if (pendingHold !== null || last?.ends.kind === 'hold' || pendingMacro !== null || last?.ends.kind === 'macro'
+      || pendingBoundM6 !== null || finalBoundM6 !== null) {
+      openStageForStep(pendingHold?.line ?? pendingMacro?.line ?? pendingBoundM6?.line ?? (last!.ends as { line: number }).line)
       closeStage({ kind: 'end' })
     } else if (last !== undefined && last.ends.kind !== 'end') {
       last.ends = { kind: 'end' }

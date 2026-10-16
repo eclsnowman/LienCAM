@@ -1,3 +1,7 @@
+import { catalogChildren, liveCatalog } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { RotateCcw } from 'lucide-react'
 import { Component } from 'react'
 import { Check } from 'lucide-react'
@@ -99,12 +103,12 @@ import { useSetupWalkthroughVisibility } from './definition/setup/useSetupWalkth
 // Exported for the setup walkthrough's step 1 (WO-1696, v2/SLICES.md T13):
 // the same four-entry Kind list and the same dialect-registry Controller
 // list, never a second copy typed into `setup/steps/Step1WhatIsThisMachine.tsx`.
-export const MACHINE_KIND_OPTIONS: { value: MachineKind; label: string }[] = [
-  { value: 'router', label: 'Router' },
-  { value: 'plasma', label: 'Plasma' },
-  { value: 'laser', label: 'Laser' },
-  { value: 'knife', label: 'Knife' },
-]
+export const MACHINE_KIND_OPTIONS: { value: MachineKind; label: string }[] = liveCatalog(() => ([
+  { value: 'router', label: controlText('MachineDefinitionPanel.text001') },
+  { value: 'plasma', label: controlText('MachineDefinitionPanel.text002') },
+  { value: 'laser', label: controlText('MachineDefinitionPanel.text003') },
+  { value: 'knife', label: controlText('MachineDefinitionPanel.text004') },
+]))
 export const MACHINE_CONTROLLER_OPTIONS: { value: ControllerType; label: string }[] =
   DIALECT_OPTIONS.map((d) => ({ value: d.id as ControllerType, label: d.label }))
 
@@ -121,12 +125,12 @@ export const MACHINE_CONTROLLER_OPTIONS: { value: ControllerType; label: string 
 // this element's rendered text.
 const DEF_GROUP_LABEL = Object.fromEntries(DEF_GROUPS.map(([key, label]) => [key, label])) as Record<DefGroup, string>
 
-const AUTHORITY_TAG_TEXT: Record<string, string> = {
-  saved: 'Saved profile',
-  pending: 'Pending - reconnect',
-  applied: 'Applied - live',
-  session: 'Live this session',
-}
+const AUTHORITY_TAG_TEXT: Record<string, string> = liveCatalog(() => ({
+  saved: controlText('MachineDefinitionPanel.text005'),
+  pending: controlText('MachineDefinitionPanel.text006'),
+  applied: controlText('MachineDefinitionPanel.text007'),
+  session: controlText('MachineDefinitionPanel.text008'),
+}))
 
 // WO-1713 fix round - a native <select> sizes its closed box to its WIDEST
 // option, not the one currently shown; one of `MACHINE_CONTROLLER_OPTIONS`'s
@@ -138,11 +142,12 @@ const AUTHORITY_TAG_TEXT: Record<string, string> = {
 // copy of it, Step1WhatIsThisMachine.tsx) keep the full label unchanged. A
 // whole shorter WORD, not an ellipsis - never a sentence, so the "never
 // truncate" rule this fix round is about does not apply to it.
-const BAR_CONTROLLER_OPTION_LABEL: Record<string, string> = {
-  'Generic (linear only)': 'Generic',
-}
+const BAR_CONTROLLER_OPTION_LABEL: Record<string, string> = liveCatalog(() => ({
+  'Generic (linear only)': controlText('MachineDefinitionPanel.text009'),
+}))
 
 export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) {
+  useText('control-screens-not-probing')
   const panel = useMachineDefinitionPanel(props)
   const { applyTooltip, applying, applyIsCurrent: panelApplyIsCurrent, applyState, assignedPins, authorityState, authorityText, commit, def, dirty, draft, editDraft, editsConnectedMachine, enabledAxes, handleApply, importIssues, order, panelBodyRef, problems, revert, saved, section, setSection, setSkewTyped, settingSearch, setSettingSearch, setupKind, skewTyped, unsent, visiblePins } = panel
   const applyIsCurrent = panelApplyIsCurrent && applyState !== null
@@ -198,7 +203,7 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
       // "used only" choice nobody can reach must not keep hiding settings.
     >
       <div className="panel-header">
-        <span className="panel-title">Machine definition</span>
+        <span className="panel-title">{controlText('MachineDefinitionPanel.text010')}</span>
         {/* WO-1713: the machine's name used to repeat here (`machine-def-panel-
             machine-name`) - Operator ruling 2026-09-19: "why do we need the second
             horizontal banner saying the machine when we've already selected
@@ -212,38 +217,37 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
         >
           {def ? (
             <>
-              {enabledAxes.map((a) => a.axis).join('') || 'no axes'}
+              {enabledAxes.map((a) => a.axis).join('') || controlText('MachineDefinitionPanel.text011')}
               {/* WO-1713 fix round: on a phone this is what CSS shortens
                   first (`.machine-def-summary-home`, hidden under 640px) -
                   the words are unchanged, never cut mid-word, still fully
                   present in the DOM either way (wo913's own
                   `toContain('home Z,X,Y')` reads this same node). */}
-              <span className="machine-def-summary-home">{` / home ${order.join(',') || 'none'}`}</span>
-              {` / ${assignedPins} of ${visiblePins.length} pins`}
-              {problems.length > 0 ? ` / ${problems.length} to fix` : ''}
+              <span className="machine-def-summary-home">{controlText('MachineDefinitionPanel.text012', { value1: String(order.join(',') || 'none') })}</span>
+              {controlText('MachineDefinitionPanel.text013', { value1: String(assignedPins), value2: String(visiblePins.length) })}
+              {problems.length > 0 ? controlText('MachineDefinitionPanel.text014', { value1: String(problems.length) }) : ''}
             </>
-          ) : 'Not defined'}
+          ) : controlText('MachineDefinitionPanel.text015')}
         </span>
         <button
           type="button"
           className="control-chip-btn"
           data-testid="machine-def-panel-revert"
           disabled={!dirty}
-          data-tooltip={dirty ? 'Discard these edits' : 'No unsaved changes'}
+          data-tooltip={dirty ? controlText('MachineDefinitionPanel.text016') : controlText('MachineDefinitionPanel.text017')}
           onClick={revert}
           style={{ marginLeft: 8 }}
         >
-          <RotateCcw size={12} /> Revert
-        </button>
+          <RotateCcw size={12} />{controlText('MachineDefinitionPanel.text018')}</button>
         <button
           type="button"
           className="control-chip-btn"
           data-testid="machine-def-panel-save"
           data-save-state={dirty ? 'dirty' : saved ? 'saved' : 'clean'}
-          data-tooltip={dirty ? 'Save to this machine' : 'No unsaved changes'}
+          data-tooltip={dirty ? controlText('MachineDefinitionPanel.text019') : controlText('MachineDefinitionPanel.text020')}
           onClick={() => { commit() }}
         >
-          {saved ? <><Check size={12} /> Saved</> : 'Save'}
+          {saved ? <><Check size={12} />{controlText('MachineDefinitionPanel.text021')}</> : controlText('MachineDefinitionPanel.text022')}
         </button>
       </div>
 
@@ -284,13 +288,13 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
               label from its own select onto separate lines - the split is
               what left "Controller" stranded with no select beside it. */}
           <span className="machine-def-bar-field">
-            <label className="mform-label" htmlFor="machine-def-bar-kind">Kind</label>
+            <label className="mform-label" htmlFor="machine-def-bar-kind">{controlText('MachineDefinitionPanel.text023')}</label>
             <select
               id="machine-def-bar-kind"
               className="mform-select"
               data-testid="machine-def-bar-kind"
               data-drives-this-app=""
-              aria-label="Kind"
+              aria-label={controlText('MachineDefinitionPanel.text024')}
               value={draft.kind ?? 'router'}
               onChange={(e) => { editDraft((m) => ({ ...m, kind: e.target.value as MachineKind })) }}
             >
@@ -298,18 +302,18 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
             </select>
           </span>
           <span className="machine-def-bar-field">
-            <label className="mform-label" htmlFor="machine-def-bar-controller">Controller</label>
+            <label className="mform-label" htmlFor="machine-def-bar-controller">{controlText('MachineDefinitionPanel.text025')}</label>
             <select
               id="machine-def-bar-controller"
               className="mform-select"
               data-testid="machine-def-bar-controller"
               data-drives-this-app=""
-              aria-label="Controller"
+              aria-label={controlText('MachineDefinitionPanel.text026')}
               value={draft.controller}
               onChange={(e) => { editDraft((m) => ({ ...m, controller: e.target.value as ControllerType })) }}
             >
               {!MACHINE_CONTROLLER_OPTIONS.some((c) => c.value === draft.controller) && (
-                <option value={draft.controller}>{`${draft.controller} (legacy)`}</option>
+                <option value={draft.controller}>{controlText('MachineDefinitionPanel.text027', { value1: String(draft.controller) })}</option>
               )}
               {MACHINE_CONTROLLER_OPTIONS.map((c) => (
                 <option key={c.value} value={c.value}>{BAR_CONTROLLER_OPTION_LABEL[c.label] ?? c.label}</option>
@@ -351,8 +355,8 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
               className="mform-input"
               data-testid="machine-def-bar-search"
               data-drives-this-app=""
-              placeholder="Find any setting"
-              aria-label="Find any setting"
+              placeholder={controlText('MachineDefinitionPanel.text028')}
+              aria-label={controlText('MachineDefinitionPanel.text029')}
               value={settingSearch}
               onChange={(e) => { setSettingSearch(e.target.value) }}
               style={{ width: '100%', paddingLeft: 22 }}
@@ -382,10 +386,10 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
               {applying
                 ? 'Applying...'
                 : applyIsCurrent && applyState!.ok
-                  ? <><Check size={12} /> Applied</>
+                  ? <><Check size={12} />{controlText('MachineDefinitionPanel.text030')}</>
                   : applyIsCurrent
-                    ? <><Cpu size={12} /> Apply failed</>
-                    : <><Cpu size={12} /> Apply to Machine</>}
+                    ? <><Cpu size={12} />{controlText('MachineDefinitionPanel.text031')}</>
+                    : <><Cpu size={12} />{controlText('MachineDefinitionPanel.text032')}</>}
             </button>
           )}
         </div>
@@ -419,16 +423,15 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
             data-testid="machine-def-section-undefined"
             data-section={section}
           >
-            {`${draft.name} has no controller definition, so ${DEF_GROUP_LABEL[section]} has nothing to show yet.`}
+            {controlText('MachineDefinitionPanel.text033', { value1: String(draft.name), value2: String(DEF_GROUP_LABEL[section]) })}
             <button
               type="button"
               className="control-chip-btn"
               data-testid="machine-def-section-define"
-              data-tooltip="Describe this machine's axes, homing cycle and pin assignments"
+              data-tooltip={controlText('MachineDefinitionPanel.text034')}
               onClick={panel.defineController}
             >
-              <Plus size={12} /> Define this machine
-            </button>
+              <Plus size={12} />{controlText('MachineDefinitionPanel.text035')}</button>
           </div>
         )}
         {!def && section === 'overview' && (
@@ -440,12 +443,10 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
               type="button"
               className="control-chip-btn"
               data-testid="machine-def-panel-run-walkthrough"
-              data-tooltip="Answer seven short questions instead - imports a .pro or a connected board, and every step can be skipped"
+              data-tooltip={controlText('MachineDefinitionPanel.text036')}
               onClick={openWalkthrough}
               style={{ marginTop: 8 }}
-            >
-              Run the setup walkthrough
-            </button>
+            >{controlText('MachineDefinitionPanel.text037')}</button>
             {/* WO-1114: a GRBL machine's skew sits in the serial setup row
                 above; the standalone copy is for controllers whose block has
                 no row to join (bridge, simulator). */}
@@ -586,10 +587,8 @@ class ReferencePositionsSection extends Component<{
     return (
       <div data-testid="machine-def-reference-positions" style={{ marginTop: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-          <strong style={{ fontSize: 'var(--font-size-sm)' }}>G30 reference positions</strong>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
-            Machine coordinates (mm). G30.1 stores point 1 at the current position.
-          </span>
+          <strong style={{ fontSize: 'var(--font-size-sm)' }}>{controlText('MachineDefinitionPanel.text038')}</strong>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>{controlText('MachineDefinitionPanel.text039')}</span>
           <details open={this.state.editing}>
             <summary
               data-testid="machine-def-reference-edit"
@@ -598,26 +597,26 @@ class ReferencePositionsSection extends Component<{
                 this.setState(({ editing }) => ({ editing: !editing }))
               }}
             >
-              {this.state.editing ? 'Done editing' : 'Edit positions'}
+              {this.state.editing ? controlText('MachineDefinitionPanel.text040') : controlText('MachineDefinitionPanel.text041')}
             </summary>
           </details>
         </div>
         {hasPositions || this.state.editing ? (
           <table className="machine-def-table" data-testid="machine-def-reference-table">
-            <thead><tr><th>Point</th><th>X</th><th>Y</th><th>Z</th></tr></thead>
+            <thead><tr><th>{controlText('MachineDefinitionPanel.text042')}</th><th>X</th><th>Y</th><th>Z</th></tr></thead>
             <tbody>
               {REFERENCE_POINT_NUMBERS.map((pointNumber) => {
                 const point = positions?.[pointNumber]
                 return (
                   <tr key={pointNumber} data-testid={`machine-def-reference-point-${pointNumber}`}>
-                    <th scope="row">P{pointNumber}</th>
+                    <th scope="row">{catalogChildren(controlText('MachineDefinitionPanel.text043', { value1: '\u0000value1\u0000' }), { value1: pointNumber })}</th>
                     {point ? (['x', 'y', 'z'] as const).map((axis) => (
                       <td key={axis} data-drives-this-app="">
                         {this.state.editing ? (
                           <NumericInput
                             value={point[axis]}
                             step={0.1}
-                            ariaLabel={`G30 point ${pointNumber} ${axis.toUpperCase()} machine coordinate`}
+                            ariaLabel={controlText('MachineDefinitionPanel.text044', { value1: String(pointNumber), value2: String(axis.toUpperCase()) })}
                             className="mform-input mform-input-mono"
                             style={{ width: 90 }}
                             onChange={(value) => this.setAxis(pointNumber, axis, value)}
@@ -632,10 +631,8 @@ class ReferencePositionsSection extends Component<{
                             className="control-chip-btn"
                             data-testid={`machine-def-reference-add-${pointNumber}`}
                             onClick={() => { this.addPoint(pointNumber) }}
-                          >
-                            Add P{pointNumber}
-                          </button>
-                        ) : 'Not stored'}
+                          >{catalogChildren(controlText('MachineDefinitionPanel.text045', { value1: '\u0000value1\u0000' }), { value1: pointNumber })}</button>
+                        ) : controlText('MachineDefinitionPanel.text046')}
                       </td>
                     )}
                   </tr>
@@ -644,9 +641,7 @@ class ReferencePositionsSection extends Component<{
             </tbody>
           </table>
         ) : (
-          <div data-testid="machine-def-reference-none" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-            No reference positions stored. Jog to the first park position and enter G30.1 in MDI.
-          </div>
+          <div data-testid="machine-def-reference-none" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{controlText('MachineDefinitionPanel.text047')}</div>
         )}
       </div>
     )

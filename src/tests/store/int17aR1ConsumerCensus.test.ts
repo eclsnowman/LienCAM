@@ -167,6 +167,13 @@ const CENSUS: Record<string, string> = {
   // WO-2646 (704318587/28564fe62) added the exact-shape contact check. Classified
   // by WO-2652 from the two project.geometry reads in that file.
   'lib/simulation/workholdingContact.ts': "HANDLES + ALLOWED-PASSTHROUGH: primeWorkholdingContactShapes reads only rows that are placed vise/clamp components and caches each one's exact shape through readDisplayShape (workholding/shapes.ts), which takes a modeled row's shape from modelBody.display via isModelOriginGeometry and never from source bytes or a kernel handle; a row with no readable shape keeps its box (over-report, never miss). workholdingContactShapes poses components through resolveInstancePlacements (model-aware) and boxes any other marked row exactly as workholding/contactBodies.ts does. Read-only: no row is mutated, no operation can source from it, and the result is only a clearance mesh for the Simulate contact report.",
+  // WO-2784 RE-PIN: two readers added after the last repin, each classified by reading its
+  // project.geometry read.
+  // 69f9f07fd0 (WO-2700 follow-up, owner 10-09: the New Model window must list the project's
+  // models, "never only" New Model; i18n-wrapped by WO-2322 cec8b23b5d).
+  'components/modals/ModelEntryModal.tsx': "REFUSES-BY-SHAPE: lists imported parts for 'Edit as model' only through isWrappableGeometryRow (format 'step' or 'stl', not a nest seed copy); a modeled entry is format 'model', so it is never listed and never reaches wrapImportedGeometryAsModelItem. Model Items themselves come from project.modelItems, not from geometry rows. Read-only.",
+  // 33879cedf3 (WO-2748, smart-dimension preview arrows match the committed dimension).
+  'components/viewport/camOverlaysPort.ts': "REFUSES-BY-SHAPE: projectDimensionPreview passes project.geometry to resolveSketchEditorOffset, which looks the owning row up by sketch layer id (layers2d) -- the same read as ReferenceImage2d.tsx above; a modeled entry carries no layers2d, so it never matches. Display-only, never mutates a row.",
 }
 
 /** Recursively collect production .ts/.tsx files (tests excluded). */

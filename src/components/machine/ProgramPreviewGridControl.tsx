@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import type { WcsId } from '../../lib/machine/types'
 import {
   safeMachinePosition,
@@ -114,7 +117,7 @@ export function resolveProgramPreviewGrid(
   const activeOrigin = activeWcs ? finiteVec3(offsets[activeWcs]) : null
   if (selection === 'off') {
     return {
-      label: 'Off',
+      label: controlText('ProgramPreviewGridControl.text001'),
       available: true,
       programOriginMachine: activeOrigin,
       gridOriginMachine: null,
@@ -140,7 +143,7 @@ export function resolveProgramPreviewGrid(
     // move the grid origin away from machine-coordinate zero.
     const available = machineZeroOrigin !== null && travel !== null
     return {
-      label: available ? 'Machine' : travel === null ? 'Machine unavailable' : 'Machine - HOME FIRST',
+      label: available ? controlText('ProgramPreviewGridControl.text002') : travel === null ? controlText('ProgramPreviewGridControl.text003') : controlText('ProgramPreviewGridControl.text004'),
       available,
       programOriginMachine: activeOrigin,
       gridOriginMachine: available ? machineZeroOrigin : null,
@@ -154,7 +157,7 @@ export function resolveProgramPreviewGrid(
   const selectedName = selection
 
   return {
-    label: available ? selectedName : `${selectedName} unavailable`,
+    label: available ? selectedName : controlText('ProgramPreviewGridControl.text005', { value1: String(selectedName) }),
     available,
     programOriginMachine: activeOrigin,
     gridOriginMachine: available ? offset : null,
@@ -167,11 +170,11 @@ export function resolveProgramPreviewGrid(
  *  a caption under the selector (Operator: one line, no more) - it is the
  *  selector's tooltip, one hover deep. */
 export function gridFrameCaption(value: ProgramPreviewGridSelection): string {
-  if (value === 'off') return 'No grid drawn. The program does not move when you switch grids.'
+  if (value === 'off') return controlText('ProgramPreviewGridControl.text006')
   if (value === 'machine') {
-    return 'Machine grid - numbers are machine coordinates from machine zero. The program does not move when you switch grids.'
+    return controlText('ProgramPreviewGridControl.text007')
   }
-  return `Work grid - numbers are ${value} work coordinates. The program does not move when you switch grids.`
+  return controlText('ProgramPreviewGridControl.text008', { value1: String(value) })
 }
 
 interface ProgramPreviewGridControlProps {
@@ -192,6 +195,7 @@ export function ProgramPreviewGridControl({
   onChange,
   resolution,
 }: ProgramPreviewGridControlProps) {
+  useText('control-screens-not-probing')
   const tip = gridFrameCaption(value)
   return (
     <div
@@ -201,7 +205,7 @@ export function ProgramPreviewGridControl({
     >
       <select
         className="mform-input control-preview-grid-select"
-        aria-label="Preview coordinate grid"
+        aria-label={controlText('ProgramPreviewGridControl.text009')}
         data-testid="program-preview-grid-label"
         data-grid-frame={value === 'off' ? 'none' : value === 'machine' ? 'machine' : 'work'}
         title={tip}
@@ -211,8 +215,8 @@ export function ProgramPreviewGridControl({
           if (isProgramPreviewGridSelection(next)) onChange(next)
         }}
       >
-        <option value="off">Off</option>
-        <option value="machine">{value === 'machine' ? resolution.label : 'Machine'}</option>
+        <option value="off">{controlText('ProgramPreviewGridControl.text010')}</option>
+        <option value="machine">{value === 'machine' ? resolution.label : controlText('ProgramPreviewGridControl.text011')}</option>
         {PROGRAM_PREVIEW_WCS_IDS.map((wcs) => (
           <option key={wcs} value={wcs}>{value === wcs ? resolution.label : wcs}</option>
         ))}

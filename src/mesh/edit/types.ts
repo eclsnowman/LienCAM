@@ -104,6 +104,9 @@ export interface MeshEditOperation<P = unknown> {
   /** throw (naming the problem) if these parameters are not this operation's;
    *  return the typed parameters otherwise. */
   validate(parameters: Record<string, unknown>): P;
+  /** Complete an operation's dependent geometry before the selection is
+   *  witnessed and persisted. Preview and record must use the same completion. */
+  completeSelection?(mesh: MeshBuffers, facets: readonly number[]): number[];
   /** pure: same mesh + same record -> same output, no I/O, no globals. */
   apply(input: MeshEditApplyInput<P>): MeshEditApplyResult;
 }

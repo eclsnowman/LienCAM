@@ -9,6 +9,7 @@
 // Form undo (whole-cage snapshots) lives only while form mode is open; the
 // Model history gets one step per Finish.
 
+import { useText } from '../../../i18n'
 import { useCallback, useEffect, useRef } from 'react'
 import { Box, Circle, Copy, Cylinder, Link, Dot, Donut, Magnet, Expand, Shrink, SquareDashedMousePointer, PenTool, SquarePlus, LocateFixed, Spline, Target, Grid3x3, Merge, Route, Eye, Import, Unlink, RectangleHorizontal, Ruler, Grip, ArrowUpFromLine, Rotate3d, FlipHorizontal2, FlipVertical2, FoldHorizontal, Grid2x2, Layers, Link2, Move, Redo2, Repeat2, RotateCw, Rows3, Rows4, Scaling, SeparatorHorizontal, Slash, Square, SquareDashed, Sun, Trash2, Undo2, Waves } from 'lucide-react'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -16,6 +17,7 @@ import { useFormStore } from '../../../form/formStore'
 import { FormOverlay } from '../../../form/formOverlay'
 import { isFormFeaturePayload, makeFormFeaturePayload } from '../../../form/formBody'
 import { formFromBody, type BodyMesh } from '../../../form/fromMesh'
+import { validateCage } from '../../../form/halfEdge'
 import { defaultPipeRadius, joinPaths, pathLength, pipeCage, straightPath, tightestBend, type PlaneFrame, type SketchPath } from '../../../form/pipe'
 import { longestEdgeChain } from '../../../form/edgePath'
 import { extrudeProfileCage, planeMap, revolveAxis, revolveProfileCage, sketchProfile } from '../../../form/profile'
@@ -96,6 +98,7 @@ declare global {
 }
 
 export function useFormSession(deps: FormSessionDeps): FormSession {
+  const workbenchText = useText('sketch-and-model-workbench')
   const active = useFormStore((s) => s.active)
   const canUndo = useFormStore((s) => s.history.past.length > 0)
   const canRedo = useFormStore((s) => s.history.future.length > 0)
@@ -141,7 +144,7 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
     const next = !additive ? [hit] : at >= 0 ? picks.filter((_, i) => i !== at) : [...picks, hit]
     setEdgePicks(next)
     const n = next.length
-    if (n > 0) useFormStore.getState().setNotice(`${n} body edge${n === 1 ? '' : 's'} picked: Pipe runs along ${n === 1 ? 'it' : 'them'}. Shift+click adds or removes an edge; a click off the body clears them.`)
+    if (n > 0) useFormStore.getState().setNotice(workbenchText('useFormSession.bodyEdgePickedPipeRunsAlongShiftClickAdds', { n: String(n), value2: String(n === 1 ? '' : 's'), value3: String(n === 1 ? 'it' : 'them') }))
     return true
   }, [setEdgePicks])
 
@@ -210,7 +213,7 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
       return
     }
     const id = nextId(dag, 'FRM')
-    useFormStore.getState().openSession({ featureId: null, name: `Form ${id.slice(3)}` })
+    useFormStore.getState().openSession({ featureId: null, name: workbenchText('useFormSession.form', { value1: String(id.slice(3)) }) })
   }, [setEdgePicks])
 
   const leave = useCallback(() => {
@@ -247,15 +250,24 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
   const startFromBody = useCallback(async () => {
     const source = await depsRef.current.selectedBodyMesh?.()
     const st = useFormStore.getState()
-    if (!source) { st.setNotice('Select a body in the Model tree first, then From body turns it into a form'); return }
+    if (!source) { st.setNotice(workbenchText('useFormSession.selectABodyInTheModelTreeFirstThen')); return }
     const r = formFromBody(source.mesh)
+    // WO-2865: applyCage's own refusal names a cage face index ("face 2106
+    // repeats a point") with no next step. Check first and say it in shop words;
+    // the index stays in the debug log for whoever traces the conversion.
+    const check = validateCage(r.cage)
+    if (!check.ok) {
+      console.info(`Form - From body: cage check failed: ${check.problems.join('; ')}`)
+      st.setNotice(workbenchText('useFormSession.fromBodyCouldNotShapeThisBody'))
+      return
+    }
     if (!st.applyCage(r.cage, {
       topology: true, record: true, startFrom: true,
-      notice: `From body: ${[
-        r.flatFaces > 0 ? `${r.flatFaces} flat face${r.flatFaces === 1 ? '' : 's'} kept whole` : '',
-        r.gridFaces > 0 ? `${r.gridFaces} face${r.gridFaces === 1 ? '' : 's'} remeshed into quads` : '',
-        r.curvedTriangles > 0 ? `${r.curvedTriangles} triangles of curved faces smoothed` : '',
-      ].filter(Boolean).join(', ')}; ${r.cage.creases.length} sharp edges creased. The body is hidden while you shape it and stays in the tree.`,
+      notice: workbenchText('useFormSession.fromBodySharpEdgesCreasedTheBodyIsHidden', { value1: String([
+        r.flatFaces > 0 ? workbenchText('useFormSession.flatFaceKeptWhole', { value1: String(r.flatFaces), value2: String(r.flatFaces === 1 ? '' : 's') }) : '',
+        r.gridFaces > 0 ? workbenchText('useFormSession.faceRemeshedIntoQuads', { value1: String(r.gridFaces), value2: String(r.gridFaces === 1 ? '' : 's') }) : '',
+        r.curvedTriangles > 0 ? workbenchText('useFormSession.trianglesOfCurvedFacesSmoothed', { value1: String(r.curvedTriangles) }) : '',
+      ].filter(Boolean).join(', ')), length: String(r.cage.creases.length) }),
     })) return
     st.setSourceBodyId(source.featureId)
     useFormStore.setState({ startedFrom: 'body' })
@@ -271,11 +283,11 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
       const path = chain.path
       const radius = st.pipeRadius > 0 ? st.pipeRadius : defaultPipeRadius(path)
       const bend = tightestBend(path)
-      const size = st.pipeRadius > 0 ? `radius ${+radius.toFixed(3)} mm${radius > bend ? ` (wider than the tightest bend, ${+bend.toFixed(2)} mm: the tube folds there)` : ''}` : `radius ${radius} mm (automatic; the Form palette's Pipe row sets it)`
-      const name = chain.edges === chain.total ? edgePicks.name : `${chain.edges} of ${edgePicks.name}`
+      const size = st.pipeRadius > 0 ? workbenchText('useFormSession.radiusMm', { value1: String(+radius.toFixed(3)), value2: String(radius > bend ? workbenchText('useFormSession.widerThanTheTightestBendMmTheTubeFolds', { value1: String(+bend.toFixed(2)) }) : '') }) : workbenchText('useFormSession.radiusMmAutomaticTheFormPaletteSPipeRow', { radius: String(radius) })
+      const name = chain.edges === chain.total ? edgePicks.name : workbenchText('useFormSession.of', { value1: String(chain.edges), value2: String(edgePicks.name) })
       const source = st.sourceBodyId
-      if (!st.applyCage(pipeCage(path, { radius }), { topology: true, record: true, startFrom: true, notice: `Pipe along ${name}: ${pathLength(path).toFixed(1)} mm${path.closed ? ', closed' : ''}, ${size}` })) return
-      if (chain.edges < chain.total) depsRef.current.log?.(`Pipe: the ${chain.total} picked edges do not all connect - built along the longest connected chain, ${chain.edges} of them (${pathLength(path).toFixed(1)} mm)`)
+      if (!st.applyCage(pipeCage(path, { radius }), { topology: true, record: true, startFrom: true, notice: workbenchText('useFormSession.pipeAlongMm', { name: String(name), value2: String(pathLength(path).toFixed(1)), value3: String(path.closed ? workbenchText('useFormSession.closed') : ''), size: String(size) }) })) return
+      if (chain.edges < chain.total) depsRef.current.log?.(workbenchText('useFormSession.pipeThePickedEdgesDoNotAllConnectBuilt', { total: String(chain.total), edges: String(chain.edges), value3: String(pathLength(path).toFixed(1)) }))
       // a next sketch whose curve starts where these edges end carries the pipe on, as after a sketch
       pipeRef.current = { names: [edgePicks.name], path }
       useFormStore.setState({ sourceBodyId: null, selection: EMPTY_SELECTION, startedFrom: 'pipe' })
@@ -298,10 +310,10 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
     const source = st.sourceBodyId
     // a tube wider than the path's tightest bend folds on itself there (a straight path has none)
     const bend = tightestBend(path)
-    const size = st.pipeRadius > 0 ? `radius ${+radius.toFixed(3)} mm${radius > bend ? ` (wider than the tightest bend, ${+bend.toFixed(2)} mm: the tube folds there)` : ''}` : `radius ${radius} mm (automatic; the Form palette's Pipe row sets it)`
+    const size = st.pipeRadius > 0 ? workbenchText('useFormSession.radiusMm', { value1: String(+radius.toFixed(3)), value2: String(radius > bend ? workbenchText('useFormSession.widerThanTheTightestBendMmTheTubeFolds', { value1: String(+bend.toFixed(2)) }) : '') }) : workbenchText('useFormSession.radiusMmAutomaticTheFormPaletteSPipeRow', { radius: String(radius) })
     const notice = picked !== null
-      ? `Pipe along ${picked.name}: ${pathLength(path).toFixed(1)} mm${path.closed ? ', closed' : ''}, ${size}`
-      : `Pipe: a straight ${pathLength(path).toFixed(0)} mm pipe, ${size}. With a sketch selected in the Model tree, Pipe follows its curve; a next sketch whose curve starts where it ends, clicked the same way, carries it on.`
+      ? workbenchText('useFormSession.pipeAlongMm', { name: String(picked.name), value2: String(pathLength(path).toFixed(1)), value3: String(path.closed ? workbenchText('useFormSession.closed') : ''), size: String(size) })
+      : workbenchText('useFormSession.pipeAStraightMmPipeWithASketchSelected', { value1: String(pathLength(path).toFixed(0)), size: String(size) })
     if (!st.applyCage(pipeCage(path, { radius }), { topology: true, record: true, startFrom: true, notice })) return
     useFormStore.setState({ sourceBodyId: null, selection: EMPTY_SELECTION, startedFrom: 'pipe' })
     if (source !== null) depsRef.current.showBody(source, true)
@@ -325,16 +337,16 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
       const r = extrudeProfileCage(path, frame, st.profileHeight)
       cage = r.cage
       notice = from !== null
-        ? `Extruded ${from}${path.closed ? '' : ' (an open curve: an open sheet)'} ${Math.abs(st.profileHeight)} mm: ${r.around} points round, ${r.corners} corner${r.corners === 1 ? '' : 's'} creased`
-        : `Extrude: a 40 mm circle ${Math.abs(st.profileHeight)} mm tall. With a sketch selected in the Model tree, Extrude takes its profile.`
+        ? workbenchText('useFormSession.extrudedMmPointsRoundCornerCreased', { from: String(from), value2: String(path.closed ? '' : workbenchText('useFormSession.anOpenCurveAnOpenSheet')), value3: String(Math.abs(st.profileHeight)), around: String(r.around), corners: String(r.corners), value6: String(r.corners === 1 ? '' : 's') })
+        : workbenchText('useFormSession.extrudeA40MmCircleMmTallWithA', { value1: String(Math.abs(st.profileHeight)) })
     } else {
       const axis = revolveAxis(picked?.entities ?? [], path)
       const r = revolveProfileCage(path, frame, axis, st.revolveSegments, 48, st.revolveAngle)
       cage = r.cage
-      const turn = st.revolveAngle >= 360 ? '' : ` ${+st.revolveAngle.toFixed(2)} degrees${path.closed ? ', its ends capped flat' : ''}`
+      const turn = st.revolveAngle >= 360 ? '' : workbenchText('useFormSession.degrees', { value1: String(+st.revolveAngle.toFixed(2)), value2: String(path.closed ? workbenchText('useFormSession.itsEndsCappedFlat') : '') })
       notice = from !== null
-        ? `Revolved ${from} round ${axis.label}${turn}: ${r.around} points along the profile, ${st.revolveSegments} round${r.poles > 0 ? `, ${r.poles} pole${r.poles === 1 ? '' : 's'} on the axis` : ''}`
-        : `Revolve: a 10 x 10 mm square turned round Z${turn || ' into a ring'}. With a sketch selected in the Model tree, Revolve turns its profile.`
+        ? workbenchText('useFormSession.revolvedRoundPointsAlongTheProfileRound', { from: String(from), label: String(axis.label), turn: String(turn), around: String(r.around), revolveSegments: String(st.revolveSegments), value6: String(r.poles > 0 ? workbenchText('useFormSession.poleOnTheAxis', { value1: String(r.poles), value2: String(r.poles === 1 ? '' : 's') }) : '') })
+        : workbenchText('useFormSession.revolveA10X10MmSquareTurnedRound', { value1: String(turn || workbenchText('useFormSession.intoARing')) })
     }
     if (!st.applyCage(cage, { topology: true, record: true, startFrom: true, notice })) return
     useFormStore.setState({ sourceBodyId: null, selection: EMPTY_SELECTION, startedFrom: how })
@@ -345,7 +357,7 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
   const pullToBody = useCallback(async () => {
     const target = await depsRef.current.selectedBodyMesh?.()
     const st = useFormStore.getState()
-    if (target === undefined || target === null) { st.setNotice('Pull to body: select the body to pull onto in the Model tree, then click Pull to body'); return }
+    if (target === undefined || target === null) { st.setNotice(workbenchText('useFormSession.pullToBodySelectTheBodyToPullOnto')); return }
     const name = String(depsRef.current.dag.getNode(target.featureId)?.payload?.name ?? target.featureId)
     st.pullOntoBody(target.mesh, name)
   }, [])
@@ -359,7 +371,7 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
     const picked = depsRef.current.selectedSketch?.() ?? null
     const st = useFormStore.getState()
     const profile = picked === null ? null : sketchProfile(picked.entities)
-    if (picked === null || profile === null) { st.setNotice('Loft: select a sketch in the Model tree, then click Loft; each click adds its profile'); return }
+    if (picked === null || profile === null) { st.setNotice(workbenchText('useFormSession.loftSelectASketchInTheModelTreeThen')); return }
     const picks = { name: picked.name, path: profile, frame: picked.frame }
     // an open curve from the first profile to the last is a rail; anything else is the next profile
     const asRail = !loftRailsRef.current.some((p) => p.name === picked.name) && railOf(loftRef.current, picks)
@@ -374,17 +386,17 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
       loftRef.current = list
       // the first click shows in the view: profile 1 outlined where it lies until the loft appears
       overlayRef.current?.setProfileOutlines(list.map((p) => { const m = planeMap(p.frame); return { points: p.path.points.map((q) => m.at([q[0], q[1]])), closed: p.path.closed } }))
-      st.setNotice(`Loft: ${picked.name} is profile 1; select the next sketch in the Model tree and click Loft again`)
+      st.setNotice(workbenchText('useFormSession.loftIsProfile1SelectTheNextSketchIn', { name: String(picked.name) }))
       return
     }
     const r = loftCage(list, 32, rails)
-    if ('reason' in r) { st.setNotice(`${r.reason} (${list.length - 1} profile${list.length === 2 ? '' : 's'} kept)`); return }
+    if ('reason' in r) { st.setNotice(workbenchText('useFormSession.profileKept', { reason: String(r.reason), value2: String(list.length - 1), value3: String(list.length === 2 ? '' : 's') })); return }
     loftRef.current = list
     loftRailsRef.current = rails
     overlayRef.current?.setProfileOutlines([])
     const source = st.sourceBodyId
-    const railWords = rails.length === 0 ? '' : ` along ${rails.map((p) => p.name).join(', ')}`
-    if (!st.applyCage(r.cage, { topology: true, record: true, startFrom: true, notice: `Lofted through ${list.map((p) => p.name).join(', ')}${railWords}: ${r.rings} rings, the skin pulled through every profile${rails.length === 0 ? '' : ' and rail'}; select another sketch and click Loft to add it (an open curve from the first profile to the last is a rail)` })) return
+    const railWords = rails.length === 0 ? '' : workbenchText('useFormSession.along', { value1: String(rails.map((p) => p.name).join(', ')) })
+    if (!st.applyCage(r.cage, { topology: true, record: true, startFrom: true, notice: workbenchText('useFormSession.loftedThroughRingsTheSkinPulledThroughEveryProfile', { value1: String(list.map((p) => p.name).join(', ')), railWords: String(railWords), rings: String(r.rings), value4: String(rails.length === 0 ? '' : workbenchText('useFormSession.andRail')) }) })) return
     useFormStore.setState({ sourceBodyId: null, selection: EMPTY_SELECTION, startedFrom: 'loft' })
     if (source !== null) depsRef.current.showBody(source, true)
   }, [])
@@ -401,7 +413,7 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
     const chain = st.faceTool?.chain === true
     if (picked === null) { st.startFaceTool({ replace, chain }); return }
     const f = picked.frame
-    st.startFaceTool({ replace, chain, plane: { origin: [f.origin.x, f.origin.y, f.origin.z], normal: [f.normal.x, f.normal.y, f.normal.z] }, planeWords: `the plane of ${picked.name}` })
+    st.startFaceTool({ replace, chain, plane: { origin: [f.origin.x, f.origin.y, f.origin.z], normal: [f.normal.x, f.normal.y, f.normal.z] }, planeWords: workbenchText('useFormSession.thePlaneOf', { name: String(picked.name) }) })
   }, [])
 
   const undo = useCallback(() => useFormStore.getState().undo(), [])
@@ -411,19 +423,19 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
   const railSections: RailSection[] = [
     {
       id: 'form-create',
-      title: 'Form - start from',
+      title: workbenchText('useFormSession.formStartFrom'),
       tools: [...([
-        ['box', 'Box', Box],
-        ['cylinder', 'Cylinder', Cylinder],
-        ['sphere', 'Sphere', Circle],
-        ['torus', 'Torus', Donut],
-        ['plane', 'Plane', Square],
+        ['box', workbenchText('useFormSession.box'), Box],
+        ['cylinder', workbenchText('useFormSession.cylinder'), Cylinder],
+        ['sphere', workbenchText('useFormSession.sphere'), Circle],
+        ['torus', workbenchText('useFormSession.torus'), Donut],
+        ['plane', workbenchText('useFormSession.plane'), Square],
       ] as const).map(([kind, label, icon]) => ({
         testId: `form-starter-${kind}`,
         label,
         icon,
         active: startedFrom === kind && !faceReplacing,
-        title: `Start again from a ${label.toLowerCase()} cage (segment counts in the Form palette)`,
+        title: workbenchText('useFormSession.startAgainFromACageSegmentCountsInThe', { value1: String(label.toLowerCase()) }),
         onClick: () => {
           // WO-2125 audit: a starter replaces a From-body cage, so its source body is no longer hidden - repaint it.
           const source = store().sourceBodyId
@@ -433,61 +445,61 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
       })),
       {
         testId: 'form-starter-pipe',
-        label: 'Pipe',
+        label: workbenchText('useFormSession.pipe'),
         icon: Route,
         active: startedFrom === 'pipe' && !faceReplacing,
-        title: 'A tube along the curve of the sketch selected in the Model tree (a straight pipe when none is selected); its radius from the Form palette\'s Pipe row, else automatic. Select a next sketch whose curve starts where the pipe ends and click Pipe again to carry it on, onto other planes too. Edges of a body clicked in the view (Shift+click adds more) come first: the tube runs along them',
+        title: workbenchText('useFormSession.aTubeAlongTheCurveOfTheSketchSelected'),
         onClick: startPipe,
       },
       {
         testId: 'form-starter-extrude',
-        label: 'Extrude',
+        label: workbenchText('useFormSession.extrude'),
         icon: ArrowUpFromLine,
         active: startedFrom === 'extrude' && !faceReplacing,
-        title: 'A form from the profile of the sketch selected in the Model tree, taken along its plane\'s normal (height in the Form palette)',
+        title: workbenchText('useFormSession.aFormFromTheProfileOfTheSketchSelected'),
         onClick: () => startFromProfile('extrude'),
       },
       {
         testId: 'form-starter-revolve',
-        label: 'Revolve',
+        label: workbenchText('useFormSession.revolve'),
         icon: Rotate3d,
         active: startedFrom === 'revolve' && !faceReplacing,
-        title: 'A form from the profile of the sketch selected in the Model tree, turned round its construction line (else a sketch axis it does not cross) by the Form palette\'s Revolve angle and segments',
+        title: workbenchText('useFormSession.aFormFromTheProfileOfTheSketchSelected2'),
         onClick: () => startFromProfile('revolve'),
       },
       {
         testId: 'form-starter-loft',
-        label: 'Loft',
+        label: workbenchText('useFormSession.loft'),
         icon: Spline,
         active: startedFrom === 'loft' && !faceReplacing,
-        title: 'A form through sketch profiles: select a sketch in the Model tree and click Loft, then the next sketch and Loft again (a third adds a third); the skin passes through each profile. An open curve drawn from the first profile to the last, added the same way, is a rail the sides follow',
+        title: workbenchText('useFormSession.aFormThroughSketchProfilesSelectASketchIn'),
         onClick: startLoft,
       },
       {
         testId: 'form-starter-face',
-        label: 'Face',
+        label: workbenchText('useFormSession.face'),
         icon: PenTool,
         active: startedFrom === 'face' || faceReplacing,
-        title: 'A new form from faces you click: 4 corners on the plane of the sketch or construction plane selected in the Model tree (else XY at Z = 0) make a face, each next face can share the points of the last; Alt+click a face of the form to work on its plane; Enter makes a triangle of 3, Esc stops',
+        title: workbenchText('useFormSession.aNewFormFromFacesYouClick4Corners'),
         onClick: () => startFace(true),
       },
       {
         testId: 'form-starter-body',
-        label: 'From body',
+        label: workbenchText('useFormSession.fromBody'),
         icon: Import,
         active: startedFrom === 'body' && !faceReplacing,
-        title: 'Start from the body selected in the Model tree: its flat faces and sharp edges kept, curved faces smoothed (the body itself stays)',
+        title: workbenchText('useFormSession.startFromTheBodySelectedInTheModelTree'),
         onClick: () => { void startFromBody() },
       },
       ],
     },
     {
       id: 'form-edit',
-      title: 'Edit form',
+      title: workbenchText('useFormSession.editForm'),
       tools: [...([
-        ['translate', 'Move', Move, 'Move the selection (Alt-drag a face arrow to extrude)'],
-        ['rotate', 'Rotate', RotateCw, 'Rotate the selection about its centre'],
-        ['scale', 'Scale', Scaling, 'Scale the selection about its centre'],
+        ['translate', workbenchText('useFormSession.move'), Move, workbenchText('useFormSession.moveTheSelectionAltDragAFaceArrowTo')],
+        ['rotate', workbenchText('useFormSession.rotate'), RotateCw, workbenchText('useFormSession.rotateTheSelectionAboutItsCentre')],
+        ['scale', workbenchText('useFormSession.scale'), Scaling, workbenchText('useFormSession.scaleTheSelectionAboutItsCentre')],
       ] as const).map(([mode, label, icon, title]) => ({
         testId: `form-transform-${mode}`,
         label,
@@ -496,57 +508,57 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
         title,
         onClick: () => store().setTransformMode(mode),
       })),
-        { testId: 'form-flatten', label: 'Flatten', icon: RectangleHorizontal, title: 'Put the selected points (or the corners of the selected faces or edges) on a plane: their best fit, or the one chosen in the Form palette (an X, Y or Z plane, the selected face\'s, the mirror\'s)', onClick: () => store().flattenSelection() },
-        { testId: 'form-straighten', label: 'Straighten', icon: Ruler, title: 'Put each selected edge chain on the line between its ends (selected points on their best-fit line)', onClick: () => store().straightenSelection() },
-        { testId: 'form-make-uniform', label: 'Uniform', icon: Grip, title: 'Even out the spacing of the selected points over the surface (the whole form when nothing is selected); points on the open border or on creases stay', onClick: () => store().makeUniformSelection() },
-        ...(SHOW_PULL_TO_BODY ? [{ testId: 'form-pull-body', label: 'Pull to body', icon: Target, title: 'Pull the surface at the selected points (all when nothing is selected) onto the body selected in the Model tree (else the only body), to within its display mesh', onClick: () => { void pullToBody() } }] : []),
-        { testId: 'form-pull', label: 'Pull', icon: LocateFixed, title: 'Move the cage so the smooth surface passes through the selected points where they are now (all points when nothing is selected); creases and corners follow their own rules', onClick: () => store().pullSelection() },
+        { testId: 'form-flatten', label: workbenchText('useFormSession.flatten'), icon: RectangleHorizontal, title: workbenchText('useFormSession.putTheSelectedPointsOrTheCornersOfThe'), onClick: () => store().flattenSelection() },
+        { testId: 'form-straighten', label: workbenchText('useFormSession.straighten'), icon: Ruler, title: workbenchText('useFormSession.putEachSelectedEdgeChainOnTheLineBetween'), onClick: () => store().straightenSelection() },
+        { testId: 'form-make-uniform', label: workbenchText('useFormSession.uniform'), icon: Grip, title: workbenchText('useFormSession.evenOutTheSpacingOfTheSelectedPointsOver'), onClick: () => store().makeUniformSelection() },
+        ...(SHOW_PULL_TO_BODY ? [{ testId: 'form-pull-body', label: workbenchText('useFormSession.pullToBody'), icon: Target, title: workbenchText('useFormSession.pullTheSurfaceAtTheSelectedPointsAllWhen'), onClick: () => { void pullToBody() } }] : []),
+        { testId: 'form-pull', label: workbenchText('useFormSession.pull'), icon: LocateFixed, title: workbenchText('useFormSession.moveTheCageSoTheSmoothSurfacePassesThrough'), onClick: () => store().pullSelection() },
       ],
     },
     {
       id: 'form-topology',
-      title: 'Topology',
+      title: workbenchText('useFormSession.topology'),
       tools: [
-        { testId: 'form-insert-loop', label: 'Insert loop', icon: Rows3, title: 'Insert an edge loop across the ring of the selected edge', onClick: () => store().insertLoop() },
-        { testId: 'form-crease', label: 'Crease', icon: Slash, title: 'Crease the selected edges (and the edges of selected faces)', onClick: () => store().crease(true) },
-        { testId: 'form-uncrease', label: 'Uncrease', icon: Waves, title: 'Make the selected edges smooth again', onClick: () => store().crease(false) },
-        { testId: 'form-insert-point', label: 'Insert point', icon: Dot, title: 'Insert a point in the middle of each selected edge', onClick: () => store().insertPointOnSelection() },
-        { testId: 'form-add-face', label: 'Add face', icon: SquarePlus, active: faceTool?.replace === false, title: 'Add faces to this form by clicking 4 corners each: on the work plane, or on the form\'s own points to join them (Enter: a triangle of 3; Esc stops)', onClick: () => startFace(false) },
-        { testId: 'form-face-chain', label: 'Chain', icon: Link, active: faceTool?.chain === true, title: 'Chain faces: each face starts the next on its last edge, so a strip takes 2 clicks a face (starts Add face when the Face tool is off; click again to stop chaining)', onClick: () => store().toggleFaceChain() },
-        { testId: 'form-subdivide', label: 'Subdivide', icon: Grid3x3, title: 'Split the selected faces into quads round their centres', onClick: () => store().subdivideSelection() },
-        { testId: 'form-weld', label: 'Weld', icon: Merge, title: 'Merge the selected points (or the ends of a selected edge) into one', onClick: () => store().weldSelection() },
-        { testId: 'form-weld-close', label: 'Weld close', icon: Magnet, title: 'Weld points closer than the Form palette\'s Weld distance - among the selection, or across the form when nothing is selected', onClick: () => store().weldCloseSelection() },
-        { testId: 'form-unweld', label: 'Unweld', icon: Unlink, title: 'Cut the form open along the selected edges, or round the selected faces (the points stay where they are, one copy per side)', onClick: () => store().unweldSelection() },
+        { testId: 'form-insert-loop', label: workbenchText('useFormSession.insertLoop'), icon: Rows3, title: workbenchText('useFormSession.insertAnEdgeLoopAcrossTheRingOfThe'), onClick: () => store().insertLoop() },
+        { testId: 'form-crease', label: workbenchText('useFormSession.crease'), icon: Slash, title: workbenchText('useFormSession.creaseTheSelectedEdgesAndTheEdgesOfSelected'), onClick: () => store().crease(true) },
+        { testId: 'form-uncrease', label: workbenchText('useFormSession.uncrease'), icon: Waves, title: workbenchText('useFormSession.makeTheSelectedEdgesSmoothAgain'), onClick: () => store().crease(false) },
+        { testId: 'form-insert-point', label: workbenchText('useFormSession.insertPoint'), icon: Dot, title: workbenchText('useFormSession.insertAPointInTheMiddleOfEachSelected'), onClick: () => store().insertPointOnSelection() },
+        { testId: 'form-add-face', label: workbenchText('useFormSession.addFace'), icon: SquarePlus, active: faceTool?.replace === false, title: workbenchText('useFormSession.addFacesToThisFormByClicking4Corners'), onClick: () => startFace(false) },
+        { testId: 'form-face-chain', label: workbenchText('useFormSession.chain'), icon: Link, active: faceTool?.chain === true, title: workbenchText('useFormSession.chainFacesEachFaceStartsTheNextOnIts'), onClick: () => store().toggleFaceChain() },
+        { testId: 'form-subdivide', label: workbenchText('useFormSession.subdivide'), icon: Grid3x3, title: workbenchText('useFormSession.splitTheSelectedFacesIntoQuadsRoundTheirCentres'), onClick: () => store().subdivideSelection() },
+        { testId: 'form-weld', label: workbenchText('useFormSession.weld'), icon: Merge, title: workbenchText('useFormSession.mergeTheSelectedPointsOrTheEndsOfA'), onClick: () => store().weldSelection() },
+        { testId: 'form-weld-close', label: workbenchText('useFormSession.weldClose'), icon: Magnet, title: workbenchText('useFormSession.weldPointsCloserThanTheFormPaletteSWeld'), onClick: () => store().weldCloseSelection() },
+        { testId: 'form-unweld', label: workbenchText('useFormSession.unweld'), icon: Unlink, title: workbenchText('useFormSession.cutTheFormOpenAlongTheSelectedEdgesOr'), onClick: () => store().unweldSelection() },
       ],
     },
     {
       id: 'form-select',
-      title: 'Select',
+      title: workbenchText('useFormSession.select'),
       tools: [
-        { testId: 'form-select-loop', label: 'Loop', icon: Repeat2, title: 'Add the edge loop of each selected edge (straight on through the points around it)', onClick: () => store().selectLoop() },
-        { testId: 'form-select-ring', label: 'Ring', icon: Rows4, title: 'Add the edge ring of each selected edge (across the faces beside it)', onClick: () => store().selectRing() },
-        { testId: 'form-select-grow', label: 'Grow', icon: Expand, title: 'Widen the selection by one ring (faces by shared corners, points and edges by their neighbours)', onClick: () => store().growSelection() },
-        { testId: 'form-select-shrink', label: 'Shrink', icon: Shrink, title: 'Narrow the selection by one ring from its edge', onClick: () => store().shrinkSelection() },
-        { testId: 'form-select-all', label: 'All', icon: SquareDashedMousePointer, title: 'Select every face (or every edge / point when edges / points are selected)', onClick: () => store().selectAll() },
+        { testId: 'form-select-loop', label: workbenchText('useFormSession.loop'), icon: Repeat2, title: workbenchText('useFormSession.addTheEdgeLoopOfEachSelectedEdgeStraight'), onClick: () => store().selectLoop() },
+        { testId: 'form-select-ring', label: workbenchText('useFormSession.ring'), icon: Rows4, title: workbenchText('useFormSession.addTheEdgeRingOfEachSelectedEdgeAcross'), onClick: () => store().selectRing() },
+        { testId: 'form-select-grow', label: workbenchText('useFormSession.grow'), icon: Expand, title: workbenchText('useFormSession.widenTheSelectionByOneRingFacesByShared'), onClick: () => store().growSelection() },
+        { testId: 'form-select-shrink', label: workbenchText('useFormSession.shrink'), icon: Shrink, title: workbenchText('useFormSession.narrowTheSelectionByOneRingFromItsEdge'), onClick: () => store().shrinkSelection() },
+        { testId: 'form-select-all', label: workbenchText('useFormSession.all'), icon: SquareDashedMousePointer, title: workbenchText('useFormSession.selectEveryFaceOrEveryEdgePointWhenEdges'), onClick: () => store().selectAll() },
       ],
     },
     {
       id: 'form-openings',
-      title: 'Openings',
+      title: workbenchText('useFormSession.openings'),
       tools: [
-        { testId: 'form-delete-faces', label: 'Delete', icon: Trash2, title: 'Delete the selected faces (the form is open there); with only edges selected, those edges (the faces either side merge; an edge loop goes whole); with only points selected, those points (the faces round each merge into one)', onClick: () => store().deleteSelection() },
-        { testId: 'form-fill-hole', label: 'Fill hole', icon: SquareDashed, title: 'Cap the opening through the selected rim edge with one face', onClick: () => store().fillHoleAtSelection() },
-        { testId: 'form-bridge', label: 'Bridge', icon: Link2, title: 'Join two selected faces or face sets, or the edges of two openings or open borders, with a band of faces (segments in the Form palette): a handle, a hole through, or two pieces joined', onClick: () => store().bridgeSelection() },
-        { testId: 'form-thicken', label: 'Thicken', icon: Layers, title: 'Close an open form with an inner skin (wall thickness in the Form palette)', onClick: () => store().thickenForm() },
+        { testId: 'form-delete-faces', label: workbenchText('useFormSession.delete'), icon: Trash2, title: workbenchText('useFormSession.deleteTheSelectedFacesTheFormIsOpenThere'), onClick: () => store().deleteSelection() },
+        { testId: 'form-fill-hole', label: workbenchText('useFormSession.fillHole'), icon: SquareDashed, title: workbenchText('useFormSession.capTheOpeningThroughTheSelectedRimEdgeWith'), onClick: () => store().fillHoleAtSelection() },
+        { testId: 'form-bridge', label: workbenchText('useFormSession.bridge'), icon: Link2, title: workbenchText('useFormSession.joinTwoSelectedFacesOrFaceSetsOrThe'), onClick: () => store().bridgeSelection() },
+        { testId: 'form-thicken', label: workbenchText('useFormSession.thicken'), icon: Layers, title: workbenchText('useFormSession.closeAnOpenFormWithAnInnerSkinWall'), onClick: () => store().thickenForm() },
       ],
     },
     {
       id: 'form-symmetry',
-      title: 'Symmetry',
+      title: workbenchText('useFormSession.symmetry'),
       tools: [...([
-        ['x', 'Mirror X', FlipHorizontal2, 'Mirror across the YZ plane (X = 0): paired points move together, seam points stay on the plane'],
-        ['y', 'Mirror Y', FlipVertical2, 'Mirror across the XZ plane (Y = 0): paired points move together, seam points stay on the plane'],
-        ['z', 'Mirror Z', SeparatorHorizontal, 'Mirror across the level plane through the form\'s mid-height: paired points move together, seam points stay on the plane'],
+        ['x', workbenchText('useFormSession.mirrorX'), FlipHorizontal2, workbenchText('useFormSession.mirrorAcrossTheYZPlaneX0PairedPoints')],
+        ['y', workbenchText('useFormSession.mirrorY'), FlipVertical2, workbenchText('useFormSession.mirrorAcrossTheXZPlaneY0PairedPoints')],
+        ['z', workbenchText('useFormSession.mirrorZ'), SeparatorHorizontal, workbenchText('useFormSession.mirrorAcrossTheLevelPlaneThroughTheFormS')],
       ] as const).map(([axis, label, icon, title]) => ({
         testId: `form-mirror-${axis}`,
         label,
@@ -556,48 +568,48 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
         onClick: () => store().setSymmetry(symmetry === axis ? null : axis),
       })), {
         testId: 'form-circular',
-        label: 'Circular',
+        label: workbenchText('useFormSession.circular'),
         icon: Sun,
         active: symmetry !== null && circularCount(symmetry) !== null,
-        title: 'Circular symmetry round the Z axis - as many copies as the form fits, or the Form palette\'s count: each point moves with its rotated copies',
+        title: workbenchText('useFormSession.circularSymmetryRoundTheZAxisAsManyCopies'),
         onClick: () => store().toggleCircular(),
       }, {
         testId: 'form-mirror-selection',
-        label: 'Between',
+        label: workbenchText('useFormSession.between'),
         icon: FoldHorizontal,
         active: symmetry === 'p',
-        title: 'Mirror across a plane you place: select two points to mirror onto each other (the plane goes halfway between them), or three or more on the plane you want. The Form palette moves it along its normal',
+        title: workbenchText('useFormSession.mirrorAcrossAPlaneYouPlaceSelectTwoPoints'),
         onClick: () => store().mirrorFromSelection(),
       }, {
         testId: 'form-mirror-duplicate',
-        label: 'Duplicate',
+        label: workbenchText('useFormSession.duplicate'),
         icon: Copy,
-        title: 'Mirror a copy of the form across the mirror plane (X = 0 when no mirror is on) and join the two halves along it: model half, get the whole. The mirror stays on',
+        title: workbenchText('useFormSession.mirrorACopyOfTheFormAcrossTheMirror'),
         onClick: () => store().mirrorDuplicateForm(),
       }],
     },
     {
       id: 'form-display',
-      title: 'Display',
+      title: workbenchText('useFormSession.display'),
       tools: ([
-        ['cage', 'Cage', Grid2x2],
-        ['both', 'Both', Eye],
-        ['smooth', 'Smooth', Circle],
+        ['cage', workbenchText('useFormSession.cage'), Grid2x2],
+        ['both', workbenchText('useFormSession.both'), Eye],
+        ['smooth', workbenchText('useFormSession.smooth'), Circle],
       ] as const).map(([mode, label, icon]) => ({
         testId: `form-display-${mode}`,
         label,
         icon,
-        title: mode === 'both' ? 'Cage over the smooth skin' : mode === 'cage' ? 'The control cage only' : 'The smooth skin only',
+        title: mode === 'both' ? workbenchText('useFormSession.cageOverTheSmoothSkin') : mode === 'cage' ? workbenchText('useFormSession.theControlCageOnly') : workbenchText('useFormSession.theSmoothSkinOnly'),
         active: displayMode === mode,
         onClick: () => store().setDisplayMode(mode),
       })),
     },
     {
       id: 'form-history',
-      title: 'Form history',
+      title: workbenchText('useFormSession.formHistory'),
       tools: [
-        ...(canUndo ? [{ testId: 'form-undo', label: 'Undo', icon: Undo2, title: 'Undo in the form (Ctrl+Z)', onClick: undo }] : []),
-        ...(canRedo ? [{ testId: 'form-redo', label: 'Redo', icon: Redo2, title: 'Redo in the form (Ctrl+Shift+Z)', onClick: redo }] : []),
+        ...(canUndo ? [{ testId: 'form-undo', label: workbenchText('useFormSession.undo'), icon: Undo2, title: workbenchText('useFormSession.undoInTheFormCtrlZ'), onClick: undo }] : []),
+        ...(canRedo ? [{ testId: 'form-redo', label: workbenchText('useFormSession.redo'), icon: Redo2, title: workbenchText('useFormSession.redoInTheFormCtrlShiftZ'), onClick: redo }] : []),
       ],
     },
   ].filter((section) => section.tools.length > 0)

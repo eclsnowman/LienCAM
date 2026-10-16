@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { topics as machine } from '../../help/topics/machine'
 import { HELP_INDEX } from '../../help/index-data'
 import { ESTOP_BLOCKS_MOTION } from '../../lib/machine/operatorAuthority'
+import controlEnglish from '../../i18n/locales/en/control-screens-not-probing'
 
 const root = resolve(import.meta.dirname, '../../..')
 const source = (path: string) => readFileSync(resolve(root, path), 'utf8')
@@ -34,10 +35,22 @@ function search(needle: string): string[] {
 describe('WO-2691 the product names the Help now uses', () => {
   it('the labels are the ones the Control tab draws', () => {
     expect(source('src/lib/machine/operatorTransport.ts')).toContain("export const RE_ARM_LABEL = 'Re-arm from start'")
-    expect(source('src/components/machine/OffsetsWorkspace.tsx')).toContain('Push changed ({differingRows.length})')
-    expect(source('src/components/machine/OffsetsWorkspace.tsx')).toContain('Set from position')
-    expect(source('src/components/machine/ControlTransportBar.tsx')).toContain("['offsets', 'Offsets']")
-    expect(source('src/components/machine/ControlTransportBar.tsx')).toContain("label: 'CLEAR'")
+    // WO-2784 RE-PIN: 4fce2323aa (WO-2324 catalog extraction, owner 10-01 5:55 PM
+    // "scope the work for a language translation") moved the button's words into
+    // the English Control catalog. Each label is still drawn by the same control:
+    // pin the source's catalog lookup at that control AND the catalog's English.
+    const offsets = source('src/components/machine/OffsetsWorkspace.tsx')
+    const transport = source('src/components/machine/ControlTransportBar.tsx')
+    // Push-all draws "Push changed (" + the count + ")".
+    expect(offsets).toContain("{controlText('OffsetsWorkspace.text006')}{differingRows.length})")
+    expect(controlEnglish.OffsetsWorkspace.text006).toBe(' Push changed (')
+    expect(offsets).toContain("<Crosshair size={13} />{controlText('OffsetsWorkspace.text017')}</button>")
+    expect(controlEnglish.OffsetsWorkspace.text017).toBe(' Set from position')
+    expect(transport).toContain("['offsets', controlText('ControlTransportBar.text040')]")
+    expect(controlEnglish.ControlTransportBar.text040).toBe('Offsets')
+    // The E-STOP button's 'stopped' (mode: 'clear') label.
+    expect(transport).toMatch(/stopped: \{\s+label: controlText\('ControlTransportBar\.text005'\),\s+mode: 'clear',/)
+    expect(controlEnglish.ControlTransportBar.text005).toBe('CLEAR')
     expect(ESTOP_BLOCKS_MOTION).toBe('The software stop is latched. Press CLEAR to reset it.')
   })
 })

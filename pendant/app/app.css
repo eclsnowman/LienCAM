@@ -463,6 +463,7 @@ details[open] > summary.card-title::after { content: '\2212'; }
 .diagram-card { align-items: center; }
 .probe-diagram { width: 100%; max-width: 460px; height: clamp(140px, 22vh, 220px); }
 .probe-diagram svg { width: 100%; height: 100%; display: block; }
+.probe-where { margin: 8px 0 0; font-size: var(--fs-label); font-weight: 700; color: var(--slate-200, #e2e8f0); line-height: 1.35; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

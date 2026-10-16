@@ -9,6 +9,7 @@ import { STLExporter } from 'three/addons/exporters/STLExporter.js'
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const PART = 'examples/04-tool-storage-bar'
 const EVIDENCE = 'src/tests/evidence/WO-2547'
+const LONG_FLUTE_MILL = '3 mm flat end mill, 15 mm flutes'
 const HOLES = [{ x: 25, diameter: 6.5 }, { x: 68, diameter: 8.5 }, { x: 121, diameter: 12.5 }]
 
 // The flip relationship describes the fixture, not a transformation of imported
@@ -191,7 +192,7 @@ async function setup(driver, stockId, secondSide = false) {
 async function operation(driver, side, type) {
   const state = await driver.readState()
   const geo = state.project.geometry.find(g => g.name === side)
-  const tool = type === 'drill' ? '3 mm drill' : type === 'bore' ? '3 mm flat end mill' : '6 mm 90 deg chamfer mill'
+  const tool = type === 'drill' ? '3 mm drill' : type === 'bore' ? LONG_FLUTE_MILL : '6 mm 90 deg chamfer mill'
   await driver.page.getByRole('button', { name: 'Add operation', exact: true }).last().click()
   await driver.page.locator('.op-type-card').filter({ hasText: type === 'chamfer' ? '2D Chamfer' : type === 'drill' ? /^Drill$/ : /^Bore$/ }).click()
   if (side === 'bottom') await driver.page.getByPlaceholder(/^Chamfer \d+$/).fill('Chamfer underside')
@@ -239,16 +240,18 @@ async function operation(driver, side, type) {
 
 // Customize the existing project tool; the shared starter library stays intact.
 export async function specifyLongFluteMill(driver) {
-  if ((await driver.readState()).toolLibrary.some(t => t.name === '3 mm flat end mill' && t.fluteLength === 15)) return
+  if ((await driver.readState()).toolLibrary.some(t => t.name === LONG_FLUTE_MILL && t.fluteLength === 15)) return
   const page = driver.page
   await page.getByTestId('mode-tab-toollibrary').click()
   await page.locator('.tool-list-item').filter({ hasText: '3 mm flat end mill' }).click()
+  await page.locator('.tool-tab').filter({ hasText: /^General$/ }).click()
+  await page.locator('.tool-editor-col .mform-row').filter({ has: page.locator('.mform-label').getByText('Name', { exact: true }) }).locator('input').fill(LONG_FLUTE_MILL)
   await page.locator('.tool-tab').filter({ hasText: /^Cutter$/ }).click()
   const input = page.locator('.mform-row').filter({ hasText: 'Flute length (from tip)' }).locator('input')
   await input.fill('15'); await input.press('Tab')
-  await driver.step('Specify the same 3 mm end mill with 15 mm flutes',
+  await driver.step('Name the 3 mm end mill with 15 mm flutes distinctly',
     p => p.getByRole('button', { name: 'Save Changes', exact: true }).click(),
-    s => s.toolLibrary.some(t => t.name === '3 mm flat end mill' && t.fluteLength === 15))
+    s => s.toolLibrary.some(t => t.name === LONG_FLUTE_MILL && t.fluteLength === 15))
   await page.locator('.tool-modal .modal-close-btn').click()
 }
 

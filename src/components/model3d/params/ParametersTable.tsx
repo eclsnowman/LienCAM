@@ -13,6 +13,7 @@
 // Testids EXACTLY per the INT-5 scanner (tools/smoke/int5-premise-check.mjs:133):
 // params-table, param-add, param-row.
 
+import { useText } from '../../../i18n'
 import { useState } from 'react'
 import type { ParameterTable } from '../../../doc'
 
@@ -42,7 +43,7 @@ function formatParamDiag(diag: { code: string; params: Record<string, string> } 
   return detail === '' ? diag.code : `${diag.code}: ${detail}`
 }
 
-const rowStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0', borderBottom: '1px solid var(--border-subtle, #2a3540)' }
+const rowStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0', borderBottom: "1px solid var(--border-subtle, #2a3540)" }
 const fieldRowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6 }
 const inputStyle: React.CSSProperties = {
   flex: 1,
@@ -50,12 +51,13 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
   background: 'var(--surface-1, #161b20)',
   color: 'var(--text-primary)',
-  border: '1px solid var(--border-subtle, #2a3540)',
+  border: "1px solid var(--border-subtle, #2a3540)",
   borderRadius: 4,
   padding: '2px 6px',
 }
 
 export function ParametersTable({ paramTable, version, onChanged, onDeleteParameter }: ParametersTableProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   void version // re-render trigger only -- every read below goes straight through paramTable
   const [newName, setNewName] = useState('')
   const [newExpression, setNewExpression] = useState('')
@@ -108,11 +110,10 @@ export function ParametersTable({ paramTable, version, onChanged, onDeleteParame
 
   return (
     <div data-testid="params-table" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontWeight: 600 }}>Parameters</div>
+      <div style={{ fontWeight: 600 }}>{workbenchText('ParametersTable.parameters')}</div>
       {names.length === 0 ? (
         <div style={{ color: 'var(--text-muted)' }} data-testid="params-table-empty">
-          (no parameters yet)
-        </div>
+          {workbenchText('ParametersTable.noParametersYet')}</div>
       ) : (
         names.map((name) => {
           const draft = drafts[name] ?? paramTable.expressionOf(name) ?? ''
@@ -139,8 +140,7 @@ export function ParametersTable({ paramTable, version, onChanged, onDeleteParame
                   {paramTable.valueOf(name)?.toFixed(4) ?? '--'}
                 </span>
                 <button type="button" data-testid={`param-delete-${name}`} className="modal-btn modal-btn-ghost" onClick={() => handleDelete(name)}>
-                  Delete
-                </button>
+                  {workbenchText('ParametersTable.delete')}</button>
               </div>
               {status !== 'ok' && diagnostic !== undefined && (
                 <div data-testid={`param-status-${name}`} style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
@@ -169,18 +169,17 @@ export function ParametersTable({ paramTable, version, onChanged, onDeleteParame
           spreadsheet's always-visible entry row uses), not a separate
           concept from the committed rows above. */}
       <div data-testid="param-row" style={fieldRowStyle}>
-        <input data-testid="param-new-name" type="text" placeholder="name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 90, flex: 'unset' }} />
+        <input data-testid="param-new-name" type="text" placeholder={workbenchText('ParametersTable.name')} value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 90, flex: 'unset' }} />
         <input
           data-testid="param-new-expression"
           type="text"
-          placeholder="expression, e.g. 2*base+5 or 10mm"
+          placeholder={workbenchText('ParametersTable.expressionEG2Base5Or10mm')}
           value={newExpression}
           onChange={(e) => setNewExpression(e.target.value)}
           style={inputStyle}
         />
         <button type="button" data-testid="param-add" className="modal-btn modal-btn-primary" disabled={newName.trim() === ''} onClick={() => void commitNew()}>
-          Add
-        </button>
+          {workbenchText('ParametersTable.add')}</button>
       </div>
       {addError !== undefined && (
         <div data-testid="param-add-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>

@@ -9,11 +9,12 @@
 //     the chooser (so do direct entries like the per-layer Edit-sketch
 //     button and finish-related transitions — they set the document
 //     before switching modes and never consult the tab).
-//   - listSketchEntryCandidates: every 2D layer in the project, with the
-//     reason it cannot be sketch-edited when it cannot (STL projections
-//     are read-only per ADR-0011; locked layers refuse edits). Disabled
-//     entries are LISTED greyed-out rather than hidden — the user sees
-//     why a layer is not offered instead of wondering where it went.
+//   - listSketchEntryCandidates: every 2D layer the chooser can OPEN.
+//     Projection layers (read-only per ADR-0011, from STL, STEP or model
+//     parts alike) and locked layers are NOT listed (WO-2854, rule 11 -
+//     The operator, 2026-10-15: "are we going to allow editing of STL projections?
+//     If not why is it in there?"); a part with no openable layer has no
+//     group at all.
 //   - resolveSketchTabSelection (NAV-SKETCH-TAB-SELECTION, GEO-UNIFY
 //     Stage 5): the sketch-side mirror of the Model tab's selection-aware
 //     routing (UI-EDIT-MODEL-FROM-BODY). Reads the tree/CAM selection and
@@ -40,8 +41,19 @@ export interface SketchEntryCandidate {
   loopCount: number
   /** True when a stored parametric document exists (re-edit, not lift). */
   hasStoredSketch: boolean
-  /** Null = selectable. Otherwise the human-readable refusal reason. */
-  disabledReason: string | null
+  /** Always null: only openable layers are listed (WO-2854). Kept so
+   *  existing callers that test it stay well-typed. */
+  disabledReason: null
+}
+
+/** A layer the sketch editor can open: not a projection (ADR-0011 read-only;
+ *  every layer of an STL part is one) and not locked. openSketchForLayer
+ *  refuses exactly these, so the chooser never offers a row that refuses. */
+function isSketchEditableLayer(
+  geo: ImportedGeometry,
+  layer: NonNullable<ImportedGeometry['layers2d']>[number],
+): boolean {
+  return !layer.projectionPlane && geo.format !== 'stl' && !layer.locked
 }
 
 /** The Sketch tab opens the chooser ONLY when no document is active.
@@ -56,12 +68,7 @@ export function listSketchEntryCandidates(
   const out: SketchEntryCandidate[] = []
   for (const geo of geometry) {
     for (const layer of geo.layers2d ?? []) {
-      let disabledReason: string | null = null
-      if (layer.projectionPlane || geo.format === 'stl') {
-        disabledReason = 'STL projection - read-only (ADR-0011)'
-      } else if (layer.locked) {
-        disabledReason = 'Layer is locked'
-      }
+      if (!isSketchEditableLayer(geo, layer)) continue
       out.push({
         geoId: geo.id,
         layerId: layer.id,
@@ -70,7 +77,7 @@ export function listSketchEntryCandidates(
         loopCount: (geo.loops ?? []).filter((lp) => lp.layerId === layer.id).length,
         hasStoredSketch:
           geo.sketches?.some((sk) => sk.layerId === layer.id) ?? false,
-        disabledReason,
+        disabledReason: null,
       })
     }
   }
@@ -98,7 +105,6 @@ export function resolveSketchTabSelection(
   const geo = geometry.find((g) => g.id === selectedGeometryId)
   if (!geo) return { kind: 'none' }
   const candidates = listSketchEntryCandidates([geo])
-    .filter((c) => c.disabledReason === null)
   if (candidates.length === 0) return { kind: 'none' }
   if (candidates.length === 1) {
     return { kind: 'direct', geoId: candidates[0].geoId, layerId: candidates[0].layerId }
@@ -142,7 +148,7 @@ export function resolvePromoteTabSelection(
       : geometry.find((g) => g.layers2d?.some((l) => l.id === selectedLayerId))
     if (geo) {
       const cand = listSketchEntryCandidates([geo]).find(
-        (c) => c.layerId === selectedLayerId && c.disabledReason === null,
+        (c) => c.layerId === selectedLayerId,
       )
       if (cand) return { kind: 'direct', geoId: cand.geoId, layerId: cand.layerId }
     }
@@ -152,7 +158,7 @@ export function resolvePromoteTabSelection(
   if (selectedGeometryId) {
     const geo = geometry.find((g) => g.id === selectedGeometryId)
     if (!geo) return { kind: 'none' }
-    const candidates = listSketchEntryCandidates([geo]).filter((c) => c.disabledReason === null)
+    const candidates = listSketchEntryCandidates([geo])
     if (candidates.length === 1) return { kind: 'direct', geoId: candidates[0].geoId, layerId: candidates[0].layerId }
     if (candidates.length >= 2) return { kind: 'ambiguous', geoId: geo.id }
   }

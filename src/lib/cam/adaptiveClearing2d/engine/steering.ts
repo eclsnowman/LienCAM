@@ -23,6 +23,8 @@ export interface StepResult {
   areaPerDist: number
   deflectionAngle: number
   hitIterationLimit: boolean
+  /** No candidate cut honored materialSide; the tool stays at its original position. */
+  blockedByMillingSide?: boolean
 }
 
 export interface ProbeRecord {
@@ -43,9 +45,13 @@ export interface StepDecision {
   probes: ProbeRecord[]
   acceptedIndex: number
   hitIterationLimit: boolean
+  /** No candidate cut honored materialSide; the tool stays at its original position. */
+  blockedByMillingSide?: boolean
 }
 
 export interface StepperOptions {
+  /** Required dominant physical cutting flank in the planner's clockwise-spindle frame. */
+  materialSide?: 'left' | 'right'
   maxDeflection?: number   // per-step curvature clamp (rad); FreeCAD pi/4
   maxIterations?: number   // search budget per step; FreeCAD 12
   maxErrorRel?: number     // accept band as a fraction of target load
@@ -66,6 +72,11 @@ export interface Stepper {
   /** One adaptive step from (toolPos,toolDir) holding `targetAreaPerDist` against `cleared`. */
   findNextPoint(cleared: Loops, toolPos: Pt, toolDir: Pt, step: number, targetAreaPerDist: number): StepResult
 }
+
+// A frontal bite cuts both flanks; polygon faceting also perturbs a symmetric
+// split. Treat 40/60 through 60/40 as mixed engagement (the WO-1227 diagnostic
+// deadband), and reject only a clearly dominant cut on the opposite flank.
+const MILLING_SIDE_DEADBAND = 0.2
 
 export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): Stepper {
   const maxDeflection = opts.maxDeflection ?? Math.PI / 4
@@ -115,6 +126,7 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
     // even though a good move was found earlier. Returning the last probe was making
     // passes quit prematurely with cuttable material still adjacent (the SquareIsland /
     // "should have continued" failure).
+    let sawWrongSideCut = false
     let bestCut: { pos: Pt; dir: Pt; area: number; apd: number; angle: number; err: number } | null = null
 
     const accept = (pos: Pt, dir: Pt, area: number, apd: number, angle: number, overLimit: boolean): StepResult => {
@@ -133,12 +145,15 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
       probes?.push({ angle, area, areaPerDist, sideBalance })
       const error = areaPerDist - targetAreaPerDist
 
+      const sideAllowed = !opts.materialSide || area <= 0
+        || (opts.materialSide === 'left' ? sideBalance >= -MILLING_SIDE_DEADBAND : sideBalance <= MILLING_SIDE_DEADBAND)
+      if (area > 0 && !sideAllowed) sawWrongSideCut = true
       const absErr = Math.abs(error)
-      if (area > 0 && (bestCut === null || absErr < bestCut.err)) {
+      if (area > 0 && sideAllowed && (bestCut === null || absErr < bestCut.err)) {
         bestCut = { pos: tryPos, dir: tryDir, area, apd: areaPerDist, angle, err: absErr }
       }
 
-      if (absErr < maxError) {
+      if (sideAllowed && absErr < maxError) {
         // good enough -> take this move directly
         return accept(tryPos, tryDir, area, areaPerDist, angle, false)
       }
@@ -146,6 +161,17 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
       if (iteration > maxIterations) {
         // budget exhausted -> prefer the best cutting move found over the last probe
         if (bestCut) return accept(bestCut.pos, bestCut.dir, bestCut.area, bestCut.apd, bestCut.angle, true)
+        if (sawWrongSideCut) {
+          // No admissible cutting heading was found. End this pass at its actual
+          // position; never emit the rejected cut with an air/no-cut label.
+          if (probes) opts.onDecision?.({
+            from: { ...toolPos }, dir: { ...toolDir }, step,
+            target: targetAreaPerDist, maxError, predictedAngle, probes,
+            acceptedIndex: -1, hitIterationLimit: true, blockedByMillingSide: true,
+          })
+          return { toolPos, toolDir, area: 0, areaPerDist: 0, deflectionAngle: 0,
+            hitIterationLimit: true, blockedByMillingSide: true }
+        }
         // nothing cut in any sampled direction -> genuine no-cut
         observe(angle, area, areaPerDist, true)
         return { toolPos: tryPos, toolDir: normalize(tryDir), area, areaPerDist, deflectionAngle: angle, hitIterationLimit: true }

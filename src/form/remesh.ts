@@ -19,11 +19,15 @@
 //     quads from one loop to the other; ONE ring when the face is ruled (the
 //     straight line between each pair of matched rim points lies on it, as on
 //     every cylinder and cone), since a smooth skin between two rows of points
-//     runs straight;
+//     runs straight; a ring per 30 degrees the face turns across, ruled or not
+//     (a foot fillet round a boss);
 //   - curved, bounded by three chains (a fillet corner blend) or five or more:
 //     split at a centre point into one Coons grid per corner, each side cut at
 //     its middle and joined to the centre by a spoke (all sides the same even
 //     count);
+//   - flat with holes (a plate top round a boss or a pocket): triangles between
+//     its loops' points, so its edges take the counts their neighbours settle
+//     on (never fewer than its own triangles had);
 //   - anything else keeps its triangles, and its chains keep their original
 //     points (so a neighbour's grid meets them).
 // A chain between two flat faces (or a flat face and an opening) keeps its
@@ -32,8 +36,8 @@
 // A quad face ruled between two opposite sides whose other two sides are
 // straight AND creased (the side of an extruded curve between sharp seams)
 // asks only one segment of those; a neighbour that wants more still gets it.
-// (Beside a smooth neighbour - a fillet strip against a flat face - it keeps its
-// segments: one would let the skin sag off the body.)
+// (Beside a smooth neighbour - a fillet strip against a flat face, on any of its
+// four sides - it keeps its segments: one would let the skin sag off the body.)
 // A grid's opposite sides need the same number of points, and chains are
 // shared, so the counts are settled together (union-find; a group takes the
 // largest count any member wants, a multiple of four where a dome needs it or
@@ -53,6 +57,7 @@ import type { Cage, Vec3 } from './cage'
 import { edgeKey } from './cage'
 import { closestPointIndex } from './closestPoint'
 import { pullOntoTargets } from './shapeTools'
+import * as THREE from 'three'
 
 export interface RemeshMesh { position: ArrayLike<number>; index: ArrayLike<number>; triFace: ArrayLike<number> }
 
@@ -184,7 +189,7 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
 
   // --- faces: flat, or which grid (a curved face with a shape the grids do not take keeps its triangles)
   const normalOf = (t: number[]): Vec3 => { const [a, b, c] = t.map((i) => P[i]); return unit(cross(sub(b, a), sub(c, a))) }
-  type Kind = { kind: 'flat' } | { kind: 'quad'; sides: Array<{ chain: number; forward: boolean }> } | { kind: 'dome'; loop: { chain: number; forward: boolean } } | { kind: 'annulus'; loops: Array<{ chain: number; forward: boolean }> } | { kind: 'star'; sides: Array<{ chain: number; forward: boolean }> } | { kind: 'triangles' }
+  type Kind = { kind: 'flat' } | { kind: 'quad'; sides: Array<{ chain: number; forward: boolean }> } | { kind: 'dome'; loop: { chain: number; forward: boolean } } | { kind: 'annulus'; loops: Array<{ chain: number; forward: boolean }> } | { kind: 'star'; sides: Array<{ chain: number; forward: boolean }> } | { kind: 'plate' } | { kind: 'triangles' }
   // a chain is sharp where the two faces beside it meet at a real angle (an opening counts as sharp)
   const sharp = chains.map((c) => {
     const k = Math.floor((c.verts.length - 1) / 2)
@@ -193,11 +198,13 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
   })
   const kind = new Map<number, Kind>()
   const flatFaceIds = new Set<number>()
+  const planeFaceIds = new Set<number>()
   for (const f of faceIds) {
     const list = trisOf.get(f)!
     const loops = loopsOf.get(f)!
     const n0 = normalOf(tris[list[0]]), o = P[tris[list[0]][0]]
     const flat = list.every((t) => { const n = normalOf(tris[t]); return dot(n, n0) > 1 - 1e-9 && tris[t].every((i) => Math.abs(dot(sub(P[i], o), n0)) <= 1e-6 * Math.max(1, extent)) })
+    if (flat) planeFaceIds.add(f)
     if (flat && loops.length === 1) flatFaceIds.add(f)
     const allSharp = loops.every((l) => l.every((s) => sharp[s.chain]))
     if (flat && loops.length === 1 && allSharp) kind.set(f, { kind: 'flat' })
@@ -206,6 +213,7 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
     else if (loops.length === 2 && loops.every((l) => l.length === 1 && chains[l[0].chain].closed)) kind.set(f, { kind: 'annulus', loops: [loops[0][0], loops[1][0]] })
     else if (loops.length === 1 && (loops[0].length === 3 || loops[0].length >= 5) && loops[0].every((s) => !chains[s.chain].closed)) kind.set(f, { kind: 'star', sides: loops[0] })
     else if (flat && loops.length === 1) kind.set(f, { kind: 'flat' })
+    else if (flat && loops.length > 1) kind.set(f, { kind: 'plate' })
     else kind.set(f, { kind: 'triangles' })
   }
 
@@ -246,6 +254,10 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
       if (!sharp[k.sides[a].chain] || !sharp[k.sides[b].chain]) continue
       if (!straightChain(chains[k.sides[a].chain]) || !straightChain(chains[k.sides[b].chain])) continue
       const u = k.sides[(a + 1) % 4], w = k.sides[(a + 3) % 4]
+      // ...and the two sides the lines run between creased too: a flat side face between two r6 corner fillets
+      // took one segment of its 48 mm bottom, the bottom crease ran from 3 mm arc spans into one 48 mm span, and
+      // the Pull threw that corner point 16 mm out to make the skin meet it - 2.5 mm off at every corner (WO-2822)
+      if (!sharp[u.chain] || !sharp[w.chain]) continue
       const ruled = [0.25, 0.5, 0.75].every((t) => {
         const p = chainAt(u, t), q = chainAt(w, 1 - t)
         return [0.25, 0.5, 0.75].every((g) => onFace.closest([p[0] + (q[0] - p[0]) * g, p[1] + (q[1] - p[1]) * g, p[2] + (q[2] - p[2]) * g]).distance <= ruledTol)
@@ -254,6 +266,10 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
     }
   }
   const original = chains.map((c) => c.verts.length - 1)
+  // a plate's edges keep at least the points its own triangles had (it took exactly those before it was
+  // triangulated from its loops): a boss's rim from the plate top's 32 to the twelve its length asks
+  // let the foot fillet sag 0.27 mm off the body, a dome's rim 1.1 mm
+  chains.forEach((c, i) => { if (c.faces.some((f) => kind.get(f)?.kind === 'plate')) want[i] = Math.max(want[i], original[i]) })
   let counts: number[] = []
   for (let pass = 0; pass < chains.length + 2; pass++) {
     const parent = chains.map((_, i) => i)
@@ -271,7 +287,7 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
       const g = find(i)
       best.set(g, Math.max(best.get(g) ?? 0, want[i]))
       const kindOf = (f: number) => kind.get(f)?.kind
-      if (c.faces.some((f) => kindOf(f) === 'triangles' || (f >= 0 && !kind.has(f))) || c.faces.every((f) => f < 0 || kindOf(f) === 'flat')) {
+      if (c.faces.some((f) => kindOf(f) === 'triangles' || (f >= 0 && !kind.has(f))) || c.faces.every((f) => f < 0 || kindOf(f) === 'flat' || kindOf(f) === 'plate')) {
         if (fixed.has(g) && fixed.get(g) !== original[i]) conflict = g
         fixed.set(g, original[i])
       }
@@ -356,6 +372,12 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
     if (k.kind === 'flat') {
       const loop = loopsOf.get(f)![0].flatMap((s) => along(s).slice(0, -1))
       addFaces([loop]); flatFaces++
+    } else if (k.kind === 'plate' && loopsOf.get(f)!.some((l) => l.some((s) => counts[s.chain] !== original[s.chain]))) {
+      addFaces(plateTriangles(loopsOf.get(f)!.map((l) => l.flatMap((s) => along(s).slice(0, -1))), out, refN)); flatFaces++
+    } else if (k.kind === 'plate') {
+      // its edges kept their points: its own triangles, as the kernel laid them out (earcut's long slivers
+      // round a rib's corners left a point of the finished body 0.93 mm off the plate)
+      addFaces(trisOf.get(f)!.map((t) => tris[t].map(keep))); flatFaces++
     } else if (k.kind === 'quad' || k.kind === 'dome') {
       let sides: number[][]
       if (k.kind === 'quad') sides = k.sides.map(along)
@@ -364,11 +386,15 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
         const n4 = ring.length / 4
         sides = [0, 1, 2, 3].map((j) => [...ring, ring[0]].slice(j * n4, (j + 1) * n4 + 1))
       }
-      addFaces(coonsGrid(sides, out, onFace)); gridFaces++
+      // a dome's grid starts flat across its rim: each interior point goes up onto the dome along the rim's
+      // normal, not to the dome's nearest point - over a hemisphere (a ball cap taller than its radius) that
+      // is the rim itself for every point, and the dome came back as a flat lid (WO-2822)
+      const lift = k.kind === 'dome' ? liftOnto(sides.flatMap((sd) => sd.slice(0, -1).map((i) => out[i])), trisOf.get(f)!.map((t) => tris[t].map((v) => P[v]))) : undefined
+      addFaces(coonsGrid(sides, out, onFace, lift)); gridFaces++
     } else if (k.kind === 'star') {
       addFaces(starGrid(k.sides.map(along), out, onFace)); gridFaces++
     } else if (k.kind === 'annulus') {
-      addFaces(ringGrid(along(k.loops[0]).slice(0, -1), along(k.loops[1]).slice(0, -1), out, onFace, h, ruledTol)); gridFaces++
+      addFaces(ringGrid(along(k.loops[0]).slice(0, -1), along(k.loops[1]).slice(0, -1), out, onFace, h, ruledTol, maxTurn)); gridFaces++
     } else {
       const list = trisOf.get(f)!
       addFaces(list.map((t) => tris[t].map(keep)))
@@ -383,7 +409,12 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
   const creases: string[] = []
   for (const [key, list] of sides) {
     if (list.length !== 2 || bodyFaceOf[list[0]] === bodyFaceOf[list[1]]) continue
-    if (dot(cageNormal[list[0]], cageNormal[list[1]]) < cosSharp) creases.push(key)
+    // also where a flat face kept as its triangles (a plate top with a hole) runs smoothly into a curved grid
+    // (the foot fillet round a boss): the fan's long triangles cannot carry the blend, and Pulled onto the body
+    // the skin waved 0.68 mm into a groove at the fillet's foot; creased, the grid ends on the flat face (WO-2822)
+    const [fa, fb] = [bodyFaceOf[list[0]], bodyFaceOf[list[1]]]
+    const fanBesideGrid = (x: number, y: number) => (kind.get(x)!.kind === 'triangles' || kind.get(x)!.kind === 'plate') && planeFaceIds.has(x) && kind.get(y)!.kind !== 'triangles' && !planeFaceIds.has(y)
+    if (dot(cageNormal[list[0]], cageNormal[list[1]]) < cosSharp || fanBesideGrid(fa, fb) || fanBesideGrid(fb, fa)) creases.push(key)
   }
   let cage: Cage = { positions: out, faces, creases }
   let offBefore = 0, offAfter = 0
@@ -406,12 +437,53 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
 }
 
 /**
+ * A flat face with holes (a plate top round a boss, a block top round a pocket) as triangles between its
+ * loops' points (point id lists, the outer one the largest), so its edges take whatever counts the faces
+ * beside them settle on: kept as the body's own triangles they kept their own counts, and a pocket whose
+ * rim had eight points on each corner arc and one on each straight wall could not be gridded at all.
+ */
+function plateTriangles(loops: number[][], out: Vec3[], n: Vec3): number[][] {
+  const u = unit(cross(Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], n)), w = cross(n, u)
+  const flat = loops.map((l) => l.map((i) => new THREE.Vector2(dot(out[i], u), dot(out[i], w))))
+  const area = flat.map((l) => Math.abs(THREE.ShapeUtils.area(l)))
+  const outer = area.indexOf(Math.max(...area))
+  const order = [outer, ...loops.map((_, j) => j).filter((j) => j !== outer)]
+  const ids = order.flatMap((j) => loops[j])
+  const tris = THREE.ShapeUtils.triangulateShape(flat[outer], order.slice(1).map((j) => flat[j])).map((t) => t.map((i) => ids[i]))
+  // earcut leaves out a loop point exactly in line with its neighbours (the samples along a straight edge) and
+  // bridges holes along such lines (two ribs' ends in line: one edge through both), and the face would be open
+  // there: a triangle edge with loop points on it becomes a fan through them
+  const xy = new Map<number, THREE.Vector2>()
+  order.forEach((j) => loops[j].forEach((id, k) => xy.set(id, flat[j][k])))
+  const all = [...xy.keys()]
+  const onEdge = (u: number, v: number): number[] => {
+    const a = xy.get(u)!, d = xy.get(v)!.clone().sub(a), l2 = d.lengthSq()
+    const eps = 1e-9 * Math.max(1, l2)
+    return all
+      .map((id) => { const q = xy.get(id)!.clone().sub(a); return { id, t: q.dot(d) / l2, off: Math.abs(q.cross(d)) } })
+      .filter((h) => h.id !== u && h.id !== v && h.off <= eps && h.t > 1e-9 && h.t < 1 - 1e-9)
+      .sort((x, y) => x.t - y.t).map((h) => h.id)
+  }
+  const split = (t: number[], depth: number): number[][] => {
+    for (let e = 0; e < 3 && depth < 8; e++) {
+      const u = t[e], v = t[(e + 1) % 3], c = t[(e + 2) % 3]
+      const run = onEdge(u, v)
+      if (run.length === 0) continue
+      const pts = [u, ...run, v]
+      return pts.slice(0, -1).flatMap((q, k) => split([q, pts[k + 1], c], depth + 1))
+    }
+    return [t]
+  }
+  return tris.flatMap((t) => split(t, 0))
+}
+
+/**
  * A grid of quads inside four sides (point id lists, each running round the
  * face: side 0 c0->c1, side 1 c1->c2, side 2 c2->c3, side 3 c3->c0; opposite
  * sides the same length). Interior points: the Coons patch of the sides, put
  * on the face and relaxed.
  */
-function coonsGrid(sides: number[][], out: Vec3[], onFace: { closest(q: Vec3): { point: Vec3 } }): number[][] {
+function coonsGrid(sides: number[][], out: Vec3[], onFace: { closest(q: Vec3): { point: Vec3 } }, place: (p: Vec3) => Vec3 = (p) => onFace.closest(p).point): number[][] {
   const a = sides[0].length - 1, b = sides[1].length - 1
   const grid: number[][] = Array.from({ length: a + 1 }, () => new Array<number>(b + 1))
   for (let i = 0; i <= a; i++) { grid[i][0] = sides[0][i]; grid[a - i][b] = sides[2][i] }
@@ -423,7 +495,7 @@ function coonsGrid(sides: number[][], out: Vec3[], onFace: { closest(q: Vec3): {
     const p = [0, 1, 2].map((c) =>
       (1 - v) * X(i, 0)[c] + v * X(i, b)[c] + (1 - u) * X(0, j)[c] + u * X(a, j)[c]
       - ((1 - u) * (1 - v) * X(0, 0)[c] + u * (1 - v) * X(a, 0)[c] + (1 - u) * v * X(0, b)[c] + u * v * X(a, b)[c])) as Vec3
-    out.push(onFace.closest(p).point)
+    out.push(place(p))
     grid[i][j] = out.length - 1
     inner.push([i, j])
   }
@@ -463,7 +535,7 @@ function starGrid(sides: number[][], out: Vec3[], onFace: { closest(q: Vec3): { 
 }
 
 /** Rings of quads between two closed loops of the same length (lined up by least distance), their interior on the face. */
-function ringGrid(l0: number[], l1raw: number[], out: Vec3[], onFace: { closest(q: Vec3): { point: Vec3; distance: number } }, h: number, ruledTol: number): number[][] {
+function ringGrid(l0: number[], l1raw: number[], out: Vec3[], onFace: { closest(q: Vec3): { point: Vec3; distance: number } }, h: number, ruledTol: number, maxTurn: number): number[][] {
   const n = l0.length
   // the second loop runs the other way round the face; turn it to line up with the first
   let l1 = [...l1raw].reverse()
@@ -480,7 +552,14 @@ function ringGrid(l0: number[], l1raw: number[], out: Vec3[], onFace: { closest(
     const a = out[p], b = out[l1[i]]
     return onFace.closest([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]).distance <= tol
   }))
-  const m = ruled ? 1 : Math.max(1, Math.round(bestLen / n / h))
+  // ...but a band that turns across takes a ring per maxTurn of it, ruled or not: a short one passes the test
+  // above (an r3 foot fillet round a d20 boss misses its lines by 0.88 mm against a 1.5 mm sag, and is one
+  // twelfth of the body across), and one ring made it a straight bevel at Finish (WO-2822). How far it turns:
+  // the arc whose chord is the line between matched points and whose sagitta is the line's miss at its middle
+  // (8 x sagitta / chord; a facet's miss over a long straight line turns it next to nothing)
+  const turn = Math.max(...l0.map((p, i) => { const a = out[p], b = out[l1[i]], L = dist(a, b); return L > 0 ? (8 * onFace.closest(mid(a, b)).distance) / L : 0 }))
+  const byTurn = Math.ceil(turn / maxTurn - 1e-9)
+  const m = Math.max(1, byTurn, ruled ? 1 : Math.round(bestLen / n / h))
   const rings: number[][] = [l0]
   const inner: number[] = [], nbs: number[][] = []
   for (let k = 1; k < m; k++) {
@@ -493,6 +572,33 @@ function ringGrid(l0: number[], l1raw: number[], out: Vec3[], onFace: { closest(
   const quads: number[][] = []
   for (let k = 0; k < m; k++) for (let i = 0; i < n; i++) quads.push([rings[k][i], rings[k][(i + 1) % n], rings[k + 1][(i + 1) % n], rings[k + 1][i]])
   return quads
+}
+
+/**
+ * Where a point of a dome's flat rim disk goes onto the dome: along the rim's normal (turned toward the dome)
+ * to the dome's triangles, the nearest hit; its nearest point on them when the line misses.
+ */
+function liftOnto(rim: Vec3[], faceTris: Vec3[][]): (p: Vec3) => Vec3 {
+  let n = newellN(rim)
+  const c = centroid(rim)
+  const mid = centroid(faceTris.map((t) => centroid(t)))
+  if (dot(n, sub(mid, c)) < 0) n = [-n[0], -n[1], -n[2]]
+  const onFace = closestPointIndex({ position: faceTris.flat(2), index: faceTris.flatMap((_, j) => [j * 3, j * 3 + 1, j * 3 + 2]) })
+  return (p) => {
+    let best = Infinity
+    for (const [a, b, q] of faceTris) {
+      // Moller-Trumbore, both ways along the line (a rim that is not quite flat starts some points above the dome)
+      const e1 = sub(b, a), e2 = sub(q, a), pv = cross(n, e2), det = dot(e1, pv)
+      if (Math.abs(det) < 1e-12) continue
+      const tv = sub(p, a), u = dot(tv, pv) / det
+      if (u < -1e-9 || u > 1 + 1e-9) continue
+      const qv = cross(tv, e1), v = dot(n, qv) / det
+      if (v < -1e-9 || u + v > 1 + 1e-9) continue
+      const t = dot(e2, qv) / det
+      if (Math.abs(t) < Math.abs(best)) best = t
+    }
+    return best === Infinity ? onFace.closest(p).point : [p[0] + n[0] * best, p[1] + n[1] * best, p[2] + n[2] * best]
+  }
 }
 
 /** A few rounds of each interior point to the average of its neighbours, put back on the face. */

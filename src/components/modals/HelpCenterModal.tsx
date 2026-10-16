@@ -17,7 +17,7 @@ import { textFor, useText } from '../../i18n'
 // Model screen.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, CircleHelp, FolderOpen, Search, Sparkles, X } from 'lucide-react'
+import { Bug, ChevronDown, ChevronRight, CircleHelp, FolderOpen, Search, Sparkles, X } from 'lucide-react'
 import { askBeforeReplacingProject, useCamStore } from '../../store'
 import { HELP_CATEGORIES } from '../../help/categories'
 import { deriveHelpContext, rankTopics } from '../../help/helpContext'
@@ -27,7 +27,10 @@ import { helpIndex, helpIndexEntry, loadTopic } from '../../help/registry'
 import type { ContextKey, HelpCategoryId, HelpSection, HelpTopic } from '../../help/types'
 import { HelpFigure } from './HelpFigure'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
+import { useProjectPicker } from '../../lib/projectOpen/picker'
 import { assetUrl } from '../../lib/assetUrl'
+import { installDiagnostics } from '../../lib/diagnostics'
+import { ReportProblemModal, openReportProblem } from './ReportProblemModal'
 
 const shellText = textFor('app-shell-settings-menus')
 
@@ -236,8 +239,23 @@ function SectionBlock({ section, topic }: { section: HelpSection; topic: HelpTop
   }
 }
 
-export function HelpCenterModal({ onAbout, aboutOpen = false }: { onAbout?: () => void; aboutOpen?: boolean }) {
+/** WO-2759: Help also hosts Help > Report a problem, which keeps its own open
+ *  flag so it can sit over Help-as-overlay without replacing the dialog below.
+ *  Help is mounted for the app's whole life, so it starts the diagnostic
+ *  history too. */
+export function HelpCenterModal(props: { onAbout?: () => void; aboutOpen?: boolean }) {
+  useEffect(() => { installDiagnostics() }, [])
+  return (
+    <>
+      <HelpCenterDialog {...props} />
+      <ReportProblemModal />
+    </>
+  )
+}
+
+function HelpCenterDialog({ onAbout, aboutOpen = false }: { onAbout?: () => void; aboutOpen?: boolean }) {
   useText('app-shell-settings-menus')
+  const openExamples = () => { closeHelp(); useProjectPicker.getState().show('examples') }
   const activeModal = useCamStore((s) => s.activeModal)
   const confirmPending = useCamStore((s) => s.confirmDialog !== null)
   // WO-413: a hotlink's requested topic / anchor, and whether Help sits OVER
@@ -431,6 +449,20 @@ export function HelpCenterModal({ onAbout, aboutOpen = false }: { onAbout?: () =
           </button>
         </div>
 
+        <div style={{ padding: '10px 16px', display: 'flex', gap: 8 }}>
+          <button className="modal-btn modal-btn-primary" onClick={openExamples}>Open an example project</button>
+          {/* WO-2759: Help > Report a problem. Help closes so the report sits on
+              whatever was under it; an overlay's dialog underneath stays put. */}
+          <button
+            type="button"
+            className="modal-btn modal-btn-ghost"
+            data-testid="help-report-problem"
+            data-tooltip={shellText('HelpCenterModal.reportAProblemTip')}
+            onClick={() => { closeHelp(); openReportProblem() }}
+          >
+            <Bug size={13} /> {shellText('HelpCenterModal.reportAProblem')}
+          </button>
+        </div>
         <div className="help-center-search">
           <Search size={14} />
           <input
@@ -446,6 +478,7 @@ export function HelpCenterModal({ onAbout, aboutOpen = false }: { onAbout?: () =
 
         <div className="help-center-layout">
           <nav className="help-nav" aria-label={shellText('HelpCenterModal.helpTopics')}>
+            <button className="help-cat-row" onClick={openExamples}><FolderOpen size={14} />Open an example project</button>
             {searching ? (
               <div className="help-topic-list-scroll">
                 {matches.map(topicRow)}

@@ -1,4 +1,4 @@
-; LienCAM 0.36.0-alpha.1 - 01 Fixture plate - M6 x 1 - linuxcnc
+; LienCAM 0.36.0-alpha.2 - 01 Fixture plate - M6 x 1 - linuxcnc
 G90 G94 G17 G21 G64
 ; Setup 1
 G54

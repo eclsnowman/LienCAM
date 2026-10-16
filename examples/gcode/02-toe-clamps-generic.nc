@@ -1,4 +1,5 @@
-(LienCAM 0.36.0-alpha.1 - 02 Toe clamps - generic)
+(LienCAM 0.36.0-alpha.2 - 02 Toe clamps - generic)
+G90 G21
 ( Setup 1 )
 G54
 ( Toe recesses - 2 mm )

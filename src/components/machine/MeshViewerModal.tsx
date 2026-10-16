@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { fmtMachineLength, unitLabel } from '../../lib/ui/unitFormat'
 import { useDisplayUnits } from './useDisplayUnits'
 // WO-416: the flatness viewer Operator asked for. "I want a visualization of the
@@ -151,6 +155,7 @@ function buildGeometry(mesh: SurfaceMeshMap, stats: MeshViewerStats): THREE.Buff
  *  tests, a software-only sandbox), and a perfectly honest reading of the
  *  same data either way. */
 function HeatmapFallback({ mesh, stats }: { mesh: SurfaceMeshMap; stats: MeshViewerStats }) {
+  useText('control-screens-not-probing')
   const grid = useMemo(() => sampleGridOf(mesh), [mesh])
   const range = stats.range || 1
   const cell = 100 / Math.max(mesh.pointsX, mesh.pointsY)
@@ -161,7 +166,7 @@ function HeatmapFallback({ mesh, stats }: { mesh: SurfaceMeshMap; stats: MeshVie
       className="mesh-viewer-heatmap"
       data-testid="mesh-viewer-heatmap"
       role="img"
-      aria-label="Top-view heatmap of the measured surface"
+      aria-label={controlText('MeshViewerModal.text001')}
     >
       {Array.from({ length: mesh.pointsY }, (_, row) =>
         Array.from({ length: mesh.pointsX }, (_, col) => {
@@ -188,6 +193,7 @@ function HeatmapFallback({ mesh, stats }: { mesh: SurfaceMeshMap; stats: MeshVie
 }
 
 export function MeshViewerModal() {
+  useText('control-screens-not-probing')
   const units = useDisplayUnits()
   const activeModal = useCamStore((s) => s.activeModal)
   const closeModal = useCamStore((s) => s.closeModal)
@@ -307,42 +313,40 @@ export function MeshViewerModal() {
       >
         <div className="modal-header">
           <Mountain size={15} className="modal-header-icon" />
-          <span className="modal-title">Surface mesh flatness</span>
-          <button className="modal-close-btn" onClick={closeModal} data-tooltip="Close" aria-label="Close">
+          <span className="modal-title">{controlText('MeshViewerModal.text002')}</span>
+          <button className="modal-close-btn" onClick={closeModal} data-tooltip={controlText('MeshViewerModal.text003')} aria-label={controlText('MeshViewerModal.text004')}>
             <X size={14} />
           </button>
         </div>
         <div className="modal-body mesh-viewer-body">
           {!surfaceMesh || !stats ? (
-            <div className="panel-empty" data-testid="mesh-viewer-empty">
-              No active surface mesh - probe and arm a mesh from the Probing tab first.
-            </div>
+            <div className="panel-empty" data-testid="mesh-viewer-empty">{controlText('MeshViewerModal.text005')}</div>
           ) : (
             <>
               <div className="mesh-viewer-readouts" data-testid="mesh-viewer-readouts">
                 <div>
-                  <span className="mesh-viewer-readout-label">Points</span>
-                  <span data-testid="mesh-viewer-points">{stats.pointsX} x {stats.pointsY}</span>
+                  <span className="mesh-viewer-readout-label">{controlText('MeshViewerModal.text006')}</span>
+                  <span data-testid="mesh-viewer-points">{catalogChildren(controlText('MeshViewerModal.text007', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: stats.pointsX, value2: stats.pointsY })}</span>
                 </div>
                 <div>
-                  <span className="mesh-viewer-readout-label">Min Z</span>
+                  <span className="mesh-viewer-readout-label">{controlText('MeshViewerModal.text008')}</span>
                   <span data-testid="mesh-viewer-min-z">{fmtMachineLength(stats.minZ, units)} {unitLabel(units)}</span>
                 </div>
                 <div>
-                  <span className="mesh-viewer-readout-label">Max Z</span>
+                  <span className="mesh-viewer-readout-label">{controlText('MeshViewerModal.text009')}</span>
                   <span data-testid="mesh-viewer-max-z">{fmtMachineLength(stats.maxZ, units)} {unitLabel(units)}</span>
                 </div>
                 <div>
-                  <span className="mesh-viewer-readout-label">Range (flatness)</span>
+                  <span className="mesh-viewer-readout-label">{controlText('MeshViewerModal.text010')}</span>
                   <span data-testid="mesh-viewer-range">{fmtMachineLength(stats.range, units)} {unitLabel(units)}</span>
                 </div>
                 <div>
-                  <span className="mesh-viewer-readout-label">Reference Z</span>
+                  <span className="mesh-viewer-readout-label">{controlText('MeshViewerModal.text011')}</span>
                   <span data-testid="mesh-viewer-reference-z">{fmtMachineLength(stats.referenceZ, units)} {unitLabel(units)}</span>
                 </div>
                 <div>
-                  <span className="mesh-viewer-readout-label">Z exaggerated</span>
-                  <span data-testid="mesh-viewer-exaggeration">{stats.exaggeration}x</span>
+                  <span className="mesh-viewer-readout-label">{controlText('MeshViewerModal.text012')}</span>
+                  <span data-testid="mesh-viewer-exaggeration">{catalogChildren(controlText('MeshViewerModal.text013', { value1: '\u0000value1\u0000' }), { value1: stats.exaggeration })}</span>
                 </div>
               </div>
               <div className="mesh-viewer-scene" data-testid="mesh-viewer-scene">
@@ -353,9 +357,7 @@ export function MeshViewerModal() {
                 )}
               </div>
               <div className="mesh-viewer-legend" aria-hidden="true">
-                <span className="mesh-viewer-legend-swatch mesh-viewer-legend-low" /> low
-                <span className="mesh-viewer-legend-swatch mesh-viewer-legend-high" /> high
-                {webgl && <span className="mesh-viewer-hint">Drag to orbit - wheel to zoom</span>}
+                <span className="mesh-viewer-legend-swatch mesh-viewer-legend-low" />{controlText('MeshViewerModal.text014')}<span className="mesh-viewer-legend-swatch mesh-viewer-legend-high" />{controlText('MeshViewerModal.text015')}{webgl && <span className="mesh-viewer-hint">{controlText('MeshViewerModal.text016')}</span>}
               </div>
             </>
           )}

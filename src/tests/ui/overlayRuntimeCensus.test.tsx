@@ -440,14 +440,15 @@ describe('WO UI-70-R2 / 0. the census is not vacuous', () => {
 // what A3 means by an "invented mapping".
 
 describe('WO UI-70-R3 / 0b. the committed artifacts match their derivation', () => {
-  // WO-2685 publishes the complete current derivations in its owned evidence
-  // directory, retaining the historical UI-70 snapshots unchanged.
+  // WO-2810 adds a second run-from-line overlay authoring site. WO-2828
+  // refreshes that derivation in its owned evidence; exemption rules did not change.
   const EVIDENCE = path.join(process.cwd(), 'src', 'tests', 'evidence', 'WO-2685')
 
   /** Writes when UI70_WRITE_KEYS=1 -- the regeneration path the artifacts' own
    *  headers document -- and otherwise only ever reads. */
   function gateArtifact(fileName: string, rendered: string): void {
-    const file = path.join(EVIDENCE, fileName)
+    const file = path.join(fileName === 'OVERLAY-RUNTIME-KEYS.md'
+      ? path.join(process.cwd(), 'src', 'tests', 'evidence', 'WO-2828') : EVIDENCE, fileName)
     // Write only a REAL change: rewriting an unchanged artifact with LF endings left
     // CRLF files "modified" in the main checkout, and that EOL-only dirt made a
     // lane's gate refuse to measure (2026-09-23, WO-1876).
@@ -1429,7 +1430,9 @@ describe('WO UI-70-R3 / 2e. recipe: the CAM modal backdrops', () => {
     { id: 'settings', module: '../../components/modals/SettingsModal', export: 'SettingsModal', key: 'components/modals/SettingsModal.tsx:SettingsModal > div.modal-backdrop' },
     { id: 'sketch-entry', module: '../../components/modals/SketchEntryModal', export: 'SketchEntryModal', key: 'components/modals/SketchEntryModal.tsx:SketchEntryModal > div.modal-backdrop' },
     { id: 'tool-library', module: '../../components/modals/ToolLibraryModal', export: 'ToolLibraryModal', key: 'components/modals/ToolLibraryModal.tsx:ToolLibraryModal > div.modal-backdrop' },
-    { id: 'help', module: '../../components/modals/HelpCenterModal', export: 'HelpCenterModal', key: 'components/modals/HelpCenterModal.tsx:HelpCenterModal > div.modal-backdrop' },
+    // WO-2784 RE-PIN: WO-2759 (2d220dbd0b) moved the Help backdrop into HelpCenterDialog, rendered by the
+    // exported HelpCenterModal wrapper; the recipe still mounts the export, the observed key names the new owner.
+    { id: 'help', module: '../../components/modals/HelpCenterModal', export: 'HelpCenterModal', key: 'components/modals/HelpCenterModal.tsx:HelpCenterDialog > div.modal-backdrop' },
   ]
 
   for (const m of MODALS) {

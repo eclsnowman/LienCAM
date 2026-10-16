@@ -1,3 +1,7 @@
+import { catalogChildren } from './definition/catalogText'
+import { textFor, useText } from '../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { Check, FileSearch, X } from 'lucide-react'
 import {
   describeChangeHeadline,
@@ -51,6 +55,7 @@ function StatusWord({
 }
 
 function PinRow({ row }: { row: ProfilePinRow }) {
+  useText('control-screens-not-probing')
   const status = profilePinPreviewStatus(row)
   const replacement = row.replacement
   return (
@@ -72,7 +77,7 @@ function PinRow({ row }: { row: ProfilePinRow }) {
       <td>
         <StatusWord
           status={status}
-          word={replacement ? 'you set this - will be replaced' : undefined}
+          word={replacement ? controlText('ProfilePreviewView.text001') : undefined}
           explanation={replacement ? describeProfileReplacementTooltip(replacement) : row.outcome}
           testId={`profile-preview-status-pin-${row.key}`}
         />
@@ -82,6 +87,7 @@ function PinRow({ row }: { row: ProfilePinRow }) {
 }
 
 function ChangeRow({ row }: { row: ProfileChangeRow }) {
+  useText('control-screens-not-probing')
   const status = profileChangePreviewStatus(row)
   const replacement = row.replacement
   return (
@@ -97,7 +103,7 @@ function ChangeRow({ row }: { row: ProfileChangeRow }) {
       <td>
         <StatusWord
           status={status}
-          word={replacement ? 'you set this - will be replaced' : undefined}
+          word={replacement ? controlText('ProfilePreviewView.text002') : undefined}
           explanation={replacement
             ? describeProfileReplacementTooltip(replacement)
             : describeProfileChange(row)}
@@ -119,6 +125,7 @@ export function ProfilePreviewView({
   onCancel,
   busy = false,
 }: ProfilePreviewViewProps) {
+  useText('control-screens-not-probing')
   const pins = changedFirst(preview.pins)
   const changes = changedFirst(preview.changes)
   const total = pins.length + changes.length
@@ -137,7 +144,7 @@ export function ProfilePreviewView({
       data-profile-path={preview.path}
       data-replacement-count={replacementCount}
       data-replacement-source={preview.replacementSource ?? 'app'}
-      aria-label={`Review ${profileFileName(preview.path)}`}
+      aria-label={controlText('ProfilePreviewView.text003', { value1: String(profileFileName(preview.path)) })}
     >
       <header className="modal-header profile-preview-header">
         <FileSearch size={16} className="modal-header-icon" />
@@ -146,9 +153,7 @@ export function ProfilePreviewView({
             {profileFileName(preview.path)}
             {preview.profileName ? ` - ${preview.profileName}` : ''}
           </span>
-          <span className="profile-preview-row-count" data-testid="uccnc-profile-row-count">
-            {total} rows, {preview.changedCount} changing
-          </span>
+          <span className="profile-preview-row-count" data-testid="uccnc-profile-row-count">{catalogChildren(controlText('ProfilePreviewView.text004', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: total, value2: preview.changedCount })}</span>
           {replacementSummary && (
             <span
               className="profile-preview-replacement-summary"
@@ -166,8 +171,7 @@ export function ProfilePreviewView({
           data-testid="uccnc-profile-cancel"
           onClick={onCancel}
         >
-          <X size={12} /> Cancel
-        </button>
+          <X size={12} />{controlText('ProfilePreviewView.text005')}</button>
         {preview.readable && (
           <button
             type="button"
@@ -176,8 +180,7 @@ export function ProfilePreviewView({
             onClick={onConfirm}
             disabled={busy}
           >
-            <Check size={12} /> Import these values
-          </button>
+            <Check size={12} />{controlText('ProfilePreviewView.text006')}</button>
         )}
       </header>
 
@@ -188,10 +191,10 @@ export function ProfilePreviewView({
             data-pin-translation={String(preview.board.pinTranslation)}
           >
             {preview.board.type === null
-              ? 'The bridge did not say what board it is talking to.'
-              : `Board: ${preview.board.type}.`}
+              ? controlText('ProfilePreviewView.text007')
+              : controlText('ProfilePreviewView.text008', { value1: String(preview.board.type) })}
             {!preview.board.pinTranslation
-              && ' Its pin table has not been transcribed into the bridge, so pins cannot be translated.'}
+              && controlText('ProfilePreviewView.text009')}
           </div>
           {preview.warnings.map((warning, index) => (
             <div key={warning} data-testid={`uccnc-profile-warning-${index}`}>{warning}</div>
@@ -199,9 +202,7 @@ export function ProfilePreviewView({
         </div>
 
         {!preview.readable ? (
-          <div className="profile-preview-unreadable" data-testid="uccnc-profile-unreadable">
-            {preview.error} Nothing was changed.
-          </div>
+          <div className="profile-preview-unreadable" data-testid="uccnc-profile-unreadable">{catalogChildren(controlText('ProfilePreviewView.text010', { value1: '\u0000value1\u0000' }), { value1: preview.error })}</div>
         ) : (
           <>
             <div
@@ -218,12 +219,9 @@ export function ProfilePreviewView({
                 className="profile-preview-warning"
                 data-testid="uccnc-profile-translation-only"
                 data-count={preview.translationOnlyCount}
-              >
-                {preview.translationOnlyCount === 1
-                  ? '1 pin keeps the same wiring and gets a DIFFERENT result on the board'
-                  : `${preview.translationOnlyCount} pins keep the same wiring and get DIFFERENT results on the board`}
-                . This can mean a different pin, a pin the board REFUSES, or one that can no longer be checked.
-              </div>
+              >{catalogChildren(controlText('ProfilePreviewView.text013', { value1: '\u0000value1\u0000' }), { value1: preview.translationOnlyCount === 1
+                  ? controlText('ProfilePreviewView.text011')
+                  : controlText('ProfilePreviewView.text012', { value1: String(preview.translationOnlyCount) }) })}</div>
             )}
 
             <section className="profile-preview-section" aria-labelledby="profile-preview-pins-title">
@@ -232,18 +230,17 @@ export function ProfilePreviewView({
                 id="profile-preview-pins-title"
                 data-testid="uccnc-profile-pins-heading"
                 data-pin-count={pins.length}
-              >
-                Pins <span>{pins.length} rows</span>
+              >{controlText('ProfilePreviewView.text014')}<span>{catalogChildren(controlText('ProfilePreviewView.text015', { value1: '\u0000value1\u0000' }), { value1: pins.length })}</span>
               </div>
               <table className="profile-preview-table profile-preview-pin-table">
                 <thead>
                   <tr>
-                    <th>Pin</th>
-                    <th>Wired now</th>
-                    <th>Wired after</th>
-                    <th>Board now</th>
-                    <th>Board after</th>
-                    <th>Status</th>
+                    <th>{controlText('ProfilePreviewView.text016')}</th>
+                    <th>{controlText('ProfilePreviewView.text017')}</th>
+                    <th>{controlText('ProfilePreviewView.text018')}</th>
+                    <th>{controlText('ProfilePreviewView.text019')}</th>
+                    <th>{controlText('ProfilePreviewView.text020')}</th>
+                    <th>{controlText('ProfilePreviewView.text021')}</th>
                   </tr>
                 </thead>
                 <tbody>{pins.map((row) => <PinRow key={row.key} row={row} />)}</tbody>
@@ -256,12 +253,11 @@ export function ProfilePreviewView({
                 id="profile-preview-values-title"
                 data-testid="uccnc-profile-values-heading"
                 data-value-count={changes.length}
-              >
-                Other settings <span>{changes.length} rows</span>
+              >{controlText('ProfilePreviewView.text022')}<span>{catalogChildren(controlText('ProfilePreviewView.text023', { value1: '\u0000value1\u0000' }), { value1: changes.length })}</span>
               </div>
               <table className="profile-preview-table profile-preview-value-table">
                 <thead>
-                  <tr><th>Setting</th><th>Now</th><th>After</th><th>Status</th></tr>
+                  <tr><th>{controlText('ProfilePreviewView.text024')}</th><th>{controlText('ProfilePreviewView.text025')}</th><th>{controlText('ProfilePreviewView.text026')}</th><th>{controlText('ProfilePreviewView.text027')}</th></tr>
                 </thead>
                 <tbody>{changes.map((row) => <ChangeRow key={row.key} row={row} />)}</tbody>
               </table>

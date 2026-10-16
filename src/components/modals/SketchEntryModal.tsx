@@ -15,6 +15,7 @@
 // same local `pickedGeoId` state the viewport-pick flow already uses, so the
 // two entry paths render identically.
 
+import { useText } from '../../i18n'
 import { useEffect, useState } from 'react'
 import { X, PenTool, FilePlus, MousePointer2 } from 'lucide-react'
 import { useCamStore } from '../../store'
@@ -26,6 +27,7 @@ const getVp = (): VpHandle | null =>
   ((window as unknown as Record<string, unknown>).__cncViewport as VpHandle) ?? null
 
 export function SketchEntryModal() {
+  const workbenchText = useText('sketch-and-model-workbench')
   const activeModal = useCamStore((s) => s.activeModal)
   const closeModal = useCamStore((s) => s.closeModal)
   const geometry = useCamStore((s) => s.project.geometry)
@@ -91,8 +93,9 @@ export function SketchEntryModal() {
     group.items.push(candidate)
   }
 
-  const pickableGroups = groups.filter((group) =>
-    group.items.some((candidate) => candidate.disabledReason === null))
+  // Every listed layer opens (WO-2854: projection and locked layers are not
+  // candidates), so every group is pickable.
+  const pickableGroups = groups
   const displayedGroups = pickedGeoId
     ? groups.filter((group) => group.geoId === pickedGeoId)
     : groups
@@ -115,7 +118,7 @@ export function SketchEntryModal() {
 
   const handleEditLayer = (geoId: string, layerId: string) => {
     closeChooser()
-    // Refusals from raced lock/projection changes surface via the store's
+    // Refusals from raced lock changes surface via the store's
     // sketch notice. geoId disambiguates duplicated imported layer ids.
     openSketchForLayer(layerId, geoId)
   }
@@ -133,7 +136,7 @@ export function SketchEntryModal() {
     setIsPickingExisting(true)
     useCamStore.getState().addConsoleEvent({
       severity: 'info', source: 'sketch',
-      message: 'Pick the part to edit in the viewport - eligible parts highlight.',
+      message: workbenchText('SketchEntryModal.pickThePartToEditInTheViewportEligible'),
     })
     viewport.setPartPickMode(
       (geoId) => {
@@ -142,8 +145,7 @@ export function SketchEntryModal() {
 
         const group = pickableGroups.find((candidateGroup) =>
           candidateGroup.geoId === geoId)
-        const editableLayers = group?.items.filter((candidate) =>
-          candidate.disabledReason === null) ?? []
+        const editableLayers = group?.items ?? []
         if (!group || editableLayers.length === 0) return
 
         useCamStore.getState().setSelectedGeometry(geoId)
@@ -153,7 +155,7 @@ export function SketchEntryModal() {
           const layer = editableLayers[0]
           useCamStore.getState().addConsoleEvent({
             severity: 'success', source: 'sketch',
-            message: `Editing sketch: ${layer.layerName} (${group.containerName}).`,
+            message: workbenchText('SketchEntryModal.editingSketch', { layerName: String(layer.layerName), containerName: String(group.containerName) }),
           })
           handleEditLayer(layer.geoId, layer.layerId)
           return
@@ -163,7 +165,7 @@ export function SketchEntryModal() {
         // Keep the spatial selection and narrow the fallback to that part.
         useCamStore.getState().addConsoleEvent({
           severity: 'info', source: 'sketch',
-          message: `${group.containerName} has multiple editable layers - choose one below.`,
+          message: workbenchText('SketchEntryModal.hasMultipleEditableLayersChooseOneBelow', { containerName: String(group.containerName) }),
         })
         setPickedGeoId(geoId)
       },
@@ -175,7 +177,7 @@ export function SketchEntryModal() {
         const label = pickableGroups.find((candidateGroup) => candidateGroup.geoId === geoId)?.containerName ?? geoId
         useCamStore.getState().addConsoleEvent({
           severity: 'info', source: 'sketch',
-          message: `Pick the part to edit - hovering: ${label}.`,
+          message: workbenchText('SketchEntryModal.pickThePartToEditHovering', { label: String(label) }),
         })
       },
     )
@@ -189,15 +191,13 @@ export function SketchEntryModal() {
       <div className="loop-pick-banner" data-testid="sketch-entry-part-pick-banner">
         <MousePointer2 size={16} className="loop-pick-icon" />
         <span className="loop-pick-text">
-          Click the sketch part in the viewport. Eligible parts highlight.
-        </span>
+          {workbenchText('SketchEntryModal.clickTheSketchPartInTheViewportEligibleParts')}</span>
         <button
           className="loop-pick-done-btn"
           data-testid="sketch-entry-part-pick-cancel"
           onClick={stopViewportPicking}
         >
-          <X size={14} /> Cancel
-        </button>
+          <X size={14} />{workbenchText('SketchEntryModal.cancel')}</button>
       </div>
     )
   }
@@ -217,7 +217,7 @@ export function SketchEntryModal() {
       >
         <div className="modal-header">
           <PenTool size={15} className="modal-header-icon" />
-          <span className="modal-title">Enter Sketch Mode</span>
+          <span className="modal-title">{workbenchText('SketchEntryModal.enterSketchMode')}</span>
           <button className="modal-close-btn" onClick={closeChooser}>
             <X size={14} />
           </button>
@@ -226,7 +226,7 @@ export function SketchEntryModal() {
         <div className="modal-body">
           <button className="op-type-card sketch-entry-new" onClick={handleNewSketch}>
             <FilePlus size={18} />
-            <span className="op-type-name">New sketch</span>
+            <span className="op-type-name">{workbenchText('SketchEntryModal.newSketch')}</span>
           </button>
 
           <button
@@ -237,28 +237,25 @@ export function SketchEntryModal() {
           >
             <MousePointer2 size={18} />
             <span className="op-type-name">
-              {pickedGeoId ? 'Pick a different part' : 'Pick existing in viewport'}
+              {pickedGeoId ? workbenchText('SketchEntryModal.pickADifferentPart') : workbenchText('SketchEntryModal.pickExistingInViewport')}
             </span>
           </button>
 
           <div className="sketch-entry-list-title">
             {pickedGroup
-              ? `Choose a layer in ${pickedGroup.containerName}`
-              : 'Or choose an existing layer'}
+              ? workbenchText('SketchEntryModal.chooseALayerIn', { containerName: String(pickedGroup.containerName) })
+              : workbenchText('SketchEntryModal.orChooseAnExistingLayer')}
           </div>
           {pickedGroup && (
             <div
               className="sketch-entry-pick-note"
               data-testid="sketch-entry-picked-part-note"
             >
-              This part has multiple editable layers. Choose one below.
-            </div>
+              {workbenchText('SketchEntryModal.thisPartHasMultipleEditableLayersChooseOneBelow')}</div>
           )}
           {candidates.length === 0 ? (
             <div className="sketch-entry-empty">
-              No 2D layers in this project yet - import a DXF/SVG or start
-              with a new sketch.
-            </div>
+              {workbenchText('SketchEntryModal.no2DLayersInThisProjectYetImportA')}</div>
           ) : (
             <div className="sketch-entry-list">
               {displayedGroups.map((group) => (
@@ -272,33 +269,20 @@ export function SketchEntryModal() {
                   {group.items.map((candidate) => (
                     <button
                       key={`${candidate.geoId}:${candidate.layerId}`}
-                      className={`sketch-entry-row ${
-                        candidate.disabledReason ? 'sketch-entry-row-disabled' : ''
-                      }`}
-                      disabled={candidate.disabledReason !== null}
+                      className="sketch-entry-row"
                       onClick={() => handleEditLayer(
                         candidate.geoId,
                         candidate.layerId,
                       )}
-                      data-tooltip={candidate.disabledReason ?? (
-                        candidate.hasStoredSketch
-                          ? 'Re-open the stored parametric sketch'
-                          : 'Lift this layer into a new sketch'
-                      )}
+                      data-tooltip={candidate.hasStoredSketch
+                        ? workbenchText('SketchEntryModal.reOpenTheStoredParametricSketch')
+                        : workbenchText('SketchEntryModal.editThisLayerInPlace')}
                     >
                       <span className="sketch-entry-row-name">
                         {candidate.layerName}
                       </span>
                       <span className="sketch-entry-row-meta">
-                        {candidate.loopCount} loop
-                        {candidate.loopCount === 1 ? '' : 's'}
-                        {candidate.hasStoredSketch ? ' - parametric' : ''}
-                      </span>
-                      {candidate.disabledReason && (
-                        <span className="sketch-entry-row-reason">
-                          {candidate.disabledReason}
-                        </span>
-                      )}
+                        {candidate.loopCount}{workbenchText('SketchEntryModal.loop', { value1: String((candidate.loopCount === 1 ? '' : 's')), value2: String((candidate.hasStoredSketch ? workbenchText('SketchEntryModal.parametric') : '')) })}</span>
                     </button>
                   ))}
                 </div>
@@ -309,8 +293,7 @@ export function SketchEntryModal() {
 
         <div className="modal-footer">
           <button className="modal-btn modal-btn-ghost" onClick={closeChooser}>
-            Cancel
-          </button>
+            {workbenchText('SketchEntryModal.cancel2')}</button>
         </div>
       </div>
     </div>

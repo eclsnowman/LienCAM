@@ -5,7 +5,8 @@ import sharp from 'sharp'
 import { chromium } from 'playwright'
 import { withViteCaptureServer, dismissMachineModal, CHROMIUM_CAPTURE_ARGS } from '../lib/harness.mjs'
 import { demoProject } from './demo-project.mjs'
-const dir = 'src/tests/evidence/WO-2491/additional'
+import { HELP_EVIDENCE } from './evidence-root.mjs'
+const dir = HELP_EVIDENCE + '/additional'
 fs.mkdirSync(dir, { recursive: true })
 const results = []
 const contourOnly = process.argv.includes('--contour-only')

@@ -2,7 +2,7 @@ import type { StreamerPhase, ConnectionPhase, MachineController } from './contro
 import { unhomedAxes } from './controller'
 import type { MachineState } from './types'
 
-export type MachineChipState = 'offline' | 'not-homed' | 'ready' | 'running' | 'held' | 'alarm'
+export type MachineChipState = 'offline' | 'not-homed' | 'ready' | 'running' | 'held' | 'alarm' | 'stopped'
 
 export interface MachineChipView {
   state: MachineChipState
@@ -17,6 +17,9 @@ export interface MachineChipFacts {
   programM0Held?: boolean
   /** A stationary tool-change card waiting for Continue, including a typed M6. */
   toolChangeWaiting?: boolean
+  /** WO-2774: the Probing screen holds a stopped probe run - its red
+   *  "Stopped at step N" or "Did not start" line is up. */
+  probeRunStopped?: boolean
   /**
    * The live controller is the only datum authority. A connected chip without
    * one fails closed to "Not homed"; it never substitutes the render store's
@@ -31,6 +34,7 @@ const READY: MachineChipView = { state: 'ready', label: 'Ready' }
 const RUNNING: MachineChipView = { state: 'running', label: 'Running' }
 const HELD: MachineChipView = { state: 'held', label: 'Held' }
 const ALARM: MachineChipView = { state: 'alarm', label: 'Alarm' }
+const STOPPED: MachineChipView = { state: 'stopped', label: 'Stopped' }
 
 /**
  * Derive the header's one machine reading from live controller facts.
@@ -52,6 +56,9 @@ export function deriveMachineChip(facts: MachineChipFacts): MachineChipView {
     facts.machineState === 'jog' ||
     facts.machineState === 'home'
   if (activeJob || activeMotion) return RUNNING
+  // WO-2774 (owner 10-08): beside the red stop line the chip reads the stop,
+  // not "Ready"; it returns to the machine reading when that line goes.
+  if (facts.probeRunStopped) return STOPPED
 
   if (!facts.datumResolver || unhomedAxes(facts.datumResolver).length > 0) return NOT_HOMED
   return READY

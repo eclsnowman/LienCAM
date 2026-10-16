@@ -486,7 +486,7 @@ packages are excluded from the desktop installer (see the Manifold section).
 - **0BSD:** `tslib@2.8.1`
 - **Apache-2.0 AND LGPL-3.0-or-later AND MIT:** `@img/sharp-wasm32@0.35.3` (optional)
 - **Apache-2.0 AND LGPL-3.0-or-later:** `@img/sharp-win32-arm64@0.35.3` (optional), `@img/sharp-win32-ia32@0.35.3` (optional), `@img/sharp-win32-x64@0.35.3` (optional)
-- **Apache-2.0:** `@dimforge/rapier3d-compat@0.12.0`, `@img/sharp-darwin-arm64@0.35.3` (optional), `@img/sharp-darwin-x64@0.35.3` (optional), `@img/sharp-freebsd-wasm32@0.35.3` (optional), `@img/sharp-linux-arm64@0.35.3` (optional), `@img/sharp-linux-arm@0.35.3` (optional), `@img/sharp-linux-ppc64@0.35.3` (optional), `@img/sharp-linux-riscv64@0.35.3` (optional), `@img/sharp-linux-s390x@0.35.3` (optional), `@img/sharp-linux-x64@0.35.3` (optional), `@img/sharp-linuxmusl-arm64@0.35.3` (optional), `@img/sharp-linuxmusl-x64@0.35.3` (optional), `@img/sharp-webcontainers-wasm32@0.35.3` (optional), `brepjs@18.118.3`, `comlink@4.4.2`, `detect-libc@2.1.2`, `flatbuffers@25.9.23`, `long@5.3.2`, `manifold-3d@3.5.1`, `sharp@0.35.3`
+- **Apache-2.0:** `@dimforge/rapier3d-compat@0.12.0`, `@img/sharp-darwin-arm64@0.35.3` (optional), `@img/sharp-darwin-x64@0.35.3` (optional), `@img/sharp-freebsd-wasm32@0.35.3` (optional), `@img/sharp-linux-arm64@0.35.3` (optional), `@img/sharp-linux-arm@0.35.3` (optional), `@img/sharp-linux-ppc64@0.35.3` (optional), `@img/sharp-linux-riscv64@0.35.3` (optional), `@img/sharp-linux-s390x@0.35.3` (optional), `@img/sharp-linux-x64@0.35.3` (optional), `@img/sharp-linuxmusl-arm64@0.35.3` (optional), `@img/sharp-linuxmusl-x64@0.35.3` (optional), `@img/sharp-webcontainers-wasm32@0.35.3` (optional), `brepjs@18.118.3`, `comlink@4.4.2`, `detect-libc@2.1.2`, `flatbuffers@25.9.23`, `long@5.3.2`, `manifold-3d@3.5.1`, `sharp@0.35.3`, `typescript@6.0.3`
 - **BSD-3-Clause:** `@protobufjs/aspromise@1.1.2`, `@protobufjs/base64@1.1.2`, `@protobufjs/codegen@2.0.5`, `@protobufjs/eventemitter@1.1.1`, `@protobufjs/fetch@1.1.1`, `@protobufjs/float@1.0.2`, `@protobufjs/path@1.1.2`, `@protobufjs/pool@1.1.0`, `@protobufjs/utf8@1.1.2`, `protobufjs@7.6.6`
 - **BSL-1.0:** `clipper2-wasm@0.4.0`
 - **ISC:** `flatbush@4.6.2`, `flatqueue@3.1.0`, `guid-typescript@1.0.9`, `lucide-react@1.12.0`, `sharp/node_modules/semver@7.8.5`
@@ -505,7 +505,8 @@ The texts below are the components' own licence files. The generated block
 is written by `tools/release/credits.mjs` from the files each entry of
 `src/about/credits.json` names - the packages' own LICENSE files where they ship
 one. The texts after it are kept by hand because no shipped package carries
-them. LienCAM's own licence, GPL-3.0, is [LICENSE](LICENSE).
+them. LienCAM's own licence, Apache-2.0, is [LICENSE](LICENSE), with the
+Adaptive2d and LinuxCNC gateway exceptions described at the start of this file.
 
 ## Package and vendored licence files (generated)
 

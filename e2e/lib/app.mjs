@@ -16,22 +16,50 @@ export function modelConsole(page) {
  * button, so the journey does too - and says so in the log.
  */
 /**
- * The desktop app offers "Try an example" when it starts on an empty project
- * (WO-2532). The journey builds its own part, so it answers as a new user
- * who wants to start from scratch would: "Start with an empty project".
+ * The desktop app offers its project picker ("Open a project"; "Try an example"
+ * before WO-2725) when it starts on an empty project (WO-2532). The journey
+ * builds its own part, so it answers as a new user starting from scratch would.
  */
 export async function startEmptyIfOffered(journey, { timeout = 500 } = {}) {
   const page = journey.page
-  const button = page.getByRole('button', { name: /^Start with an empty project$/ })
+  // WO-2789 restores the explicit start choice in the shared picker. Prefer
+  // it; keep Close as a fallback for older packaged builds used by the journey.
+  const empty = page.getByRole('button', { name: /^Start with an empty project$/ })
+  const picker = page.getByRole('dialog', { name: 'Open a project' })
   try {
-    await button.first().waitFor({ state: 'visible', timeout })
+    await empty.or(picker).first().waitFor({ state: 'visible', timeout })
   } catch {
     return false
   }
-  journey.log('TRY-AN-EXAMPLE answered: Start with an empty project')
-  await button.first().click()
-  await button.first().waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {})
-  return true
+  if (await empty.first().isVisible().catch(() => false)) {
+    journey.log('PROJECT-PICKER answered: Start with an empty project')
+    await empty.first().click()
+    await empty.first().waitFor({ state: 'detached', timeout: 10_000 })
+    return true
+  }
+  if (await picker.isVisible().catch(() => false)) {
+    journey.log('OPEN-A-PROJECT picker answered: Close (start with the empty project)')
+    await picker.getByRole('button', { name: 'Close project picker' }).click()
+    await picker.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {})
+    return true
+  }
+  return false
+}
+
+/**
+ * Open project, then the file. Since WO-2725 (f9019502e5, 2026-10-10) the
+ * toolbar's Open project shows the "Open a project" picker first; its
+ * Browse... asks Save/Discard/Cancel (WO-2704) and then the native Open dialog.
+ */
+export async function openProjectFile(journey, file) {
+  const page = journey.page
+  const answered = await journey.answerNextOpenDialog(file)
+  await page.getByRole('button', { name: 'Open project' }).click()
+  const picker = page.getByRole('dialog', { name: 'Open a project' })
+  await picker.waitFor({ state: 'visible', timeout: 10_000 })
+  await picker.getByRole('button', { name: /^Browse/ }).click()
+  await discardIfAsked(journey)
+  await answered()
 }
 
 /**

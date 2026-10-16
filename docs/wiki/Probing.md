@@ -14,7 +14,9 @@ Probing finds edges, corners, bores, bosses, surfaces and tool lengths with a to
 
 The Probing tab is the workpiece probing station. Pick what you are measuring in the Routine panel (Z0, Edge, Outside corner, Inside corner, Angle, Bore, Boss, Rect pocket, Rect boss, Z surface, Tool Z, Calibrate), fill in its setup panel (for example "Outside corner setup": which work offset, the approach side, the rough size), and the picture beside it draws the moves and touches in order before anything moves.
 
-![The Probing tab with Outside corner picked: its setup panel, the BEFORE START front and top views, the step strip with YOU on the steps you do, the Picture key, and Start probing](images/probing-tab/probing-outside-corner.webp)
+![Outside corner front-right setup before Start probing, with the front and top previews, Picture key, brief step guidance and expanded shared Console with history and MDI](images/probing-tab/probing-outside-corner.webp)
+
+The Console below the picture is shared with Main. Its compact view shows the latest line; expand it for history and MDI. Switching between Main and Probing keeps the same history and unsent MDI text. The picture gives brief step guidance; open More about this step for the detail.
 
 An early tool-setter touch shows no separate warning. After a successful fine touch, the short result gives the early contact, its difference from the tool-table prediction, the retract and the measured tool length that replaces the table value. An early contact by itself is not a completed measurement; a failed fine touch or retract leaves the previous tool length in place.
 
@@ -28,7 +30,7 @@ On connection, the built-in simulator places a fixed tool setter at the machine 
 6. Save probing settings under Control \> Machine \> Definition \> Probing and the next routine uses them without reconnecting, including Search speed, Probe speed, clearance and search bounds. Settings that must be written to the controller still need its receipt; this change applies to probing values used by LienCAM.
 7. The diagram keeps the probe in its labeled start zone before Start. When the reported probe position is within the pictured feature and its margin, Front and Right show its reported depth; its sideways place stays tied to the plan. Outside that area, or without a known position, the diagram keeps the planned picture.
 8. PROBE shows the touch input; PROBING shows that a probe cycle is in process. The Control, Probing, Tools and tool-change surfaces share the same probe reading. If the controller does not report it, the lamp says so; PROBE is not read while the spindle turns.
-9. A refused probe start keeps the current preview. A failed or stopped probe cycle shows Stopped and the full reason in red on the probing screen; a refused start shows Did not start and its reason. A new stop or refused start replaces the previous reason. The message states what happened, without guessing a cause. If a tool-setter measurement fails on a tool-change card, Retry measure repeats the measurement without visiting the park again. The failure names the setter and the touch result; Cancel on a manual tool change reports the cancellation and keeps the recorded spindle tool.
+9. A refused probe start keeps the current preview. A failed or stopped probe cycle shows Stopped (and the failed step when known); a refused start shows Did not start. The picture gives a brief reason; expand the Console to read the full diagnostic. A new stop or refused start replaces the previous reason. The message states what happened, without guessing a cause. If a tool-setter measurement fails on a tool-change card, Retry measure repeats the measurement without visiting the park again. The failure names the setter and the touch result; Cancel on a manual tool change reports the cancellation and keeps the recorded spindle tool.
 10. When the reference tool is measured again, the Console reports its reading change and the actual work Z offset change sent to the controller. Those can differ on a controller that stores tool length in the work offset.
 
 Top tells you where a feature routine gets its top reference. Edge, Outside corner and Angle use "Touch it first". Bore, Rect pocket and Inside corner use "Use work Z0": set work Z0 at the stock top before running them. Boss and Rect boss let you choose either, starting with "Touch it first"; set work Z0 first if you choose "Use work Z0". Calibrate touches the top for an outside reference and uses work Z0 for an inside reference.
@@ -44,6 +46,10 @@ The Routines tab on Control (next to Probing) holds the probing sequences as dat
 ![Z surface setup before probing, with a loaded program, a 3 by 3 grid preview, margin and fade settings; no surface has been measured.](images/probing-tab/z-surface-setup.webp)
 
 ![Calibrate setup with a 25 mm gauge pin and the BEFORE START preview; no calibration result has been measured or applied.](images/probing-tab/calibrate-plan.webp)
+
+Feature probing on the simulator with a UCCNC machine definition follows the same plan as native UCCNC: approach from above, then step out and down as pictured. A controller that cannot run that plan says what it lacks and moves nothing. Tool Z and custom probe routines on that simulator also include the native route's guarded steps. These route corrections are simulator/desk proven; they are not new hardware verification.
+
+The built-in simulator touches the part with the probe tip radius of the tool in the spindle, resolved the same way as the Probing screen. Bore, Boss, Edge and Corner compensation then reads the simulated part size. This changes simulated part contact only; tool-setter contact and real-controller probing keep their existing behavior.
 
 See also: [Probe routines](Probing#probe-routines), [Jogging and setting zero](Control#control-jog-zero), [Work offsets G54-G59](Setup-Stock-and-Workholding#work-offsets).
 

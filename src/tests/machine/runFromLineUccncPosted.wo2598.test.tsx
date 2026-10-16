@@ -208,6 +208,13 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
+// WO-2669: the session routes the connected controller's loadProgram through
+// its Rapid % hand-over (bound at connect), so a prototype spy set later never
+// sees a load. Spy on the connected instance, which every load goes through.
+function spyOnLoad() {
+  return vi.spyOn(getMachineController() as InstanceType<typeof UccncController>, 'loadProgram')
+}
+
 function target() {
   const text = stagedProgramContext()!.text
   const lines = text.split(/\r?\n/)
@@ -217,7 +224,9 @@ function target() {
 }
 
 describe('WO-2598 UCCNC posted setup run from line', () => {
-  it.each([2, null])('fits the restart tool through the guided M6 before releasing the prelude (reported %s)', async fitted => {
+  // WO-2810 (Operator 10-14): the fit runs only when the operator chose "Run the
+  // tool change first" at the run-from-line pop-up; "Start now" runs from the line.
+  it.each([2, null])('fits the restart tool through the guided M6 before releasing the prelude when chosen (reported %s)', async fitted => {
     const { line } = target()
     const project = useCamStore.getState().project
     const machine = { ...project.machine!, macros: [{
@@ -230,8 +239,8 @@ describe('WO-2598 UCCNC posted setup run from line', () => {
     table.recordProbedZ(machine.id, 2, 12, 1)
     table.setReference(machine.id, 2)
     useMachineControl.setState({ activeTool: fitted })
-    const loaded = vi.spyOn(UccncController.prototype, 'loadProgram')
-    expect((await armProgramFromLine(line)).ok).toBe(true)
+    const loaded = spyOnLoad()
+    expect((await armProgramFromLine(line, 'tool-change-first')).ok).toBe(true)
     // The only initial queue is the existing zero-motion completion fence.
     expect(loaded.mock.calls[0][0].steps.every(step => step.kind === 'dwell')).toBe(true)
     autoRun = true
@@ -262,6 +271,24 @@ describe('WO-2598 UCCNC posted setup run from line', () => {
     expect(frames.filter(frame => frame.m === 'probe')).toHaveLength(2)
     expect(frames.some(frame => frame.m === 'setWorkOffset' && (frame.a as { z?: number }).z === 1)).toBe(true)
     writeFileSync(`src/tests/evidence/WO-2598/fix-guided-${fitted ?? 'unknown'}.json`, JSON.stringify({ fitted, applies, state: useMachineControl.getState().toolChange, frames }, null, 2))
+  })
+
+  it.each([2, null])('WO-2810: Start now arms no tool change and the line runs with the fitted tool (reported %s)', async fitted => {
+    const { line } = target()
+    useMachineControl.setState({ activeTool: fitted })
+    const armed = await armProgramFromLine(line)
+    expect(armed.ok).toBe(true)
+    expect(armed.ok && armed.from === 'line' && armed.plan.prelude.some(raw => /M0?6\b/.test(raw))).toBe(false)
+    autoRun = true
+    expect(await executeOperatorCycleStart()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    // Answer the existing manual-spindle hold, then run to M30.
+    expect(useMachineControl.getState().toolChange).toBeNull()
+    expect(await executeOperatorCycleStart()).toBe(true)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(useMachineControl.getState().toolChange).toBeNull()
+    expect(useMachineControl.getState().job.phase).toBe('complete')
+    expect(frames.filter(frame => frame.m === 'probe')).toHaveLength(0)
   })
 
   it('completes the restarted file, unlocks MDI and announces the original section', async () => {
@@ -321,7 +348,7 @@ describe('WO-2598 UCCNC posted setup run from line', () => {
     const { line } = target()
     const listing = useMachineControl.getState().stagedProgram
     const original = loadedProgramText()
-    const load = vi.spyOn(UccncController.prototype, 'loadProgram')
+    const load = spyOnLoad()
     frames.length = 0
     let armed: Awaited<ReturnType<typeof armProgramFromLine>> | undefined
     await act(async () => { armed = await armProgramFromLine(line) })
@@ -430,7 +457,7 @@ describe('WO-2598 UCCNC posted setup run from line', () => {
   })
 
   it('refuses an alarm or live program without changing the staged queue', async () => {
-    const load = vi.spyOn(UccncController.prototype, 'loadProgram')
+    const load = spyOnLoad()
     useMachineControl.setState({ machineState: 'alarm' })
     expect(await armProgramFromLine(target().line)).toMatchObject({ ok: false, reason: expect.stringContaining('alarm') })
     useMachineControl.setState({ machineState: 'idle' })

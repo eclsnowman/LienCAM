@@ -15,6 +15,7 @@
 // sweep feature now reopens this dialog prefilled from the stored payload,
 // and Apply rewrites the SAME node through EditFeaturePayloadCommand.
 
+import { useText } from '../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -79,6 +80,7 @@ function isUpstreamProducer(dag: FeatureDag, featureId: string | undefined, prod
 }
 
 export function SweepDialog({ dag, history, sketchOptions, mode = 'create', featureId, treeSketchPick, onTreePickConsumed, onStartProfilePick, onApplied, onClose }: SweepDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const editing = mode === 'edit'
   const existing = editing && featureId !== undefined ? (dag.getNode(featureId)?.payload as Record<string, unknown> | undefined) : undefined
   const sketches = sketchOptions.filter((option) => !editing || isUpstreamProducer(dag, featureId, option.id))
@@ -98,7 +100,7 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
     if (treeSketchPick === undefined || treeSketchPick.nonce <= handledTreeSketchPickNonceRef.current) return
     handledTreeSketchPickNonceRef.current = treeSketchPick.nonce
     if (isPickingProfile || !treeSketchPickAvailable) {
-      console.info(`Tree pick ignored: ${isPickingProfile ? 'profile pick session is active' : 'sketch is not available'}`)
+      console.info(workbenchText('SweepDialog.treePickIgnored', { value1: String(isPickingProfile ? workbenchText('SweepDialog.profilePickSessionIsActive') : workbenchText('SweepDialog.sketchIsNotAvailable')) }))
       onTreePickConsumed?.(treeSketchPick.nonce)
       return
     }
@@ -125,7 +127,7 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
     setIsPickingProfile(true)
     const stop = onStartProfilePick({
       allowedIds: sketches.map((option) => option.id),
-      prompt: 'Click a closed sketch region for the sweep profile.',
+      prompt: workbenchText('SweepDialog.clickAClosedSketchRegionForTheSweepProfile'),
       maxPicks: 1,
       onDone: ([result]) => {
         if (!session.active) return
@@ -194,7 +196,7 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
       axis,
       length,
       orientation,
-      name: `Sweep ${id}`,
+      name: workbenchText('SweepDialog.sweep', { id: String(id) }),
     }
     try {
       history.execute(createFeatureCommand(dag, { id, kind: 'feature', consumes: [sketchId], payload }))
@@ -208,10 +210,10 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
 
   return (
     <DialogShell
-      title={editing ? 'Edit sweep' : 'Sweep'}
+      title={editing ? workbenchText('SweepDialog.editSweep') : workbenchText('SweepDialog.sweep2')}
       onApply={handleApply}
       onCancel={isPickingProfile ? cancelProfilePick : onClose}
-      cancelLabel={isPickingProfile ? 'Stop picking' : 'Cancel'}
+      cancelLabel={isPickingProfile ? workbenchText('SweepDialog.stopPicking') : workbenchText('SweepDialog.cancel')}
       applyDisabled={invalid || isPickingProfile}
       floatingPalette
     >
@@ -224,23 +226,21 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
           aria-pressed={isPickingProfile}
           onClick={isPickingProfile ? cancelProfilePick : beginProfilePick}
         >
-          {isPickingProfile ? 'Cancel profile pick' : 'Pick profile in viewport'}
-          <span className="op-pick-count">{sketches.find((option) => option.id === sketchId)?.label ?? 'none'}</span>
+          {isPickingProfile ? workbenchText('SweepDialog.cancelProfilePick') : workbenchText('SweepDialog.pickProfileInViewport')}
+          <span className="op-pick-count">{sketches.find((option) => option.id === sketchId)?.label ?? workbenchText('SweepDialog.none')}</span>
         </button>
         {treeSelectionActive && (
           <div data-testid="sweep-tree-sketch-status" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Sketch: {sketches.find((option) => option.id === sketchId)?.label ?? sketchId} (from the design tree) - whole sketch
-          </div>
+            {workbenchText('SweepDialog.sketch')}{sketches.find((option) => option.id === sketchId)?.label ?? sketchId}{workbenchText('SweepDialog.fromTheDesignTreeWholeSketch')}</div>
         )}
         {isPickingProfile && (
           <div data-testid="sweep-profile-pick-guidance" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-            Click one closed sketch profile in the viewport. Escape stops picking and keeps this panel open.
-          </div>
+            {workbenchText('SweepDialog.clickOneClosedSketchProfileInTheViewportEscape')}</div>
         )}
         <details>
-          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>Choose profile by name fallback</summary>
+          <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>{workbenchText('SweepDialog.chooseProfileByNameFallback')}</summary>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <span style={{ width: 70, color: 'var(--text-muted)' }}>Profile</span>
+            <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('SweepDialog.profile')}</span>
             <select
               data-testid="sweep-profile-select"
               value={sketchId}
@@ -251,7 +251,7 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
               }}
               style={{ flex: 1 }}
             >
-              {!profileAvailable && sketchId !== '' && <option value={sketchId}>(unavailable: {sketchId})</option>}
+              {!profileAvailable && sketchId !== '' && <option value={sketchId}>{workbenchText('SweepDialog.unavailable')}{sketchId}{workbenchText('SweepDialog.value')}</option>}
               {sketches.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
@@ -262,34 +262,33 @@ export function SweepDialog({ dag, history, sketchOptions, mode = 'create', feat
         </details>
         {!profileAvailable && (
           <div data-testid="sweep-profile-error" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
-            Select an available upstream sketch profile.
-          </div>
+            {workbenchText('SweepDialog.selectAnAvailableUpstreamSketchProfile')}</div>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Path axis</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('SweepDialog.pathAxis')}</span>
           <select data-testid="sweep-path-axis-select" value={axis} onChange={(e) => setAxis(e.target.value as PathAxis)} style={{ flex: 1 }}>
-            <option value="x">World X</option>
-            <option value="y">World Y</option>
-            <option value="z">World Z</option>
+            <option value="x">{workbenchText('SweepDialog.worldX')}</option>
+            <option value="y">{workbenchText('SweepDialog.worldY')}</option>
+            <option value="z">{workbenchText('SweepDialog.worldZ')}</option>
           </select>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Length</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('SweepDialog.length')}</span>
           <span data-testid="sweep-length" style={{ flex: 1 }}>
             <NumericInput value={length} onChange={setLength} min={0.1} style={{ width: '100%' }} />
           </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>mm</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('SweepDialog.mm')}</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 70, color: 'var(--text-muted)' }}>Orientation</span>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{workbenchText('SweepDialog.orientation')}</span>
           <select
             data-testid="sweep-orientation-select"
             value={orientation}
             onChange={(e) => setOrientation(e.target.value as 'frenet' | 'fixed')}
             style={{ flex: 1 }}
           >
-            <option value="fixed">Fixed</option>
-            <option value="frenet">Frenet</option>
+            <option value="fixed">{workbenchText('SweepDialog.fixed')}</option>
+            <option value="frenet">{workbenchText('SweepDialog.frenet')}</option>
           </select>
         </label>
         {applyError !== undefined && (

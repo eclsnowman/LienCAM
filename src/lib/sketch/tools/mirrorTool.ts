@@ -32,6 +32,8 @@ import type {
 } from '../types'
 import { isInjectedSketchAnchorId } from '../sketchAnchors'
 import { nearestPointOnSpline } from '../spline'
+import { defineMirrorPattern } from '../patterns'
+import type { PatternResult } from './patternTools'
 
 const TWO_PI = Math.PI * 2
 
@@ -74,7 +76,7 @@ function axisPickPhase(chain: MirrorChainState | null): boolean {
 
 export interface MirrorClickOutcome {
   chain: MirrorChainState | null
-  commit: { entities: SketchEntity[]; constraints: SketchConstraint[] } | null
+  commit: PatternResult | null
   notice: string | null
 }
 
@@ -388,11 +390,11 @@ export function mirrorClick(
         notice: 'Mirror: click a LINE other than a source to mirror the set about',
       }
     }
-    const r = mirrorEntities(entities, chain!.ids, axis.id, newId)
+    const r = defineMirrorPattern(mirrorEntities(entities, chain!.ids, axis.id, newId), axis.id, newId)
     if (typeof r === 'string') return { chain, commit: null, notice: r }
     return {
       chain: null,
-      commit: { entities: r.entities, constraints: r.constraints },
+      commit: r,
       notice: null,
     }
   }
@@ -424,9 +426,9 @@ export function mirrorClick(
     if (ids.length === 0) {
       return { chain, commit: null, notice: 'Mirror: select entities to mirror first' }
     }
-    const r = mirrorEntities(entities, ids, constructionAxis.id, newId)
+    const r = defineMirrorPattern(mirrorEntities(entities, ids, constructionAxis.id, newId), constructionAxis.id, newId)
     if (typeof r === 'string') return { chain, commit: null, notice: r }
-    return { chain: null, commit: { entities: r.entities, constraints: r.constraints }, notice: null }
+    return { chain: null, commit: r, notice: null }
   }
 
   // Toggle the entity in/out of the mirror set. Adding a REGULAR line

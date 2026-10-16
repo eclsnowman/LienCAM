@@ -1,3 +1,7 @@
+import { catalogChildren } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { SectionHead } from './DefinitionFields'
@@ -43,6 +47,7 @@ export function MachineArea({
   patchHoming, defineHoming, setHomingOrderAt, pinProblem, polarityBoxFor, skewTyped, setSkewTyped,
   toggleAxisEnabled, unsetSoftLimitAxes, enabledAxes, pinText, unsent,
 }: MachineAreaProps) {
+  useText('control-screens-not-probing')
   const [openAxis, setOpenAxis] = useState<AxisName | null>(null)
 
   const connectionPhase = useMachineControl((state) => state.connectionPhase)
@@ -87,11 +92,11 @@ export function MachineArea({
     if (offset === null) return null
     if (field === 'dirPin') {
       const value = grblMaskBit(grblSettingsRecord, 3, offset)
-      return value === null ? null : { value, setting: '$3 in the GRBL controller settings table' }
+      return value === null ? null : { value, setting: controlText('MachineArea.text001') }
     }
     if (field === 'homePin' || field === 'limitMinusPin' || field === 'limitPlusPin') {
       const value = grblFlag(grblSettingsRecord, 5)
-      return value === null ? null : { value, setting: '$5 in the GRBL controller settings table' }
+      return value === null ? null : { value, setting: controlText('MachineArea.text002') }
     }
     return null
   }
@@ -119,24 +124,21 @@ export function MachineArea({
     <div data-testid="machine-def-group-machine" style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
       <div style={{ flex: '1 1 auto', minWidth: 0 }}>
         <SectionHead
-          title="Machine"
+          title={controlText('MachineArea.text003')}
           summary={`${enabledAxes.map((a) => a.axis).join('') || 'none'} enabled of ${AXIS_NAMES.length}`}
           testId="machine-def-panel-head-machine"
         />
 
         {Boolean(grbl) && hasGrblTravelHomingRows && (
           <>
-            <p className="mform-help" data-testid="machine-def-grbl-travel-authority">
-              GRBL settings are authoritative. Edit and send $20-$27 and $130-$132 in the
-              controller settings table; these values are read-only here.
-            </p>
+            <p className="mform-help" data-testid="machine-def-grbl-travel-authority">{controlText('MachineArea.text004')}</p>
             <div
               data-testid="machine-def-grbl-homing-summary"
               style={{ display: 'flex', gap: '6px 18px', flexWrap: 'wrap', marginBottom: 6 }}
             >
-              <span>Soft limits: {grblOnOff(20)}</span>
-              <span>Hard limits: {grblOnOff(21)}</span>
-              <span>Homing cycle: {grblOnOff(22)}</span>
+              <span>{catalogChildren(controlText('MachineArea.text005', { value1: '\u0000value1\u0000' }), { value1: grblOnOff(20) })}</span>
+              <span>{catalogChildren(controlText('MachineArea.text006', { value1: '\u0000value1\u0000' }), { value1: grblOnOff(21) })}</span>
+              <span>{catalogChildren(controlText('MachineArea.text007', { value1: '\u0000value1\u0000' }), { value1: grblOnOff(22) })}</span>
             </div>
           </>
         )}
@@ -148,16 +150,16 @@ export function MachineArea({
         >
           <thead>
             <tr>
-              <th data-tooltip="Use this axis on this machine">Axis</th>
-              <th data-tooltip="Motor steps per unit of travel">steps/mm</th>
-              <th data-tooltip="Maximum velocity, units per minute">max speed</th>
-              <th data-tooltip="Acceleration, units per second squared">accel</th>
-              <th data-tooltip="The lowest machine coordinate this axis may travel to">travel from</th>
-              <th data-tooltip="The highest machine coordinate this axis may travel to">travel to</th>
-              <th data-tooltip="Which end of travel this axis homes to">home at</th>
-              <th data-tooltip="Search speed toward the switch, units per minute">home speed</th>
-              <th data-tooltip="The axis slaved to this one - a gantry pairing">slaved to</th>
-              <th>pins</th>
+              <th data-tooltip={controlText('MachineArea.text008')}>{controlText('MachineArea.text009')}</th>
+              <th data-tooltip={controlText('MachineArea.text010')}>{controlText('MachineArea.text011')}</th>
+              <th data-tooltip={controlText('MachineArea.text012')}>{controlText('MachineArea.text013')}</th>
+              <th data-tooltip={controlText('MachineArea.text014')}>{controlText('MachineArea.text015')}</th>
+              <th data-tooltip={controlText('MachineArea.text016')}>{controlText('MachineArea.text017')}</th>
+              <th data-tooltip={controlText('MachineArea.text018')}>{controlText('MachineArea.text019')}</th>
+              <th data-tooltip={controlText('MachineArea.text020')}>{controlText('MachineArea.text021')}</th>
+              <th data-tooltip={controlText('MachineArea.text022')}>{controlText('MachineArea.text023')}</th>
+              <th data-tooltip={controlText('MachineArea.text024')}>{controlText('MachineArea.text025')}</th>
+              <th>{controlText('MachineArea.text026')}</th>
             </tr>
           </thead>
           <tbody>
@@ -177,12 +179,12 @@ export function MachineArea({
                   <td>
                     <label
                       data-wired=""
-                      data-tooltip={`Use the ${name} axis on this machine`}
+                      data-tooltip={controlText('MachineArea.text027', { value1: String(name) })}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                     >
                       <input
                         type="checkbox"
-                        aria-label={`${name} axis enabled`}
+                        aria-label={controlText('MachineArea.text028', { value1: String(name) })}
                         data-testid={`machine-def-panel-axis-enabled-${name}`}
                         checked={a.enabled}
                         onChange={(e) => toggleAxisEnabled(name, e.target.checked)}
@@ -253,12 +255,10 @@ export function MachineArea({
                             type="button"
                             className="control-chip-btn"
                             data-testid={`machine-def-panel-homing-define-${name}`}
-                            data-tooltip={`Create a homing block for ${name} from the safe defaults, then correct it`}
+                            data-tooltip={controlText('MachineArea.text030', { value1: String(name) })}
                             onClick={() => defineHoming(name)}
                             style={{ marginLeft: 6 }}
-                          >
-                            Define {name} homing
-                          </button>
+                          >{catalogChildren(controlText('MachineArea.text029', { value1: '\u0000value1\u0000' }), { value1: name })}</button>
                         )}
                       </td>
                     </>
@@ -267,21 +267,21 @@ export function MachineArea({
                       <td data-wired="">
                         <select
                           className="mform-select"
-                          aria-label={`${name} homing direction`}
+                          aria-label={controlText('MachineArea.text031', { value1: String(name) })}
                           style={{ width: 72 }}
                           value={h.direction}
                           onChange={(e) => patchHoming(name, {
                             direction: e.target.value as 'negative' | 'positive',
                           })}
                         >
-                          <option value="negative">At min</option>
-                          <option value="positive">At max</option>
+                          <option value="negative">{controlText('MachineArea.text032')}</option>
+                          <option value="positive">{controlText('MachineArea.text033')}</option>
                         </select>
                       </td>
                       <td data-wired="">
                         <NumericInput
                           min={0} step={100} value={h.fastSpeed}
-                          ariaLabel={`${name} homing fast speed`}
+                          ariaLabel={controlText('MachineArea.text034', { value1: String(name) })}
                           className="mform-input mform-input-mono"
                           style={{ flex: 'none', width: 78 }}
                           onChange={(v) => patchHoming(name, { fastSpeed: v })}
@@ -289,33 +289,29 @@ export function MachineArea({
                       </td>
                     </>
                   ) : (
-                    <td colSpan={2} style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-                      No homing block in this record.
-                      <button
+                    <td colSpan={2} style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('MachineArea.text035')}<button
                         type="button"
                         className="control-chip-btn"
                         data-testid={`machine-def-panel-homing-define-${name}`}
-                        data-tooltip={`Create a homing block for ${name} from the safe defaults, then correct it`}
+                        data-tooltip={controlText('MachineArea.text037', { value1: String(name) })}
                         onClick={() => defineHoming(name)}
                         style={{ marginLeft: 6 }}
-                      >
-                        Define {name} homing
-                      </button>
+                      >{catalogChildren(controlText('MachineArea.text036', { value1: '\u0000value1\u0000' }), { value1: name })}</button>
                     </td>
                   )}
                   <td>
                     <select
                       data-wired=""
                       className="mform-select"
-                      aria-label={`${name} slave axis`}
-                      data-tooltip={`The axis slaved to ${name} - a gantry pairing`}
+                      aria-label={controlText('MachineArea.text038', { value1: String(name) })}
+                      data-tooltip={controlText('MachineArea.text039', { value1: String(name) })}
                       style={{ flex: 'none', width: 68 }}
                       value={a.slaveAxis ?? ''}
                       onChange={(e) => patchAxis(name, {
                         slaveAxis: e.target.value === '' ? null : e.target.value as AxisName,
                       })}
                     >
-                      <option value="">None</option>
+                      <option value="">{controlText('MachineArea.text040')}</option>
                       {AXIS_NAMES.filter((n) => n !== name).map((n) => (
                         <option key={n} value={n}>{n}</option>
                       ))}
@@ -326,12 +322,11 @@ export function MachineArea({
                       type="button"
                       className="control-chip-btn"
                       data-testid={`machine-def-panel-axis-pins-more-${name}`}
-                      data-tooltip={`${name} pins: step ${pinText(a.stepPin)}, dir ${pinText(a.dirPin)}, `
-                        + `home ${pinText(a.homePin)}, limit- ${pinText(a.limitMinusPin)}, `
-                        + `limit+ ${pinText(a.limitPlusPin)}, enable ${pinText(a.enablePin)}`}
+                      data-tooltip={controlText('MachineArea.text041', { value1: String(name), value2: String(pinText(a.stepPin)), value3: String(pinText(a.dirPin)) })
+                        + controlText('MachineArea.text042', { value1: String(pinText(a.homePin)), value2: String(pinText(a.limitMinusPin)) })
+                        + controlText('MachineArea.text043', { value1: String(pinText(a.limitPlusPin)), value2: String(pinText(a.enablePin)) })}
                       onClick={() => setOpenAxis(name)}
-                    >
-                      Pins and more <ChevronRight size={12} />
+                    >{controlText('MachineArea.text044')}<ChevronRight size={12} />
                     </button>
                   </td>
                 </tr>
@@ -364,19 +359,17 @@ export function MachineArea({
             className="mform-label"
             style={{ minWidth: 44 }}
             data-tooltip={
-              'Z FIRST IS A SAFETY DEFAULT, NOT A PREFERENCE. Homing Z last on a '
-              + 'router with a tool in the spindle drives the tool through the work '
-              + 'on its way to the X or Y switch.'
+              controlText('MachineArea.text045')
+              + controlText('MachineArea.text046')
+              + controlText('MachineArea.text047')
             }
-          >
-            Home order
-          </span>
+          >{controlText('MachineArea.text048')}</span>
           {order.map((ax, i) => (
             <select
               key={`${ax}-${i}`}
               data-wired=""
               className="mform-select"
-              aria-label={`Homing order position ${i + 1}`}
+              aria-label={controlText('MachineArea.text049', { value1: String(i + 1) })}
               data-testid={`machine-def-panel-homing-order-${i}`}
               style={{ flex: 'none', width: 56 }}
               value={ax}
@@ -387,9 +380,7 @@ export function MachineArea({
             </select>
           ))}
           {order.length === 0 && (
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
-              no axes enabled
-            </span>
+            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>{controlText('MachineArea.text050')}</span>
           )}
         </div>
 
@@ -397,13 +388,9 @@ export function MachineArea({
           <div
             data-testid="machine-def-panel-unset-soft-limits"
             style={{ margin: '6px 0', color: 'var(--warning)', fontSize: 'var(--font-size-sm)' }}
-          >
-            Travel is unset for {unsetSoftLimitAxes.join(', ')}.
-            {grbl && hasGrblTravelHomingRows
-              ? ' Read $130-$132 from GRBL for X/Y/Z; enter both limits for other axes;'
-              : ' Enter both soft min and soft max;'}
-            {' '}until then the limit is unknown, not zero.
-          </div>
+          >{catalogChildren(controlText('MachineArea.text053', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: unsetSoftLimitAxes.join(', '), value2: grbl && hasGrblTravelHomingRows
+              ? controlText('MachineArea.text051')
+              : controlText('MachineArea.text052'), value3: ' ' })}</div>
         )}
 
         <div style={{ marginTop: 10 }}>
@@ -419,22 +406,22 @@ export function MachineArea({
         <label
           data-wired=""
           data-tooltip={
-            "This machine's safe height - read from the profile when it states one, "
-            + 'typed here otherwise. Used to clear the work before a rapid move.'
+            controlText('MachineArea.text054')
+            + controlText('MachineArea.text055')
           }
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10,
             fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)',
           }}
         >
-          <span>Safe Z</span>
+          <span>{controlText('MachineArea.text056')}</span>
           {/* An imported profile Safe Z cannot be cleared here, so its box
               reverts a blank. App-owned definition values and typed values are
               clearable; unset stays blank, never a 0 nobody typed. */}
           {safeZ?.from === 'profile' ? (
             <NumericInput
               value={safeZ.z}
-              ariaLabel="Safe Z"
+              ariaLabel={controlText('MachineArea.text057')}
               className="mform-input mform-input-mono"
               style={{ flex: 'none', width: 78 }}
               onChange={(v) => editDraft((m) => withMachineSafeZ(m, v))}
@@ -442,7 +429,7 @@ export function MachineArea({
           ) : (
             <OptionalNumericInput
               value={safeZ?.z}
-              ariaLabel="Safe Z"
+              ariaLabel={controlText('MachineArea.text058')}
               className="mform-input mform-input-mono"
               style={{ flex: 'none', width: 78 }}
               onChange={(v) => editDraft((m) => withMachineSafeZ(m, v ?? null))}
@@ -452,9 +439,7 @@ export function MachineArea({
             <span
               data-testid="machine-def-panel-safe-z-unset"
               style={{ color: 'var(--text-muted)' }}
-            >
-              not stated
-            </span>
+            >{controlText('MachineArea.text059')}</span>
           )}
         </label>
       </div>

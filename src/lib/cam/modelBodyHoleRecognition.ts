@@ -13,27 +13,27 @@
 // reconstruct the body (an unsupported feature kind, a lost reference, a
 // kernel refusal) still refuses by name (ADR-0003).
 
-import type { BodyHandle, FeatureVerdict, ProfileRegion } from '../../geom/geom-service'
+import type { BodyHandle, FeatureVerdict } from '../../geom/geom-service'
 import type { BodyResolution } from './modelReferenceResolution'
 import { createGeomService, type GeomClient } from '../../geom'
 import type { GeometrySnapshot } from '../../geom'
 import { RegenScheduler, type DagNodeSnapshot, type ElementMap, type FeatureDag, type FeatureOp } from '../../doc'
 import { loadDocumentArchive } from '../../doc/persist'
 import { collectDocumentArchive, LEGACY_MODEL_ITEM_ID } from '../../doc/documentHolder'
-import { isDatumPlanePayload, makeDatumPlaneExecutor, type DatumPlanePayload } from '../../sketch3d/datumPlane'
+import { isDatumPlanePayload, type DatumPlanePayload } from '../../sketch3d/datumPlane'
 import { makeSketch3dExecutor, sketch3dIdFromNodeId } from '../../sketch3d/regen'
 import { createSketch3dSolveService, type Sketch3dSolveService } from '../../sketch3d/solveService'
 import type { PlaneFrame } from '../../sketch3d'
-import { resolveProfileSelector, type ProfileSelector } from '../../components/model3d/workbench/regionSelector'
-import { buildExtrudeRequest, type ExtrudeParamsInput } from '../../components/model3d/workbench/extrudeParams'
-import { resolveDrivenField } from '../../components/model3d/workbench/featureDimension'
 import { extractSketchProfile } from '../../components/model3d/workbench/sketchProfile'
 import type { Sketch as CamSketch } from '../../lib/sketch/sketcher'
 import { liveBodyFeatureIds } from '../../components/model3d/bodyLineage'
-import type { HoleFeaturePayload } from '../../components/model3d/dialogs/HoleDialog'
-import type { BooleanFeaturePayload } from '../../components/model3d/dialogs/BooleanDialog'
-import type { ChamferFeaturePayload } from '../../components/model3d/dialogs/ChamferDialog'
-import type { ShellFeaturePayload } from '../../components/model3d/dialogs/ShellDialog'
+import {
+  kernelOpFailure,
+  runHeadlessDatum,
+  runHeadlessFeature,
+  runHeadlessMeshImport,
+  type HeadlessReplayWorld,
+} from './headlessFeatureReplay'
 import { loadCachedStep } from '../stepCache'
 
 export type ModelBodyHoleRecognizer = (bodyId: string) => Promise<FeatureVerdict[]>
@@ -77,6 +77,8 @@ function workbenchHooks(): WorkbenchHoleHooks | undefined {
 // workbench's own regen executor uses (makeDatumPlaneExecutor, makeSketch3dExecutor,
 // buildExtrudeRequest, extractSketchProfile, resolveDrivenField) -- this is a
 // second CALLER of that shared logic, never a second implementation of it.
+// WO-2857: every body feature kind the Model tab builds replays through
+// headlessFeatureReplay.ts, branch for branch with the live executor.
 
 /** Test / harness injection for the transient kernel client (mirrors
  *  headlessModelBodyReplay's __setHeadlessReplayClientFactoryForTests). Pass
@@ -84,10 +86,6 @@ function workbenchHooks(): WorkbenchHoleHooks | undefined {
 let clientFactory: () => GeomClient = createGeomService
 export function __setModelBodyHeadlessClientFactoryForTests(factory: (() => GeomClient) | null): void {
   clientFactory = factory ?? createGeomService
-}
-
-function kernelOpFailure(nodeId: string, reason: string): { ok: false; diagnostics: [{ code: 'KERNEL_OP_FAILED'; severity: 'error'; params: { id: string; reason: string } }] } {
-  return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { id: nodeId, reason } }] }
 }
 
 /** A `PlaneFrame` with a NaN/zero-length axis is unusable for profile
@@ -128,47 +126,6 @@ async function recomputePackageSketchProfile(dag: FeatureDag, nodeId: string): P
 
   dag.setPayload(nodeId, { ...node.payload, regions: result.regions })
   return { ok: true, diagnostics: [] }
-}
-
-/** Replay one 'feature' node whose opType is 'extrude' against the transient
- *  kernel, tracking the resulting BodyHandle by node id so a later feature
- *  that targets/consumes this one can find it (bodyHandles is this pass's
- *  ONLY bookkeeping -- there is no viewport/undo state to maintain here). */
-async function runHeadlessExtrude(
-  dag: FeatureDag,
-  client: GeomClient,
-  bodyHandles: Map<string, BodyHandle>,
-  node: DagNodeSnapshot,
-  modelItemId: string,
-): Promise<Awaited<ReturnType<FeatureOp>>> {
-  const payload = node.payload
-  const sketchId = payload.sketchId
-  if (typeof sketchId !== 'string' || sketchId.length === 0) {
-    return kernelOpFailure(node.id, 'extrude feature has no sketch reference')
-  }
-  const sketchNode = dag.getNode(sketchId)
-  const profileSelection = resolveProfileSelector(
-    sketchNode?.payload.regions as ProfileRegion[] | undefined,
-    payload.profileSelector as ProfileSelector | undefined,
-  )
-  if (!profileSelection.ok) {
-    return kernelOpFailure(node.id, `profile selector ${profileSelection.code} for '${sketchId}': ${profileSelection.message}`)
-  }
-
-  const driven = resolveDrivenField(dag, node, 'distance')
-  const build = buildExtrudeRequest({
-    featureId: node.id,
-    payload: payload as ExtrudeParamsInput,
-    profiles: profileSelection.profiles,
-    distance: driven.value,
-    lookupTarget: (id) => bodyHandles.get(id),
-    modelItemId,
-  })
-  if (!build.ok) return kernelOpFailure(node.id, build.reason)
-
-  const result = await client.makeExtrude(build.req)
-  if (result.ok && result.body !== undefined) bodyHandles.set(node.id, result.body)
-  return result
 }
 
 /** Replay one 'import' node (a STEP-imported body) against the transient
@@ -229,65 +186,6 @@ async function runHeadlessImport(
   return { ok: true, body: selected.handle, elementMap: selected.elementMap, diagnostics: imported.diagnostics }
 }
 
-/** WO-2282: the body a single-owner feature (hole, chamfer, shell, boolean)
- *  replays onto -- the headless counterpart of the live executor's
- *  lookupLiveBody gate (SolidsWorkbenchPage.tsx): the SAME shared
- *  liveBodyFeatureIds census, so an owner a later feature already consumed
- *  never resolves here either. This pass replays every node once from
- *  scratch in dag order, so "has a handle" is exactly "already rebuilt". */
-function lookupHeadlessLiveBody(
-  dag: FeatureDag,
-  bodyHandles: Map<string, BodyHandle>,
-  id: string,
-): BodyHandle | undefined {
-  return liveBodyFeatureIds(dag, (bid) => bodyHandles.has(bid)).includes(id) ? bodyHandles.get(id) : undefined
-}
-
-/** WO-2282: replay one feature that consumes upstream bodies by feature id,
- *  with the SAME kernel op and the SAME request the live executor's branch
- *  for that opType builds (SolidsWorkbenchPage.tsx makeReplayExecutor).
- *  Returns undefined for an opType this headless path does not replay, so
- *  the caller's by-name refusal stands for it. */
-async function runHeadlessOwnedFeature(
-  dag: FeatureDag,
-  client: GeomClient,
-  bodyHandles: Map<string, BodyHandle>,
-  node: DagNodeSnapshot,
-): Promise<Awaited<ReturnType<FeatureOp>> | undefined> {
-  const opType = node.payload.opType
-  const live = (id: string): BodyHandle | undefined => lookupHeadlessLiveBody(dag, bodyHandles, id)
-  const noLiveBody = (label: string, id: string) =>
-    kernelOpFailure(node.id, `${label} '${id}' has no live body (missing or already consumed)`)
-  let result: Awaited<ReturnType<GeomClient['makeHole']>>
-  if (opType === 'hole') {
-    const p = node.payload as unknown as HoleFeaturePayload
-    const body = live(p.ownerId)
-    if (body === undefined) return noLiveBody('hole owner', p.ownerId)
-    result = await client.makeHole({ featureId: node.id, body, face: p.faceId, points: p.points, style: p.style, depth: p.depth })
-  } else if (opType === 'chamfer') {
-    const p = node.payload as unknown as ChamferFeaturePayload
-    const body = live(p.ownerId)
-    if (body === undefined) return noLiveBody('chamfer owner', p.ownerId)
-    result = await client.applyChamfer({ featureId: node.id, body, edges: p.edges, distance: p.distance, propagateTangent: true })
-  } else if (opType === 'shell') {
-    const p = node.payload as unknown as ShellFeaturePayload
-    const body = live(p.ownerId)
-    if (body === undefined) return noLiveBody('shell owner', p.ownerId)
-    result = await client.applyShell({ featureId: node.id, body, removeFaces: p.removeFaces, thickness: p.thickness })
-  } else if (opType === 'boolean') {
-    const p = node.payload as unknown as BooleanFeaturePayload
-    const target = live(p.targetFeatureId)
-    if (target === undefined) return noLiveBody(`boolean ${p.boolOp} target`, p.targetFeatureId)
-    const tool = live(p.toolFeatureId)
-    if (tool === undefined) return noLiveBody(`boolean ${p.boolOp} tool`, p.toolFeatureId)
-    result = await client.applyBoolean({ featureId: node.id, op: p.boolOp, target, tools: [tool] })
-  } else {
-    return undefined
-  }
-  if (result.ok && result.body !== undefined) bodyHandles.set(node.id, result.body)
-  return result
-}
-
 /** The one FeatureOp this module drives its own RegenScheduler pass with.
  *  Dispatches by node kind/opType onto the shared, kernel-op-owning builders
  *  above; anything this headless path does not yet know how to replay
@@ -306,8 +204,9 @@ function makeHeadlessExecutor(
     return solveServicePromise
   }
 
+  const world: HeadlessReplayWorld = { dag, map, scheduler, client, bodyHandles, modelItemId }
   return async (node) => {
-    if (node.kind === 'datum') return makeDatumPlaneExecutor(dag, map)(node)
+    if (node.kind === 'datum') return runHeadlessDatum(world, node)
 
     if (node.kind === 'sketch') {
       const payload = node.payload as { sketch?: unknown; document?: unknown }
@@ -322,17 +221,18 @@ function makeHeadlessExecutor(
       return { ok: true, diagnostics: [] }
     }
 
-    if (node.kind === 'feature' && node.payload.opType === 'extrude') {
-      return runHeadlessExtrude(dag, client, bodyHandles, node, modelItemId)
-    }
-
     if (node.kind === 'import') {
       return runHeadlessImport(client, bodyHandles, node)
     }
 
+    if (node.kind === 'meshImport') {
+      return runHeadlessMeshImport(world, node)
+    }
+
     if (node.kind === 'feature') {
-      const owned = await runHeadlessOwnedFeature(dag, client, bodyHandles, node)
-      if (owned !== undefined) return owned
+      // WO-2857: every opType the Model tab builds (headlessFeatureReplay.ts).
+      const replayed = await runHeadlessFeature(world, node)
+      if (replayed !== undefined) return replayed
     }
 
     const what = node.kind === 'feature' ? `a '${String(node.payload.opType)}' feature` : `a '${node.kind}' node`

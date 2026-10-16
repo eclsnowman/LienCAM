@@ -1,3 +1,5 @@
+import { useText, textFor } from '../../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import { useEffect, useRef } from 'react'
 import type { SketcherOverlaysPort } from './port'
 import type {
@@ -42,10 +44,10 @@ interface Props {
 const PILL_GAP_PX = 18
 
 const ALIGN_BUTTONS: { mode: TextPathAlign; label: string; hint: string }[] = [
-  { mode: 'left', label: 'L', hint: 'Align to the start of the curve' },
-  { mode: 'center', label: 'C', hint: 'Center on the curve' },
-  { mode: 'right', label: 'R', hint: 'Align to the end of the curve' },
-  { mode: 'free', label: 'F', hint: 'Free - slide anywhere along the curve (keeps the current position)' },
+  { mode: 'left', label: 'L', get hint() { return workbenchText('SketchTextAnchorPill.alignToTheStartOfTheCurve') } },
+  { mode: 'center', label: 'C', get hint() { return workbenchText('SketchTextAnchorPill.centerOnTheCurve') } },
+  { mode: 'right', label: 'R', get hint() { return workbenchText('SketchTextAnchorPill.alignToTheEndOfTheCurve') } },
+  { mode: 'free', label: 'F', get hint() { return workbenchText('SketchTextAnchorPill.freeSlideAnywhereAlongTheCurveKeepsTheCurrent') } },
 ]
 
 /** The on-path text entity the pill targets, or null. EDIT target wins (the
@@ -80,6 +82,7 @@ function pillTarget(sketch: Sketch | null, targetId: string | null): SketchTextE
 }
 
 export function SketchTextAnchorPill({ port }: Props) {
+  const workbenchText = useText('sketch-and-model-workbench')
   const isSketch = port.useIsSketchActive()
   const sketch = port.useSketch()
   const textEditId = port.useTextEditId()
@@ -178,11 +181,10 @@ export function SketchTextAnchorPill({ port }: Props) {
         type="button"
         className={`sketch-header-toggle${flip ? ' sketch-header-toggle-on' : ''}`}
         aria-pressed={flip}
-        data-tooltip="Flip the text to the other side of the curve"
+        data-tooltip={workbenchText('SketchTextAnchorPill.flipTheTextToTheOtherSideOfThe')}
         onClick={() => setFlipById(targetId, !flip)}
       >
-        Flip
-      </button>
+        {workbenchText('SketchTextAnchorPill.flip')}</button>
       {/* Flip-TEXT (T5b): mirror-image the glyphs in place -- independent of
           the flip-SIDE toggle above. The same property is reachable from the
           toolbox text section (free text has no pill). */}
@@ -190,11 +192,10 @@ export function SketchTextAnchorPill({ port }: Props) {
         type="button"
         className={`sketch-header-toggle${mirrored ? ' sketch-header-toggle-on' : ''}`}
         aria-pressed={mirrored}
-        data-tooltip="Mirror the glyphs (reads reversed, same position)"
+        data-tooltip={workbenchText('SketchTextAnchorPill.mirrorTheGlyphsReadsReversedSamePosition')}
         onClick={() => setMirrorById(targetId, !mirrored)}
       >
-        Mirror
-      </button>
+        {workbenchText('SketchTextAnchorPill.mirror')}</button>
     </div>
   )
 }

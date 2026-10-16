@@ -280,12 +280,15 @@ describe('WO-1865 pierce through the real pick and command path', () => {
     expect(pierceOf(current).unresolved).toBeUndefined()
     expect(sketcherTools.piercePending()).toBeNull()
     expect(sketcherToolStore.getState().tool).toBe('select')
-    expect(notices.at(-1)).toMatch(/^Pierce: Line \d+ now sits where "Edge .*" crosses the sketch plane/)
+    // WO-2858: a projected model edge reads "Edge"; its key stays in the source above.
+    expect(notices.at(-1)).toMatch(/^Pierce: Line \d+ now sits where "Edge" crosses the sketch plane/)
+    expect(notices.at(-1)).not.toContain(E_AXIS)
 
     // Shown in the browser like every other constraint, naming its edge.
     const group = buildBrowserModel(current, current.solveStatus).groups.find((g) => g.kind === 'pierce')
     expect(group?.title).toBe('Pierce')
-    expect(group?.rows[0].operands).toContain(`"Edge ${E_AXIS}"`)
+    expect(group?.rows[0].operands).toContain('"Edge"')
+    expect(group?.rows[0].operands).not.toContain(E_AXIS)
     expect(group?.rows[0].unresolved).toBeUndefined()
   })
 
@@ -349,7 +352,7 @@ describe('WO-1865 pierce through the real pick and command path', () => {
     const { sketch: after, newlyUnresolved, sentence } = regen(pierced, cache)
     expect(newlyUnresolved).toBe(1)
     expect(sentence).toBe(
-      `Sketch on XY: the model edge "Edge ${E_AXIS}" runs parallel to the sketch plane, so it does not ` +
+      'Sketch on XY: the model edge "Edge" runs parallel to the sketch plane, so it does not ' +
       'presently cross it; its pierced point stays where it last was.')
     expect(dist(line(after, 'a').start, { x: 10, y: 5 })).toBeLessThanOrEqual(1e-9)
     expect(after.solveStatus?.solveFailed).not.toBe(true)
@@ -360,7 +363,8 @@ describe('WO-1865 pierce through the real pick and command path', () => {
     expect(pierceOf(after).unresolved).toBe('parallel')
     const row = buildBrowserModel(after, after.solveStatus).groups.find((g) => g.kind === 'pierce')!.rows[0]
     expect(row.unresolved).toMatch(/runs parallel to the sketch plane/)
-    expect(row.unresolved).toContain(`"Edge ${E_AXIS}"`)
+    expect(row.unresolved).toContain('"Edge"')
+    expect(row.unresolved).not.toContain(E_AXIS)
     // A second pass says nothing new; tilting back clears the mark and the point follows again.
     expect(regen(after, cache).newlyUnresolved).toBe(0)
     cache.ingest(BODY, bodyBuffers(axisAt(12, 6)))

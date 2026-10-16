@@ -1,3 +1,5 @@
+import { textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 // WO-120: what the constraint solver's boot is doing, said ONCE, in the one
 // place both action seams read it from.
 //
@@ -64,7 +66,7 @@ export function resolveSolverAvailability(
  * is what actually cures the documented stale-hash class -- the same advice the
  * geometry kernel's own exhausted status gives.
  */
-const RELOAD_ADVICE = 'Reload the page to restore it.'
+const RELOAD_ADVICE = workbenchText('solverAvailability.reloadThePageToRestoreIt')
 
 /**
  * What the DOCUMENT seam says when it cannot solve: geometry is always kept
@@ -76,12 +78,12 @@ const RELOAD_ADVICE = 'Reload the page to restore it.'
  */
 export function unsolvedDocumentNotice(state: SolverAvailability): string {
   if (state === 'unavailable') {
-    return `The sketch solver is unavailable, so this was not solved - the geometry is kept exactly as drawn. ${RELOAD_ADVICE}`
+    return workbenchText('solverAvailability.theSketchSolverIsUnavailableSoThisWasNot', { RELOAD_ADVICE: String(RELOAD_ADVICE) })
   }
   if (state === 'not-started') {
-    return 'The sketch solver has not started; geometry is placed but not yet solved.'
+    return workbenchText('solverAvailability.theSketchSolverHasNotStartedGeometryIsPlaced')
   }
-  return 'The sketch solver is still loading; geometry is placed but not yet solved.'
+  return workbenchText('solverAvailability.theSketchSolverIsStillLoadingGeometryIsPlaced')
 }
 
 /**
@@ -94,10 +96,10 @@ export function unsolvedDocumentNotice(state: SolverAvailability): string {
  */
 export function unverifiableApplyNotice(state: SolverAvailability, label: string): string {
   if (state === 'unavailable') {
-    return `${label} was not applied: the sketch solver is unavailable, so it cannot be verified. ${RELOAD_ADVICE}`
+    return workbenchText('solverAvailability.wasNotAppliedTheSketchSolverIsUnavailableSo', { label: String(label), RELOAD_ADVICE: String(RELOAD_ADVICE) })
   }
   if (state === 'not-started') {
-    return `${label}: the sketch solver has not started, so this cannot be verified yet.`
+    return workbenchText('solverAvailability.theSketchSolverHasNotStartedSoThisCannot', { label: String(label) })
   }
-  return `${label}: the sketch solver is still loading. Try again in a moment.`
+  return workbenchText('solverAvailability.theSketchSolverIsStillLoadingTryAgainIn', { label: String(label) })
 }

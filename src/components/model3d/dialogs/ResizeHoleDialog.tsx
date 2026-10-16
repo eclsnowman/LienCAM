@@ -12,6 +12,8 @@
 // user sees, never a second apply path. It owns no diameter/apply UI of its
 // own any more; the anchored entry is the one and only apply surface.
 
+import { useText, textFor } from '../../../i18n'
+const workbenchText = textFor('sketch-and-model-workbench')
 import type { FeatureClass, FeatureVerdict } from '../../../geom/geom-service'
 import { DialogShell } from './DialogShell'
 
@@ -29,9 +31,9 @@ export interface ResizeHoleCandidate {
 const RESIZE_HOLE_CLASS_SET = new Set<FeatureClass>(RESIZE_HOLE_CLASSES)
 
 export const CLASS_LABEL: Record<ResizeHoleClass, string> = {
-  throughHole: 'Through hole',
-  blindHole: 'Blind hole',
-  counterboreStack: 'Counterbore',
+  get throughHole() { return workbenchText('ResizeHoleDialog.throughHole') },
+  get blindHole() { return workbenchText('ResizeHoleDialog.blindHole') },
+  get counterboreStack() { return workbenchText('ResizeHoleDialog.counterbore') },
 }
 
 /** Refusal reason for one verdict, or undefined if it is a clean resize
@@ -40,11 +42,11 @@ export const CLASS_LABEL: Record<ResizeHoleClass, string> = {
  *  SolidsWorkbenchPage, this file's own list builder, and their tests) so a
  *  hover match and a list row can never disagree about eligibility. */
 function resizeHoleDisabledReason(verdict: FeatureVerdict): string | undefined {
-  if (!RESIZE_HOLE_CLASS_SET.has(verdict.featureClass)) return 'not a recognized hole'
-  if (!verdict.removable) return verdict.refuseReason ?? 'The geometry engine refused this hole without naming a reason.'
+  if (!RESIZE_HOLE_CLASS_SET.has(verdict.featureClass)) return workbenchText('ResizeHoleDialog.notARecognizedHole')
+  if (!verdict.removable) return verdict.refuseReason ?? workbenchText('ResizeHoleDialog.theGeometryEngineRefusedThisHoleWithoutNamingA')
   const measured = verdict.params.diameter
   if (typeof measured !== 'number' || !Number.isFinite(measured) || measured <= 0) {
-    return 'The recognized hole has no finite positive diameter.'
+    return workbenchText('ResizeHoleDialog.theRecognizedHoleHasNoFinitePositiveDiameter')
   }
   return undefined
 }
@@ -75,6 +77,31 @@ export function eligibleResizeHoleVerdicts(verdicts: FeatureVerdict[]): FeatureV
 export function sameHoleLocation(keyA: string, keyB: string): boolean {
   const dropLast = (key: string): string => key.split(':').slice(0, -1).join(':')
   return dropLast(keyA) === dropLast(keyB)
+}
+
+/** WO-2795: two hole keys (`hole:x:y:z:dx:dy:dz:r`) on the SAME axis line,
+ *  whichever end each was measured from and whichever way each points. A
+ *  resize may rebuild the wall from the hole's other end, so the live key
+ *  can differ from the stored one in origin and sign as well as radius. */
+export function sameHoleAxis(keyA: string, keyB: string): boolean {
+  const parse = (key: string): number[] | undefined => {
+    const parts = key.split(':')
+    if (parts.length !== 8 || parts[0] !== 'hole') return undefined
+    const nums = parts.slice(1, 7).map(Number)
+    return nums.every(Number.isFinite) ? nums : undefined
+  }
+  const a = parse(keyA)
+  const b = parse(keyB)
+  if (a === undefined || b === undefined) return false
+  const [ax, ay, az, adx, ady, adz] = a
+  const [bx, by, bz, bdx, bdy, bdz] = b
+  const la = Math.hypot(adx, ady, adz)
+  const lb = Math.hypot(bdx, bdy, bdz)
+  if (la === 0 || lb === 0) return false
+  if (Math.abs(Math.abs(adx * bdx + ady * bdy + adz * bdz) / (la * lb) - 1) > 1e-4) return false
+  const [ux, uy, uz] = [adx / la, ady / la, adz / la]
+  const [wx, wy, wz] = [bx - ax, by - ay, bz - az]
+  return Math.hypot(wy * uz - wz * uy, wz * ux - wx * uz, wx * uy - wy * ux) < 1e-2
 }
 
 /** The one derivation used by both the dialog and its census tests. Filtering
@@ -112,6 +139,10 @@ export interface ResizeHoleFeaturePayload extends Record<string, unknown> {
   newDiameter: number
   delta: number
   name: string
+  /** WO-2762: 'counterbore' = this edit changes the counterbore step alone
+   *  (currentDiameter/newDiameter and any depth are the counterbore's); absent
+   *  = the hole's pilot, as before. */
+  holeStep?: 'counterbore'
 }
 
 export type ResizeDiameterValidation =
@@ -122,16 +153,16 @@ export type ResizeDiameterValidation =
  * strings such as "8mm"; the finite guard independently closes Infinity/NaN's
  * comparison holes before the signed delta reaches history or the engine. */
 export function validateResizeDiameter(draft: string, currentDiameter: number): ResizeDiameterValidation {
-  if (draft.trim() === '') return { ok: false, reason: 'Enter a new diameter.' }
+  if (draft.trim() === '') return { ok: false, reason: workbenchText('ResizeHoleDialog.enterANewDiameter') }
   const newDiameter = Number(draft)
-  if (!Number.isFinite(newDiameter)) return { ok: false, reason: 'New diameter must be a finite number.' }
-  if (newDiameter <= 0) return { ok: false, reason: 'New diameter must be greater than 0 mm.' }
+  if (!Number.isFinite(newDiameter)) return { ok: false, reason: workbenchText('ResizeHoleDialog.newDiameterMustBeAFiniteNumber') }
+  if (newDiameter <= 0) return { ok: false, reason: workbenchText('ResizeHoleDialog.newDiameterMustBeGreaterThan0Mm') }
   if (!Number.isFinite(currentDiameter) || currentDiameter <= 0) {
-    return { ok: false, reason: 'Current diameter is not a finite positive number.' }
+    return { ok: false, reason: workbenchText('ResizeHoleDialog.currentDiameterIsNotAFinitePositiveNumber') }
   }
   const delta = newDiameter - currentDiameter
-  if (!Number.isFinite(delta)) return { ok: false, reason: 'Computed diameter delta is not finite.' }
-  if (Math.abs(delta) <= 1e-9) return { ok: false, reason: 'New diameter must differ from the current diameter.' }
+  if (!Number.isFinite(delta)) return { ok: false, reason: workbenchText('ResizeHoleDialog.computedDiameterDeltaIsNotFinite') }
+  if (Math.abs(delta) <= 1e-9) return { ok: false, reason: workbenchText('ResizeHoleDialog.newDiameterMustDifferFromTheCurrentDiameter') }
   return { ok: true, newDiameter, delta }
 }
 
@@ -150,13 +181,13 @@ export function validateHoleDepth(
 }
 
 export function formatMm(value: number): string {
-  return Number.isFinite(value) ? `${Number(value.toFixed(6))} mm` : 'unreadable'
+  return Number.isFinite(value) ? workbenchText('ResizeHoleDialog.mm2', { value1: String(Number(value.toFixed(6))) }) : 'unreadable'
 }
 
 export function formatSignedMm(value: number): string {
   if (!Number.isFinite(value)) return 'unreadable'
   const rounded = Number(value.toFixed(6))
-  return `${rounded > 0 ? '+' : ''}${rounded} mm`
+  return workbenchText('ResizeHoleDialog.mm', { value1: String(rounded > 0 ? '+' : ''), value2: String(rounded) })
 }
 
 // ---- Supplement list (WO UI-58: demoted from the primary flow) ------------
@@ -194,18 +225,18 @@ export interface ResizeHoleDialogProps {
 }
 
 export function ResizeHoleDialog({ rows, onSelect, onClose }: ResizeHoleDialogProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <DialogShell
-      title="Recognized holes"
+      title={workbenchText('ResizeHoleDialog.recognizedHoles')}
       onApply={onClose}
       onCancel={onClose}
-      applyLabel="Close"
+      applyLabel={workbenchText('ResizeHoleDialog.close')}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-          Click a hole to select it (same as clicking it in the viewport)
-        </div>
-        <div role="radiogroup" aria-label="Recognized holes" data-testid="resize-hole-picker" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {workbenchText('ResizeHoleDialog.clickAHoleToSelectItSameAsClicking')}</div>
+        <div role="radiogroup" aria-label={workbenchText('ResizeHoleDialog.recognizedHoles')} data-testid="resize-hole-picker" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {rows.map((row, index) => {
             const disabled = row.disabledReason !== undefined
             return (
@@ -256,8 +287,7 @@ export function ResizeHoleDialog({ rows, onSelect, onClose }: ResizeHoleDialogPr
           })}
           {rows.length === 0 && (
             <div data-testid="resize-hole-picker-empty" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-              No recognized through, blind, or counterbore holes on any live body.
-            </div>
+              {workbenchText('ResizeHoleDialog.noRecognizedThroughBlindOrCounterboreHolesOnAny')}</div>
           )}
         </div>
       </div>

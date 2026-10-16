@@ -19,7 +19,8 @@ import {
   surfaceSpeedToDisplay, surfaceSpeedFromDisplay, surfaceSpeedLabel,
 } from '../../lib/ui/unitFormat'
 import type { Tool, ToolType, ToolMaterial, ToolCoating, ToolCutHand, FeedsAndSpeeds, Units, ToolHolder, HolderSegment, ProbeContact } from '../../types'
-import { DEFAULT_TOOL_LIBRARY_ID } from '../../store/migrations/projectMigrations'
+import { DEFAULT_TOOL_LIBRARY_ID, MIGRATION_DEFAULT_TOOL_LIBRARY } from '../../store/migrations/projectMigrations'
+import { identicalImportedLibrary, importedToolKey, nextImportedToolNumber } from '../../lib/tools/toolImportIdentity'
 import { TOOL_TYPE_ORDER, toolTypeMeta, fieldRelevanceForType } from '../../lib/tool/toolMeta'
 import { buildHolderProfile } from '../../lib/tool/toolProfile'
 import { normalizeToolCutHand } from '../../lib/tool/cutHand'
@@ -513,10 +514,9 @@ export function ToolLibraryModal() {
     const file = e.target.files?.[0]
     if (!file) return
     setImportFeedback(null)
-    // An import creates a NEW named library from the file name (extension
-    // stripped) and tags every imported tool with that library's id, instead of
-    // dumping into the flat pool. Preserves per-file library grouping.
-    const libName = file.name.replace(/\.[^.]+$/, '').trim() || words("ToolLibraryModal.imported_library")
+    // WO-2867: a single exported Tool joins the selected library (or My Tools).
+    // Arrays and Fusion archives remain library imports, even with one member.
+    let libName = file.name.replace(/\.[^.]+$/, '').trim() || words("ToolLibraryModal.imported_library")
     const reader = new FileReader()
     reader.onerror = () => {
       addConsoleEvent({ severity: 'error', source: 'tool', message: words("ToolLibraryModal.tool_library_import_could_not_read_the") })
@@ -530,7 +530,6 @@ export function ToolLibraryModal() {
         // Decode FIRST so a malformed file throws before we create a library.
         const bytes = new Uint8Array(reader.result as ArrayBuffer)
         const parsed = decodeToolLibraryFile(bytes)
-        const newLibId = addToolLibrary(libName)
         // Detect the wrapped tool-library format: { "data": [...] } wrapper or array with geometry field
         const dataArray = Array.isArray(parsed) ? parsed
           : (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string,unknown>).data))
@@ -539,7 +538,8 @@ export function ToolLibraryModal() {
         const firstItem = dataArray?.[0]
         const isFusion = dataArray !== null && firstItem != null
           && typeof firstItem === 'object' && 'geometry' in (firstItem as object)
-        let count = 0
+        const isSingleTool = dataArray === null && !Array.isArray(parsed)
+        const pendingTools: Tool[] = []
         // One flat diagnostics list for the WHOLE batch (WO-1441 rule 3): every
         // rejected record/segment and every unrecognized-type notice lands here,
         // and the caller reports it as ONE console summary — never a bare count.
@@ -547,12 +547,13 @@ export function ToolLibraryModal() {
         if (isFusion) {
           const { tools: importedTools, holders: importedHolders, diagnostics: fusionDiagnostics } = importFusionTools(parsed)
           diagnostics.push(...fusionDiagnostics)
-          // Push the embedded holders first (deduped by guid in the store) so the
-          // tools' holderId links resolve. addHolder is a no-op for a known id.
-          importedHolders.forEach(h => addHolder(h))
+          // WO-1440: resolve embedded holders by content before matching tools.
+          // A conflicting GUID returns a different ID; preserve that remap.
+          const holderIds = new Map(importedHolders.map(h => [h.id, addHolder(h)]))
           // Preserve each tool's holderId link (set by the importer) while
           // re-minting the tool id and tagging the new library.
-          importedTools.forEach(t => { addTool({ ...t, id: crypto.randomUUID(), libraryId: newLibId }); count++ })
+          importedTools.forEach(t => pendingTools.push({ ...t, id: crypto.randomUUID(),
+            holderId: t.holderId ? holderIds.get(t.holderId) ?? t.holderId : undefined }))
         } else {
           // Internal format: array of Tool or single Tool. Each record runs
           // through the shared validator before it reaches the store (rule:
@@ -595,36 +596,59 @@ export function ToolLibraryModal() {
             const holderParse = embeddedHolder ? parseFusionHolder(embeddedHolder, 'millimeters') : undefined
             holderParse?.rejectedSegments.forEach(r => diagnostics.push({ label: words("ToolLibraryModal.holder", { value1: label, value2: r.label }), reason: r.reason }))
             const holderId = holderParse?.holder ? addHolder(holderParse.holder) : t.holderId
-            addTool({
+            pendingTools.push({
               ...toolFields,
               type: t.type ?? 'flat_end_mill',  // guard: type is required for rendering
               feedsAndSpeeds,
               holderId,
               id: crypto.randomUUID(),
-              libraryId: newLibId,
             })
-            count++
           })
         }
-        if (count === 0) {
-          // Nothing imported -> roll back the empty library we provisionally made.
-          removeToolLibrary(newLibId)
+        if (pendingTools.length === 0) {
+          // No destination is created until at least one valid record exists.
           const msg = diagnostics.length > 0
             ? words("ToolLibraryModal.0_tools_imported", { value1: diagnostics.map(d => words("ToolLibraryModal.diagnostic", { label: d.label, reason: d.reason })).join('; ') })
             : words("ToolLibraryModal.no_tools_were_found_in_that_file")
           addConsoleEvent({ severity: 'warning', source: 'tool', message: words("ToolLibraryModal.tool_library_import", { value1: msg }) })
           flashImportFeedback('warning', diagnostics.length > 0 ? words("ToolLibraryModal.no_valid_tools_were_found_see_console") : msg)
         } else {
-          // Scope the view to the freshly-imported library so the user sees them.
-          setSelectedLibraryId(newLibId)
+          // Read live state: FileReader is async and another import may have
+          // completed since this callback was registered. Never replace or
+          // delete existing tools, including pre-existing duplicates.
+          const current = useCamStore.getState()
+          let target = isSingleTool
+            ? current.toolLibraries.find(l => l.id === selectedLibraryId)
+              ?? current.toolLibraries.find(l => l.id === DEFAULT_TOOL_LIBRARY_ID)
+              ?? current.toolLibraries.find(l => l.name === MIGRATION_DEFAULT_TOOL_LIBRARY.name)
+            : current.toolLibraries.find(l => l.name === libName && identicalImportedLibrary(
+              current.toolLibrary.filter(t => t.libraryId === l.id), pendingTools))
+          if (isSingleTool) libName = target?.name ?? MIGRATION_DEFAULT_TOOL_LIBRARY.name
+          const reusedLibrary = !isSingleTool && target !== undefined
+          if (!target) target = { id: addToolLibrary(libName), name: libName }
+          const members = current.toolLibrary.filter(t => t.libraryId === target.id)
+          let count = 0
+          if (!reusedLibrary) {
+            for (const tool of pendingTools) {
+              if (isSingleTool && members.some(t => importedToolKey(t) === importedToolKey(tool))) continue
+              const incoming = { ...tool, libraryId: target.id,
+                ...(isSingleTool ? { toolNumber: nextImportedToolNumber(members) } : {}) }
+              if (addTool(incoming)) { members.push(incoming); count++ }
+            }
+          }
+          setSelectedLibraryId(target.id)
+          const alreadyThere = count === 0
+            ? `${isSingleTool ? pendingTools[0].name : libName} is already in "${libName}". No tools added.`
+            : null
           const base = words("ToolLibraryModal.imported_tool_into_library", { value1: count, value2: count === 1 ? '' : 's', value3: libName })
+          const summary = alreadyThere ?? base
           const msg = diagnostics.length > 0
-            ? words("ToolLibraryModal.flaggedDiagnostics", { base, count: diagnostics.length, diagnostics: diagnostics.map(d => words("ToolLibraryModal.diagnostic", { label: d.label, reason: d.reason })).join('; ') })
-            : base
+            ? words("ToolLibraryModal.flaggedDiagnostics", { base: summary, count: diagnostics.length, diagnostics: diagnostics.map(d => words("ToolLibraryModal.diagnostic", { label: d.label, reason: d.reason })).join('; ') })
+            : summary
           addConsoleEvent({ severity: diagnostics.length > 0 ? 'warning' : 'success', source: 'tool', message: msg })
           flashImportFeedback(
             diagnostics.length > 0 ? 'warning' : 'success',
-            diagnostics.length > 0 ? words("ToolLibraryModal.flagged_see_console", { value1: base, value2: diagnostics.length }) : base,
+            diagnostics.length > 0 ? words("ToolLibraryModal.flagged_see_console", { value1: summary, value2: diagnostics.length }) : summary,
           )
         }
       } catch (err) {
@@ -771,6 +795,12 @@ export function ToolLibraryModal() {
     <div
       className="modal-backdrop"
       data-ui78-sanctioned=""
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape' || e.defaultPrevented || e.nativeEvent.isComposing || useCamStore.getState().confirmDialog) return
+        e.preventDefault()
+        e.stopPropagation()
+        handleClose()
+      }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) handleClose() }}
     >
       <div className="modal-container tool-modal" ref={dialogFocusRef}>
@@ -863,7 +893,7 @@ export function ToolLibraryModal() {
                     onBlur={commitRenameLibrary}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') commitRenameLibrary()
-                      if (e.key === 'Escape') setRenamingLibrary(false)
+                      if (e.key === 'Escape') { e.stopPropagation(); setRenamingLibrary(false) }
                     }}
                   />
                 ) : (
@@ -990,7 +1020,7 @@ export function ToolLibraryModal() {
                           onClick={() => handleSelect(t)}
                         >
                           <div className="tool-list-name" data-tooltip={t.name ?? words("ToolLibraryModal.unnamed")}>{t.name ?? words("ToolLibraryModal.unnamed")}</div>
-                          <div className="tool-list-meta">{words("ToolLibraryModal.symbol_3")}{fmtDim(t.diameter ?? 0, displayUnits, displayUnits === 'inch' ? 3 : 1)}{unitLabel(displayUnits)}{words("ToolLibraryModal.symbol_4")}{t.type === 'probe' ? words("ToolLibraryModal.probeMeta") : words("ToolLibraryModal.fluteMeta", { count: t.numberOfFlutes ?? '?' })}{selectedLibraryId === 'all' && t.libraryId ? words("ToolLibraryModal.libraryMeta", { name: toolLibraries.find(l => l.id === t.libraryId)?.name ?? '' }) : ''}</div>
+                          <div className="tool-list-meta">{words("ToolLibraryModal.symbol_3")}{displayUnits === 'mm' ? String(t.diameter ?? 0) : String(Number(fmtDim(t.diameter ?? 0, displayUnits)))}{unitLabel(displayUnits)}{words("ToolLibraryModal.symbol_4")}{t.type === 'probe' ? words("ToolLibraryModal.probeMeta") : words("ToolLibraryModal.fluteMeta", { count: t.numberOfFlutes ?? '?' })}{selectedLibraryId === 'all' && t.libraryId ? words("ToolLibraryModal.libraryMeta", { name: toolLibraries.find(l => l.id === t.libraryId)?.name ?? '' }) : ''}</div>
                           {t.toolNumber !== undefined && (
                             <span className="badge badge-accent">{words("ToolLibraryModal.t", { value1: t.toolNumber })}</span>
                           )}
@@ -1007,7 +1037,7 @@ export function ToolLibraryModal() {
                     onClick={() => handleSelect(t)}
                   >
                     <div className="tool-list-name" data-tooltip={t.name ?? words("ToolLibraryModal.unnamed")}>{t.name ?? words("ToolLibraryModal.unnamed")}</div>
-                    <div className="tool-list-meta">{words("ToolLibraryModal.symbol_3")}{fmtDim(t.diameter ?? 0, displayUnits, displayUnits === 'inch' ? 3 : 1)}{unitLabel(displayUnits)}{words("ToolLibraryModal.symbol_4")}{t.type === 'probe' ? words("ToolLibraryModal.probeMeta") : words("ToolLibraryModal.fluteMeta", { count: t.numberOfFlutes ?? '?' })}{selectedLibraryId === 'all' && t.libraryId ? words("ToolLibraryModal.libraryMeta", { name: toolLibraries.find(l => l.id === t.libraryId)?.name ?? '' }) : ''}</div>
+                    <div className="tool-list-meta">{words("ToolLibraryModal.symbol_3")}{displayUnits === 'mm' ? String(t.diameter ?? 0) : String(Number(fmtDim(t.diameter ?? 0, displayUnits)))}{unitLabel(displayUnits)}{words("ToolLibraryModal.symbol_4")}{t.type === 'probe' ? words("ToolLibraryModal.probeMeta") : words("ToolLibraryModal.fluteMeta", { count: t.numberOfFlutes ?? '?' })}{selectedLibraryId === 'all' && t.libraryId ? words("ToolLibraryModal.libraryMeta", { name: toolLibraries.find(l => l.id === t.libraryId)?.name ?? '' }) : ''}</div>
                     {t.toolNumber !== undefined && (
                       <span className="badge badge-accent">{words("ToolLibraryModal.t", { value1: t.toolNumber })}</span>
                     )}
@@ -1029,7 +1059,7 @@ export function ToolLibraryModal() {
                 <Plus size={11} />{words("ToolLibraryModal.new")}</button>
               <button className="machine-list-btn" onClick={handleDuplicate} disabled={!selectedId} data-tooltip={words("ToolLibraryModal.duplicate_selected_tool")}>
                 <Copy size={11} />{words("ToolLibraryModal.dup")}</button>
-              <button className="machine-list-btn" onClick={() => importRef.current?.click()} data-tooltip={words("ToolLibraryModal.import_a_tools_json_file_as_a")}>
+              <button className="machine-list-btn" onClick={() => importRef.current?.click()} data-tooltip="Import a tool into this library, or import a library file">
                 <Upload size={11} />{words("ToolLibraryModal.import")}</button>
               <button
                 className="machine-list-btn"
@@ -1614,7 +1644,7 @@ function CalcField({ label, computedValue, decimals = 4, step = 0.0001, onBackCa
               const v = parseFloat(e.currentTarget.value)
               if (!isNaN(v) && v > 0) { onBackCalc(v); setEditVal(null); e.currentTarget.blur() }
             }
-            if (e.key === 'Escape') { setEditVal(null); e.currentTarget.blur() }
+            if (e.key === 'Escape') { e.stopPropagation(); setEditVal(null); e.currentTarget.blur() }
           }}
         />
         <span className="calc-field-badge" data-tooltip={words("ToolLibraryModal.auto_calculated_edit_to_back_calculate_the")}>{words("ToolLibraryModal.fx")}</span>

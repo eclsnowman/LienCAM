@@ -12,6 +12,10 @@ import type { BodyHandle } from '../../geom/geom-service'
 
 afterEach(cleanup)
 const hooks = () => window.__solidsWorkbenchHooks!
+// WO-2858: the hover readout names the body whose edge is under the cursor,
+// never the edge key: F2 is tessellated as 'front', F1 as 'rear'.
+const FRONT_EDGE = 'Edge on F2'
+const REAR_EDGE = 'Edge on F1'
 
 async function setup(previewCoversOwner = false) {
   const owners = new Map<BodyHandle, string>()
@@ -70,7 +74,7 @@ describe('WO-2077 Model rendered occluders, independent of selectable owners', (
     await toggleFront()
     expect(hooks().getBodyPresentationVisible('F2')).toBe(true)
     hover()
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain('front'))
+    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe(FRONT_EDGE))
     click()
     await waitFor(() => expect(screen.getByTestId('fillet-edge-count').textContent).toMatch(/1 edge/))
   }, 60_000)
@@ -81,7 +85,7 @@ describe('WO-2077 Model rendered occluders, independent of selectable owners', (
     expect(hooks().getBodyPresentationVisible('F2')).toBe(false)
     fireEvent.click(screen.getByTestId(`workbench-${feature}`))
     hover()
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain('rear'))
+    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe(REAR_EDGE))
     click()
     await waitFor(() => expect(screen.getByTestId(`${feature}-edge-count`).textContent).toMatch(/1 edge/))
     await waitFor(() => expect(screen.getByTestId(`${feature}-preview-status`).getAttribute('data-status')).toBe('ready'))
@@ -89,7 +93,7 @@ describe('WO-2077 Model rendered occluders, independent of selectable owners', (
     // Owner source is now hidden behind its rendered preview. Its coincident
     // boundary is still visible/selectable; the old cached source is no occluder.
     hover()
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain('rear'))
+    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe(REAR_EDGE))
     // Audit 3: a second CREATE click on the owner, now hidden behind its own
     // preview, still adds the edge under the cursor (the opposite rear edge).
     runtime.rayOverride = { origin: { x: -10, y: 0, z: 100 }, direction: { x: 0, y: 0, z: -1 } }
@@ -111,7 +115,7 @@ describe('WO-2077 Model rendered occluders, independent of selectable owners', (
     fireEvent.click(screen.getByTestId(`workbench-shading-${mode}`))
     fireEvent.click(screen.getByTestId('workbench-fillet'))
     hover()
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain('rear'))
+    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe(REAR_EDGE))
     click()
     await waitFor(() => expect(screen.getByTestId('fillet-edge-count').textContent).toMatch(/1 edge/))
   }, 60_000)
@@ -157,7 +161,7 @@ describe('WO-2077 Model rendered occluders, independent of selectable owners', (
     ownerMesh.visible = false
     expect(hooks().getBodyPresentationVisible('F1')).toBe(false)
     hover()
-    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toContain('rear'))
+    await waitFor(() => expect(screen.getByTestId('solids-workbench-hover-readout').textContent).toBe(REAR_EDGE))
     expect(hooks().getBodyPresentationVisible('F3')).toBe(false)
     ownerMesh.visible = false
     expect(hooks().getBodyPresentationVisible('F1')).toBe(false)

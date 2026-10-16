@@ -1,4 +1,4 @@
-import type { MachineConfig } from '../../types'
+import type { MachineConfig, MachineMacro } from '../../types'
 import { createSampleMachine } from './sampleMachine'
 
 interface ExampleMachine {
@@ -108,11 +108,78 @@ export const EXAMPLE_MACHINES: readonly ExampleMachine[] = [
 export function createExampleMachine(example: typeof EXAMPLE_MACHINES[number]): MachineConfig {
   const sample = createSampleMachine()
   const defaultFeeds = example.key === 'longmill-30x30' ? '' : 'cutting feeds, '
-  return {
+  const machine: MachineConfig = {
     ...sample,
     ...structuredClone(example.specs),
     id: crypto.randomUUID(),
     name: `Example - ${example.name}`,
     notes: `Example built from published specifications. Check against your own machine and edit as needed. ${example.detail}\nEditable LienCAM defaults, not published machine specifications: ${defaultFeeds}rapid rates (overall and per-axis), acceleration (unset), probing, spindle direction, tool changer, coolant, home convention (unset) and other setup values${example.defaults ? `, ${example.defaults}` : ''}. No controller definition, board identity or connection is supplied.`,
   }
+  machine.macros = exampleMacros(machine)
+  return machine
+}
+
+// WO-2597: editable content, not another macro execution path. Hidden means
+// OFF (WO-2657); show an example in the editor before calling its M-code.
+// Example profiles supply no verified home convention or stock dimensions.
+// Ask for those coordinates rather than inventing a positive machine origin,
+// a front park, or a clearance height from nominal travel.
+function exampleMacros(machine: MachineConfig): MachineMacro[] {
+  const rpmDefault = (rpm: number | undefined) => rpm === undefined ? '' : `, ${rpm}`
+  return [
+    {
+      id: 'example-part-swap', name: 'Example - Part swap', mCode: 300, hidden: true,
+      body: `// Retract first, park at the BACK of travel, then M0 pauses for a part swap.
+const safeZ = ask('Safe clearance Z in machine coordinates (mm)?')
+const parkX = ask('Part-swap X in machine coordinates (mm)?')
+const backY = ask('BACK of travel Y in machine coordinates (mm)?')
+if (typeof safeZ === 'number' && typeof parkX === 'number' && typeof backY === 'number') {
+  line('M5')
+  goTo({ z: safeZ })
+  goTo({ x: parkX, y: backY })
+  say('Parked at the back. Swap the part, then press CYCLE START.')
+  line('M0')
+} else {
+  say('Part swap cancelled; nothing moved.')
+}`,
+    },
+    {
+      id: 'example-spindle-warm-up', name: 'Example - Spindle warm-up', mCode: 301, hidden: true,
+      body: `// Warm up clockwise at three RPM stages for 30 seconds each, then stop.
+const low = ask('Starting warm-up RPM?'${rpmDefault(machine.minSpindleRpm)})
+const high = ask('Final warm-up RPM?'${rpmDefault(machine.maxSpindleRpm)})
+if (typeof low === 'number' && typeof high === 'number') {
+  const speeds = [low, (low + high) / 2, high]
+  for (let i = 0; i < speeds.length; i++) {
+    line('M3 S' + speeds[i])
+    wait(30000)
+  }
+  line('M5')
+  say('Spindle warm-up complete.')
+} else {
+  say('Spindle warm-up cancelled; spindle unchanged.')
+}`,
+    },
+    {
+      id: 'example-part-trace', name: 'Example - Part trace', mCode: 302, hidden: true,
+      body: `// Trace a rectangular stock/part outline in work coordinates, at safe machine Z.
+const safeZ = ask('Safe clearance Z in machine coordinates (mm)?')
+const left = ask('Outline minimum work X (mm)?')
+const right = ask('Outline maximum work X (mm)?')
+const front = ask('Outline minimum work Y (mm)?')
+const back = ask('Outline maximum work Y (mm)?')
+if (typeof safeZ === 'number' && typeof left === 'number' && typeof right === 'number' && typeof front === 'number' && typeof back === 'number') {
+  line('M5')
+  goTo({ z: safeZ })
+  goTo({ x: left, y: front }, { machine: false })
+  goTo({ x: right, y: front }, { machine: false })
+  goTo({ x: right, y: back }, { machine: false })
+  goTo({ x: left, y: back }, { machine: false })
+  goTo({ x: left, y: front }, { machine: false })
+  say('Part outline traced at clearance height.')
+} else {
+  say('Part trace cancelled; nothing moved.')
+}`,
+    },
+  ]
 }

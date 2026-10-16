@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor, useText } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 
 // ---------------------------------------------------------------------------
@@ -8,15 +12,15 @@ import type { MachineDefinitionPanelState } from './useMachineDefinitionPanel'
 // old three-group sub-navigation under it once All settings carried every
 // field Legacy drew (Operator ruling 2026-09-19: "No legacy, and all means ALL").
 // ---------------------------------------------------------------------------
-export const DEF_GROUPS = [
-  ['overview', 'Overview', 'A short summary of this machine.'],
-  ['machine', 'Machine', 'Axes, travel, homing and the pins that wire them.'],
-  ['spindle', 'Spindle', 'Drive, RPM range, direction and the VFD link.'],
-  ['outputs', 'Outputs & coolant', 'Every output this machine switches, and what drives it.'],
-  ['probing', 'Probing', 'Probe and tool-setter pins, and the feeds that use them.'],
-  ['controller', 'Controller', "This computer's link, profile import/export, and the e-stop pin."],
-  ['allSettings', 'All settings', 'Every setting this machine carries, with its value, searchable by name.'],
-] as const
+export const DEF_GROUPS = liveCatalog(() => ([
+  ['overview', controlText('DefinitionNavigation.text001'), controlText('DefinitionNavigation.text002')],
+  ['machine', controlText('DefinitionNavigation.text003'), controlText('DefinitionNavigation.text004')],
+  ['spindle', controlText('DefinitionNavigation.text005'), controlText('DefinitionNavigation.text006')],
+  ['outputs', controlText('DefinitionNavigation.text007'), controlText('DefinitionNavigation.text008')],
+  ['probing', controlText('DefinitionNavigation.text009'), controlText('DefinitionNavigation.text010')],
+  ['controller', controlText('DefinitionNavigation.text011'), controlText('DefinitionNavigation.text012')],
+  ['allSettings', controlText('DefinitionNavigation.text013'), controlText('DefinitionNavigation.text014')],
+] as const))
 
 export type DefGroup = (typeof DEF_GROUPS)[number][0]
 
@@ -67,11 +71,12 @@ type DefinitionSectionNavProps =
   Pick<MachineDefinitionPanelState, 'section' | 'sectionProblemCount' | 'setSection'>
 
 export function DefinitionSectionNav({ section, sectionProblemCount, setSection }: DefinitionSectionNavProps) {
+  useText('control-screens-not-probing')
   return (
     <div
       className="control-strip-nav"
       role="tablist"
-      aria-label="Machine definition sections"
+      aria-label={controlText('DefinitionNavigation.text015')}
       data-testid="machine-def-tabs"
       style={{ flex: '0 0 auto' }}
     >
@@ -89,7 +94,7 @@ export function DefinitionSectionNav({ section, sectionProblemCount, setSection 
             type="button"
             role="tab"
             aria-selected={section === key}
-            aria-label={count > 0 ? `${label}, ${count} to fix` : label}
+            aria-label={count > 0 ? controlText('DefinitionNavigation.text016', { value1: String(label), value2: String(count) }) : label}
             data-testid={`machine-def-tab-${key}`}
             data-problem-count={count > 0 ? String(count) : undefined}
             data-tooltip={description}
@@ -100,7 +105,7 @@ export function DefinitionSectionNav({ section, sectionProblemCount, setSection 
             {count > 0 && (
               <span
                 data-testid={`machine-def-tab-badge-${key}`}
-                data-tooltip={`${count} thing${count === 1 ? '' : 's'} to fix in ${label}`}
+                data-tooltip={controlText('DefinitionNavigation.text017', { value1: String(count), value2: String(count === 1 ? '' : 's'), value3: String(label) })}
                 style={{
                   marginLeft: 6, padding: '0 5px', borderRadius: 8,
                   background: 'var(--accent-red)', color: 'var(--text-active)',

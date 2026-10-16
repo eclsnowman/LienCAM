@@ -1,3 +1,4 @@
+import { useText } from '../../../i18n'
 import { Check, X } from 'lucide-react'
 
 interface BlockEditBannerProps {
@@ -23,31 +24,32 @@ interface BlockEditBannerProps {
  * app.css), so the two rows read as one family of session-exit controls.
  */
 export function BlockEditBanner({ name, onFinish, onCancel }: BlockEditBannerProps) {
+  const workbenchText = useText('sketch-and-model-workbench')
   return (
     <div className="tree-section" data-testid="block-edit-banner">
       <div className="tree-section-header">
-        <span>Editing block{name ? `: ${name}` : ''}</span>
+        <span>{workbenchText('BlockEditBanner.editingBlock', { value1: String((name ? `: ${name}` : '')) })}</span>
       </div>
       <div className="sketch-session-actions">
         <button
           type="button"
           className="sketch-finish-btn"
           onClick={onFinish}
-          aria-label="Finish editing block"
-          data-tooltip="Re-freeze the block with its edited members"
+          aria-label={workbenchText('BlockEditBanner.finishEditingBlock')}
+          data-tooltip={workbenchText('BlockEditBanner.reFreezeTheBlockWithItsEditedMembers')}
         >
           <Check size={14} />
-          <span>Finish</span>
+          <span>{workbenchText('BlockEditBanner.finish')}</span>
         </button>
         <button
           type="button"
           className="sketch-cancel-btn"
           onClick={onCancel}
-          aria-label="Cancel block edit"
-          data-tooltip="Discard the edit and restore the block"
+          aria-label={workbenchText('BlockEditBanner.cancelBlockEdit')}
+          data-tooltip={workbenchText('BlockEditBanner.discardTheEditAndRestoreTheBlock')}
         >
           <X size={14} />
-          <span>Cancel</span>
+          <span>{workbenchText('BlockEditBanner.cancel')}</span>
         </button>
       </div>
     </div>

@@ -35,6 +35,7 @@ const { createFakeGeomClient } = await import('./fakeGeomClient')
 const { waitForLoadedModel3d: waitFor } = await import('./loadTolerantWaitFor')
 const edit = await import('../../mesh/edit')
 const recognition = await import('../../mesh/recognition')
+const { buildStlModelBodyModel } = await import('../../components/model3d/workbench/stlModelBody')
 type ImportedGeometry = import('../../types').ImportedGeometry
 type MeshEditRecord = import('../../mesh/edit').MeshEditRecord
 type FakeSceneRuntime = ReturnType<typeof createFakeSceneRuntime>
@@ -189,7 +190,17 @@ describe('WO-1936: the Model tools edit an STL part\'s features', () => {
     expect(withoutId(journal('plate')![0])).toEqual(expected)
     await waitFor(() => expect(screen.queryByTestId('defeature-command-card')).toBeNull())
     // The part redraws from the journal: the hole is gone from its features.
-    await waitFor(() => expect(window.__solidsWorkbenchHooks?.getStlBody?.()?.featureCount).toBe(9), { timeout: 20_000 })
+    await waitFor(() => expect(window.__solidsWorkbenchHooks?.getStlBody?.()?.featureCount).toBe(11), { timeout: 20_000 })
+
+    // WO-2803 retains two overlapping planar floor targets for Push/Pull.
+    // This recognizer control explains the count; the page redraw above is
+    // still the application evidence, and the real hole must be gone.
+    const model = buildStlModelBodyModel({ geoId: 'plate', name: 'acceptance plate', bytes: cache.get('plate')!, meshEdits: journal('plate') })
+    expect(model.features.map((f) => f.id)).not.toContain('through-hole-256')
+    const floors = model.features.filter((f, index) => f.facets.every((facet) => model.featureOfFacet[facet] !== index))
+    expect(floors).toHaveLength(2)
+    expect(floors.every((f) => f.kind === 'flat-face')).toBe(true)
+    console.log('WO2815_FLOORS=' + JSON.stringify(floors.map((f) => ({ id: f.id, label: f.label }))))
 
     await undoAndRedoRoundTrip('plate', expected)
   }, 60_000)

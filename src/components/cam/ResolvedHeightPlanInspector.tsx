@@ -1,3 +1,4 @@
+import { readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
 import type { CSSProperties, ReactNode } from 'react'
@@ -118,14 +119,14 @@ function planHasUserOverride(plan: ResolvedHeightPlanV2): boolean {
 
 function ownerLabel(owner: SmartHeightIntentOwner): string {
   switch (owner.kind) {
-    case 'setup': return tx('ResolvedHeightPlanInspector.Setup', { p1: owner.setupId })
+    case 'setup': return tx('ResolvedHeightPlanInspector.Setup')
     case 'operation_policy': return tx('ResolvedHeightPlanInspector.Operation_policy')
     case 'user_override': return tx('ResolvedHeightPlanInspector.User_override')
   }
 }
 
 function evidenceLabel(node: SmartHeightEvidenceNode): string {
-  return `${node.kind} / ${node.role} (${node.id})`
+  return `${friendlyLabel(node.kind)} / ${friendlyLabel(node.role)}`
 }
 
 function proofLabel(
@@ -134,7 +135,7 @@ function proofLabel(
 ): string {
   if (component.proofNodeIds.length === 0) return tx('ResolvedHeightPlanInspector.Authored_value')
   return component.proofNodeIds
-    .map(id => evidenceById.has(id) ? evidenceLabel(evidenceById.get(id)!) : id)
+    .map(id => evidenceById.has(id) ? evidenceLabel(evidenceById.get(id)!) : tx('ResolvedHeightPlanInspector.Reference_unavailable'))
     .join(', ')
 }
 
@@ -202,9 +203,9 @@ function RefusalView({ refusal, repairMessage }: {
       style={{ ...contentStyle, color: 'var(--text-danger)' }}
     >
       <strong>{refusal.code}</strong>
-      <span>{refusal.message}</span>
+      <span>{readableInternalIds(refusal.message)}</span>
       {basis && <span>{tx('ResolvedHeightPlanInspector.Evidence', { p1: basis })}</span>}
-      {repairMessage && <span>{tx('ResolvedHeightPlanInspector.Repair', { p1: repairMessage })}</span>}
+      {repairMessage && <span>{tx('ResolvedHeightPlanInspector.Repair', { p1: readableInternalIds(repairMessage) })}</span>}
     </div>
   )
 }
@@ -220,9 +221,9 @@ function ResolvedPlanView({ plan }: { plan: ResolvedHeightPlanV2 }) {
       get label() { return tx('ResolvedHeightPlanInspector.Target_to_cutter_center_offset') },
       valueMm: plan.machining.cutterCenterEnd.wcsMm - plan.machining.physicalTarget.wcsMm,
     }] : []),
-    ...(plan.machining.featureEndpoints ?? []).map(endpoint => ({
+    ...(plan.machining.featureEndpoints ?? []).map((endpoint, index) => ({
       id: `feature:${endpoint.feature.stableId}`,
-      label: tx('ResolvedHeightPlanInspector.offset', { p1: endpoint.feature.featureKind, p2: endpoint.feature.stableId }),
+      label: tx('ResolvedHeightPlanInspector.offset', { p1: endpoint.feature.featureKind, p2: index + 1 }),
       valueMm: endpoint.cutterCenterEnd.wcsMm - endpoint.physicalTarget.wcsMm,
     })),
   ]
@@ -266,7 +267,7 @@ function ResolvedPlanView({ plan }: { plan: ResolvedHeightPlanV2 }) {
           evidenceById={evidenceById}
         >
           {plan.machining.materialArtifact && (
-            <span>{tx('ResolvedHeightPlanInspector.Material_evidence', { p1: plan.machining.materialArtifact.representation, p2: plan.machining.materialArtifact.artifactId, p3: plan.machining.materialArtifact.frame })}</span>
+            <span>{tx('ResolvedHeightPlanInspector.Material_evidence', { p1: plan.machining.materialArtifact.representation, p3: plan.machining.materialArtifact.frame })}</span>
           )}
         </PrimaryHeightRow>
         <PrimaryHeightRow
@@ -287,14 +288,14 @@ function ResolvedPlanView({ plan }: { plan: ResolvedHeightPlanV2 }) {
           {allowances.map(node => (
             <span key={node.id}>{tx('ResolvedHeightPlanInspector.Allowance_evidence', { p1: evidenceLabel(node), p2: node.scalar ? `: ${formatMm(node.scalar.valueMm)} ${node.scalar.frame}` : '' })}</span>
           ))}
-          {(plan.machining.featureEndpoints ?? []).map(endpoint => (
-            <span key={endpoint.feature.stableId}>{tx('ResolvedHeightPlanInspector.WCS_Z_2', { p1: friendlyLabel(endpoint.feature.featureKind), p2: endpoint.feature.stableId, p3: formatMm(endpoint.cutterCenterEnd.wcsMm), p4: endpoint.cutterCenterEnd.owner.kind === 'user_override' ? tx('ResolvedHeightPlanInspector.User_Override') : tx('ResolvedHeightPlanInspector.Smart') })}</span>
+          {(plan.machining.featureEndpoints ?? []).map((endpoint, index) => (
+            <span key={endpoint.feature.stableId}>{tx('ResolvedHeightPlanInspector.WCS_Z_2', { p1: friendlyLabel(endpoint.feature.featureKind), p2: index + 1, p3: formatMm(endpoint.cutterCenterEnd.wcsMm), p4: endpoint.cutterCenterEnd.owner.kind === 'user_override' ? tx('ResolvedHeightPlanInspector.User_Override') : tx('ResolvedHeightPlanInspector.Smart') })}</span>
           ))}
           {plan.machining.targetArtifact && (
-            <span>{tx('ResolvedHeightPlanInspector.Target_evidence', { p1: plan.machining.targetArtifact.representation, p2: plan.machining.targetArtifact.artifactId, p3: plan.machining.targetArtifact.frame })}</span>
+            <span>{tx('ResolvedHeightPlanInspector.Target_evidence', { p1: plan.machining.targetArtifact.representation, p3: plan.machining.targetArtifact.frame })}</span>
           )}
           {plan.warnings.map(warning => (
-            <span key={warning} data-testid="resolved-height-warning">{tx('ResolvedHeightPlanInspector.Warning', { p1: warning })}</span>
+            <span key={warning} data-testid="resolved-height-warning">{tx('ResolvedHeightPlanInspector.Warning', { p1: readableInternalIds(warning) })}</span>
           ))}
         </PrimaryHeightRow>
       </div>

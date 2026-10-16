@@ -198,7 +198,8 @@ describe('WO-2120 (4): an applied STL edit says what it did', () => {
     await waitFor(() => expect(screen.getByTestId('defeature-preview-status').getAttribute('data-state')).toBe('ready'), { timeout: 20_000 })
     fireEvent.click(screen.getByTestId('dialog-shell-apply'))
     await waitFor(() => expect(state().project.geometry[0].meshEdits).toHaveLength(1), { timeout: 20_000 })
-    await waitFor(() => expect(hooks().getStlBody?.()?.featureCount).toBe(9), { timeout: 20_000 })
+    // WO-2803 now retains the two overlapping planar Push/Pull floor targets.
+    await waitFor(() => expect(hooks().getStlBody?.()?.featureCount).toBe(11), { timeout: 20_000 })
 
     expect(strip()).toBe('Removed the through hole (diameter 6 mm) from "acceptance plate".')
     expect(strip()).not.toMatch(/coherent|face group|Applying/)

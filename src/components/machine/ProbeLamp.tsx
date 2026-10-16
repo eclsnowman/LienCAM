@@ -1,3 +1,6 @@
+import { textFor, useText } from '../../i18n'
+const probeText = textFor('probing-screens')
+
 // WO-1633: two probe lamps - PROBE (the probe input, a touch) and PROBING (a
 // probe cycle in process). Operator ruling 2026-09-17: "those are two separate
 // indicators with two different use cases." One shared component and one
@@ -22,20 +25,20 @@ function lampState(value: ProbeLampValue): 'on' | 'off' | 'unavailable' {
 }
 
 const LAMP_LABEL: Record<ProbeLampKind, string> = {
-  probe: 'PROBE',
-  probing: 'PROBING',
+  get probe() { return probeText('probeLamp1') },
+  get probing() { return probeText('probeLamp2') },
 }
 
 const LAMP_TOOLTIP: Record<ProbeLampKind, Record<'on' | 'off' | 'unavailable', string>> = {
   probe: {
-    on: 'PROBE: the probe input is triggered (a touch)',
-    off: 'PROBE: the probe input is clear',
-    unavailable: 'PROBE: not reported by this controller',
+    get on() { return probeText('probeLamp3') },
+    get off() { return probeText('probeLamp4') },
+    get unavailable() { return probeText('probeLamp5') },
   },
   probing: {
-    on: 'PROBING: a probe cycle is in process',
-    off: 'PROBING: no probe cycle running',
-    unavailable: 'PROBING: not reported by this controller',
+    get on() { return probeText('probeLamp6') },
+    get off() { return probeText('probeLamp7') },
+    get unavailable() { return probeText('probeLamp8') },
   },
 }
 
@@ -54,7 +57,7 @@ const LAMP_TOOLTIP: Record<ProbeLampKind, Record<'on' | 'off' | 'unavailable', s
 // field clears to 'off'. "Turning" is now RPM > 0 OR the controller's own
 // reported accessory state says the spindle is running, so either signal
 // alone is enough to grey the lamp.
-const SPINDLE_TURNING_TOOLTIP = 'PROBE: not read while the spindle turns'
+// Resolve the spindle tooltip at render time, like the state-specific getters.
 
 export function ProbeLamp({
   kind,
@@ -65,12 +68,13 @@ export function ProbeLamp({
   value: ProbeLampValue
   testId: string
 }) {
+  useText('probing-screens')
   const spindleRpm = useMachineControl((s) => s.spindleRpm)
   const spindleAccessory = useMachineControl((s) => s.reportedAccessories.spindle)
   const notReadWhileTurning =
     kind === 'probe' && ((spindleRpm ?? 0) > 0 || spindleAccessory !== 'off')
   const state = notReadWhileTurning ? 'unavailable' : lampState(value)
-  const tooltip = notReadWhileTurning ? SPINDLE_TURNING_TOOLTIP : LAMP_TOOLTIP[kind][state]
+  const tooltip = notReadWhileTurning ? probeText('probeLamp9') : LAMP_TOOLTIP[kind][state]
   return (
     <span
       className={`probe-lamp probe-lamp-${kind} probe-lamp-${state}`}

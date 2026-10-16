@@ -75,7 +75,7 @@ export class FormInteraction {
   private readonly gizmo: TransformControlsAdapter
   private readonly pivot = new THREE.Object3D()
   private hover: CagePick | null = null
-  private down: { x: number; y: number; alt: boolean; additive: boolean; onGizmo: boolean } | null = null
+  private down: { x: number; y: number; alt: boolean; additive: boolean; onGizmo: boolean; choosingAxis?: boolean } | null = null
   private drag: { start: THREE.Matrix4 } | null = null
   /** a mirror plane being dragged: where it was grabbed, its normal, and where it was then */
   private mirrorDrag: { grab: Vec3; normal: Vec3; at: number; pointerId: number } | null = null
@@ -95,12 +95,19 @@ export class FormInteraction {
   /** where the next corner would land, and the face the corners so far and the pointer make */
   private readonly marker: THREE.Points
   private readonly ghost: THREE.Mesh
+  private readonly axisLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffb830, depthTest: false, depthWrite: false }))
+  private readonly axisOrigin = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: 0xffb830, size: 12, sizeAttenuation: false, depthTest: false, depthWrite: false }))
   private cursor: Vec3 | null = null
 
   constructor(host: FormInteractionHost, overlay: FormOverlay, createAdapter: CreateTransformControlsAdapter = createDefaultTransformControlsAdapter) {
     this.host = host
     this.overlay = overlay
     this.pivot.name = 'form-gizmo-pivot'
+    this.axisLine.name = 'form-rotation-axis'
+    this.axisOrigin.name = 'form-rotation-origin'
+    this.axisLine.renderOrder = this.axisOrigin.renderOrder = 9
+    host.addObject(this.axisLine)
+    host.addObject(this.axisOrigin)
     host.addObject(this.pivot)
     this.gizmo = createAdapter(host.camera(), host.canvas)
     this.gizmo.setSpace('world')
@@ -123,7 +130,7 @@ export class FormInteraction {
     this.unsubscribe = useFormStore.subscribe((s, prev) => {
       if (s.transformMode !== prev.transformMode) this.gizmo.setMode(s.transformMode)
       const flashed = s.resultFlash !== prev.resultFlash
-      if (!this.drag && (s.selection !== prev.selection || s.cage !== prev.cage || flashed)) this.placeGizmo()
+      if (!this.drag && (s.selection !== prev.selection || s.cage !== prev.cage || flashed || s.transformMode !== prev.transformMode || s.rotationAxis !== prev.rotationAxis || s.rotationPick !== prev.rotationPick)) this.placeGizmo()
       if (s.selection !== prev.selection || s.cage !== prev.cage || flashed) this.paintHighlight()
       if (s.faceTool !== prev.faceTool) { if (s.faceTool === null) this.cursor = null; this.paintDraft() }
     })
@@ -200,14 +207,31 @@ export class FormInteraction {
   /** The gizmo sits at the centroid of everything the selection moves; hidden when nothing is selected, and while a tool's result flashes. */
   placeGizmo(): void {
     const s = useFormStore.getState()
-    if (isSelectionEmpty(s.selection) || s.resultFlash !== null) {
+    const axis = s.transformMode === 'rotate' ? s.rotationAxis : null
+    this.axisLine.visible = this.axisOrigin.visible = axis !== null
+    if (axis) {
+      const span = Math.max(10, ...s.cage.positions.map((p) => Math.hypot(...p.map((v, k) => v - axis.origin[k])))) * 1.3
+      const ends = [-span, span].flatMap((t) => axis.origin.map((v, k) => v + t * axis.direction[k]))
+      this.axisLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(ends, 3))
+      this.axisOrigin.geometry.setAttribute('position', new THREE.Float32BufferAttribute(axis.origin, 3))
+      this.axisLine.geometry.computeBoundingSphere()
+      this.axisOrigin.geometry.computeBoundingSphere()
+    }
+    if (isSelectionEmpty(s.selection) || s.resultFlash !== null || s.rotationPick !== null) {
       this.gizmo.detach()
       this.host.requestRender()
       return
     }
-    const c = centroidOf(s.cage, selectionPoints(s.cage, s.selection))
+    const c = axis?.origin ?? centroidOf(s.cage, selectionPoints(s.cage, s.selection))
     this.pivot.position.set(c[0], c[1], c[2])
     this.pivot.rotation.set(0, 0, 0)
+    if (axis) this.pivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...axis.direction))
+    this.gizmo.setSpace(axis ? 'local' : 'world')
+    // TransformControls exposes these public visibility properties; with a chosen
+    // line only local Z can turn, including its picker (E/XYZE disappear too).
+    const handles = this.gizmo as TransformControlsAdapter & { showX: boolean; showY: boolean; showZ: boolean }
+    handles.showX = handles.showY = axis === null
+    handles.showZ = true
     this.pivot.scale.set(1, 1, 1)
     this.pivot.updateMatrixWorld(true)
     this.gizmo.attach(this.pivot)
@@ -256,6 +280,12 @@ export class FormInteraction {
     const fingers = this.touches.size
     if (e.pointerType === 'touch') this.touches.add(e.pointerId)
     const p = this.local(e)
+    if (useFormStore.getState().rotationPick !== null) {
+      this.down = { ...p, alt: false, additive: false, onGizmo: false, choosingAxis: true }
+      e.stopImmediatePropagation()
+      e.preventDefault()
+      return
+    }
     // the adapter exposes the hovered handle as `axis` on the real TransformControls
     const axis = (this.gizmo as unknown as { axis?: string | null }).axis
     this.down = { ...p, alt: e.altKey, additive: e.shiftKey || e.ctrlKey || e.metaKey, onGizmo: axis !== null && axis !== undefined }
@@ -340,6 +370,7 @@ export class FormInteraction {
   }
 
   private readonly onPointerMove = (e: PointerEvent): void => {
+    if (this.down?.choosingAxis) { e.stopPropagation(); return }
     if (this.mirrorDrag !== null) {
       const p = this.local(e)
       this.slideMirrorTo(p.x, p.y)
@@ -379,6 +410,12 @@ export class FormInteraction {
     this.touches.delete(e.pointerId)
     const down = this.down
     this.down = null
+    if (down?.choosingAxis) {
+      const p = this.local(e)
+      if (e.button === 0 && Math.hypot(p.x - down.x, p.y - down.y) <= CLICK_SLOP_PX) useFormStore.getState().pickRotationAxis(this.overlay.pickAt(p.x, p.y))
+      e.stopPropagation()
+      return
+    }
     if (this.mirrorDrag !== null) {
       const p = this.local(e)
       this.slideMirrorTo(p.x, p.y)
@@ -424,6 +461,7 @@ export class FormInteraction {
     const pick = this.overlay.pickAt(p.x, p.y)
     if (pick?.kind !== 'edge') return
     const st = useFormStore.getState()
+    if (st.rotationPick !== null) return
     if (!st.selection.edges.includes(pick.key)) st.select(pick, e.shiftKey)
     useFormStore.getState().selectLoop()
   }
@@ -462,6 +500,11 @@ export class FormInteraction {
     if (st.faceTool !== null && (e.key === 'Escape' || e.key === 'Enter')) {
       if (e.key === 'Enter') st.finishFaceDraft()
       else st.stopFaceTool()
+      e.stopPropagation()
+      return
+    }
+    if (e.key === 'Escape' && (st.rotationPick !== null || st.rotationAxis !== null)) {
+      st.chooseRotationAxis(null)
       e.stopPropagation()
       return
     }
@@ -509,6 +552,7 @@ export class FormInteraction {
     this.host.removeObject(this.gizmo.getHelper())
     this.gizmo.dispose()
     this.host.removeObject(this.pivot)
+    for (const o of [this.axisLine, this.axisOrigin]) { this.host.removeObject(o); o.geometry.dispose(); o.material.dispose() }
     this.host.removeObject(this.draft)
     this.host.removeObject(this.draftPoints)
     this.host.removeObject(this.marker)

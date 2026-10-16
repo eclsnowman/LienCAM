@@ -1,3 +1,7 @@
+import { liveCatalog } from './catalogText'
+import { textFor } from '../../../i18n'
+const controlText = textFor('control-screens-not-probing')
+
 import { type SettingSource } from './DefinitionFields'
 import { NotSent } from './DefinitionFields'
 import {
@@ -28,47 +32,47 @@ export function SpindleNotSent({ label, settingKey, settings, section = 'Spindle
   )
 }
 
-export const SPINDLE_SPEED_FIELDS = [
-  ['PWM mode', 'IsSpindleinPWMMode'],
-  ['PWM frequency', 'SpindlePWMfrequency'],
-  ['PWM minimum %', 'SpindlePWMminpercent'],
-  ['PWM maximum %', 'SpindlePWMmaxpercent'],
-  ['steps per unit', 'Spindlestepsperunit'],
-  ['acceleration', 'Spindleacceleration'],
-  ['minimum velocity', 'Spindleminvelocity'],
-  ['maximum velocity', 'Spindlemaxvelocity'],
-] as const
+export const SPINDLE_SPEED_FIELDS = liveCatalog(() => ([
+  [controlText('SpindleFields.text001'), 'IsSpindleinPWMMode'],
+  [controlText('SpindleFields.text002'), 'SpindlePWMfrequency'],
+  [controlText('SpindleFields.text003'), 'SpindlePWMminpercent'],
+  [controlText('SpindleFields.text004'), 'SpindlePWMmaxpercent'],
+  [controlText('SpindleFields.text005'), 'Spindlestepsperunit'],
+  [controlText('SpindleFields.text006'), 'Spindleacceleration'],
+  [controlText('SpindleFields.text007'), 'Spindleminvelocity'],
+  [controlText('SpindleFields.text008'), 'Spindlemaxvelocity'],
+] as const))
 
-export const SPINDLE_COMMAND_OUTPUT_ROWS = [
-  ['PWM speed', 'SpindlePWMoutport', 'SpindlePWMoutpin', 'SpindlePWMoutpinnegate'],
-  ['PWM direction', 'SpindlePWMdirport', 'SpindlePWMdirpin', 'SpindlePWMdirpinnegate'],
-  ['Step pulse', 'Spindlestepport', 'Spindlesteppin', 'Spindlesteppinnegate'],
-  ['Step direction', 'Spindledirport', 'Spindledirpin', 'Spindledirpinnegate'],
-] as const
+export const SPINDLE_COMMAND_OUTPUT_ROWS = liveCatalog(() => ([
+  [controlText('SpindleFields.text009'), 'SpindlePWMoutport', 'SpindlePWMoutpin', 'SpindlePWMoutpinnegate'],
+  [controlText('SpindleFields.text010'), 'SpindlePWMdirport', 'SpindlePWMdirpin', 'SpindlePWMdirpinnegate'],
+  [controlText('SpindleFields.text011'), 'Spindlestepport', 'Spindlesteppin', 'Spindlesteppinnegate'],
+  [controlText('SpindleFields.text012'), 'Spindledirport', 'Spindledirpin', 'Spindledirpinnegate'],
+] as const))
 
-export const SPINDLE_RELAY_ROWS = [
-  ['M3 clockwise', 'M3relayport', 'M3relaypin', 'M3relaypinnegate', 'M3ondelay', 'M3offdelay'],
-  ['M4 counterclockwise', 'M4relayport', 'M4relaypin', 'M4relaypinnegate', 'M4ondelay', 'M4offdelay'],
-  ['M7 mist', 'M7relayport', 'M7relaypin', 'M7relaypinnegate', 'M7ondelay', null],
-  ['M8 flood', 'M8relayport', 'M8relaypin', 'M8relaypinnegate', 'M8ondelay', null],
-] as const
+export const SPINDLE_RELAY_ROWS = liveCatalog(() => ([
+  [controlText('SpindleFields.text013'), 'M3relayport', 'M3relaypin', 'M3relaypinnegate', 'M3ondelay', 'M3offdelay'],
+  [controlText('SpindleFields.text014'), 'M4relayport', 'M4relaypin', 'M4relaypinnegate', 'M4ondelay', 'M4offdelay'],
+  [controlText('SpindleFields.text015'), 'M7relayport', 'M7relaypin', 'M7relaypinnegate', 'M7ondelay', null],
+  [controlText('SpindleFields.text016'), 'M8relayport', 'M8relaypin', 'M8relaypinnegate', 'M8ondelay', null],
+] as const))
 
-export const SPINDLE_ENCODER_FIELDS = [
-  ['A port', 'EncoderAport'],
-  ['A pin', 'EncoderApin'],
-  ['B port', 'EncoderBport'],
-  ['B pin', 'EncoderBpin'],
-  ['reverse direction', 'Encoderreversedirection'],
-  ['pulses per revolution', 'EncoderPPR'],
-] as const
+export const SPINDLE_ENCODER_FIELDS = liveCatalog(() => ([
+  [controlText('SpindleFields.text017'), 'EncoderAport'],
+  [controlText('SpindleFields.text018'), 'EncoderApin'],
+  [controlText('SpindleFields.text019'), 'EncoderBport'],
+  [controlText('SpindleFields.text020'), 'EncoderBpin'],
+  [controlText('SpindleFields.text021'), 'Encoderreversedirection'],
+  [controlText('SpindleFields.text022'), 'EncoderPPR'],
+] as const))
 
-export const SPINDLE_PID_FIELDS = [
-  ['enabled', 'PIDenable'],
-  ['proportional gain (Kp)', 'Kp'],
-  ['derivative gain (Kd)', 'Kd'],
-  ['integral gain (Ki)', 'Ki'],
-  ['sampling time', 'Samplingtime'],
-] as const
+export const SPINDLE_PID_FIELDS = liveCatalog(() => ([
+  [controlText('SpindleFields.text023'), 'PIDenable'],
+  [controlText('SpindleFields.text024'), 'Kp'],
+  [controlText('SpindleFields.text025'), 'Kd'],
+  [controlText('SpindleFields.text026'), 'Ki'],
+  [controlText('SpindleFields.text027'), 'Samplingtime'],
+] as const))
 
 export const SPINDLE_PULLEY_ROWS = Array.from({ length: 15 }, (_, index) => index + 1)
 
@@ -78,18 +82,18 @@ export type SpindleDriveKind =
   | 'modbus-vfd' | 'board-pwm' | 'board-analog' | 'relay' | 'manual'
   | 'vfd-modbus' | 'relay-pwm' | 'relay-only' | 'pwm-board' | 'none'
 
-export const SPINDLE_DRIVE_KIND_LABEL: Record<SpindleDriveKind, string> = {
-  'modbus-vfd': 'Modbus VFD',
-  'board-pwm': 'PWM from the board',
-  'board-analog': '0-10 V from the board',
-  relay: 'Relay on/off',
-  manual: 'Manual',
-  'vfd-modbus': 'VFD over Modbus',
-  'relay-pwm': 'Relay + PWM',
-  'relay-only': 'Relay only',
-  'pwm-board': 'PWM from the board',
-  none: 'None',
-}
+export const SPINDLE_DRIVE_KIND_LABEL: Record<SpindleDriveKind, string> = liveCatalog(() => ({
+  'modbus-vfd': controlText('SpindleFields.text028'),
+  'board-pwm': controlText('SpindleFields.text029'),
+  'board-analog': controlText('SpindleFields.text030'),
+  relay: controlText('SpindleFields.text031'),
+  manual: controlText('SpindleFields.text032'),
+  'vfd-modbus': controlText('SpindleFields.text033'),
+  'relay-pwm': controlText('SpindleFields.text034'),
+  'relay-only': controlText('SpindleFields.text035'),
+  'pwm-board': controlText('SpindleFields.text036'),
+  none: controlText('SpindleFields.text037'),
+}))
 
 /** A pre-WO-1760 record has no `spindleDrive`; absence is deliberately
  * returned as absence so the caller can preserve the exact legacy derivation

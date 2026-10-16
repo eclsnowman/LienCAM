@@ -17,6 +17,9 @@ test-output*.txt
 /review-images/
 /coordination/
 
+# Bounded judge source delivery (WO-2814); regenerated from committed source.
+/.judge-source/
+
 # Environment
 .env
 .env.*

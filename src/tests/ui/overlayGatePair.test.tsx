@@ -51,7 +51,8 @@ import {
 // WO-2622: one shared sanction list; retain the exact migrated-site controls.
 const MIGRATED_KEYS = [
   'components/model3d/referenceImage/ReferenceImageCalibration.tsx:ReferenceImageCalibration > createPortal(<> {points.length < 2 && <WorkbenchConfirmBar testId="reference-image-cali...',
-  'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label="Reference image corner handles"> {IMAGE_CORNERS.map((corn...',
+  // WO-2784 RE-PIN: WO-2322 (686f74ad2f, landed a43dc7cf90) moved the corner-handles aria-label into the workbench text catalog; same portal site, key re-texted only.
+  "components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label={workbenchText('ReferenceImagePlacement.referenceImageCorn...",
   'components/panels/sketch/SketchImportExportWindows.tsx:SketchImportExportWindows > createPortal( <div className="modal-backdrop" data-ui78-sanctioned="" onMouseDown={onCl...',
   'form/remesh.ts:r > home[i](q)',
   'form/symmetry.ts:symmetrize/pairs.images.forEach(...) > T[t](positions[winner])',
@@ -367,7 +368,8 @@ describe('WO UI-70-R4 / L2: the pair is ONE gate -- sanctioned-and-censused, or 
       // WO-2303 e355945b3: shared, dispositioned overlays inside the viewport host.
       'components/model3d/referenceImage/ReferenceImageCalibration.tsx:ReferenceImageCalibration > createPortal(<> {points.length < 2 && <WorkbenchConfirmBar testId="reference-image-cali...',
       // WO-2331 3693668eb: fixed image handles, explicitly classified by the static census.
-      'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label="Reference image corner handles"> {IMAGE_CORNERS.map((corn...',
+      // WO-2784 RE-PIN: WO-2322 (686f74ad2f, landed a43dc7cf90) moved the corner-handles aria-label into the workbench text catalog; same portal site, key re-texted only.
+      "components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > createPortal(<div aria-label={workbenchText('ReferenceImagePlacement.referenceImageCorn...",
       // WO-2318 e1a181ed2: the existing MODAL-GOVERNED sketch import/export shell.
       'components/panels/sketch/SketchImportExportWindows.tsx:SketchImportExportWindows > createPortal( <div className="modal-backdrop" data-ui78-sanctioned="" onMouseDown={onCl...',
       // WO-2301 6ce7ed850: hidden zero-size print document, outside the visible overlay domain.

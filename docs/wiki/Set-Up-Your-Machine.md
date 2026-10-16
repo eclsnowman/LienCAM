@@ -35,6 +35,8 @@ Press Examples in the Machine Library to add a ready-made starting point. Each i
 
 These are sized from published specifications and may not match your own machine exactly. Machine names are listed only so you can find a starting point; picking one does not connect to anything and does not mean the controller has been tested. Check the travel, spindle range and homing equipment against your own machine.
 
+Each example includes three hidden macros: **Example - Part swap (M300)**, **Example - Spindle warm-up (M301)** and **Example - Part trace (M302)**. Hidden means off. Review the body and show it in **Edit macros** before calling its M-code. Part swap asks for safe machine Z and a park at the back of travel, then pauses with M0. Warm-up asks for starting and final RPM. Part trace asks for safe machine Z and the outline in work coordinates. The examples supply no verified home convention or stock dimensions.
+
 ## The Machine definition page (wiring and homing)
 
 Control > Machine > Machine definition holds the wiring, homing and controller-specific settings a homebuilt machine needs. It is the control half of the machine record (pin assignments, steps per unit, homing direction and speeds, backlash, and every setting your controller catalogues); the Machine Library holds the CAM half (travel, spindle, feed caps). Both write the same record.

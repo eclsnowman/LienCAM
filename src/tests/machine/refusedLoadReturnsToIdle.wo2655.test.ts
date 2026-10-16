@@ -271,6 +271,7 @@ const {
   getMachineController,
   loadGcodeTextToolpathProgram,
   sendMdiLine,
+  runMachineAction,
 } = await import('../../lib/machine/machineSession')
 
 const MDI_LOCKED = 'A program is running - MDI is locked out.'
@@ -390,12 +391,25 @@ async function load(name: string): Promise<{ ok: boolean; reason: string | null 
   return outcome
 }
 
+/** WO-2659: typed lines now defer Load. Keep these board-refusal fallback
+ * proofs on a configured action sending the identical line: actions retain
+ * the original busy-load contract, including stale status and late starts.
+ * Recovery still uses the operator's typed MDI door below. */
+async function action(line: string): Promise<boolean> {
+  let sent = false
+  await act(async () => {
+    sent = runMachineAction([line]).ok
+    await vi.advanceTimersByTimeAsync(20)
+  })
+  return sent
+}
+
 /** The seat's z2c row: MDI "G53 G0 Z115" with the startJob ok held ~2 s; the
  *  board makes the move and reports Idle at the target once, then its status
  *  read stalls - and the operator presses Load inside the stall. */
 async function loadRefusedInsideStall(): Promise<void> {
   socket().board.holdStartReplyMs = 2000
-  expect(await mdi('G53 G0 Z115'), consoleText()).toBe(true)
+  expect(await action('G53 G0 Z115'), consoleText()).toBe(true)
   await polls(2)
   // The stale Idle frame is all the app has: the line looks finished.
   expect(getMachineController().machineState()).toBe('idle')
@@ -503,7 +517,7 @@ describe('WO-2655: a load the board refuses leaves Control in the board\'s real 
   }, 30_000)
 
   it('a load while the board visibly runs is still refused before anything reaches the board (rule 11 guard kept)', async () => {
-    expect(await mdi('G53 G0 Z115'), consoleText()).toBe(true)
+    expect(await action('G53 G0 Z115'), consoleText()).toBe(true)
     await polls(1)
     expect(getMachineController().machineState()).toBe('run')
     const mark = socket().sent.length
@@ -523,7 +537,7 @@ describe('WO-2655: a load the board refuses leaves Control in the board\'s real 
   it('zhs: refusal -> the same job\'s late started -> completed leaves Control not Running', async () => {
     const ctrl = getMachineController()
     socket().board.holdFromNextStart = true
-    expect(await mdi('G53 G0 X50 Y50'), consoleText()).toBe(true)
+    expect(await action('G53 G0 X50 Y50'), consoleText()).toBe(true)
     expect(socket().board.holdInbound).toBe(true)
     socket().board.answerLaterCalls = true
     const mark = socket().sent.length
