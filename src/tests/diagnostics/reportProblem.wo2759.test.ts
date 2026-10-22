@@ -68,6 +68,10 @@ async function sources(): Promise<ReportSources> {
     project: { bytes: new TextEncoder().encode('{"name":"Customer Bracket Rev C"}') },
     program: { bytes: new TextEncoder().encode('(Customer Bracket Rev C)\nG21\nG1 X10 Y20 F500\n') },
     image: { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]), kind: 'png' },
+    // WO-2911 categories, so "turning on X adds exactly its files" covers them too.
+    reproduction: { failure: null, expected: 'a toolpath', actual: 'none', steps: '1. Generate' },
+    consoleTail: { lines: ['10:00:00 error compute: failed'], total: 1 },
+    currentProject: { bytes: new TextEncoder().encode('{"name":"Customer Bracket Rev C"}') },
   }
 }
 

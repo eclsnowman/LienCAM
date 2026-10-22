@@ -23,6 +23,8 @@
 // configured wall-finish lead-in/out moves. A toleranced smoothing stage may slot in before
 // the postprocessor later; the postprocessor itself re-segments per controller.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import type { ToolpathMove } from '../../../../types'
 import type { AdaptiveMillingDirection } from '../../types'
 import { materialSideFor, type MaterialSide } from '../../millingDirection'
@@ -31,7 +33,8 @@ import type { ResolvedFeedrates } from '../../feedrates'
 import type { FeatureResult, AdaptivePass, FinishApproach } from './processFeature'
 import { MIN_DESCENT_HELIX_RADIUS } from './processFeature'
 import { operatorNotice } from './operatorNotices'
-import { helixDescent, helixFits } from '../../moves'
+import { floorHop, floorHopAlong, helixDescent, helixFits } from '../../moves'
+import { FLOOR_HOP_FALLBACK_BAND_MM, makeFloorHopCorridorProof } from './rapidCorridor'
 
 /** Material side of travel for the context's direction (./millingDirection, WO-1896). */
 function materialSideOf(ctx: EmitContext): MaterialSide {
@@ -68,24 +71,40 @@ export interface EmitContext {
   /** True floor Z for an optional one-time adaptive floor cleanup replay. Undefined
    *  selects the byte-identical legacy emitter. */
   floorFinishDepth?: number
+  /** WO-2835: the operation's floor-hop height, in mm above the level floor. A reposition
+   *  over a cleared floor (a jumpType-1 keep-down, or a jumpType-2 link the planner proved
+   *  clear for a micro-lift) leaves the cut in one rapid that rises while it starts the XY
+   *  move, holds this height, and descends while it finishes the XY move (moves/ floorHop).
+   *  Undefined keeps the legacy shapes: the keep-down traverses at floor depth and the
+   *  micro-lift goes straight up to link.microLift.z, across, and down. */
+  floorHopMm?: number
+  /** Actual cutter/defined shank, supplied by the production entry. */
+  floorHopToolRadius?: number
+  floorHopAssemblyRadius?: number
+  /** Emission-local physical proof. Candidate-only shape/timing controls omit it;
+   * the complete feature always installs it before emitting any motion. */
+  floorHopIsClear?: (moves: ToolpathMove[], route: readonly { x: number; y: number }[], z: number) => boolean
 }
 
-const HELIX_FI_STEP = Math.PI / 16     // FreeCAD spiral angular step
-const HELIX_EDGE_BACKOFF = 0.01        // FreeCAD: r = helixRadius - 0.01
-const MAX_HELIX_POINTS = 5000          // safety cap so a tiny angle cannot explode the loop
+const HELIX_FI_STEP = Math.PI / AP.helix.angularStepDivisor     // FreeCAD spiral angular step
+const HELIX_EDGE_BACKOFF = AP.helix.edgeBackoffMm        // FreeCAD: r = helixRadius - 0.01
+const MAX_HELIX_POINTS = AP.helix.maxPoints          // safety cap so a tiny angle cannot explode the loop
 // One floor for planner and both emitters (processFeature.MIN_DESCENT_HELIX_RADIUS). Read at
 // call time, not bound to a module constant: processFeature reaches this file through
 // repositionTime.ts (WO-2787 round 6), so on that import order processFeature's export is not
 // yet initialised while this module body runs.
 const defaultMinHelixRadius = (): number => MIN_DESCENT_HELIX_RADIUS
-const FINISH_LEAD_SWEEP = Math.PI / 2   // tangent gate: explicit finish leads never exceed 90 deg
-const FINISH_LEAD_FIT_SAMPLES = 8
+const FINISH_LEAD_SWEEP = Math.PI / AP.sharpening.finishLeadMaxSweepDivisor   // tangent gate: explicit finish leads never exceed 90 deg
+const FINISH_LEAD_FIT_SAMPLES = AP.sampling.finishLeadFitSamples
 const XY_EPS = 1e-9
 
 /** Convert one feature's processFeature result into a full multi-depth ToolpathMove[]. */
 export function emitFeature(result: FeatureResult, ctx: EmitContext): ToolpathMove[] {
   const floor = floorReplayDepth(ctx)
-  return floor === undefined ? emitFeatureLegacy(result, ctx) : emitFeatureWithFloorFinish(result, ctx, floor)
+  const guarded = { ...ctx, floorHopIsClear: makeFloorHopCorridorProof(
+    ctx.floorHopToolRadius ?? 0, ctx.floorHopAssemblyRadius ?? ctx.floorHopToolRadius ?? 0,
+  ) }
+  return floor === undefined ? emitFeatureLegacy(result, guarded) : emitFeatureWithFloorFinish(result, guarded, floor)
 }
 
 /** The Z the pass stream is replayed at once more for floor finishing, or undefined when no
@@ -107,11 +126,11 @@ export interface EmitLevel { startZ: number; z: number; floorReplay: boolean }
 
 /** Multi-depth: descend from the stock top to the final depth in stepdown bites. */
 function roughLevels(topZ: number, bottomZ: number, stepdown: number): EmitLevel[] {
-  const step = Math.max(stepdown, 0.1)
+  const step = Math.max(stepdown, AP.sampling.minStepdownMm)
   const levels: EmitLevel[] = []
   let passStartDepth = topZ
   let guard = 0
-  while (passStartDepth > bottomZ + 1e-6 && guard++ < 2000) {
+  while (passStartDepth > bottomZ + 1e-6 && guard++ < AP.sampling.maxDepthLevels) {
     const passEndDepth = Math.max(passStartDepth - step, bottomZ)
     levels.push({ startZ: passStartDepth, z: passEndDepth, floorReplay: false })
     passStartDepth = passEndDepth
@@ -155,14 +174,14 @@ export function emitConnectionPass(
     if (level.floorReplay) emitFloorFinishCut(moves, pass.points, z)
     else emitWallFollow(moves, pass.points, z, ctx.feeds.feedRate)
   } else if (pass.type === 'loopback') {
-    emitLoopback(moves, pass.points, z)
+    emitLoopback(moves, pass.points, z, floorHopAt(ctx, z), ctx)
   } else if (pass.type === 'link') {
     // A link immediately before an entry is superseded by the entry's own safe
     // approach (the entry owns the reposition to the helix start), so skip it.
     const next = passes[i + 1]
     if (next && next.type === 'entry') return
     const minHelixR = finitePositive(ctx.minHelixRadius) || defaultMinHelixRadius()
-    const helixAngleRad = Math.max(ctx.helixAngleDeg, 1) * Math.PI / 180
+    const helixAngleRad = Math.max(ctx.helixAngleDeg, AP.helix.minAngleDeg) * Math.PI / 180
     emitLink(moves, pass, level.startZ, z, ctx, helixAngleRad, minHelixR)
   }
 }
@@ -173,7 +192,7 @@ function emitFeatureLegacy(result: FeatureResult, ctx: EmitContext): ToolpathMov
 
   const { clearanceZ, topZ, bottomZ } = ctx.heights
   const minHelixR = finitePositive(ctx.minHelixRadius) || defaultMinHelixRadius()
-  const helixAngleRad = Math.max(ctx.helixAngleDeg, 1) * Math.PI / 180
+  const helixAngleRad = Math.max(ctx.helixAngleDeg, AP.helix.minAngleDeg) * Math.PI / 180
   const passes = result.passes
 
   for (const level of roughLevels(topZ, bottomZ, ctx.stepdown)) {
@@ -247,7 +266,7 @@ function emitFeatureWithFloorFinish(
   }
 
   const minHelixR = finitePositive(ctx.minHelixRadius) || defaultMinHelixRadius()
-  const helixAngleRad = Math.max(ctx.helixAngleDeg, 1) * Math.PI / 180
+  const helixAngleRad = Math.max(ctx.helixAngleDeg, AP.helix.minAngleDeg) * Math.PI / 180
   const passes = result.passes
   const wallFinishMode = ctx.wallFinishMode ?? 'final'
 
@@ -325,6 +344,17 @@ function emitFeatureWithFloorFinish(
   return moves
 }
 
+/** WO-3023: before an entry's rapid to `target` at clearance, leave where the tool stands
+ *  VERTICALLY when it is still below clearance -- the rule emitFinishApproach states (TIER 3,
+ *  first half). Without it the next level's entry rapid rose diagonally from the end of the
+ *  last pass, through the stock between chambers (WO-3019 item 1). */
+function leaveVertically(moves: ToolpathMove[], target: { x: number; y: number }, clearanceZ: number): void {
+  const last = moves[moves.length - 1]
+  if (last && last.z < clearanceZ && (last.x !== target.x || last.y !== target.y)) {
+    moves.push({ type: 'rapid', x: last.x, y: last.y, z: clearanceZ, role: 'rapid' })
+  }
+}
+
 /** Helix ramp (or straight plunge) entry from passStartDepth down to passEndDepth. */
 function emitEntry(
   moves: ToolpathMove[], entry: Extract<AdaptivePass, { type: 'entry' }>,
@@ -340,6 +370,7 @@ function emitEntry(
       throw new Error('adaptive emit: side entry is missing its fully-clear descent point')
     }
     const clear = entry.clearPoint
+    leaveVertically(moves, clear, clearanceZ)
     moves.push({ type: 'rapid', x: clear.x, y: clear.y, z: clearanceZ, role: 'rapid' })
     moves.push({ type: 'rapid', x: clear.x, y: clear.y, z: passEndDepth, role: 'rapid' })
     moves.push({
@@ -357,6 +388,7 @@ function emitEntry(
 
   if (!useHelix) {
     // Straight plunge: safe rapid approach over the entry, then feed down to depth.
+    leaveVertically(moves, c, clearanceZ)
     moves.push({ type: 'rapid', x: c.x, y: c.y, z: clearanceZ, role: 'rapid' })
     moves.push({ type: 'rapid', x: c.x, y: c.y, z: retractZ, role: 'rapid' })
     moves.push({ type: 'rapid', x: c.x, y: c.y, z: feedZ, role: 'rapid' })
@@ -381,18 +413,19 @@ function emitHelixRamp(
 ): { x: number; y: number } {
   const { clearanceZ, retractZ, feedZ } = ctx.heights
   const { plungeRate, rampRate } = ctx.feeds
-  const r = Math.max(helixR - HELIX_EDGE_BACKOFF, helixR * 0.5)
+  const r = Math.max(helixR - HELIX_EDGE_BACKOFF, helixR * AP.helix.minRadiusFraction)
   const tanAngle = Math.tan(helixAngleRad)
   const depthPerCircle = 2 * Math.PI * helixR * tanAngle
   const passDepth = passStartDepth - passEndDepth
   const maxfi = depthPerCircle > 1e-9 ? (passDepth / depthPerCircle) * 2 * Math.PI : 2 * Math.PI
   // The helix bores into material that surrounds it: material on the right is CCW.
   const travelSign = materialSideOf(ctx) === 'right' ? 1 : -1
-  const offsetFi = -travelSign * maxfi - Math.PI / 16 // end near 0 deg in either direction
+  const offsetFi = -travelSign * maxfi - Math.PI / AP.helix.angularStepDivisor // end near 0 deg in either direction
   const startX = c.x + r * Math.cos(offsetFi)
   const startY = c.y + r * Math.sin(offsetFi)
 
   // Safe approach to the helix start, then descend to the level's start depth.
+  leaveVertically(moves, { x: startX, y: startY }, clearanceZ)
   moves.push({ type: 'rapid', x: startX, y: startY, z: clearanceZ, role: 'rapid' })
   moves.push({ type: 'rapid', x: startX, y: startY, z: retractZ, role: 'rapid' })
   moves.push({ type: 'rapid', x: startX, y: startY, z: feedZ, role: 'rapid' })
@@ -451,7 +484,10 @@ function emitWallFollow(moves: ToolpathMove[], points: { x: number; y: number }[
  *  surrounding wall-follow cuts and stays in cleared territory. Role 'fast_traverse' carries
  *  NO feedrate -- the postprocessor (and the runtime estimate's no-feed fallback) applies the
  *  machine traverse rate. (ADR-0001: geometry + move type only, no baked feedrate.) */
-function emitLoopback(moves: ToolpathMove[], points: { x: number; y: number }[], z: number): void {
+function emitLoopback(moves: ToolpathMove[], points: { x: number; y: number }[], z: number, hop: number, ctx: EmitContext): void {
+  // A feed-accepted loopback may still remove slivers (round5 continuous witnesses).
+  // Promote only an EMPTY physical full-width corridor; otherwise keep the fed route.
+  if (hop > 0 && points.length > 1 && emitProvenFloorHop(moves, points, z, hop, ctx)) return
   for (const p of points) moves.push({ type: 'feed', x: p.x, y: p.y, z, role: 'fast_traverse' })
 }
 
@@ -784,8 +820,12 @@ function emitStopShortApproach(
     }
   }
   // travel[0] / feed[0] are where the tool already is; only the destinations are emitted.
-  for (let i = 1; i < travel.length; i++) {
-    moves.push({ type: 'feed', x: travel[i].x, y: travel[i].y, z, role: 'fast_traverse' })
+  // WO-2835: the travel hops (emitLoopback's rule) and lands where the fed tail begins.
+  const hop = floorHopAt(ctx, z)
+  if (!(hop > 0 && travel.length > 1 && emitProvenFloorHop(moves, travel, z, hop, ctx))) {
+    for (let i = 1; i < travel.length; i++) {
+      moves.push({ type: 'feed', x: travel[i].x, y: travel[i].y, z, role: 'fast_traverse' })
+    }
   }
   for (let i = 1; i < feed.length; i++) {
     moves.push({ type: 'feed', x: feed[i].x, y: feed[i].y, z, feed: ctx.feeds.leadInRate, role: 'lead_in' })
@@ -1032,6 +1072,8 @@ function emitLink(
 ): void {
   const { clearanceZ } = ctx.heights
   const [a, b] = link.points
+  const hop = floorHopAt(ctx, z)
+  if (link.jumpType === 1 && hop > 0 && emitProvenFloorHop(moves, link.points, z, hop, ctx)) return
   if (link.jumpType === 1) {
     // Keep-down reposition: a non-cutting traverse at depth through already-cleared stock.
     // It carries the 'fast_traverse' move type and NO feed -- the postprocessor (and, until
@@ -1046,6 +1088,20 @@ function emitLink(
   // ancestor's own keep-down (jumpType-1 rapid at passEndDepth + Lift Distance), the reference path's
   // Stay-Down, a small lift. Changes ONLY the height of these two horizontal-
   // clearance rapids; the gated descent below (helixDescent/plunge) is untouched.
+  if (link.microLift?.empty && hop > 0 && !link.helixDescent
+    && (!ctx.floorHopIsClear || (moves.length > 0 && samePoint(moves[moves.length - 1], a) && moves[moves.length - 1].z === z))
+    && hopIsClear(ctx, moves, link.points, z)) {
+    // WO-2835 blended micro-lift: the hop height is the operation setting, not
+    // LIFT_DISTANCE, and the shape is rise-while-moving / hold / descend-while-moving
+    // (moves/ floorHop) over a corridor attachMicroLift proved EMPTY at full tool width,
+    // landing disk included (never set together with helixDescent). A micro-lift proven
+    // only to the sliver cap keeps its LIFT_DISTANCE hover below. A clear-air landing
+    // descends by rapid into air and its lead follows at leadInRate; any other landing
+    // holds the hop height to the landing and plunges at plungeRate.
+    floorHop(moves, a, b, z, hop, link.clearAirLanding === true)
+    if (!link.clearAirLanding) moves.push({ type: 'feed', x: b.x, y: b.y, z, feed: ctx.feeds.plungeRate, role: 'plunge' })
+    return
+  }
   const stayDownZ = link.microLift ? z + link.microLift.z : clearanceZ
   moves.push({ type: 'rapid', x: a.x, y: a.y, z: stayDownZ, role: 'rapid' })
   const hd = link.helixDescent
@@ -1079,4 +1135,60 @@ function emitLink(
     return
   }
   moves.push({ type: 'feed', x: b.x, y: b.y, z, feed: ctx.feeds.plungeRate, role: 'plunge' })
+}
+
+/** Keep the existing fed route at the frontier; hop only an interior corridor
+ * proven empty, and slow the terminal fed approach before any material contact.
+ * This changes no cutting point or XY route. A failed proof emits nothing here. */
+function emitProvenFloorHop(
+  moves: ToolpathMove[], route: { x: number; y: number }[], z: number, hop: number, ctx: EmitContext,
+): boolean {
+  const at = moves[moves.length - 1]
+  if (ctx.floorHopIsClear && (!at || at.z !== z || !samePoint(at, route[0]))) return false
+  if (hopIsClear(ctx, moves, route, z)) {
+    floorHopAlong(moves, route, z, hop, true)
+    return true
+  }
+  const distances = [0]
+  for (let i = 1; i < route.length; i++) distances.push(distances[i - 1] + Math.hypot(route[i].x - route[i - 1].x, route[i].y - route[i - 1].y))
+  const length = distances[distances.length - 1]
+  const between = (from: number, to: number): { x: number; y: number }[] => {
+    const out: { x: number; y: number }[] = []
+    for (let i = 1; i < route.length; i++) {
+      const a = route[i - 1], b = route[i], start = distances[i - 1], end = distances[i]
+      if (end <= from || start >= to || end <= start) continue
+      const point = (s: number) => ({ x: a.x + (b.x - a.x) * (s - start) / (end - start), y: a.y + (b.y - a.y) * (s - start) / (end - start) })
+      if (out.length === 0) out.push(point(Math.max(from, start)))
+      out.push(point(Math.min(to, end)))
+    }
+    return out
+  }
+  const minimum = Math.max(hop, 2 * FLOOR_HOP_FALLBACK_BAND_MM)
+  for (const trim of [minimum, length * 0.1, length * 0.25, length * 0.4]) {
+    if (trim < minimum || length - 2 * trim <= 1e-9) continue
+    const interior = between(trim, length - trim)
+    if (!hopIsClear(ctx, moves, interior, z)) continue
+    for (const p of between(0, trim).slice(1)) moves.push({ type: 'feed', ...p, z, role: 'fast_traverse' })
+    floorHopAlong(moves, interior, z, hop, true)
+    // The terminal approach runs at FEED (leadInRate), so it is not a traverse: WO-1286 keeps
+    // every 'fast_traverse' feed-less. It is a fed link between passes over the corridor it
+    // already travelled - role 'loop_back' (stockCuttingRoles: link motion, non-cutting, the
+    // same non-cutting class the traverse had). Posted G-code is unchanged: G1 at move.feed.
+    for (const p of between(length - trim, length).slice(1)) moves.push({ type: 'feed', ...p, z, feed: ctx.feeds.leadInRate, role: 'loop_back' })
+    return true
+  }
+  return false
+}
+
+function hopIsClear(ctx: EmitContext, moves: ToolpathMove[], route: readonly { x: number; y: number }[], z: number): boolean {
+  return ctx.floorHopIsClear?.(moves, route, z) ?? true
+}
+
+/** WO-2835: the floor-hop height for a hop off floor depth z, capped so no hop, straight or
+ *  routed, rises above the clearance height. 0 (legacy shapes) when the setting is off or the
+ *  clearance height leaves no room above z. */
+function floorHopAt(ctx: EmitContext, z: number): number {
+  const hop = ctx.floorHopMm
+  if (hop === undefined || !Number.isFinite(hop) || hop <= 0) return 0
+  return Math.max(0, Math.min(hop, ctx.heights.clearanceZ - z))
 }

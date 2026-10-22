@@ -20,15 +20,67 @@ const controlText = textFor('control-screens-not-probing')
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, CircleHelp, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { controlMachine, useCamStore } from '../../store'
-import { parkCarrierMachine, saveParkMachineRecord } from '../../store/machineActionsStore'
+import { parkCarrierMachine, saveParkMachineRecord, useMachineActions } from '../../store/machineActionsStore'
 import { checkMacroBody, MACRO_API, machineMacros } from '../../lib/machine/macros/macroRuntime'
 import { machineOutputList } from '../../lib/machine/machineOutputs'
 import { macroOutputLabel, macroOutputSelection, selectedMacroOutput } from '../../lib/machine/macros/macroOutputSelection'
-import { ACTION_COLORS, type ActionColor } from '../../lib/machine/machineActions'
+import { ACTION_COLORS, EMPTY_ACTION_CONFIG, machineParkList, machineSafeZValue, parkMacroPositions, buildParkSequence, type MachineActionConfig, type ParkPosition, type ActionColor } from '../../lib/machine/machineActions'
 import { publishMacroDraft } from '../../lib/exportCenter'
-import { newMachineMacroId, type MachineMacro } from '../../types'
+import { newMachineMacroId, type MachineConfig, type MachineMacro } from '../../types'
 import { API_HELP, MacroHelp } from './MacroHelp'
 import './MacroEditor.css'
+
+// WO-2841: presentation belongs to the existing per-machine action settings.
+// Do not turn fallback parks into position macros: that would replace G30's
+// reference table and alter tool-change/clamp-pause/pendant resolution.
+interface ParkButtonDisplay {
+  name: string
+  color: ActionColor
+  hidden: boolean
+}
+interface MacroButtonDisplay {
+  order: string[]
+  parks: Record<string, ParkButtonDisplay>
+  removed: string[]
+}
+type DisplayConfig = MachineActionConfig & { macroButtons?: MacroButtonDisplay }
+export interface EditableMacroButton { macro: MachineMacro; park?: ParkPosition }
+
+export function macroButtonDisplay(config: MachineActionConfig | undefined): MacroButtonDisplay {
+  return (config as DisplayConfig | undefined)?.macroButtons ?? { order: [], parks: {}, removed: [] }
+}
+
+function saveButtonDisplay(machineId: string, display: MacroButtonDisplay) {
+  useMachineActions.setState((state) => {
+    const config: DisplayConfig = { ...(state.byMachine[machineId] ?? EMPTY_ACTION_CONFIG), macroButtons: display }
+    return { byMachine: { ...state.byMachine, [machineId]: config } }
+  })
+}
+
+/** Both editor doors and the panel resolve exactly this list. Hidden rows stay
+ *  editable; removal is a display tombstone, never deletion of a G30 point. */
+export function editableMacroButtons(machine: MachineConfig, config: MachineActionConfig | undefined): EditableMacroButton[] {
+  const display = macroButtonDisplay(config)
+  const safeZ = machineSafeZValue(machine, config)
+  const parks = parkMacroPositions(machine).length > 0 ? [] : machineParkList(machine, config)
+  const buttons: EditableMacroButton[] = parks.flatMap((park) => {
+    const id = `fallback-park:${park.id}`
+    if (display.removed.includes(id)) return []
+    const saved = display.parks[id]
+    const sequence = buildParkSequence(park, safeZ)
+    return [{ park, macro: { id, name: saved?.name ?? park.label,
+      color: saved?.color ?? 'green', hidden: saved?.hidden ?? false,
+      body: sequence.ok ? sequence.lines.join('\n') : sequence.reason } }]
+  })
+  buttons.push(...machineMacros(machine).map((macro) => ({ macro })))
+  const byId = new Map(buttons.map((button) => [button.macro.id, button]))
+  const ordered: EditableMacroButton[] = []
+  for (const id of display.order) {
+    const button = byId.get(id)
+    if (button) { ordered.push(button); byId.delete(id) }
+  }
+  return [...ordered, ...byId.values()]
+}
 
 interface Draft {
   id: string | null // null = a new macro, not yet saved
@@ -88,9 +140,13 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
   useText('control-screens-not-probing')
   const machine = useCamStore(controlMachine)
   const parkMachine = useCamStore(parkCarrierMachine)
-  const macros = machineMacros(parkMachine)
+  const storedActions = useMachineActions((state) => state.byMachine[machine.id])
+  const buttons = editableMacroButtons(parkMachine, storedActions)
+  const macros = buttons.map((button) => button.macro)
+  const display = macroButtonDisplay(storedActions)
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const parkDraft = buttons.find((button) => button.macro.id === draft?.id)?.park
   const [helpOpen, setHelpOpen] = useState(false)
 
   // WO-2010: Escape does what the X does, for this (topmost) dialog only. Window
@@ -120,7 +176,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
   // published clears, so a idle editor never clobbers another's draft.
   const published = useRef(false)
   useEffect(() => {
-    if (!open || !draft) {
+    if (!open || !draft || parkDraft) {
       if (published.current) publishMacroDraft(null)
       published.current = false
       return
@@ -128,7 +184,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
     const carried = macros.find((m) => m.id === draft.id)
     publishMacroDraft(macroFromDraft(draft, draft.id ?? 'macro-draft', carried))
     published.current = true
-  }, [open, draft, macros])
+  }, [open, draft, macros, parkDraft])
   useEffect(() => () => {
     if (published.current) publishMacroDraft(null)
   }, [])
@@ -139,7 +195,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
   // none open, it starts a new one (rule 11 - it does the thing, never
   // refuses for lack of a selection).
   const insertExample = (body: string) => {
-    if (draft) {
+    if (draft && !parkDraft) {
       setDraft({ ...draft, body })
     } else {
       setSelected(null)
@@ -149,19 +205,31 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
   }
 
   const save = (next: Draft) => {
+    const park = buttons.find((button) => button.macro.id === next.id)?.park
+    if (park && next.id) {
+      const name = next.name.trim() || park.label
+      saveButtonDisplay(machine.id, { ...display, parks: { ...display.parks,
+        [next.id]: { name, color: next.color, hidden: next.hidden } } })
+      setDraft({ ...next, name })
+      return
+    }
     const id = next.id ?? newMachineMacroId()
     const withCarried = macroFromDraft(next, id, macros.find((m) => m.id === id))
     const existing = macros.some((m) => m.id === withCarried.id)
     const nextMacros = existing
-      ? macros.map((m) => (m.id === withCarried.id ? withCarried : m))
-      : [...macros, withCarried]
+      ? machineMacros(parkMachine).map((m) => (m.id === withCarried.id ? withCarried : m))
+      : [...machineMacros(parkMachine), withCarried]
     saveParkMachineRecord({ ...parkMachine, macros: nextMacros })
     setSelected(withCarried.id)
     setDraft(draftFromMacro(withCarried))
   }
 
   const remove = (id: string) => {
-    saveParkMachineRecord({ ...parkMachine, macros: macros.filter((m) => m.id !== id) })
+    if (buttons.find((button) => button.macro.id === id)?.park) {
+      saveButtonDisplay(machine.id, { ...display, removed: [...display.removed, id] })
+    } else {
+      saveParkMachineRecord({ ...parkMachine, macros: machineMacros(parkMachine).filter((m) => m.id !== id) })
+    }
     if (selected === id) {
       setSelected(null)
       setDraft(null)
@@ -175,7 +243,10 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
     const next = [...macros]
     const [item] = next.splice(index, 1)
     next.splice(target, 0, item)
-    saveParkMachineRecord({ ...parkMachine, macros: next })
+    saveButtonDisplay(machine.id, { ...display, order: next.map((macro) => macro.id) })
+    // Keep the existing M-code precedence and native position-macro ordering.
+    const ownIds = new Set(machineMacros(parkMachine).map((macro) => macro.id))
+    saveParkMachineRecord({ ...parkMachine, macros: next.filter((macro) => ownIds.has(macro.id)) })
   }
 
   const startEdit = (m: MachineMacro) => {
@@ -321,6 +392,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
                       </div>
                       {isSelected && draft && (
                         <MacroDraftForm
+                          parkButton={!!parkDraft}
                           draft={draft}
                           setDraft={setDraft}
                           bodyCheck={bodyCheck}
@@ -359,6 +431,7 @@ export function MacroEditor({ open, onClose }: { open: boolean; onClose: () => v
 
 function MacroDraftForm({
   draft,
+  parkButton = false,
   setDraft,
   bodyCheck,
   conflictWith,
@@ -366,6 +439,7 @@ function MacroDraftForm({
   onCancel,
 }: {
   draft: Draft
+  parkButton?: boolean
   setDraft: (d: Draft) => void
   bodyCheck: ReturnType<typeof checkMacroBody> | null
   conflictWith: MachineMacro | undefined
@@ -386,7 +460,7 @@ function MacroDraftForm({
           data-testid="macro-editor-name"
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
         />
-        <label className="macro-editor-mcode-label">{controlText('MacroEditor.text021')}<input
+        {!parkButton && <label className="macro-editor-mcode-label">{controlText('MacroEditor.text021')}<input
             className="mform-input mform-input-mono macro-editor-mcode-input"
             placeholder={controlText('MacroEditor.text022')}
             inputMode="numeric"
@@ -394,7 +468,7 @@ function MacroDraftForm({
             data-testid="macro-editor-mcode"
             onChange={(e) => setDraft({ ...draft, mCodeText: e.target.value })}
           />
-        </label>
+        </label>}
       </div>
       {conflictWith && (
         <div className="control-error-text" data-testid="macro-editor-mcode-conflict">{catalogChildren(controlText('MacroEditor.text023', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000' }), { value1: draftMCode(draft.mCodeText), value2: conflictWith.name })}</div>
@@ -414,13 +488,13 @@ function MacroDraftForm({
             />
           ))}
         </span>
-        <label className="control-actions-confirm">
+        {!parkButton && <label className="control-actions-confirm">
           <input
             type="checkbox"
             checked={draft.confirm}
             data-testid="macro-editor-confirm"
             onChange={(e) => setDraft({ ...draft, confirm: e.target.checked })}
-          />{controlText('MacroEditor.text025')}</label>
+          />{controlText('MacroEditor.text025')}</label>}
         <label className="control-actions-confirm">
           <input
             type="checkbox"
@@ -430,10 +504,10 @@ function MacroDraftForm({
           />
           {controlText('MacroEditor.text026')}
           {/* WO-2657: a macro off the panel is off - no button, no M-code. */}
-          <span className="control-actions-default" data-testid="macro-editor-shown-note">{controlText('MacroEditor.hiddenNote')}</span>
+          {!parkButton && <span className="control-actions-default" data-testid="macro-editor-shown-note">{controlText('MacroEditor.hiddenNote')}</span>}
         </label>
       </div>
-      <label className="macro-editor-mcode-label">
+      {!parkButton && <label className="macro-editor-mcode-label">
         {controlText('MacroEditor.drivesOutput')}
         <select
           className="mform-input"
@@ -449,8 +523,10 @@ function MacroDraftForm({
             <option key={index} value={macroOutputSelection(output)}>{macroOutputLabel(output, outputs)}</option>
           ))}
         </select>
-      </label>
+      </label>}
+      {parkButton && <div className="control-actions-default">{controlText('MacroEditor.parkDisplayNote')}</div>}
       <textarea
+        readOnly={parkButton}
         className="mform-input mform-input-mono macro-editor-code"
         placeholder="line('M7')"
         rows={8}
@@ -458,17 +534,17 @@ function MacroDraftForm({
         data-testid="macro-editor-body"
         onChange={(e) => setDraft({ ...draft, body: e.target.value })}
       />
-      {bodyCheck && !bodyCheck.ok && (
+      {!parkButton && bodyCheck && !bodyCheck.ok && (
         <div className="control-error-text" data-testid="macro-editor-body-error">{catalogChildren(controlText('MacroEditor.text027', { value1: '\u0000value1\u0000', value2: '\u0000value2\u0000', value3: '\u0000value3\u0000' }), { value1: bodyCheck.line, value2: bodyCheck.column, value3: bodyCheck.message })}</div>
       )}
-      <div className="macro-editor-api" data-testid="macro-editor-api-list">
+      {!parkButton && <div className="macro-editor-api" data-testid="macro-editor-api-list">
         <span className="control-actions-label">{controlText('MacroEditor.text028')}</span>
         <ul>
           {MACRO_API.map((name) => (
             <li key={name} data-testid={`macro-editor-api-${name}`}>{API_HELP[name]}</li>
           ))}
         </ul>
-      </div>
+      </div>}
       <div className="control-actions-editor-row">
         <span className="control-actions-rowbtns">
           <button className="modal-btn modal-btn-primary" data-testid="macro-editor-save" onClick={onSave}>{controlText('MacroEditor.text029')}</button>

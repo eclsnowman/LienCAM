@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { defaultHeightIntent } from '../../lib/cam/heightIntent'
 import {
   buildPlanarRoughSmartHeightIntent,
@@ -18,6 +18,28 @@ import {
 import { UnknownSchemaVersionError, runMigrationChain } from '../../store/migrations/schemaMigration'
 
 const NEVER_WIRED_3D = '__never_wired_3d'
+const initialStoreState = useCamStore.getState()
+afterEach(() => useCamStore.setState(initialStoreState, true))
+
+function installEmptySetup() {
+  useCamStore.setState(state => ({
+    project: {
+      ...state.project,
+      activeOperationId: null,
+      setups: [{ id: 'smart-height-setup', name: 'Smart Height', operations: [] }] as any,
+    },
+    projectHistory: [], projectFuture: [], canUndo: false, canRedo: false,
+    consoleEvents: [],
+  }))
+  return useCamStore.getState()
+}
+
+function expectUnpublished(before: ReturnType<typeof useCamStore.getState>) {
+  for (const key of ['project', 'viewer', 'consoleEvents', 'projectHistory', 'projectFuture',
+    'sketchHistory', 'sketchFuture', 'toolSlicesHistory', 'toolSlicesFuture', 'canUndo', 'canRedo'] as const) {
+    expect(useCamStore.getState()[key], key).toBe(before[key])
+  }
+}
 
 function operationRecord(id = 'adaptive-operation') {
   return {
@@ -113,17 +135,63 @@ describe('Smart Height V2-only persistence', () => {
   })
 
   it('enforces explicit V2 authority at the central store insertion boundary', () => {
-    useCamStore.setState(state => ({
-      project: {
-        ...state.project,
-        activeOperationId: null,
-        setups: [{ id: 'smart-height-setup', name: 'Smart Height', operations: [] }] as any,
-      },
-    }))
+    const before = installEmptySetup()
     expect(() => useCamStore.getState().addOperation(
       'smart-height-setup', operationRecord('store-missing-v2') as any,
     )).toThrowError(expect.objectContaining({ code: 'missing_live_authority' }))
     expect(useCamStore.getState().project.setups[0].operations).toHaveLength(0)
+    expectUnpublished(before)
+  })
+
+  it.each([
+    ['corrupt', { smartHeight: { kind: 'future_height_system' } }, 'invalid_envelope'],
+    ['mismatched', { smartHeight: validV2State() }, 'policy_operation_mismatch'],
+    ['unsupported', { type: NEVER_WIRED_3D }, 'unsupported_operation'],
+  ])('preserves the legacy %s authority rejection without publication', (id, patch, code) => {
+    const before = installEmptySetup()
+    const operation = { ...operationRecord(String(id)), ...patch as object }
+    const original = structuredClone(operation)
+    expect(() => before.addOperation('smart-height-setup', operation as any))
+      .toThrowError(expect.objectContaining({ code }))
+    expectUnpublished(before)
+    expect(operation).toEqual(original)
+  })
+
+  it('inserts valid V2 authority through the legacy wrapper with one undo snapshot', () => {
+    const before = installEmptySetup()
+    const operation = { ...operationRecord('valid-store-v2'), type: 'face', smartHeight: validV2State() }
+    const original = structuredClone(operation)
+    expect(before.addOperation('smart-height-setup', operation as any)).toBeUndefined()
+    const after = useCamStore.getState()
+    expect(after.project.setups[0].operations).toEqual([operation])
+    expect(after.project.activeOperationId).toBe(operation.id)
+    expect(after.projectHistory).toHaveLength(1)
+    expect(after.consoleEvents).toBe(before.consoleEvents)
+    expect(operation).toEqual(original)
+    after.undo()
+    expect(useCamStore.getState().project.setups[0].operations).toEqual([])
+  })
+
+  it.each([
+    ['missing', {}, 'invalid-draft'],
+    ['corrupt', { smartHeight: { kind: 'future_height_system' } }, 'invalid-draft'],
+    ['mismatched', { smartHeight: validV2State() }, 'invalid-draft'],
+    ['unsupported', { type: NEVER_WIRED_3D }, 'invalid-command'],
+  ])('keeps typed %s authority rejection atomic after valid commands', (id, patch, code) => {
+    const before = installEmptySetup()
+    const valid = { ...operationRecord('valid-before-rejection'), type: 'face', smartHeight: validV2State() }
+    const invalid = { ...operationRecord(String(id)), ...patch as object }
+    const original = structuredClone({ valid, invalid })
+    // Include a successful error update in the prepared prefix: a rejected batch
+    // must publish neither that console event nor its otherwise valid insertion.
+    expect(before.executeCamCommands([
+      { kind: 'operation.add', setupId: 'smart-height-setup', operation: valid as any },
+      { kind: 'operation.update', setupId: 'smart-height-setup', operationId: valid.id,
+        patch: { status: 'error', errorMessage: 'must remain unpublished' } },
+      { kind: 'operation.add', setupId: 'smart-height-setup', operation: invalid as any },
+    ])).toMatchObject({ ok: false, code })
+    expectUnpublished(before)
+    expect({ valid, invalid }).toEqual(original)
   })
 
   it('preserves valid V2 insertion authority and refuses corrupt or mismatched live tags', () => {

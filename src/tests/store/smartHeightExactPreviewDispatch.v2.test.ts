@@ -21,6 +21,7 @@ type LiveType = Extract<OperationType,
   | 'thread_mill'
   | 'chamfer'
   | 'engrave'
+  | 'pattern'
   | 'vcarve'
   | 'waterline_3d'
   | 'scallop_3d'
@@ -44,6 +45,8 @@ const liveCases: ReadonlyArray<{ type: LiveType; variant: string }> = [
   { type: 'thread_mill', variant: 'internal_explicit' },
   { type: 'chamfer', variant: 'edge_width_formula' },
   { type: 'engrave', variant: 'explicit_depth' },
+  // WO-3001: the pattern family (explicit depth below the current or initial stock top).
+  { type: 'pattern', variant: 'explicit_depth' },
 ]
 
 function operation(type: LiveType, variant: string, withAuthority = true): Operation {

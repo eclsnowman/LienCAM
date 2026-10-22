@@ -171,9 +171,11 @@ describe('Face Smart Height V2 store integration', () => {
   it('previews and dispatches one identical explicit-depth plan', async () => {
     const op = faceOp('explicit_depth')
     load(op)
-    const preview = useCamStore.getState().previewFaceSmartHeights('setup-1', op)
 
     await useCamStore.getState().computeOperationToolpath('setup-1', op.id)
+    // WO-2953: the synchronous preview reads the shared remaining-stock state,
+    // which is only ready once the compute above has settled it.
+    const preview = useCamStore.getState().previewFaceSmartHeights('setup-1', op)
 
     const payload = requests[0].payload as {
       heights: Record<string, number>

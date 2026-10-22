@@ -131,6 +131,12 @@ describe('WO-1113 declared controller surface', () => {
     close()
 
     open('post-process')
+    // WO-2898: a declaration change does not erase this project's last post.
+    await waitFor(() => expect(screen.getByTestId('post-definition-select').textContent).toContain('UCCNC'))
+    close()
+    // A different project still starts on its declared machine's format.
+    act(() => useCamStore.setState(s => ({ project: { ...s.project, id: `${s.project.id}-new` } })))
+    open('post-process')
     await waitFor(() => expect(screen.getByTestId('post-definition-select').textContent).toContain('GRBL'))
     fireEvent.click(screen.getByTestId('post-definition-select'))
     expect(screen.queryByTestId('post-definition-select-option-uccnc')).not.toBeNull()

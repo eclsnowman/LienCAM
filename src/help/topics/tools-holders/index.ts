@@ -145,6 +145,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'After an import, a line below the buttons says how it went (for example "Imported 5 tools into library "Shop endmills"") and the bottom console keeps the full message. A record the app cannot read is skipped and named in the console with the reason; the rest of the file still imports. A file that yields no tools at all leaves no empty library behind.',
       },
       { kind: 'image', slot: 'import-flow' },
+      {
+        kind: 'paragraph',
+        text: 'Inch-based Fusion tool libraries are converted to millimeters and their dimensions rounded to 0.0001 mm on import. A nonzero value too small to survive rounding is kept. Libraries imported earlier keep their stored values; import the original file again to get the rounded dimensions in a new library. Metric libraries and manual edits keep their values.',
+      },
     ],
     images: [
       {

@@ -142,6 +142,16 @@ function readUiScale(): number {
 
 type TabId ='properties' | 'preview' | 'about'
 type PostActionNotice = { kind: 'success' | 'error'; message: string }
+// WO-2898: what the operator last left in the dialog, per setup id. knownOps
+// is every enabled operation he saw, so a later one can be told apart.
+type LastPostChoice = {
+  projectId: string
+  postId: string
+  checkedSetups: string[]
+  expandedSetups: string[]
+  checkedOps: Record<string, string[]>
+  knownOps: Record<string, string[]>
+}
 
 /** The hand-edit key of one separate-mode file: the setup it was posted from, so a
  *  change of extension, of which setups are output, or of the project's name never moves
@@ -289,9 +299,10 @@ export function PostProcessModal() {
 
   // Work-offset conflicts across ALL project setups (export-blocking, fail-loud),
   // resolved through physical stock ownership so same-stock sharing is allowed.
+  // Separate files may share an offset (WO-2983 beds); only Combined refuses it.
   const conflicts = useMemo(
-    () => findResolvedWorkOffsetConflicts(resolvedWorkOffsets),
-    [resolvedWorkOffsets],
+    () => (outputMode === 'combined' ? findResolvedWorkOffsetConflicts(resolvedWorkOffsets) : []),
+    [resolvedWorkOffsets, outputMode],
   )
   // setupId -> name of a DIFFERENT physical owner sharing the same resolved
   // offset (for the inline "conflicts with" badge). Same-stock sharing is
@@ -427,6 +438,58 @@ export function PostProcessModal() {
       }
     }
   }, [isOpen, project.machine])
+
+  // WO-2898: reopening within the same open project starts on the post and the
+  // operation ticks the operator last left (approved card, 10-16). The memory is
+  // this app session's only; it is never written into the project. Declared
+  // after the opening seeds above so its choices win the opening commit; a
+  // different project, a removed post or an unresolved machine keep the seeds.
+  const lastChoiceRef = useRef<LastPostChoice | null>(null)
+  const restoredOpenRef = useRef(false)
+  useEffect(() => {
+    if (!isOpen) {
+      restoredOpenRef.current = false
+      return
+    }
+    if (restoredOpenRef.current) return
+    restoredOpenRef.current = true
+    const last = lastChoiceRef.current
+    if (!last || last.projectId !== project.id) return
+    const setupIds = new Set(project.setups.map((setup) => setup.id))
+    const keptSetups = last.checkedSetups.filter((id) => setupIds.has(id))
+    if (keptSetups.length > 0) {
+      setCheckedSetups(new Set(keptSetups))
+      setExpandedSetups(new Set(last.expandedSetups.filter((id) => setupIds.has(id))))
+    }
+    // Deleted operations simply drop out; an operation added since last time
+    // was never seen, so it starts ticked like every operation does today.
+    setCheckedOps(Object.fromEntries(Object.entries(enabledOpsBySetup).map(([setupId, ops]) => {
+      const known = last.knownOps[setupId]
+      const kept = last.checkedOps[setupId]
+      return [setupId, new Set(ops
+        .filter((op) => !known?.includes(op.id) || kept?.includes(op.id))
+        .map((op) => op.id))]
+    })))
+    if (!controllerResolution.ok) return
+    const post = [...BUILT_INS, ...syncUserPostControllers(loadUserPosts())]
+      .find((candidate) => candidate.id === last.postId)
+    if (!post) return
+    setSelectedId(post.id)
+    // The export-unit choice is the operator's and survives a reopen unchanged,
+    // as it does on main; only the post and the ticks are remembered.
+    setWorking(cloneConfig(post))
+  }, [isOpen])
+  useEffect(() => {
+    if (!isOpen) return
+    lastChoiceRef.current = {
+      projectId: project.id,
+      postId: selectedId,
+      checkedSetups: [...checkedSetups],
+      expandedSetups: [...expandedSetups],
+      checkedOps: Object.fromEntries(Object.entries(checkedOps).map(([id, ops]) => [id, [...ops]])),
+      knownOps: Object.fromEntries(Object.entries(enabledOpsBySetup).map(([id, ops]) => [id, ops.map((op) => op.id)])),
+    }
+  }, [isOpen, project.id, selectedId, checkedSetups, expandedSetups, checkedOps, enabledOpsBySetup])
 
   // Selecting a different post returns the context toggle to that post's default.
   useEffect(() => { setContextChoice(null) }, [selectedId])
@@ -1298,7 +1361,8 @@ export function PostProcessModal() {
   // byte length and SHA-256 always describe bytes that exist (the file this
   // click, or the matching Export click, actually writes) — never the live
   // preview memo. 'separate' mode downloads one sheet per file, matched to its
-  // file by the same `-G<offset>` filename postProject itself derives.
+  // file by the setup id postProject returns with it (WO-2983: two beds may
+  // both use G54, so the `-G<offset>` name no longer identifies one file).
   const handleDownloadSetupSheet = async () => {
     if (nothingSelected) {
       addConsoleEvent({ severity: 'warning', source: 'post', message: words("PostProcessModal.setup_sheet_refused_nothing_selected") })
@@ -1348,9 +1412,7 @@ export function PostProcessModal() {
     const downloadedNames: string[] = []
     for (let i = 0; i < freshSetups.length; i++) {
       const setup = freshSetups[i]
-      const resolved = resolveSetupWorkOffset(freshProject, setup)
-      const expectedFilename = `${baseName}-G${resolved.fixtureOffset}.${ext}`
-      const file = files.find((f) => f.filename === expectedFilename)
+      const file = files.find((f) => f.setupId === setup.id)
       if (!file || file.result.gcode.length === 0) continue
       const sheet = await buildSetupSheetData(freshProject, [setup], exportConfig, file.result, file.filename, stockWorldBounds, postableScope.selectedOpIds)
       const textName = setupSheetFilenameFor(file.filename)

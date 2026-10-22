@@ -655,6 +655,9 @@ export interface GeomService {
 
   // I/O ---------------------------------------------------------- [Stage 1]
   importStep(bytes: ArrayBuffer, importId: string): Promise<{ bodies: ImportedBody[]; diagnostics: Diag[] }>;
+  /** WO-3046: importStep's per-body name/colour and diagnostics from the same
+   *  read, one part per body importStep would mint, without minting bodies. */
+  readStepAttributes(bytes: ArrayBuffer, importId: string): Promise<{ parts: Array<{ name?: string; color?: [number, number, number] }>; diagnostics: Diag[] }>;
   /** WO-1824: IGES read on the same kernel. Mints a body per solid; when the
    *  file holds no solid at all, the shape it DOES hold is minted as one body
    *  rather than refused, and `content` says what that is. */

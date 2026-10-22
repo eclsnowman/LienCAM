@@ -98,7 +98,9 @@ describe('WO-2462 public platform test list', () => {
     const original = join(root, 'selector-before.mjs')
     // WO-2488/2537 added distinct main-red and private-only exceptions.
     // This control removes only WO-2462's eight platform/runtime exceptions.
-    writeFileSync(original, source.replace(condition,
+    // The copied selector lives outside tools/release, so its relative is-main import is made absolute.
+    const isMain = JSON.stringify(pathToFileURL(join(ROOT, 'tools/lib/is-main.mjs')).href)
+    writeFileSync(original, source.replace(/['"]\.\.\/lib\/is-main\.mjs['"]/g, isMain).replace(condition,
       `    if (!Object.hasOwn(${JSON.stringify(expectedReasons)}, test) && Object.hasOwn(publicRunExceptions, test)) reasons.add(publicRunExceptions[test])`))
     const script = `import {buildPublicTestList as before} from ${JSON.stringify(pathToFileURL(original).href)};
       import {buildPublicTestList as after} from './tools/release/public-tests.mjs';

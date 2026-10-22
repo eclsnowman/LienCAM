@@ -96,12 +96,14 @@ function sample(via: string) {
     progress: screen.getByTestId('control-progress-text').textContent ?? '',
     line: row ? Number(row.textContent) : null,
     header: screen.queryByTestId('control-program-context')?.textContent ?? '',
-    transport: screen.getByTestId('control-next-action').textContent ?? '',
+    // WO-2885: the top row is absent while CYCLE START's own refusal stands (greyed CYCLE START
+    // carries it on hover); an absent row reads as an empty sentence, which is what is on screen.
+    transport: screen.queryByTestId('control-next-action')?.textContent ?? '',
     chip: screen.getByTestId('control-state-chip').textContent ?? '',
     phase: useMachineControl.getState().job.phase,
     moving: getMachineController().machineState() === 'run',
     executing: useMachineControl.getState().executingMoveId,
-    partHold: /Program held at part|waiting for part/.test(screen.getByTestId('control-next-action').textContent ?? ''),
+    partHold: /Program held at part|waiting for part/.test(screen.queryByTestId('control-next-action')?.textContent ?? ''),
   })
 }
 function startSampling() {

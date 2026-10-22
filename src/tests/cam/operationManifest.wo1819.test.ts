@@ -31,11 +31,11 @@ import {
   OPERATION_MANIFEST_CONSUMERS,
   operationManifestEntry,
   type OperationRequestContext,
-} from '../../lib/cam/operationManifest'
+} from '../../kernel/registry'
 import type { OperationType } from '../../types'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
-const MANIFEST_REL = 'src/lib/cam/operationManifest.ts'
+const MANIFEST_REL = 'src/kernel/registry.ts'
 const TYPES_REL = 'src/types/index.ts'
 const WORKER_REL = 'src/lib/cam/toolpathWorker.ts'
 
@@ -345,6 +345,32 @@ const BYTE_IDENTICAL_CASES: Array<{
     expected: {
       type: 'COMPUTE_VCARVE',
       payload: { ...BASE_PAYLOAD, params: PARAMS, heights: { ...OP_HEIGHTS, topHeight: TOP, bottomHeight: BOTTOM } },
+    },
+  },
+  {
+    // WO-3001 (new after the refactor, so pinned to the row itself): the spec depth is
+    // measured down from the resolved top plane; with no spindle or machine bound stated
+    // the message carries neither field.
+    name: 'pattern sends both resolved planes and omits the unstated report inputs',
+    type: 'pattern',
+    expected: {
+      type: 'COMPUTE_PATTERN',
+      payload: { ...BASE_PAYLOAD, params: PARAMS, heights: { ...OP_HEIGHTS, topHeight: TOP, bottomHeight: BOTTOM } },
+    },
+  },
+  {
+    name: 'pattern carries the commanded spindle speed and the machine bounds it reports against',
+    type: 'pattern',
+    extra: { pattern: { spindleRpm: 18000, machine: { maxCuttingFeed: 5000, maxSpindleRpm: 24000 } } },
+    expected: {
+      type: 'COMPUTE_PATTERN',
+      payload: {
+        ...BASE_PAYLOAD,
+        params: PARAMS,
+        heights: { ...OP_HEIGHTS, topHeight: TOP, bottomHeight: BOTTOM },
+        spindleRpm: 18000,
+        machine: { maxCuttingFeed: 5000, maxSpindleRpm: 24000 },
+      },
     },
   },
   {

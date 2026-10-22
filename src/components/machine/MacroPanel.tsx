@@ -13,8 +13,6 @@ import { controlMachine, useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
 import { parkCarrierMachine, saveParkMachineRecord, useMachineActions } from '../../store/machineActionsStore'
 import {
-  machineParkList,
-  parkMacroPositions,
   machineSafeZValue,
 } from '../../lib/machine/machineActions'
 import {
@@ -28,7 +26,6 @@ import {
   activeMacroRun,
   continueHeldMacro,
   runUserMacro,
-  shownMacros,
   stopUserMacro,
   subscribeMacroRun,
 } from '../../lib/machine/macros/macroRuntime'
@@ -38,7 +35,7 @@ import {
   ControlPanelCollapseToggle,
   useControlPanelCollapsed,
 } from './ControlPanelCollapseToggle'
-import { MacroEditor } from './MacroEditor'
+import { MacroEditor, editableMacroButtons } from './MacroEditor'
 
 import { machineOutputList } from '../../lib/machine/machineOutputs'
 import { selectedMacroOutput } from '../../lib/machine/macros/macroOutputSelection'
@@ -52,20 +49,11 @@ export function MacroPanel({ onOpenActions, rpm: _rpm }: { onOpenActions: () => 
   const machineId = machine?.id ?? 'default'
   const storedActions = useMachineActions((s) => s.byMachine[machineId])
   const parkMachine = useCamStore(parkCarrierMachine)
-  // WO-1680/1681/1707: the user's own macros, from the definition, in their
-  // order - former custom buttons included (moved onto the record once, by
-  // `machineActionsStore`). A macro marked hidden stays off the panel - and,
-  // WO-2657, does not run from anywhere (`shownMacros`, the one filter).
-  const userMacros = useMemo(() => shownMacros(parkMachine), [parkMachine])
-  // A machine with no position macro of its own still offers whatever
-  // `machineParkList` resolves (its G30 points, or a park saved with the
-  // wiring before WO-1670) as plain park buttons - the one case a park is
-  // NOT already a macro button above. A machine with a position macro never
-  // reaches this: `machineParkList` prefers those, so this is empty then.
-  const fallbackParks = useMemo(() => {
-    if (parkMacroPositions(parkMachine).length > 0) return []
-    return machineParkList(parkMachine, storedActions)
-  }, [parkMachine, storedActions])
+  const buttons = useMemo(() => editableMacroButtons(parkMachine, storedActions), [parkMachine, storedActions])
+  const visibleButtons = buttons.filter(({ macro }) => !macro.hidden)
+  const userMacros = useMemo(() => buttons.filter((button) => !button.park && !button.macro.hidden)
+    .map((button) => button.macro), [buttons])
+  const fallbackParks = visibleButtons.flatMap((button) => button.park ? [button.park] : [])
   const safeZ = machineSafeZValue(parkMachine, storedActions)
   const macroRun = useSyncExternalStore(subscribeMacroRun, activeMacroRun, () => null)
   const outputPins = useMachineControl((s) => s.outputPins)
@@ -180,12 +168,18 @@ export function MacroPanel({ onOpenActions, rpm: _rpm }: { onOpenActions: () => 
       </div>
       {!collapsed && (
       <div className="panel-body control-macro-body">
-        {fallbackParks.length > 0 && (
-          <div className="control-macro-grid control-park-grid" data-testid="control-park-grid">
-            {fallbackParks.map((p) => (
+        {parkError && (
+          <div className="control-park-error" data-testid="control-park-error">
+            {parkError}
+          </div>
+        )}
+        {visibleButtons.length > 0 ? (
+          <div className="control-macro-grid" data-testid="control-user-macro-grid">
+            {visibleButtons.map(({ macro: m, park: p }) => {
+              if (p) return (
               <button
-                key={p.id}
-                className="control-macro-btn macro-green"
+                key={m.id}
+                className={`control-macro-btn macro-${m.color ?? 'green'}`}
                 data-testid={`control-park-${p.id}`}
                 disabled={!canPark}
                 data-tooltip={
@@ -204,19 +198,9 @@ export function MacroPanel({ onOpenActions, rpm: _rpm }: { onOpenActions: () => 
                   setParkError(r.ok ? null : (r.reason ?? controlText('MacroPanel.text012')))
                 }}
               >
-                <ParkingSquare size={12} /> {p.label}
+                <ParkingSquare size={12} /> {m.name}
               </button>
-            ))}
-          </div>
-        )}
-        {parkError && (
-          <div className="control-park-error" data-testid="control-park-error">
-            {parkError}
-          </div>
-        )}
-        {userMacros.length > 0 ? (
-          <div className="control-macro-grid" data-testid="control-user-macro-grid">
-            {userMacros.map((m) => {
+              )
               const running = macroRun?.macroId === m.id
               const outputOn = connected && outputReadbackOn(macroOutputs.get(m.id), outputPins) === true
               const armed = armedId === m.id

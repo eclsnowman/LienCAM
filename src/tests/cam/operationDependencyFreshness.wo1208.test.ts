@@ -215,7 +215,11 @@ function restampReadyThroughStore(id: string): void {
   restored.generationFingerprint = projectOperationFingerprint(
     fingerprintProject, fingerprintSetup, restored, SNAPSHOT, TOOL, resolveTool,
   )
-  useCamStore.getState().updateOperation(SETUP_ID, id, restored)
+  // WO-2976 repin: the operation.update command refuses a patch that carries
+  // `id` (src/kernel/camCommands.ts), so the restamp sends every field but it.
+  const { id: _id, ...patch } = restored
+  void _id
+  useCamStore.getState().updateOperation(SETUP_ID, id, patch)
 }
 
 beforeEach(() => installProject(readyProject()))
@@ -353,7 +357,9 @@ describe('WO-1208 operation dependency freshness', () => {
     // WO-2272 repin: the old value was already red before WO-2272 touched the
     // fingerprint (WO-2027 hashes the tool's normalized cut hand); the WO-2272
     // predecessor change leaves a non-dependent operation's bytes unchanged.
-    expect(legacyFingerprint).toBe('camgen-v3-83c7bee394859f0f')
+    // WO-2976 repin: WO-2904 bumped CAM_GENERATION_CONTRACT_VERSION 3 -> 4 and
+    // the version is hashed, so every stamp's bytes changed once.
+    expect(legacyFingerprint).toBe('camgen-v4-dc8b52aa5d9dd526')
     expect(legacyFingerprint).toBe(
       generationFingerprint({
         operation,

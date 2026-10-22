@@ -462,6 +462,9 @@ export function ProgramPanel() {
   const machine = useCamStore(controlMachine)
   const parkMachine = useCamStore(parkCarrierMachine)
   const project = useCamStore((s) => s.project)
+  const activeSetup = project.setups.find((setup) => setup.id === project.activeSetupId)
+  const setupNotes = activeSetup?.notes ?? ''
+  const activeSetupName = activeSetup?.name ?? ''
   const toolLibrary = useCamStore((s) => s.toolLibrary)
   // The posting view of the project: the live root tool library is the truth the
   // post resolves tools from (project.toolLibrary is only a save-time snapshot).
@@ -491,6 +494,15 @@ export function ProgramPanel() {
   const setLoadError = (text: string | null) => {
     setLoadErrorState(text)
     if (text) useMachineControl.getState().pushConsole('tx', text, 'error')
+  }
+  // WO-2885: a Load the session refused already has its whole sentence in the
+  // console (the session writes that row). The line beside Load says so in a
+  // short form and keeps the sentence on hover - never a second copy of it.
+  // The operator, 10-16: "Redundancy of what's in the terminal and at the top of the screen".
+  const [sessionLoadRefusal, setSessionLoadRefusal] = useState<string | null>(null)
+  const mirrorSessionLoadRefusal = (reason: string | null) => {
+    setSessionLoadRefusal(reason)
+    setLoadErrorState(reason)
   }
   const [meta, setMeta] = useState<LoadedMeta | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -918,7 +930,7 @@ export function ProgramPanel() {
       setRunFromError(null)
       // The session owns the refusal's one console row. This local state only
       // mirrors it beside Load; pushing it again would print the same refusal.
-      setLoadErrorState(outcome.ok ? null : outcome.reason)
+      mirrorSessionLoadRefusal(outcome.ok ? null : outcome.reason)
       if (save && outcome.ok) void saveProgram(name, text).then(refreshRecent)
       return { door: 'program', ok: outcome.ok, reason: outcome.reason }
     }
@@ -1086,7 +1098,7 @@ export function ProgramPanel() {
       setMeta(null)
       setRunFromPlan(null)
       setRunFromError(null)
-      setLoadErrorState(loaded.ok ? null : loaded.reason)
+      mirrorSessionLoadRefusal(loaded.ok ? null : loaded.reason)
       return
     }
     // WO-1653: THE MOMENT CODE LEAVES THE APP. Every enabled operation in this
@@ -1172,7 +1184,7 @@ export function ProgramPanel() {
     setMeta(null)
     setRunFromPlan(null)
     setRunFromError(null)
-    setLoadErrorState(loaded.ok ? null : loaded.reason)
+    mirrorSessionLoadRefusal(loaded.ok ? null : loaded.reason)
   }
   const canLoadAllSetups = setups.length > 1 && controllerCanRunToolpathProgram()
   const [continueThroughSetups, setContinueThroughSetups] = useState(true)
@@ -1862,6 +1874,16 @@ export function ProgramPanel() {
   return (
     <section className="panel control-panel control-program-panel">
       <div className="panel-body control-program-body">
+        {/* WO-2992: the active setup's notes, read-only (edited in the setup's Properties). */}
+        {setupNotes.trim() !== '' && (
+          <div
+            className="control-setup-notes"
+            data-testid="control-setup-notes"
+            style={{ maxHeight: '4.5em', overflowY: 'auto', whiteSpace: 'pre-wrap', fontSize: 12, marginBottom: 6 }}
+          >
+            <strong>{controlText('ProgramPanel.setupNotes', { value1: String(activeSetupName) })}</strong>{' '}{setupNotes}
+          </div>
+        )}
         {/* ONE compact controls row - never grows, never wraps the preview down. */}
         <div className="control-program-source">
           {/* WO-414 batch 3b (Operator 2026-08-21, verbatim: "it should be much
@@ -2126,7 +2148,9 @@ export function ProgramPanel() {
             data-testid="control-load-error"
             title={loadError ?? runFromError ?? undefined}
           >
-            {loadError ?? runFromError}
+            {loadError !== null && loadError === sessionLoadRefusal
+              ? controlText('ProgramPanel.loadRefusedShort')
+              : loadError ?? runFromError}
           </div>
         )}
 

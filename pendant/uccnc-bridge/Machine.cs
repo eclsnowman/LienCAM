@@ -19,12 +19,417 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Threading;
 
 namespace LienCAM
 {
+    // BEGIN WO-2842 CONTROLLER VERSIONS
+    /** UC100.h has five ints; older UC100_wrapper.cs copies declare only the
+     *  first four. Keep the native write inside this local allocation without
+     *  editing the operator's wrapper. Older DLLs may leave DeviceType zero. */
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ControllerVersion
+    {
+        public int FWVersion, HWVersion, DLLVersion, SerialNumber, DeviceType;
+    }
+
+    public static class ControllerVersionLog
+    {
+        /** Report the loaded runtime copy, including legacy launches that do
+         *  not have an install root. Never infer a DLL from a folder name. A
+         *  managed simulator has no loaded UC100.dll: say unavailable. */
+        public static string LoadedDllPath()
+        {
+            try
+            {
+                using (Process process = Process.GetCurrentProcess())
+                    foreach (ProcessModule module in process.Modules)
+                        if (string.Equals(module.ModuleName, "UC100.dll", StringComparison.OrdinalIgnoreCase))
+                            return module.FileName;
+            }
+            catch (Exception) { } // diagnostic metadata must never change Open
+            return null;
+        }
+
+        public static string Line(ControllerVersion version, int rc, int boardType, string dllPath)
+        {
+            string fileVersion = "unavailable", hash = "unavailable";
+            if (dllPath != null)
+            {
+                try { fileVersion = FileVersionInfo.GetVersionInfo(dllPath).FileVersion ?? "unavailable"; }
+                catch (Exception) { }
+                try
+                {
+                    using (SHA256 sha = SHA256.Create())
+                    using (Stream stream = File.OpenRead(dllPath))
+                        hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "")
+                            .Substring(0, 8).ToLowerInvariant();
+                }
+                catch (Exception) { }
+            }
+            // DeviceInfo (or the demo id) already selected this board and its
+            // pin table. Do not depend on a fifth field an older DLL omits.
+            return "controller: " + BoardPinTables.DeviceTypeName(boardType)
+                + " serial " + (rc == 0 ? version.SerialNumber.ToString(CultureInfo.InvariantCulture) : "unavailable")
+                + " fw " + (rc == 0 ? version.FWVersion.ToString(CultureInfo.InvariantCulture) : "unavailable")
+                + " hw " + (rc == 0 ? version.HWVersion.ToString(CultureInfo.InvariantCulture) : "unavailable")
+                + " api " + (rc == 0 ? version.DLLVersion.ToString(CultureInfo.InvariantCulture) : "unavailable")
+                + " dll " + fileVersion + " sha256 " + hash + " from " + (dllPath ?? "unavailable")
+                + (rc == 0 ? "" : " GetVersio rc=" + rc.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+    // END WO-2842 CONTROLLER VERSIONS
+
+    // BEGIN WO-2844 COMPATIBILITY RECORD
+    /** WO-2844 (ADR-0058 D2/D3): boards/compat.json, the record of which
+     *  controller + DLL combinations are PROVEN on a real board and which
+     *  CANNOT run. There is no third kind: a combination the record does not
+     *  name is "untested", and untested connects (D2, rule 11). Only a
+     *  cannot-run row refuses, and it names the call that is missing (D3).
+     *
+     *    { "format": "liencam-compat", "schemaVersion": 1, "rows": [
+     *      { "status": "proven", "deviceType": 19, "fw": 1005, "hw": 1,
+     *        "dllVersion": 2190, "dllSha256": "<64 hex>", "uccncVersion": "1.2115",
+     *        "evidence": "..." },
+     *      { "status": "cannot-run", "dllFileVersion": "2.1.8.0",
+     *        "missingCall": "GetVersio", "evidence": "..." } ] }
+     *
+     *  A proven row must name deviceType, fw, dllVersion and dllSha256; hw is
+     *  matched when given; uccncVersion and evidence are for the reader. A
+     *  cannot-run row is judged BEFORE Open, so it may only use what is known
+     *  then (deviceType, dllFileVersion, dllSha256) and must name at least one
+     *  of them. A row that breaks these rules is skipped with one log line; an
+     *  unreadable file is treated as no record at all, never as a refusal. */
+    public sealed class CompatRow
+    {
+        public string Status, DllFileVersion, DllSha256, UccncVersion, MissingCall, Evidence;
+        public int? DeviceType, Fw, Hw, DllVersion;
+    }
+
+    public static class CompatRecord
+    {
+        public const string FileName = "compat.json";
+        public const string Format = "liencam-compat";
+
+        public static List<CompatRow> LoadBesideBridge(Action<string> log)
+        {
+            return Load(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, BoardPinTableFile.FolderName, FileName), log);
+        }
+
+        public static List<CompatRow> Load(string path, Action<string> log)
+        {
+            var rows = new List<CompatRow>();
+            if (!File.Exists(path)) return rows;
+            string text;
+            try { text = File.ReadAllText(path); }
+            catch (Exception error) { log("[bridge] " + FileName + " could not be read (" + error.Message + ") - every combination counts as untested"); return rows; }
+            object doc;
+            if (!Json.TryParse(text, out doc) || Json.Str(doc, "format") != Format
+                || Json.Num(doc, "schemaVersion", 0) != 1 || Json.Arr(doc, "rows") == null)
+            {
+                log("[bridge] " + FileName + " is not a schema 1 " + Format + " file - every combination counts as untested");
+                return rows;
+            }
+            List<object> list = Json.Arr(doc, "rows");
+            for (int i = 0; i < list.Count; i++)
+            {
+                string problem;
+                CompatRow row = Row(list[i], out problem);
+                if (row == null) log("[bridge] " + FileName + " row " + (i + 1) + " skipped: " + problem);
+                else rows.Add(row);
+            }
+            return rows;
+        }
+
+        static int? Int(object o, string key)
+        {
+            double d;
+            if (!Json.TryNum(Json.Get(o, key), out d) || d != Math.Floor(d)) return null;
+            return (int)d;
+        }
+
+        public static CompatRow Row(object o, out string problem)
+        {
+            problem = null;
+            string sha = Json.Str(o, "dllSha256");
+            var row = new CompatRow
+            {
+                Status = Json.Str(o, "status"),
+                DeviceType = Int(o, "deviceType"), Fw = Int(o, "fw"), Hw = Int(o, "hw"), DllVersion = Int(o, "dllVersion"),
+                DllFileVersion = FileVersion(Json.Str(o, "dllFileVersion")),
+                DllSha256 = sha == null ? null : sha.ToLowerInvariant(),
+                UccncVersion = Json.Str(o, "uccncVersion"), MissingCall = Json.Str(o, "missingCall"),
+                Evidence = Json.Str(o, "evidence"),
+            };
+            if (row.DllSha256 != null && !IsSha256(row.DllSha256)) { problem = "dllSha256 is not 64 hex digits"; return null; }
+            if (row.Status == "proven")
+            {
+                if (row.DeviceType == null || row.Fw == null || row.DllVersion == null || row.DllSha256 == null)
+                { problem = "a proven row names deviceType, fw, dllVersion and dllSha256"; return null; }
+                return row;
+            }
+            if (row.Status == "cannot-run")
+            {
+                if (string.IsNullOrEmpty(row.MissingCall)) { problem = "a cannot-run row names the missingCall"; return null; }
+                if (row.Fw != null || row.Hw != null || row.DllVersion != null)
+                { problem = "a cannot-run row is judged before Open, when fw, hw and dllVersion are not known yet"; return null; }
+                if (row.DeviceType == null && row.DllFileVersion == null && row.DllSha256 == null)
+                { problem = "a cannot-run row names deviceType, dllFileVersion or dllSha256"; return null; }
+                return row;
+            }
+            problem = "status must be proven or cannot-run, not '" + row.Status + "'";
+            return null;
+        }
+
+        static bool IsSha256(string s)
+        {
+            if (s.Length != 64) return false;
+            foreach (char c in s) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            return true;
+        }
+
+        /** "2, 1, 9, 0" (how UC100.dll writes it) and "2.1.9.0" are one version. */
+        public static string FileVersion(string raw)
+        {
+            return raw == null ? null : raw.Replace(" ", "").Replace(",", ".");
+        }
+
+        public static string FullSha256(string path)
+        {
+            if (path == null) return null;
+            try
+            {
+                using (SHA256 sha = SHA256.Create())
+                using (Stream stream = File.OpenRead(path))
+                    return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+            }
+            catch (Exception) { return null; }
+        }
+
+        public static string DllFileVersionOf(string path)
+        {
+            if (path == null) return null;
+            try { return FileVersion(FileVersionInfo.GetVersionInfo(path).FileVersion); }
+            catch (Exception) { return null; }
+        }
+
+        /** The cannot-run row that matches what is known before Open, or null.
+         *  Every key the row names must equal the observed value; a value we
+         *  could not observe never matches. */
+        public static CompatRow CannotRun(List<CompatRow> rows, int deviceType, string dllFileVersion, string dllSha256)
+        {
+            foreach (CompatRow r in rows)
+            {
+                if (r.Status != "cannot-run") continue;
+                if (r.DeviceType != null && r.DeviceType != deviceType) continue;
+                if (r.DllFileVersion != null && r.DllFileVersion != dllFileVersion) continue;
+                if (r.DllSha256 != null && r.DllSha256 != dllSha256) continue;
+                return r;
+            }
+            return null;
+        }
+
+        public static string CannotRunRefusal(CompatRow row, string boardName, string dllFileVersion, string dllSha256, string dllPath)
+        {
+            return "REFUSING TO OPEN: the " + boardName + " cannot run with UC100.dll "
+                + (dllFileVersion ?? "(version unreadable)") + " (sha256 "
+                + (dllSha256 == null ? "unreadable" : dllSha256.Substring(0, 8)) + ") from "
+                + (dllPath ?? "(path unknown)") + ": that DLL has no " + row.MissingCall
+                + ", which this bridge calls. Point LienCAM at a UCCNC install whose UC100.dll has it."
+                + (row.Evidence == null ? "" : " (" + FileName + ": " + row.Evidence + ")");
+        }
+
+        /** The proven row matching the versions read after Open, or null
+         *  (untested). A failed version read or an unreadable DLL is untested. */
+        public static CompatRow Proven(List<CompatRow> rows, ControllerVersion v, int versionRc, int deviceType, string dllSha256)
+        {
+            if (versionRc != 0 || dllSha256 == null) return null;
+            foreach (CompatRow r in rows)
+                if (r.Status == "proven" && r.DeviceType == deviceType && r.Fw == v.FWVersion
+                    && (r.Hw == null || r.Hw == v.HWVersion) && r.DllVersion == v.DLLVersion && r.DllSha256 == dllSha256)
+                    return r;
+            return null;
+        }
+
+        /** One operator line per combination per bridge process (ADR-0058
+         *  point 6, no nags): a reconnect or reopen with the same versions says
+         *  nothing again. Only "untested" has anything to say. */
+        static readonly HashSet<string> said = new HashSet<string>();
+
+        public static string TakeOperatorLine(string status, string key, string versions)
+        {
+            if (status != "untested" || key == null) return null;
+            lock (said) if (!said.Add(key)) return null;
+            return "[bridge] this controller combination has not been tested with LienCAM yet: " + versions
+                + ". It connected; nothing is refused for being untested.";
+        }
+    }
+    // END WO-2844 COMPATIBILITY RECORD
+
+    // BEGIN WO-2845 DLL PIN
+    /** WO-2845 (ADR-0058 D4): A CHANGED UC100.DLL WAITS FOR A SECOND CONNECT.
+     *
+     *  UC100.dll can update the controller's firmware by itself inside Open
+     *  (WO-2847), so pointing LienCAM at another UCCNC install can change the
+     *  firmware without anyone asking for it. Per board serial (DeviceInfo,
+     *  known before Open) this file, beside liencam-bridge.definition.json,
+     *  keeps the DLL and firmware that board last connected with:
+     *
+     *    { "format": "liencam-dll-pins", "schemaVersion": 1, "boards": [
+     *      { "serial": "0xCD095A", "deviceType": 19, "dllSha256": "<64 hex>",
+     *        "dllFileVersion": "2.1.9.0", "dllPath": "C:\\UCCNC12115\\API\\DLL\\UC100.dll",
+     *        "installRoot": "C:\\UCCNC12115", "fw": 1005, "connectedAt": "...",
+     *        "pendingDllSha256": null, "pendingSince": null } ] }
+     *
+     *  Same DLL, or no record for the board: Open at once. A different DLL:
+     *  no Open, ONE console line naming both, the firmware it may update from
+     *  and the way back; the bridge exits WaitsForConnectExitCode, which
+     *  electron/main.cjs does not respawn. The operator's next Connect press
+     *  passes ConnectArg, and only for the DLL that line named (pending) does
+     *  it open. electron/main.cjs also reads installRoot here to stop picking
+     *  the newest UCCNC install. Demo boards have no serial and no firmware,
+     *  so nothing is pinned for them. An unreadable file is no record. */
+    public sealed class DllPinEntry
+    {
+        public string Serial, DllSha256, DllFileVersion, DllPath, InstallRoot, ConnectedAt, PendingDllSha256, PendingSince;
+        public int? DeviceType, Fw;
+    }
+
+    public static class DllPin
+    {
+        public const string FileName = "liencam-bridge.dll-pins.json";
+        public const string Format = "liencam-dll-pins";
+
+        /** The exit after the one line: electron/main.cjs does not respawn it,
+         *  and passes ConnectArg on the operator's next Connect press. */
+        public const int WaitsForConnectExitCode = 12;
+        public const string ConnectArg = "--connect-with-changed-dll";
+        public const string WaitPrefix = "[bridge] UC100.DLL CHANGED";
+
+        /** The last line a hosted bridge prints (electron keeps it as
+         *  lastExit.error); the line itself already went to the Control console. */
+        public const string HostedExitLine = "[bridge] exiting: the UC100.dll changed since this controller last "
+            + "connected - the Control console says what changed. Press Connect again to connect with it.";
+
+        public enum Verdict { Open, Accepted, Wait }
+
+        public static string PathBesideBridge()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
+        }
+
+        public static string SerialKey(int serial)
+        {
+            return "0x" + serial.ToString("X", CultureInfo.InvariantCulture);
+        }
+
+        public static List<DllPinEntry> Load(string path, Action<string> log)
+        {
+            var pins = new List<DllPinEntry>();
+            if (!File.Exists(path)) return pins;
+            string text;
+            try { text = File.ReadAllText(path); }
+            catch (Exception error) { log("[bridge] " + FileName + " could not be read (" + error.Message + ") - no board has a DLL on record"); return pins; }
+            object doc;
+            if (!Json.TryParse(text, out doc) || Json.Str(doc, "format") != Format
+                || Json.Num(doc, "schemaVersion", 0) != 1 || Json.Arr(doc, "boards") == null)
+            {
+                log("[bridge] " + FileName + " is not a schema 1 " + Format + " file - no board has a DLL on record");
+                return pins;
+            }
+            foreach (object o in Json.Arr(doc, "boards"))
+            {
+                string serial = Json.Str(o, "serial");
+                if (string.IsNullOrEmpty(serial)) continue;
+                double d;
+                pins.Add(new DllPinEntry
+                {
+                    Serial = serial,
+                    DeviceType = Json.TryNum(Json.Get(o, "deviceType"), out d) ? (int?)d : null,
+                    Fw = Json.TryNum(Json.Get(o, "fw"), out d) ? (int?)d : null,
+                    DllSha256 = Lower(Json.Str(o, "dllSha256")),
+                    DllFileVersion = Json.Str(o, "dllFileVersion"),
+                    DllPath = Json.Str(o, "dllPath"),
+                    InstallRoot = Json.Str(o, "installRoot"),
+                    ConnectedAt = Json.Str(o, "connectedAt"),
+                    PendingDllSha256 = Lower(Json.Str(o, "pendingDllSha256")),
+                    PendingSince = Json.Str(o, "pendingSince"),
+                });
+            }
+            return pins;
+        }
+
+        static string Lower(string s) { return s == null ? null : s.ToLowerInvariant(); }
+
+        /** Written beside and then moved over, so a crash never leaves half a
+         *  file. False (with one log line) when it could not be written. Only
+         *  ever this file beside the exe - every write names
+         *  DllPin.PathBesideBridge() (profileReadOnly.wo1036 checks targets). */
+        public static bool Save(List<DllPinEntry> pins, Action<string> log)
+        {
+            var boards = new List<object>();
+            foreach (DllPinEntry e in pins)
+                boards.Add(new Json.Obj()
+                    .Set("serial", e.Serial).Set("deviceType", e.DeviceType)
+                    .Set("dllSha256", e.DllSha256).Set("dllFileVersion", e.DllFileVersion)
+                    .Set("dllPath", e.DllPath).Set("installRoot", e.InstallRoot)
+                    .Set("fw", e.Fw).Set("connectedAt", e.ConnectedAt)
+                    .Set("pendingDllSha256", e.PendingDllSha256).Set("pendingSince", e.PendingSince));
+            var doc = new Json.Obj().Set("format", Format).Set("schemaVersion", 1).Set("boards", boards);
+            try
+            {
+                File.WriteAllText(DllPin.PathBesideBridge() + ".pending", Json.Write(doc));
+                if (File.Exists(DllPin.PathBesideBridge())) File.Replace(DllPin.PathBesideBridge() + ".pending", DllPin.PathBesideBridge(), null);
+                else File.Move(DllPin.PathBesideBridge() + ".pending", DllPin.PathBesideBridge());
+                return true;
+            }
+            catch (Exception error)
+            {
+                log("[bridge] " + FileName + " could not be written (" + error.Message + ")");
+                return false;
+            }
+        }
+
+        public static DllPinEntry Find(List<DllPinEntry> pins, string serial)
+        {
+            foreach (DllPinEntry e in pins)
+                if (string.Equals(e.Serial, serial, StringComparison.OrdinalIgnoreCase)) return e;
+            return null;
+        }
+
+        /** No record or the same DLL: Open. A changed DLL opens only on the
+         *  Connect press after the line that named this very DLL. */
+        public static Verdict Decide(DllPinEntry pinned, string dllSha256, bool connectPressed)
+        {
+            if (pinned == null || pinned.DllSha256 == null || dllSha256 == null) return Verdict.Open;
+            if (pinned.DllSha256 == dllSha256) return Verdict.Open;
+            if (connectPressed && pinned.PendingDllSha256 == dllSha256) return Verdict.Accepted;
+            return Verdict.Wait;
+        }
+
+        /** The one operator line: both DLLs, the firmware it may update from,
+         *  and both ways on. */
+        public static string WaitLine(string boardName, DllPinEntry pinned, string dllFileVersion, string dllPath, string installRoot)
+        {
+            string was = pinned.InstallRoot ?? pinned.DllPath ?? "an install not recorded";
+            string now = installRoot ?? dllPath ?? "an install not recorded";
+            string fw = pinned.Fw == null ? "the firmware it has now" : "firmware " + pinned.Fw.Value.ToString(CultureInfo.InvariantCulture);
+            return WaitPrefix + " - NOT CONNECTED YET: this " + boardName + " (serial " + pinned.Serial
+                + ") last connected with UC100.dll " + (pinned.DllFileVersion ?? "(version unreadable)") + " from " + was
+                + (pinned.Fw == null ? "" : " (controller firmware " + pinned.Fw.Value.ToString(CultureInfo.InvariantCulture) + ")")
+                + ". LienCAM is now set to UC100.dll " + (dllFileVersion ?? "(version unreadable)") + " from " + now
+                + ", and connecting with it may update the controller from " + fw
+                + ". Press Connect again to connect with it, or set the UCCNC install on the Machine panel back to "
+                + was + ".";
+        }
+    }
+    // END WO-2845 DLL PIN
+
     // BEGIN WO-1306 CONTROLLER STARTUP WAIT
     /** The one fact startup needs before it is safe to ask DeviceInfo what is
      *  attached. Kept independent of UC100 so the release/re-enumeration race
@@ -245,6 +650,114 @@ namespace LienCAM
     }
     // END WO-1306 CONTROLLER STARTUP WAIT
 
+    // BEGIN WO-2847 FIRMWARE UPDATE WAIT
+    /** WO-2847 (ADR-0058 V6). UC100.dll starts a firmware update BY ITSELF,
+     *  inside Open, and tells the caller only by returning rc 11 while it
+     *  runs. UCCNC 1.2115 answers that by staying alive, showing a buttonless
+     *  "do not close the application" box and calling Open again every 50 ms
+     *  (then SetOffline(true)) until rc leaves 11 (decompile Form1.cs:1233-1263,
+     *  5260-5280; src/tests/evidence/WO-2843/README.md). Before this the bridge
+     *  treated rc 11 like any refusal and EXITED, unloading the DLL mid-update,
+     *  and Electron relaunched it into the same update three times.
+     *
+     *  This does what UCCNC does and nothing more. It never starts an update
+     *  (ADR-0058 D1) - with any first rc but 11 it returns that rc untouched
+     *  and calls nothing. There is no time limit, as there is none in UCCNC:
+     *  giving up is exactly the interruption this exists to prevent.
+     *
+     *  One line when the update is seen, one line when it ends (ADR-0058
+     *  point 6) - never one per poll. */
+    public static class ControllerFirmwareUpdateWait
+    {
+        public const int UpdateRc = 11;            // UC100_FW_UPDATE
+        public const int PollIntervalMs = 50;      // UCCNC's Firmwareupdatetimer
+
+        /** The bridge's exit code after an update that ended without opening
+         *  the controller. electron/main.cjs does not respawn it: a respawn
+         *  calls Open again, which is the retry loop this order removes. */
+        public const int EndedWithErrorExitCode = 11;
+
+        /** Stable prefixes electron/main.cjs keys on. */
+        public const string InProgressPrefix = "[bridge] CONTROLLER FIRMWARE UPDATE IN PROGRESS";
+        public const string FinishedPrefix = "[bridge] CONTROLLER FIRMWARE UPDATE FINISHED";
+        public const string EndedPrefix = "[bridge] CONTROLLER FIRMWARE UPDATE ENDED";
+
+        public const string InProgressLine = InProgressPrefix
+            + " - do not close LienCAM and do not power off the controller. UC100.dll started it when "
+            + "the controller was opened; LienCAM did not ask for it and is waiting for it to finish.";
+
+        /** WO-2847 fix round 3: the last line a hosted bridge prints before it
+         *  exits after a failed update. electron/main.cjs keeps it as
+         *  lastExit.error, which Connect and Restart quote; the outcome itself
+         *  already went to the Control console through the host, so this only
+         *  points at it and the outcome is never said twice. */
+        public const string HostedExitLine = "[bridge] exiting: the controller firmware update ended "
+            + "without opening the controller - the Control console says why.";
+
+        static volatile bool active;
+        static volatile bool endedWithError;
+
+        /** True while an update is being waited out. BoardOwner waits read it
+         *  so that no startup or reopen timeout abandons an update. */
+        public static bool Active { get { return active; } }
+
+        /** True once an update has ended without opening the controller, until
+         *  the operator connects again. */
+        public static bool EndedWithError { get { return endedWithError; } }
+
+        /** WO-2847 fix round 1: the operator's Connect - a new session, from
+         *  the desktop or the phone - is the retry the ENDED line asks for, so
+         *  it lets the next lost-board pass call Open again. Nothing else
+         *  clears this, so nothing retries by itself. Returns whether it was set. */
+        public static bool ClearForOperatorConnect()
+        {
+            bool was = endedWithError;
+            endedWithError = false;
+            return was;
+        }
+
+        /** firstRc is what UC100.Open just returned. Returns the rc of the
+         *  Open call that left 11 (or firstRc itself when it was not 11). */
+        public static int UntilDone(
+            int firstRc,
+            Func<int> open,
+            Action setOffline,
+            Action<int> sleep,
+            Func<int, string> explain,
+            Action<string> log)
+        {
+            if (firstRc != UpdateRc) return firstRc;
+            active = true;
+            try
+            {
+                setOffline();
+                log(InProgressLine);
+                int rc = firstRc;
+                while (rc == UpdateRc)
+                {
+                    sleep(PollIntervalMs);
+                    rc = open();
+                    setOffline();
+                }
+                if (rc == 0)
+                {
+                    log(FinishedPrefix + " - UC100.dll updated the controller's firmware while opening it; "
+                        + "the controller is open and the connection continues.");
+                }
+                else
+                {
+                    endedWithError = true;
+                    log(EndedPrefix + " without opening the controller - " + explain(rc)
+                        + ". LienCAM will not open it again by itself; check the controller with the "
+                        + "UCCNC software, then press Connect.");
+                }
+                return rc;
+            }
+            finally { active = false; }
+        }
+    }
+    // END WO-2847 FIRMWARE UPDATE WAIT
+
     /** WO-1646: a board's pin table as a file, so a board this bridge was not
      *  built with is added by dropping its table beside the bridge rather than
      *  by editing code. One file per board, in the boards folder:
@@ -276,6 +789,8 @@ namespace LienCAM
             Array.Sort(files, StringComparer.OrdinalIgnoreCase);
             foreach (string file in files)
             {
+                // WO-2844: the compatibility record shares the folder; it is not a pin table.
+                if (string.Equals(Path.GetFileName(file), CompatRecord.FileName, StringComparison.OrdinalIgnoreCase)) continue;
                 string refusal;
                 BoardPinTable table = Load(file, out refusal);
                 if (table == null)
@@ -425,6 +940,7 @@ namespace LienCAM
         {
             pinTable = null;
             boardType = -1;
+            boardSerial = null;   // WO-2845
             BoardPinTableFile.LoadBesideBridge(delegate(string line) { Console.WriteLine(line); });
 
             // A BoardID <= 0 is CNCdrive's demo controller: fully simulated, no
@@ -452,6 +968,7 @@ namespace LienCAM
                     + "accepted, planned and counted and nothing reaches the wire.";
 
             boardType = type;
+            boardSerial = serial;   // WO-2845
             Console.WriteLine("[bridge] board " + board + " reports DeviceInfo type=" + type
                               + " serial=0x" + serial.ToString("X"));
 
@@ -608,6 +1125,113 @@ namespace LienCAM
         {
             lock (openReport) return openReport.ToArray();
         }
+
+        // BEGIN WO-2847 FIRMWARE UPDATE LINES
+        /** WO-2847 (ADR-0058 point 6): each firmware-update line reaches the
+         *  operator ONCE. The update runs inside Open, before any socket exists
+         *  (startup) or while nobody is connected, so a line can never depend
+         *  on a session existing (fix round 2). Report() keeps every line for
+         *  replay at every hello, which replayed "IN PROGRESS" long after the
+         *  update was over, so these lines bypass openReport.
+         *
+         *  Fix round 4 (four audit FAILs, one cause): every earlier round
+         *  decided delivery on the SENDING side - a socket existed, a callback
+         *  did not throw - and a send that "succeeded" into a closed outbox
+         *  (WsFrames.Enqueue returns silently once outboxClosed is set) lost the
+         *  outcome for good. Now each line is ONE record and nothing is ever
+         *  dropped because a send returned:
+         *  - hosted (electron/main.cjs sets LIENCAM_BRIDGE_HOST_CONSOLE=1): the
+         *    record goes to the host, ALWAYS, session or not, as one
+         *    HostConsolePrefix line on stdout. The host keeps it for the app
+         *    run and the Control page says it once by id (bridgeHost.ts
+         *    takeBridgeConsoleLines). The socket never carries it, so there is
+         *    no second copy to deduplicate;
+         *  - else (a browser supervisor, a bridge run by hand): the record is
+         *    HELD here until a client acknowledges it. Bridge.cs sends it as a
+         *    console frame carrying its id. Only the console's explicit receipt
+         *    after accepting that id acknowledges it. Every hello says every record
+         *    still held. A progress record stops being held when its update
+         *    ends, so it is never said stale. */
+        public const string HostConsolePrefix = "[bridge] FOR THE CONTROL CONSOLE ";
+        static readonly bool HostConsole =
+            Environment.GetEnvironmentVariable("LIENCAM_BRIDGE_HOST_CONSOLE") == "1";
+        /** True when electron/main.cjs hosts this process and carries its lines. */
+        public static bool HostConsoleCarriesLines { get { return HostConsole; } }
+
+        /** One firmware-update line, held until a client acknowledges its Id. */
+        public sealed class FirmwareUpdateRecord
+        {
+            public readonly string Id;
+            public readonly string Text;
+            public readonly string Severity;
+            public readonly bool Progress;
+            public FirmwareUpdateRecord(string id, string text, string severity, bool progress)
+            { Id = id; Text = text; Severity = severity; Progress = progress; }
+        }
+
+        static int firmwareUpdateRecordSeq;
+        static readonly string firmwareUpdateProcessId = Guid.NewGuid().ToString("N");
+        readonly List<FirmwareUpdateRecord> firmwareUpdateHeld = new List<FirmwareUpdateRecord>();
+        Action<FirmwareUpdateRecord> firmwareUpdateSay;
+
+        void ReportFirmwareUpdate(string text, string severity)
+        {
+            if (HostConsole)
+            {
+                // The host line goes first, so the human line below stays the
+                // last one printed (electron/main.cjs keeps it as lastExit.error).
+                Console.WriteLine(HostConsolePrefix + severity + " " + text);
+                Console.WriteLine(text);
+                return;
+            }
+            Console.WriteLine(text);
+            var record = new FirmwareUpdateRecord(
+                "fw" + firmwareUpdateProcessId + "-" + Interlocked.Increment(ref firmwareUpdateRecordSeq), text, severity,
+                text.StartsWith(ControllerFirmwareUpdateWait.InProgressPrefix, StringComparison.Ordinal));
+            Action<FirmwareUpdateRecord> say;
+            lock (firmwareUpdateHeld)
+            {
+                // An outcome ends the update: its progress line is no longer true.
+                if (!record.Progress) firmwareUpdateHeld.RemoveAll(held => held.Progress);
+                firmwareUpdateHeld.Add(record);
+                say = firmwareUpdateSay;
+            }
+            if (say == null) return;
+            // Whatever this returns, the record stays held until the console's receipt.
+            try { say(record); }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[bridge] a firmware update line is held for the next Connect; "
+                    + "its live copy could not be queued: " + ex.Message);
+            }
+        }
+
+        /** A session starts hearing records: from now on each new one is said
+         *  to it through say, and the answer is every record still held, which
+         *  its hello says. Under one lock, so each record is in exactly one of
+         *  the two. */
+        public FirmwareUpdateRecord[] AttachFirmwareUpdateSession(Action<FirmwareUpdateRecord> say)
+        {
+            lock (firmwareUpdateHeld)
+            {
+                if (!ControllerFirmwareUpdateWait.Active) firmwareUpdateHeld.RemoveAll(held => held.Progress);
+                firmwareUpdateSay = say;
+                return firmwareUpdateHeld.ToArray();
+            }
+        }
+
+        /** The session is over. What it did not acknowledge stays held. */
+        public void DetachFirmwareUpdateSession()
+        {
+            lock (firmwareUpdateHeld) firmwareUpdateSay = null;
+        }
+
+        /** The current console accepted this exact record id. */
+        public void AcknowledgeFirmwareUpdate(string id)
+        {
+            lock (firmwareUpdateHeld) firmwareUpdateHeld.RemoveAll(held => held.Id == id);
+        }
+        // END WO-2847 FIRMWARE UPDATE LINES
 
         Dictionary<string, Dictionary<string, string>> ini;
         readonly string[] axisNames = { "X", "Y", "Z", "A", "B", "C" };
@@ -1246,9 +1870,54 @@ namespace LienCAM
                 return false;
             }
 
+            // WO-2844 (ADR-0058 D3): the only version refusal - a combination
+            // boards/compat.json says CANNOT run, named by its missing call.
+            // Untested is never refused (D2).
+            string cannotRun = CheckCompatBeforeOpen();
+            if (cannotRun != null)
+            {
+                Report("[bridge] " + cannotRun, "error");
+                return false;
+            }
+
+            // WO-2845 (ADR-0058 D4): a UC100.dll other than the one this board
+            // last connected with waits for the operator's next Connect press.
+            string dllChanged = CheckDllPinBeforeOpen();
+            if (dllChanged != null)
+            {
+                if (HostConsole) Console.WriteLine(HostConsolePrefix + "warn " + dllChanged);
+                Console.WriteLine(dllChanged);
+                return false;
+            }
+
             int rc = UC100.Open(board);
-            if (rc != 0) { Console.WriteLine("[bridge] Open " + Explain(rc)); return false; }
+            // WO-2847: rc 11 is an update UC100.dll started inside this Open.
+            // Wait it out as UCCNC does; every other rc passes straight through.
+            bool updated = rc == ControllerFirmwareUpdateWait.UpdateRc;
+            rc = ControllerFirmwareUpdateWait.UntilDone(
+                rc,
+                delegate { return UC100.Open(board); },
+                delegate { UC100.SetOffline(true); },
+                Thread.Sleep,
+                Explain,
+                delegate(string line)
+                {
+                    ReportFirmwareUpdate(line, line.StartsWith(ControllerFirmwareUpdateWait.EndedPrefix, StringComparison.Ordinal)
+                        ? "error" : "warn");
+                });
+            if (rc != 0)
+            {
+                if (!updated) Console.WriteLine("[bridge] Open " + Explain(rc));   // the update said it once
+                return false;
+            }
             opened = true;
+
+            // WO-2896: the operator's feed override starts as whatever the board
+            // holds now, read before the Stop() loop below (a read right after a
+            // stop can be the transient 0). Below 1 is not a setting an operator
+            // can make, so it is not taken for one.
+            double openFro = 0;
+            operatorFeedOverride = UC100.GetFRO(ref openFro) == 0 && openFro >= 1 ? openFro : 100;
 
             // The board boots into an e-stop latch. While it is set, every
             // SetAxisSetting below returns rc=7 and SILENTLY DISCARDS the
@@ -1465,10 +2134,17 @@ namespace LienCAM
             UC100.TrajParam tp0 = new UC100.TrajParam();
             if (UC100.GetTrajParam(ref tp0) == 0) bufferSeconds = tp0.USBPufferSize;
 
-            UC100.Versio ver = new UC100.Versio();
-            firmware = UC100.GetVersio(ref ver) == 0
-                ? "AXBB fw " + ver.FWVersion + " / hw " + ver.HWVersion + " / dll " + ver.DLLVersion
+            ControllerVersion ver = new ControllerVersion();
+            int versionRc;
+            // The wrapper's sequential int-only Versio is blittable: ref
+            // aliases this padded local directly, with no four-int copy. Keep
+            // calling the wrapper so the managed SimUC100 route works too.
+            unsafe { versionRc = UC100.GetVersio(ref *(UC100.Versio*)&ver); }
+            firmware = versionRc == 0
+                ? BoardPinTables.DeviceTypeName(boardType) + " fw " + ver.FWVersion + " / hw " + ver.HWVersion + " / dll " + ver.DLLVersion
                 : null;
+            Console.WriteLine("[bridge] " + ControllerVersionLog.Line(ver, versionRc, boardType,
+                ControllerVersionLog.LoadedDllPath()));
 
             // OUTPUTS COME UP LIVE. They used to start INHIBITED on every open
             // - "mapping verified or not: a client that wants to drive
@@ -1494,6 +2170,10 @@ namespace LienCAM
             int off = UC100.SetOffline(false);
             if (off != 0) Console.WriteLine("[bridge] WARNING could not enable outputs: " + Explain(off));
             else Console.WriteLine("[bridge] outputs live (SetOffline false) - dry run is opt-in");
+
+            // WO-2844: proven or untested, from the versions read above.
+            NoteCompatAfterOpen(ver, versionRc);
+            NoteDllPinAfterOpen(ver, versionRc);   // WO-2845
 
             // CurrentID survives Close/Open (section 12.3). Stamp a sentinel so
             // progress reporting starts from a known baseline rather than from
@@ -5058,7 +5738,7 @@ namespace LienCAM
                 case 1: what = "the controller is not open"; break;
                 case 2: what = "no controller was found"; break;
                 case 3: what = "the controller reported a firmware error"; break;
-                case 4: what = "the USB link to the controller failed"; break;
+                case 4: what = "the link to the controller failed"; break;   // USB or Ethernet (AXBB-E): WO-2847
                 case 5: what = "a movement is already in progress"; break;
                 case 6: what = "a homing cycle is already in progress"; break;
                 case 7: what = "the machine is in e-stop"; break;
@@ -5124,6 +5804,169 @@ namespace LienCAM
 
         // ---- status ---------------------------------------------------------
         public string FirmwareVersion() { return firmware; }
+
+        // ---- WO-2844: the compatibility record, per Open -------------------
+        List<CompatRow> compatRows = new List<CompatRow>();
+        string compatStatus = "unknown", compatDllPath, compatDllFileVersion, compatDllSha256,
+               compatVersions, compatEvidence;
+        int? compatFw, compatHw, compatApi;
+
+        /** Before UC100.Open: the DLL this process loaded (ListDevices loaded
+         *  it) against the record's cannot-run rows. Null to proceed. */
+        string CheckCompatBeforeOpen()
+        {
+            compatRows = CompatRecord.LoadBesideBridge(Console.WriteLine);
+            compatStatus = "unknown";
+            compatFw = compatHw = compatApi = null;
+            compatVersions = compatEvidence = null;
+            compatDllPath = ControllerVersionLog.LoadedDllPath();
+            compatDllFileVersion = CompatRecord.DllFileVersionOf(compatDllPath);
+            compatDllSha256 = CompatRecord.FullSha256(compatDllPath);
+            CompatRow row = CompatRecord.CannotRun(compatRows, boardType, compatDllFileVersion, compatDllSha256);
+            if (row == null) return null;
+            compatStatus = "cannot-run";
+            compatEvidence = row.Evidence;
+            return CompatRecord.CannotRunRefusal(row, BoardPinTables.DeviceTypeName(boardType),
+                compatDllFileVersion, compatDllSha256, compatDllPath);
+        }
+
+        /** After the version read: proven when a proven row matches every
+         *  version, otherwise untested - which connects (ADR-0058 D2). */
+        void NoteCompatAfterOpen(ControllerVersion ver, int versionRc)
+        {
+            CompatRow proven = CompatRecord.Proven(compatRows, ver, versionRc, boardType, compatDllSha256);
+            compatStatus = proven != null ? "proven" : "untested";
+            compatEvidence = proven != null ? proven.Evidence : null;
+            compatFw = versionRc == 0 ? (int?)ver.FWVersion : null;
+            compatHw = versionRc == 0 ? (int?)ver.HWVersion : null;
+            compatApi = versionRc == 0 ? (int?)ver.DLLVersion : null;
+            compatVersions = BoardPinTables.DeviceTypeName(boardType)
+                + " firmware " + (compatFw == null ? "unavailable" : compatFw.ToString())
+                + ", hardware " + (compatHw == null ? "unavailable" : compatHw.ToString())
+                + ", API " + (compatApi == null ? "unavailable" : compatApi.ToString())
+                + ", UC100.dll " + (compatDllFileVersion ?? "unavailable")
+                + (compatDllSha256 == null ? "" : " (sha256 " + compatDllSha256.Substring(0, 8) + ")");
+            Console.WriteLine("[bridge] compatibility: " + compatStatus + " - " + compatVersions
+                + (proven != null
+                    ? " (" + CompatRecord.FileName + ": " + proven.Evidence + ")"
+                    : "; not in " + CompatRecord.FileName + ", so it connects untested (ADR-0058 D2)"));
+        }
+
+        /** The operator's one line for this combination, the first time a
+         *  session asks after the Open that found it untested; null after. */
+        public string TakeCompatOperatorLine()
+        {
+            return CompatRecord.TakeOperatorLine(compatStatus,
+                compatVersions == null ? null : compatVersions + "|" + compatDllSha256, compatVersions);
+        }
+
+        // ---- WO-2845: the DLL each board last connected with, per Open -----
+        /** DeviceInfo's serial of the board being opened; null for a demo board. */
+        int? boardSerial;
+        /** Set by Bridge.cs before Open: the install's UC100.dll and its root. */
+        public static string ResolvedUc100DllPath, UccncInstallRoot;
+        /** Set by Bridge.cs from DllPin.ConnectArg: this start is the operator's
+         *  Connect press after the WaitPrefix line. */
+        public static bool ConnectWithChangedDll;
+        /** True after an Open that stopped at the WaitPrefix line. */
+        public bool DllChangeWaitsForConnect { get; private set; }
+        List<DllPinEntry> dllPins;
+        string dllPinUsedPath, dllPinSha256, dllPinFileVersion;
+
+        /** Before UC100.Open, after the board-type gate gave the serial. Null
+         *  to proceed; otherwise the one operator line, and Open stops. */
+        string CheckDllPinBeforeOpen()
+        {
+            DllChangeWaitsForConnect = false;
+            dllPins = null;
+            dllPinSha256 = dllPinFileVersion = null;
+            if (boardSerial == null) return null;   // demo board: no hardware, no firmware to update
+            // The copy ListDevices loaded (Bridge.cs copies the install's beside
+            // the exe), else the install's own file: the same bytes.
+            dllPinUsedPath = ControllerVersionLog.LoadedDllPath() ?? ResolvedUc100DllPath;
+            dllPinSha256 = CompatRecord.FullSha256(dllPinUsedPath);
+            dllPinFileVersion = CompatRecord.DllFileVersionOf(dllPinUsedPath);
+            string serial = DllPin.SerialKey(boardSerial.Value);
+            if (dllPinSha256 == null)
+            {
+                Console.WriteLine("[bridge] DLL pin: the UC100.dll in use could not be read ("
+                    + (dllPinUsedPath ?? "no path") + "), so it is not compared with the one board serial "
+                    + serial + " last connected with");
+                return null;
+            }
+            dllPins = DllPin.Load(DllPin.PathBesideBridge(), Console.WriteLine);
+            DllPinEntry pinned = DllPin.Find(dllPins, serial);
+            DllPin.Verdict verdict = DllPin.Decide(pinned, dllPinSha256, ConnectWithChangedDll);
+            string identity = "UC100.dll " + (dllPinFileVersion ?? "(version unreadable)")
+                + " (sha256 " + dllPinSha256.Substring(0, 8) + ")";
+            if (verdict == DllPin.Verdict.Open)
+            {
+                Console.WriteLine("[bridge] DLL pin: board serial " + serial + (pinned == null || pinned.DllSha256 == null
+                    ? " has no UC100.dll on record yet - connecting with " + identity
+                    : " connects with the same " + identity + " as last time"));
+                return null;
+            }
+            if (verdict == DllPin.Verdict.Accepted)
+            {
+                Console.WriteLine("[bridge] DLL pin: Connect pressed again - board serial " + serial
+                    + " connects with the changed " + identity);
+                return null;
+            }
+            pinned.PendingDllSha256 = dllPinSha256;
+            pinned.PendingSince = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            // Rule 11: if the press that follows could not be recognised, the
+            // operator could never connect - so an unwritable record does not refuse.
+            if (!DllPin.Save(dllPins, Console.WriteLine))
+            {
+                Console.WriteLine("[bridge] DLL pin: the changed " + identity + " could not be recorded as waiting, "
+                    + "so board serial " + serial + " connects with it now rather than never");
+                return null;
+            }
+            DllChangeWaitsForConnect = true;
+            return DllPin.WaitLine(BoardPinTables.DeviceTypeName(boardType), pinned,
+                dllPinFileVersion, ResolvedUc100DllPath ?? dllPinUsedPath, UccncInstallRoot);
+        }
+
+        /** After the version read: this board now connects with this DLL and
+         *  this firmware. Written only when something changed. */
+        void NoteDllPinAfterOpen(ControllerVersion ver, int versionRc)
+        {
+            if (boardSerial == null || dllPinSha256 == null) return;
+            string serial = DllPin.SerialKey(boardSerial.Value);
+            if (dllPins == null) dllPins = DllPin.Load(DllPin.PathBesideBridge(), Console.WriteLine);
+            DllPinEntry e = DllPin.Find(dllPins, serial);
+            if (e == null) { e = new DllPinEntry { Serial = serial }; dllPins.Add(e); }
+            int? fw = versionRc == 0 ? (int?)ver.FWVersion : null;
+            string dllPath = ResolvedUc100DllPath ?? dllPinUsedPath;
+            if (e.DllSha256 == dllPinSha256 && e.Fw == fw && e.DeviceType == boardType && e.DllPath == dllPath
+                && e.InstallRoot == UccncInstallRoot && e.DllFileVersion == dllPinFileVersion && e.PendingDllSha256 == null)
+                return;
+            e.DeviceType = boardType;
+            e.DllSha256 = dllPinSha256;
+            e.DllFileVersion = dllPinFileVersion;
+            e.DllPath = dllPath;
+            e.InstallRoot = UccncInstallRoot;
+            e.Fw = fw;
+            e.ConnectedAt = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            e.PendingDllSha256 = e.PendingSince = null;
+            if (DllPin.Save(dllPins, Console.WriteLine))
+                Console.WriteLine("[bridge] DLL pin: board serial " + serial + " recorded with UC100.dll "
+                    + (dllPinFileVersion ?? "(version unreadable)") + " (sha256 " + dllPinSha256.Substring(0, 8) + ") from "
+                    + (UccncInstallRoot ?? dllPath ?? "an install not recorded") + ", firmware "
+                    + (fw == null ? "unavailable" : fw.Value.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        /** hello.compat: what the record said about this Open. */
+        public Json.Obj CompatJson()
+        {
+            return new Json.Obj()
+                .Set("status", compatStatus)
+                .Set("board", boardType < 0 ? null : BoardPinTables.DeviceTypeName(boardType))
+                .Set("fw", compatFw).Set("hw", compatHw).Set("api", compatApi)
+                .Set("dllFileVersion", compatDllFileVersion)
+                .Set("dllSha256", compatDllSha256)
+                .Set("evidence", compatEvidence);
+        }
 
         static Json.Obj Vec(double x, double y, double z)
         {
@@ -5754,6 +6597,11 @@ namespace LienCAM
         {
             BoardOwner.AssertOwner("Machine.ReopenLostBoard");
             if (!boardLost) return false;
+            // WO-2847: an update that ended without opening the controller has
+            // said so once. Calling Open again is the retry loop ADR-0058 V6
+            // removes - the operator's Connect is what tries again (Bridge.cs
+            // Serve clears this at the next session).
+            if (ControllerFirmwareUpdateWait.EndedWithError) return false;
             if (openBoard == int.MinValue)
             {
                 boardLost = false;                 // never opened; nothing to reopen
@@ -5815,6 +6663,7 @@ namespace LienCAM
             if (injectUnconfiguredReopens > 0) { injectUnconfiguredReopens--; injectRefusalOnThisOpen = true; }
             if (injectedFailure || !Open(openBoard, openProfilePath))
             {
+                if (ControllerFirmwareUpdateWait.EndedWithError) return false;   // WO-2847: said once
                 // A SILENT FAILED RECOVERY IS THE SHAPE OF DEFECT THIS PROJECT
                 // KEEPS PAYING FOR (WO-932, WO-980). Say it failed, every time.
                 Report("[bridge] *** THE REOPEN FAILED *** attempt " + attempt + " could not reopen "
@@ -6565,8 +7414,18 @@ namespace LienCAM
             moveStopCause = null;             // WO-2533
             moveProbeOpenSeen = false;
             moveProbeTouched = false;
+            moveHeld = false;                 // WO-3015
             moveWatch = true;
         }
+
+        /** WO-3015: A HELD MOVE HAS NOT SETTLED. the owner's board 10-03 and three
+         *  desk runs 10-20: Feed Hold mid-move, and half a second later the
+         *  shortfall check printed THE MOVE WAS TRUNCATED ... SOFT LIMIT - the
+         *  counter sat still under the hold, which is what a clamped move looks
+         *  like. True while the last status read of this watch said "hold";
+         *  the watch is paused, not ended, and a stop that ends a held move
+         *  ended it however long the counter had been still. */
+        volatile bool moveHeld;
 
         /** WO-2533: A MOVE THIS BRIDGE WAS TOLD TO STOP IS NOT A CLAMPED MOVE.
          *
@@ -6591,7 +7450,7 @@ namespace LienCAM
         void NoteMoveStopped(string cause)
         {
             if (!moveWatch || moveStopCause != null) return;
-            if (moveSawMotion && Environment.TickCount - moveSettleTick >= MoveStillRunningMs) return;
+            if (moveSawMotion && !moveHeld && Environment.TickCount - moveSettleTick >= MoveStillRunningMs) return;
             moveStopCause = cause;
         }
 
@@ -6650,6 +7509,18 @@ namespace LienCAM
             if (!moveWatch || !posOk) return;
             ObserveMoveProbe(probeOn);            // WO-2533
             double moved = Math.Abs(x - moveMarkX) + Math.Abs(y - moveMarkY) + Math.Abs(z - moveMarkZ);
+            // WO-3015: under a feed hold the move is paused, not settled - say
+            // nothing and keep the watch. Both clocks restart while held, so
+            // after Cycle Resume the move gets the full settle (and WO-933's
+            // silence) window from where it left off, judged by its whole distance.
+            moveHeld = state == "hold";
+            if (moveHeld)
+            {
+                if (moved >= MoveSeenMm) { moveSawMotion = true; moveLastMoved = moved; }
+                moveSettleTick = Environment.TickCount;
+                moveAtTick = Environment.TickCount;
+                return;
+            }
             // WO-934: it MOVED, but did it move as far as it was asked to? A
             // clamped move stops early and then sits still, which looks exactly
             // like a completed move until the distances are compared. So the
@@ -7111,6 +7982,7 @@ namespace LienCAM
                    : kind == "rapid" ? UC100.SetJRO(target)
                    : UC100.SetSRO(target);
             if (rc != 0) { err = "could not set the " + kind + " override: " + Explain(rc); return false; }
+            if (kind == "feed") operatorFeedOverride = target;   // WO-2896
 
             if (kind == "rapid")
                 Report("[bridge] the \"rapid\" override channel set this controller's JOG RATE "
@@ -7151,6 +8023,54 @@ namespace LienCAM
          *  times the slowest the board measured (51 ms); an accepted press
          *  returns the moment the readback shows it. */
         const int OverrideSettleMs = 150;
+
+        /** WO-2896: the feed override the operator last set (SetOverride), or
+         *  what the board held at Open. Never below 1 - SetOverride refuses it. */
+        double operatorFeedOverride = 100;
+
+        /** WO-2896: A STOP CAN LEAVE THE BOARD AT 0% FEED, AND THEN EVERY MOVE
+         *  IS ACCEPTED AND NONE RUNS.
+         *
+         *  UCCNC-Linux oracle 'panic' (DLL 2190 against the fake board): after
+         *  SetFeedHold(true), JogOff(6), Stop() the DLL's RT thread can apply a
+         *  pending zero FRO after Stop restored it. GetFRO then reads 0, status
+         *  is idle, and every jog/move answers rc 0 and moves nothing - the owner's
+         *  2026-08-24 "jogs ok, nothing moves" on Windows, exposed every time
+         *  under a 1 ms timer.
+         *
+         *  So every motion entry (jog, continuous jog, move, probe, program
+         *  start incl. MDI, single block) asks first, and puts back the
+         *  operator's own setting. Board facts (machine seat, real AXBB-E, DLL
+         *  2190, 10-03/10-04) that keep this from doing harm:
+         *  - DURING a feed hold GetFRO reads 100, not 0 (1972 hold frames), so
+         *    this cannot fight a live hold; and it starts no motion of its own -
+         *    the move it guards goes exactly as commanded.
+         *  - Right after SetFeedHold(false) GetFRO reads 0 for one status frame
+         *    (~20 ms), so the release paths (CycleResume, ResumeJob,
+         *    ClearSocketLossHold) and the stops themselves never call this.
+         *  - SetOverride refuses < 1, and FRO is a double: < 0.5 is the test.
+         *  PanicStop is untouched (last-resort stop, must stay minimal); this
+         *  covers every Stop() call site by the symptom instead. Owner thread. */
+        void RestoreFeedOverrideAfterStop()
+        {
+            double fro = 0;
+            int grc, src = 0;
+            double want = operatorFeedOverride;
+            lock (io.Api)
+            {
+                grc = UC100.GetFRO(ref fro);
+                if (grc != 0 || fro >= 0.5) return;
+                src = UC100.SetFRO(want);
+            }
+            string read = fro.ToString("0.#", CultureInfo.InvariantCulture);
+            string set = want.ToString("0.#", CultureInfo.InvariantCulture);
+            if (src != 0)
+                Report("[bridge] the feed override read " + read + "% after a stop and could not be set back to "
+                       + set + "% (your last setting): " + Explain(src) + ". This move goes as commanded.", "warn");
+            else
+                Report("[bridge] the feed override read " + read + "% after a stop; set it back to "
+                       + set + "% (your last setting) before this move", "info");
+        }
 
         /** SetOffline(true) inhibits the outputs - a hardware dry run. Turning
          *  it OFF drives the terminals for real.
@@ -7942,6 +8862,7 @@ namespace LienCAM
             // Below 1% it is not a slower jog, it is an out-of-range argument.
             if (percent < 1.0) percent = 1.0;
 
+            RestoreFeedOverrideAfterStop();   // WO-2896
             int rc;
             MoveWatchOvertaken();   // WO-2106
             lock (io.Api) rc = UC100.JogOnSpeed(ax, direction < 0, percent);
@@ -8013,6 +8934,7 @@ namespace LienCAM
             // wrong way. It surfaced as a soft-limit alarm rather than a wrong
             // move only because the counter happened to sit at 0, which for X
             // and Y IS the negative soft limit - a lucky catch, not a safe one.
+            RestoreFeedOverrideAfterStop();   // WO-2896
             MoveMark mark;
             lock (io.Api) { mark = ReadMoveMark(); rc = UC100.AddLinearMoveRel(ax, Math.Abs(deltaMm), 1, percent, deltaMm < 0); }
             if (rc != 0) { err = "the controller refused the jog: " + Explain(rc); return false; }
@@ -8029,6 +8951,7 @@ namespace LienCAM
         {
             err = RequireHomed(); if (err != null) return false;
             if (feedMmMin <= 0) { err = "jog feed must be greater than zero"; return false; }
+            RestoreFeedOverrideAfterStop();   // WO-2896
             // WO-2186: a work point, so it follows the rotation like a program move.
             double mx = x + offsets[activeWcs, 0], my = y + offsets[activeWcs, 1];
             if (rotations[activeWcs] != 0) WorkToMachineXY(activeWcs, x, y, out mx, out my);
@@ -8050,6 +8973,7 @@ namespace LienCAM
         {
             err = RequireHomed(); if (err != null) return false;
             if (feedMmMin <= 0) { err = "jog feed must be greater than zero"; return false; }
+            RestoreFeedOverrideAfterStop();   // WO-2896
             int rc;
             MoveMark mark;
             lock (io.Api)
@@ -9488,6 +10412,7 @@ namespace LienCAM
             // WO-926: a probe polls for up to five minutes, so it claims the
             // machine exactly as a homing cycle does.
             err = RefuseMotion(); if (err != null) return null;
+            RestoreFeedOverrideAfterStop();   // WO-2896
             string wasLongOp;
             if (!BeginLongOp("a probe", out wasLongOp, out err)) return null;
             try { return ProbeCore(axis, targetMm, feedMmMin, out err); }
@@ -10238,6 +11163,7 @@ namespace LienCAM
             // staged absolute move. RequireHomed retains RefuseMotion and the
             // switchless/per-axis exemptions; relative escape jogs stay open.
             err = RequireHomed(); if (err != null) return false;
+            RestoreFeedOverrideAfterStop();   // WO-2896
             lock (jobLock)
             {
                 // WO-1326: EXACTLY ONE PATH OWNS THE CURSOR.
@@ -10428,6 +11354,8 @@ namespace LienCAM
                         }
                     }
                 }
+                // WO-2896: program start and MDI (loadMoves + startJob) - on the owner, before the first push.
+                if (!jobAbort) RestoreFeedOverrideAfterStop();
                 for (int i = startAt; i < staged.Count; i++)
                 {
                     if (jobAbort) break;

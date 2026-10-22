@@ -280,6 +280,10 @@ describe('CAM-BINDING Stage 1: end-to-end - Create lands the op on the named pen
     await waitFor(() => expect(createBtn.disabled).toBe(false))
     act(() => { fireEvent.click(createBtn) })
 
+    // WO-3059: since WO-3055 (cff84a2c7d) compute derives a modeled-body source through the
+    // async deriveModelOriginGeoSources, so the refusal lands a microtask after Create. Wait
+    // for compute to leave 'pending'; the status it lands on is still pinned below.
+    await waitFor(() => expect(useCamStore.getState().project.setups[0].operations[0]?.status).not.toBe('pending'))
     const ops = useCamStore.getState().project.setups[0].operations
     expect(ops).toHaveLength(1)
     const op = ops[0]

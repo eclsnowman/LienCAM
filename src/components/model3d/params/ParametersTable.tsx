@@ -15,7 +15,7 @@
 
 import { useText } from '../../../i18n'
 import { useState } from 'react'
-import type { ParameterTable } from '../../../doc'
+import { formatParamDiag, type ParameterTable } from '../../../doc'
 
 export interface ParametersTableProps {
   paramTable: ParameterTable
@@ -33,14 +33,6 @@ export interface ParametersTableProps {
    *  success. Synchronous: deletion never touches the kernel (a parameter
    *  with no consumers has nothing downstream to regenerate). */
   onDeleteParameter(name: string): string | undefined
-}
-
-function formatParamDiag(diag: { code: string; params: Record<string, string> } | undefined): string | undefined {
-  if (diag === undefined) return undefined
-  const detail = Object.entries(diag.params)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(', ')
-  return detail === '' ? diag.code : `${diag.code}: ${detail}`
 }
 
 const rowStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0', borderBottom: "1px solid var(--border-subtle, #2a3540)" }

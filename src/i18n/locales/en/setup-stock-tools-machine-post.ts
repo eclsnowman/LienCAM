@@ -111,7 +111,7 @@ const words = {
     "work_coordinate_system": "Work Coordinate System",
     "setup_work_offset": "Setup work offset",
     "g_in_use": "G{{value1}} - in use{{value2}}",
-    "all_work_offsets_g54_g59_are_owned": "All work offsets (G54-G59) are owned by other stocks or setups.",
+    "shared_work_offset_note": "G{{value1}} is also used{{value2}}. That works when these setups post as separate files (one per setup); a combined program refuses it.",
     "stock_corner": " Stock Corner",
     "snap": " Snap",
     "manual": " Manual",

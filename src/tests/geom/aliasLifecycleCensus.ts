@@ -697,6 +697,7 @@ export const NON_PRODUCER_API_DISPOSITIONS: Array<{ method: string; reason: stri
   { method: 'restoreBody', reason: 'I/O in: CONSUMES an ElementMapDelta to rebuild rec.aliases; it produces none. It is the exact path the whole WO family exists to protect, and every tier-1 matrix cell drives it (aliasLineageMatrix.test.ts).' },
   { method: 'snapshotsFor', reason: 'Read-only interrogation: returns the body record\'s geometry snapshots. Mutates nothing and emits no delta.' },
   { method: 'bboxDiagonal', reason: 'Read-only interrogation: returns a scalar. Mutates nothing and emits no delta.' },
+  { method: 'readStepAttributes', reason: 'I/O in, names only (WO-3046): reads per-body names and colours from STEP bytes for CAM Import geometry. It mints no body record, no element map and no import-cache copy, and returns { parts, diagnostics } with no delta. Its body-minting sibling, importStep, IS censused as the X-import genesis exception and IS driven.' },
 ]
 
 // ---------------------------------------------------------------------------

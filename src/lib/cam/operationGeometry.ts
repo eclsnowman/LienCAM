@@ -165,6 +165,14 @@ export const OPERATION_GEOMETRY: Record<OperationType, OpGeometrySpec> = {
     loopFilter: 'closedAndOpen',
     boundaryInference: 'none',
   },
+  // WO-3001: a pattern's optional region is closed loops, read even-odd by the
+  // pattern builder itself (an inner loop is a hole), so no island inference.
+  pattern: {
+    dimensionality: '2.5d',
+    accepts: ['loop'],
+    loopFilter: 'closed',
+    boundaryInference: 'none',
+  },
   // vcarve: mirror engrave/contour for closed profiles (spec R1 line 72).
   // Accepts edges + closed loops; a clicked cylinder coerces to its top rim.
   // TODO(smart-selection): the design is silent on whether vcarve consumes a

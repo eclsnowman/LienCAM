@@ -422,6 +422,25 @@ describe('WO-276 every dispatched strategy is guarded', () => {
     expect([...STRATEGIES].sort()).toEqual([...declared].sort())
   })
 
+  // Per-type params where the generic pocket params cannot reach the builder.
+  // COMPUTE_PATTERN (WO-2982/WO-3001) validates its spec before it generates, so
+  // pocket params are refused as "Pattern spec: must be a pattern object." and
+  // the guard is never reached. Its builder is NOT stubbed: this minimal valid
+  // spec (a 5 mm circle at the region centroid, constant depth -> the resolved
+  // Top - Bottom = 8 mm) makes the REAL pattern builder cut 8 mm deep inside the
+  // block, which the 5 mm stickout cannot reach without the holder - the same
+  // real-path proof the pocket case above gives.
+  const PARAMS_FOR: Partial<Record<string, unknown>> = {
+    COMPUTE_PATTERN: {
+      geometryId: 'geo-1', loopIds: [],
+      spec: {
+        version: 1, units: 'mm', anchor: 'region-centroid',
+        curves: [{ kind: 'polar', r: '5', t: [0, 360] }],
+        depth: POCKET_DEPTH_MM,
+      },
+    },
+  }
+
   it.each(STRATEGIES)('%s refuses a toolpath that puts the holder in the stock', async (type) => {
     stub.moves = CRASH_MOVES
     try {
@@ -429,7 +448,7 @@ describe('WO-276 every dispatched strategy is guarded', () => {
         type,
         payload: {
           opId: `op-${type}`, setupId: 'setup-1',
-          params: { ...POCKET_PARAMS }, heights: HEIGHTS, passes: PASSES, linking: LINKING,
+          params: PARAMS_FOR[type] ?? { ...POCKET_PARAMS }, heights: HEIGHTS, passes: PASSES, linking: LINKING,
           tool: tool(), loops: [POCKET_LOOP], wcsOrigin: { x: 0, y: 0, z: 0 },
           holder: HOLDER, stockBlock: STOCK,
         },

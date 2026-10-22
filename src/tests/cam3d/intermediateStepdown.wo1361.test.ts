@@ -7,7 +7,9 @@ import { BvhKernel } from '../../cam3d/kernel/bvhKernel'
 import type { CutterSpec } from '../../cam3d/kernel/types'
 import { buildPartHeightField, frameOf, planLevels } from '../../cam3d/rough'
 import { ensureEngineClipperReady } from '../../cam3d/rough/engineEntry'
+import { ADAPTIVE_ENTRY_POLICY } from '../../cam3d/rough/emit'
 import { forEachLinearSweep, replayMovesIntoStock } from '../../cam3d/rough/replayStock'
+import { ADAPTIVE_ARC_JOIN_POLICY } from '../../cam3d/rough/smoothPath'
 import { adaptiveRough } from '../../cam3d/strategies/adaptiveRough'
 import { parallelFinish } from '../../cam3d/strategies/parallel'
 import { ZDexelField, type Box3 } from '../../cam3d/stock'
@@ -21,6 +23,13 @@ const MAX_STEPDOWN = 3
 const STEPOVER_FRACTION = 0.4
 const CUT_FEED_MM_MIN = 1500
 const PLUNGE_FEED_MM_MIN = 500
+// WO-3050: the fine reference cell the switch comparison reads the carve residual at.
+const FINE_CELL = 0.1
+// WO-3050: allowed growth of the midpoint-carve residual with both adaptive switches ON over
+// both OFF, at FINE_CELL. Measured on this dome: OFF 2.8905 -> ON 2.9202 mm (+0.030, the
+// tangent fit's tol/4 = 0.0125 mm wall shift plus one 0.1 mm cell edge); a rough with a 10x
+// coarser tolerance on the ON side reads 4.041 mm (+1.15) and fails (src/tests/evidence/WO-3050/fix-time-proof-wo1361.json).
+const SWITCH_RESIDUAL_MARGIN_MM = 0.05
 
 type BandReading = {
   upperZ: number
@@ -144,6 +153,33 @@ function measureBands(
   return readings
 }
 
+type RoughInput = Parameters<typeof adaptiveRough>[1]
+
+/** The dome rough with both WO-3050 adaptive switches forced to `on`, the shipped values restored after. */
+async function roughWithSwitches(kernel: BvhKernel, input: RoughInput, on: boolean) {
+  const shipped = [ADAPTIVE_ENTRY_POLICY.entriesAtMaterial, ADAPTIVE_ARC_JOIN_POLICY.tangentJoins] as const
+  ADAPTIVE_ENTRY_POLICY.entriesAtMaterial = on
+  ADAPTIVE_ARC_JOIN_POLICY.tangentJoins = on
+  try {
+    return await adaptiveRough(kernel, input)
+  } finally {
+    [ADAPTIVE_ENTRY_POLICY.entriesAtMaterial, ADAPTIVE_ARC_JOIN_POLICY.tangentJoins] = shipped
+  }
+}
+
+/** The midpoint-carve residual (the bands' maxDeviationAfterMm) of a rough, read at FINE_CELL. */
+async function fineCarveResidualMm(
+  kernel: BvhKernel,
+  mesh: RoughInput['mesh'],
+  moves: ToolpathIR['moves'],
+  levels: readonly number[],
+): Promise<number> {
+  const stock = ZDexelField.fromBox(STOCK, FINE_CELL)
+  replayMovesIntoStock(stock, ROUGH_CUTTER, moves, null)
+  const part = await buildPartHeightField(kernel, mesh, frameOf(stock), { zSeed: STOCK.minZ - 1 })
+  return Math.max(...measureBands(stock, part, levels).map(band => band.maxDeviationAfterMm))
+}
+
 describe('WO-1361 intermediate-stepdown spike', () => {
   beforeAll(async () => {
     await ensureGeom2dReady()
@@ -155,7 +191,7 @@ describe('WO-1361 intermediate-stepdown spike', () => {
     const partMesh = hemisphereOnSlab(RADIUS, { x: 40, y: 40, t: SLAB_TOP_Z })
     const mesh = kernel.uploadMesh(partMesh)
     try {
-      const rough = await adaptiveRough(kernel, {
+      const roughInput: RoughInput = {
         mesh,
         cutter: ROUGH_CUTTER,
         stockBounds: STOCK,
@@ -173,7 +209,8 @@ describe('WO-1361 intermediate-stepdown spike', () => {
         materialTopZ: STOCK.maxZ,
         floorZ: SLAB_TOP_Z,
         heights: { clearanceZ: 44, retractZ: 34, feedZ: 34 },
-      })
+      }
+      const rough = await adaptiveRough(kernel, roughInput)
 
       const finalStock = ZDexelField.fromBox(STOCK, CELL)
       replayMovesIntoStock(finalStock, ROUGH_CUTTER, rough.moves, null)
@@ -188,6 +225,12 @@ describe('WO-1361 intermediate-stepdown spike', () => {
       const maxDeviationAfterMm = Math.max(...bands.map(band => band.maxDeviationAfterMm))
       const addedCoveragePathMm = bands.reduce((sum, band) => sum + band.coveragePathLowerBoundMm, 0)
       const addedCutTimeLowerBoundSec = addedCoveragePathMm / CUT_FEED_MM_MIN * 60
+
+      // WO-3050: the same rough with both switches forced OFF and forced ON, carve residual at 0.1 mm.
+      const roughOff = await roughWithSwitches(kernel, roughInput, false)
+      const roughOn = await roughWithSwitches(kernel, roughInput, true)
+      const fineResidualOffMm = await fineCarveResidualMm(kernel, mesh, roughOff.moves, levels)
+      const fineResidualOnMm = await fineCarveResidualMm(kernel, mesh, roughOn.moves, levels)
 
       const finishInput = {
         mesh,
@@ -231,6 +274,9 @@ describe('WO-1361 intermediate-stepdown spike', () => {
           finishTimeBeforeSec,
           finishTimeAfterSec,
           finishTimeSavedSec,
+          fineCellMm: FINE_CELL,
+          fineResidualOffMm,
+          fineResidualOnMm,
           totalTimeChangeLowerBoundSec: addedCutTimeLowerBoundSec - finishTimeSavedSec,
           totalTimeIncreaseLowerBoundPct:
             addedCutTimeLowerBoundSec / (cuttingTimeSeconds(rough) + finishTimeBeforeSec) * 100,
@@ -241,7 +287,12 @@ describe('WO-1361 intermediate-stepdown spike', () => {
       expect(bands.length).toBeGreaterThan(0)
       expect(removableVolumeMm3).toBeGreaterThan(150)
       expect(maxDeviationBeforeMm).toBeGreaterThan(2.5)
-      expect(maxDeviationAfterMm).toBeLessThan(1.5)
+      // WO-3050: was maxDeviationAfterMm < 1.5 on this spike's 0.79 mm cells. With tangent arc joins
+      // the wall pass moves by up to the fit's tol/4 and a few of those coarse cells flip to uncut
+      // (1.35 -> 2.88 mm); at 0.1 mm the step was always there (src/tests/evidence/WO-3050/dome-step.json).
+      // The guard now compares the switches themselves: ON may not leave a carve residual more than the margin taller than OFF.
+      expect(fineResidualOffMm).toBeGreaterThan(2.5)
+      expect(fineResidualOnMm).toBeLessThanOrEqual(fineResidualOffMm + SWITCH_RESIDUAL_MARGIN_MM)
       expect(irFingerprint(finishAfter)).toBe(irFingerprint(finishBefore))
       expect(finishTimeSavedSec).toBe(0)
       expect(addedCutTimeLowerBoundSec).toBeGreaterThan(0)

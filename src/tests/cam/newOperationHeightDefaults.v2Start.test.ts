@@ -65,6 +65,11 @@ describe('new operation Smart Height V2 starting policy', () => {
       variant: 'edge_width_formula', ready: true,
     },
     {
+      operationType: 'pattern',
+      context: { hasSetupStock: true, explicitEndConfirmed: true },
+      variant: 'explicit_depth', ready: true,
+    },
+    {
       operationType: 'vcarve',
       context: { hasSetupStock: true, hasSelectedGeometry: true, hasFlatDepth: true },
       variant: 'flat_depth', ready: true,

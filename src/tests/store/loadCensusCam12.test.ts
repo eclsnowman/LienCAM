@@ -17,7 +17,8 @@
 // flip-and-clear (it would destroy the file's valid moves - a named bounce).
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -66,6 +67,30 @@ const CENSUS = [
     path: 'Setup.machineActions',
     category: 'tolerated' as const,
     rule: "WO-2437 machine actions (operator stops). Every reader Array.isArray-guards the field: machineActionsOf (store/index.ts, the DesignTree/PropertiesPanel/store-action route), operatorStopsFromActions (lib/post/buildPostInput.ts, post time) and setupHasOperatorStops (lib/machine/machineSession.ts, Control load) - a non-array value reads as no actions. Object-shaped malformed elements read as non-stops or orphan rows (=== / .has compares only). A null/undefined ELEMENT is not guarded (setupListOrder reads `action.afterOpId`) - recorded in WO-2620's result, not blessed here.",
+  },
+  // WO-2976: WO-2906 (9747e264e5) added the generated-plan fields after the table was cut.
+  // Only the kernel's plan-merge/edit paths (src/kernel/session/planMerge.ts, planEdits.ts,
+  // operationEdits.ts, camCommands.ts) and the plan contract copy (contracts/plan.ts) read them,
+  // all on a later authoring action, never at the load/first-render boundary.
+  {
+    path: 'Operation.itemKey',
+    category: 'tolerated' as const,
+    rule: "WO-2906 generated-item key. Read only by plan merge/delete (=== compares, Map/Set keys, comparePlanKeys sort) after an authoring action; load and first render never read it.",
+  },
+  {
+    path: 'Operation.provenance',
+    category: 'tolerated' as const,
+    rule: "WO-2906 generator provenance. Every reader tests truthiness or uses ?. (`operation.provenance?.generatorId`), except deletePlanOperation, which reads `.generatorId` only after a truthy check; a wrong-typed value reads as 'not generated'. Load and first render never read it.",
+  },
+  {
+    path: 'Operation.userEdited',
+    category: 'tolerated' as const,
+    rule: "WO-2906 user-edited plan paths. Read only after an authoring action (editOperation, planMerge, planEdits); load and first render never read it. NOT blessed past the load boundary: editOperation's `new Set(operation.userEdited ?? [])` throws on a non-iterable value when a generated op is edited - recorded in WO-2976's result.",
+  },
+  {
+    path: 'Setup.deletedItemKeys',
+    category: 'tolerated' as const,
+    rule: "WO-2906 deleted generated-item keys per generator. Read only by deletePlanOperation after a delete action (`?? {}`, then spread); load and first render never read it.",
   },
 ] as typeof COMMITTED_CENSUS
 const CENSUS_PATHS = new Set(CENSUS.map((e) => e.path))
@@ -537,12 +562,15 @@ describe('CAM-12-R2: refresh-boundary through the REAL path (persistMigrate -> p
 // ============================================================
 
 describe('CAM-12-R3: mechanical dereference-closure (STOP-ruling enforcement)', () => {
-  it('the type-directed extraction over every Setup/WCS/Stock/Operation access in src/ exactly matches the committed census - no uncensused path, no stale entry, no unresolvable computed-key blind spot', () => {
+  it('the type-directed extraction over every Setup/WCS/Stock/Operation access in src/ exactly matches the committed census - no uncensused path, no stale entry, no unresolvable computed-key blind spot', async () => {
     const started = performance.now()
-    const output = execFileSync(
+    // WO-2976: run the scan asynchronously. A synchronous child blocks the
+    // worker for the whole ~60 s scan, Vitest's worker RPC times out
+    // ("Timeout calling onTaskUpdate") and the file fails with every test green.
+    const { stdout: output } = await promisify(execFile)(
       process.execPath,
       [resolve(REPO_ROOT, 'src/tests/support/deriveSetupClosure.mjs')],
-      { encoding: 'utf8', cwd: REPO_ROOT, windowsHide: true, timeout: 135_000 },
+      { encoding: 'utf8', cwd: REPO_ROOT, windowsHide: true, timeout: 135_000, maxBuffer: 64 * 1024 * 1024 },
     )
     const extracted = performance.now()
     const { fieldPaths, violations } = JSON.parse(output) as {
@@ -1328,6 +1356,24 @@ const TOLERATED_CONSUMERS: Record<string, ToleratedFuzzer> = {
     // fix) - reproduced inline.
     const preview = value as { loops?: unknown } | null | undefined
     void (!preview || !Array.isArray(preview.loops) || (preview.loops as unknown[]).length === 0)
+  },
+  // WO-2976: the WO-2906 plan fields have no load-path consumer; the fuzz drives the reconcile
+  // boundary and the real rehydrate path (persistMigrate -> persistMerge) with the value in place.
+  'Operation.itemKey': (value) => {
+    reconcileLoadedOpLifecycle(opProjectWith({ itemKey: value }))
+    rehydrateRoundTrip(opProjectWith({ itemKey: value }))
+  },
+  'Operation.provenance': (value) => {
+    reconcileLoadedOpLifecycle(opProjectWith({ provenance: value }))
+    rehydrateRoundTrip(opProjectWith({ provenance: value }))
+  },
+  'Operation.userEdited': (value) => {
+    reconcileLoadedOpLifecycle(opProjectWith({ userEdited: value }))
+    rehydrateRoundTrip(opProjectWith({ userEdited: value }))
+  },
+  'Setup.deletedItemKeys': (value) => {
+    reconcileLoadedOpLifecycle(setupProjectWith({ deletedItemKeys: value }))
+    rehydrateRoundTrip(setupProjectWith({ deletedItemKeys: value }))
   },
   'Operation.reachShortfall': (value) => {
     reconcileLoadedOpLifecycle(opProjectWith({ reachShortfall: value }))

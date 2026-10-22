@@ -9,13 +9,24 @@ import { textFor, useText } from '../../i18n'
 // ones DesignTree's row clicks use) so the Properties panel / viewport
 // follow the click.
 import { useMemo, useState, type ComponentType } from 'react'
-import { AlertCircle, AlertTriangle, CheckCircle2, CircleHelp, Info, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Bug, CheckCircle2, CircleHelp, Info, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { useCamStore, selectUnreadConsoleErrorCount } from '../../store'
 import type { ConsoleEvent, ConsoleEventSeverity } from '../../store'
+import { failureFromConsoleEvent } from '../../lib/diagnostics'
+import { openReportForFailure } from '../modals/ReportProblemModal'
 
 const shellText = textFor('app-shell-settings-menus')
 
 const SEVERITIES: ConsoleEventSeverity[] = ['info', 'success', 'warning', 'error']
+
+/** WO-2911: the report action sits on the lines that say something failed or was refused. */
+const REPORTABLE: ReadonlySet<ConsoleEventSeverity> = new Set(['warning', 'error'])
+
+/** Freeze this line as the failure and open the report. Never selects or applies anything. */
+function reportConsoleEvent(eventId: number) {
+  const failure = failureFromConsoleEvent(eventId)
+  if (failure) void openReportForFailure(failure)
+}
 
 const SEVERITY_ICON: Record<ConsoleEventSeverity, ComponentType<{ size?: number }>> = {
   info: Info,
@@ -157,6 +168,18 @@ export function BottomConsole({ defaultExpanded = false }: BottomConsoleProps = 
                     <span className="console-event-time">{formatEventTime(e.at)}</span>
                     <span className="console-event-source">{e.source}</span>
                     <span className="console-event-message">{readableInternalIds(e.message)}</span>
+                    {REPORTABLE.has(e.severity) && (
+                      <button
+                        type="button"
+                        className="btn-ghost-sm console-report-btn"
+                        data-testid={`console-report-${e.id}`}
+                        title={shellText('ReportProblemModal.reportThisProblemTip')}
+                        aria-label={shellText('ReportProblemModal.reportThisProblem')}
+                        style={{ marginLeft: 'auto', flexShrink: 0 }}
+                        onClick={(event) => { event.stopPropagation(); reportConsoleEvent(e.id) }}
+                      >
+                        <Bug size={11} />{shellText('ReportProblemModal.reportThisProblem')}</button>
+                    )}
                   </div>
                 )
               })

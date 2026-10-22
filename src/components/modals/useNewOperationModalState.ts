@@ -815,6 +815,10 @@ export function useNewOperationModalState() {
         })
         setContourHeightAuthority('new')
       }
+    } else if (op.type === 'pattern') {
+      // WO-3001: the pattern editor is Phase C. Until then the dialog says so in
+      // one sentence instead of rendering another family's controls.
+      setEditLoadError(tx('useNewOperationModalState.pattern_has_no_editor_yet'))
     } else {
       // ADR-0003 (no silent fallbacks): OperationType members without an
       // edit-prefill branch

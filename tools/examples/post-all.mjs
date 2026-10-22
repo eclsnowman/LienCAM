@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Use the same store/Open/recompute/post boundary as Post Process Export.
 // Chromium supplies the real worker, binary caches and stock-bounds viewport.
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
@@ -36,12 +37,29 @@ export function discoverExamples(root = ROOT) {
   return { examples, designSources }
 }
 
+// Same WASM-only cross-drive rewrite as vite.config.mts; the isolated preview
+// deliberately omits the desktop config and its controller broker.
+export function crossDriveWasmUrl(url, root, installed) {
+  if (root.slice(0, 2).toLowerCase() === installed.slice(0, 2).toLowerCase()) return url
+  const prefix = ('/@fs/' + installed.replaceAll('\\', '/') + '/').toLowerCase()
+  const pathname = url.split('?', 1)[0]
+  return pathname.toLowerCase().startsWith(prefix) && pathname.toLowerCase().endsWith('.wasm')
+    ? '/node_modules/' + url.slice(prefix.length) : url
+}
+
 export async function postAll({ check = false, overrides = {}, only } = {}) {
   const discovery = discoverExamples()
   // A private ephemeral Vite host avoids the desktop config's controller broker.
   // It serves this worktree's actual source; no dist or copied post engine.
   const server = await createServer({ root: ROOT, configFile: false,
     cacheDir: path.join(tmpdir(), `liencam-examples-vite-${process.pid}`),
+    plugins: [{ name: 'liencam-examples-cross-drive-wasm', configureServer(server) {
+      const installed = realpathSync(path.join(ROOT, 'node_modules'))
+      server.middlewares.use((req, _res, next) => {
+        req.url = crossDriveWasmUrl(req.url ?? '', ROOT, installed)
+        next()
+      })
+    } }],
     server: { host: '127.0.0.1', port: 0,
       fs: { allow: [ROOT, realpathSync(path.join(ROOT, 'node_modules'))] } },
     define: { __APP_GIT_COMMIT__: JSON.stringify('examples'),
@@ -121,7 +139,7 @@ export async function postAll({ check = false, overrides = {}, only } = {}) {
   } finally { await browser?.close(); await server.close() }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const result = await postAll({ check: process.argv.includes('--check'),
     overrides: JSON.parse(process.env.LIENCAM_EXAMPLE_OVERRIDES || '{}'),
     only: process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1].split(',') : undefined })

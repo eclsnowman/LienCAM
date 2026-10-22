@@ -125,6 +125,68 @@ export interface WallCleanupPlan {
 }
 
 /**
+ * WO-3027: Douglas-Peucker over a closed ring. Every dropped vertex lies within
+ * `epsilon` of the chord that replaces it, so the ring moves at most `epsilon`
+ * from where it was located; winding and the kept vertices are unchanged.
+ * A ring that would fall below a triangle is returned as it was.
+ */
+export function simplifyClosedRing(ring: Ring, epsilon: number): Ring {
+  const count = ring.length / 2;
+  if (count < 4 || !(epsilon > 0)) return ring;
+  let far = 0;
+  let farDistance = -1;
+  for (let i = 1; i < count; i++) {
+    const distance = Math.hypot(ring[i * 2] - ring[0], ring[i * 2 + 1] - ring[1]);
+    if (distance > farDistance) {
+      far = i;
+      farDistance = distance;
+    }
+  }
+  const keep = new Uint8Array(count);
+  keep[0] = 1;
+  keep[far] = 1;
+  // Spans as [start, end] vertex indices; `end` may be `count`, the wrap onto vertex 0.
+  const spans: Array<[number, number]> = [[0, far], [far, count]];
+  while (spans.length > 0) {
+    const [start, end] = spans.pop()!;
+    if (end - start < 2) continue;
+    const ax = ring[start * 2];
+    const ay = ring[start * 2 + 1];
+    const bx = ring[(end % count) * 2];
+    const by = ring[(end % count) * 2 + 1];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    let worst = -1;
+    let worstDistance = epsilon;
+    for (let i = start + 1; i < end; i++) {
+      const px = ring[i * 2] - ax;
+      const py = ring[i * 2 + 1] - ay;
+      const t = lengthSquared > EPS ? Math.max(0, Math.min(1, (px * dx + py * dy) / lengthSquared)) : 0;
+      const distance = Math.hypot(px - t * dx, py - t * dy);
+      if (distance > worstDistance) {
+        worst = i;
+        worstDistance = distance;
+      }
+    }
+    if (worst < 0) continue;
+    keep[worst] = 1;
+    spans.push([start, worst], [worst, end]);
+  }
+  let kept = 0;
+  for (let i = 0; i < count; i++) kept += keep[i];
+  if (kept < 3) return ring;
+  const out = new Float64Array(kept * 2);
+  let k = 0;
+  for (let i = 0; i < count; i++) {
+    if (!keep[i]) continue;
+    out[k++] = ring[i * 2];
+    out[k++] = ring[i * 2 + 1];
+  }
+  return out;
+}
+
+/**
  * Build low-link candidates plus lateral leads into immutable wall contours.
  * Traverse safety validates/reroutes the rapid candidates afterward; only the
  * lead and contour are cutting moves.

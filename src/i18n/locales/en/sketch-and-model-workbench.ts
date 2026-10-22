@@ -3054,6 +3054,16 @@ const sketchAndModelWorkbench = {
     "circular": "circular",
     "linear": "linear",
   },
+  "AgentCommands": {
+    "setParameter": "Agent: set {{name}} = {{expression}}",
+    "extrude": "Agent: Extrude",
+    "deleteFeature": "Agent: Delete",
+    "sketch": "Agent: Sketch",
+    "revolve": "Agent: Revolve",
+    "fillet": "Agent: Fillet",
+    "chamfer": "Agent: Chamfer",
+    "hole": "Agent: Hole"
+  },
 } as const
 
 export default sketchAndModelWorkbench

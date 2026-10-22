@@ -1,3 +1,4 @@
+import { isMain } from '../../lib/is-main.mjs';
 import { chromium } from 'playwright'
 import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { writeFile as writeFileAsync } from 'node:fs/promises'
@@ -5,6 +6,10 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { withViteCaptureServer, captureSourceProvenance } from '../lib/provenance.mjs'
+import { execFileSync } from 'node:child_process'
+import { verifyBuild, withBuildServer } from '../lib/scene-runner.mjs'
+import { readAppState } from '../../examples/lib/drive.mjs'
+import { realGpuVerdict } from '../lib/real-gpu.mjs'
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const EVIDENCE = path.join(ROOT, 'src/tests/evidence/WO-2571')
@@ -12,6 +17,67 @@ const OUTPUT = path.join(ROOT, 'docs/media/clips-v2')
 const json = (file, value) => writeFileSync(file, JSON.stringify(value, null, 2) + '\n')
 const delay = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)))
 import { prepare, cpuCheck, ffmpeg, travel, installPointer } from './proof.mjs'
+// Same preparation controls as proof.mjs, with production readbacks instead of
+// the development-only store hook. The recorded perform() sequence is shared.
+async function prepareProduction(page, url, sequence) {
+  const wait = async check => {
+    const deadline = Date.now() + 120000
+    while (Date.now() < deadline) { if (await check()) return; await page.waitForTimeout(150) }
+    throw new Error('Production V01 preparation timed out')
+  }
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await page.locator('#liencam-splash').waitFor({ state: 'hidden' })
+  const empty = page.getByRole('button', { name: 'Start with an empty project' })
+  if (await empty.isVisible()) await empty.click()
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Open project', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Open a project' })
+  if (await picker.isVisible()) await picker.getByRole('button', { name: 'Browse...' }).click()
+  await (await chooser).setFiles(path.join(ROOT, sequence.project))
+  await wait(async () => (await readAppState(page))?.project.geometry.length > 0)
+  const machine = page.getByRole('button', { name: 'Use this machine', exact: true })
+  if (await machine.isVisible()) {
+    await page.locator('.machine-choice-item').filter({ hasText: 'Sample hobby router' }).click()
+    await machine.click()
+  }
+  await page.getByTestId('mode-tab-toolpath').click()
+  await page.getByRole('button', { name: 'REGEN ALL', exact: true }).click()
+  await wait(async () => {
+    const ops = (await readAppState(page))?.project.setups.flatMap(s => s.operations) || []
+    if (ops.some(o => o.status === 'error')) throw new Error('Application regeneration error')
+    return ops.length > 0 && ops.every(o => o.status === 'ready') &&
+      await page.locator('.status-bar .status-item').first().innerText() === 'Ready' && !await page.locator('.status-batch').count()
+  })
+  await page.locator('.tree-setup-header').first().click()
+  await page.getByTestId('mode-tab-simulation').click()
+  await page.getByLabel('Simulate Stock Removal', { exact: true }).check()
+  await page.getByTestId('sim-hide-toolpath').check()
+  await page.getByTestId('sim-display-stock').click()
+  const slider = page.getByRole('slider', { name: 'Simulation position' })
+  await wait(async () => +await slider.getAttribute('max') > 0)
+  const durationMs = +await slider.getAttribute('max')
+  const speed = [0.1, 0.5, 1, 5, 10, 50, 100].filter(x => durationMs / x > 28000).at(-1) || 0.1
+  await page.getByTestId('sim-speed-chip').click()
+  await page.locator('.sim-speed-flyout button').filter({ hasText: new RegExp('^' + speed + 'x$|^x' + speed + '$') }).click()
+  const canvas = page.locator('.viewport-canvas')
+  await canvas.click({ button: 'right', position: { x: 650, y: 350 } })
+  await page.locator('[role="menuitem"][data-action="fit-all"]').click()
+  await canvas.click({ button: 'right', position: { x: 650, y: 350 } })
+  await page.locator('[role="menuitem"][data-action="view-iso"]').click()
+  const grid = page.getByRole('button', { name: 'Toggle grid', exact: true })
+  if ((await grid.getAttribute('class')).includes('vp-btn-on')) await grid.click()
+  await page.waitForTimeout(2000)
+  const renderer = await page.evaluate(() => {
+    const gl = document.querySelector('.viewport-canvas canvas').getContext('webgl2')
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info')
+    return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '(unknown)'
+  })
+  const gpu = realGpuVerdict(renderer)
+  if (!gpu.ok) throw new Error('Application GPU rejected: ' + renderer)
+  const p = (await readAppState(page)).project
+  return { renderer, gpu, durationMs, speed, project: { id: p.id, activeSetupId: p.activeSetupId, activeOperationId: p.activeOperationId,
+    operations: p.setups.flatMap(s => s.operations.map(o => ({ name: o.name, status: o.status, moves: o.moves?.length }))) } }
+}
 async function waitForCaptureCpu() {
   const deadline = Date.now() + 120000
   while (true) {
@@ -109,15 +175,17 @@ async function perform(page, sequence) {
       await travel(page, pointer, to, step.duration * 1000 - 180)
       await page.mouse.down(); await delay(120); await page.mouse.up(); pointer = to
     }
-    const readback = await page.evaluate(() => ({ positionMs: +document.querySelector('.sim-scrubber').value, camera: window.__cncViewport.saveCameraState(), playing: !!document.querySelector('button[aria-label="Pause"]'), stockSync: document.querySelector('.sim-panel').dataset.stockSync, stockMs: +document.querySelector('.sim-panel').dataset.stockMs, comparePressed: document.querySelector('[data-testid="sim-display-compare"]').getAttribute('aria-pressed') === 'true', opacity: window.__camStore.getState().viewer.stockSimOpacity }))
+    const readback = await page.evaluate(() => ({ positionMs: +document.querySelector('.sim-scrubber').value, camera: window.__cncViewport.saveCameraState(), playing: !!document.querySelector('button[aria-label="Pause"]'), stockSync: document.querySelector('.sim-panel').dataset.stockSync, stockMs: +document.querySelector('.sim-panel').dataset.stockMs, comparePressed: document.querySelector('[data-testid="sim-display-compare"]').getAttribute('aria-pressed') === 'true', opacity: Number(document.querySelector('[data-testid="sim-stock-opacity"]')?.value ?? window.__cncViewport.stockSimSurfaceMesh?.material.opacity ?? window.__cncViewport.voxelSimMaterial?.uniforms.uAlpha.value ?? 1) }))
     actions.push({ ...step, motion, began, ended: (performance.now() - start) / 1000, readback })
   }
   await delay(start + sequence.durationSeconds * 1000 - performance.now())
   return actions
 }
-export async function runV01({ record = false, inspectProject = false, inspectEnding = false, rehearsal = null } = {}) {
-  const EVIDENCE = rehearsal?.evidence || path.join(ROOT, 'src/tests/evidence/WO-2571')
+export async function runV01({ record = false, inspectProject = false, inspectEnding = false, rehearsal = null, build, evidence, frozenCommit } = {}) {
+  const EVIDENCE = evidence ? path.resolve(ROOT, evidence) : rehearsal?.evidence || path.join(ROOT, 'src/tests/evidence/WO-2571')
   const OUTPUT = rehearsal?.output || path.join(ROOT, 'docs/media/clips-v2')
+  const stripFile = path.join(evidence ? EVIDENCE : OUTPUT, 'V01-strip-1fps.jpg')
+  if (evidence && !EVIDENCE.startsWith(path.join(ROOT, 'src/tests/evidence/WO-2631') + path.sep)) throw new Error('Frozen evidence must stay under WO-2631')
   if (record && inspectProject) throw new Error('Project inspection is readback only, not a recording')
   if (record && inspectEnding) throw new Error('Ending inspection is diagnostic only, not a recording')
   mkdirSync(EVIDENCE, { recursive: true }); mkdirSync(OUTPUT, { recursive: true })
@@ -125,22 +193,30 @@ export async function runV01({ record = false, inspectProject = false, inspectEn
   if (record) {
     // Clear success receipts before even CPU/preparation checks: a failed rerun
     // must not leave an earlier successful proof appearing to be current.
-    for (const name of ['V01.mp4', 'V01-strip-1fps.jpg']) rmSync(path.join(OUTPUT, name), { force: true })
+    rmSync(path.join(OUTPUT, 'V01.mp4'), { force: true }); rmSync(stripFile, { force: true })
     for (const name of ['capture.json', 'telemetry.json', 'motion.json', 'prepared.png', 'finished.png']) rmSync(path.join(EVIDENCE, name), { force: true })
   }
   const s = validateSequence(JSON.parse(readFileSync(new URL('./v01.json', import.meta.url))))
   const source = captureSourceProvenance({ repoRoot: ROOT })
   if (source.workingTreeDirty) throw new Error('Application source must be committed before capture')
+  if (build) Object.assign(source, { build: verifyBuild(path.resolve(build), ROOT) })
+  if (frozenCommit) {
+    if (!build) throw new Error('Frozen capture requires a stamped production build')
+    source.frozenCommit = execFileSync('git', ['rev-parse', frozenCommit], { cwd: ROOT, encoding: 'utf8' }).trim()
+    const changed = execFileSync('git', ['diff', '--name-only', source.frozenCommit, 'HEAD', '--', 'src', ':!src/tests', 'public', 'examples', 'index.html', 'package.json', 'package-lock.json', 'vite.config.mts'], { cwd: ROOT, encoding: 'utf8' }).trim()
+    if (changed) throw new Error(`Application differs from frozen build: ${changed}`)
+  }
   const cpu = inspectProject ? null : await waitForCaptureCpu()
   const browser = await chromium.launch({ headless: true, args: rehearsal?.angle ? ['--use-gl=angle', '--use-angle=' + rehearsal.angle, '--ignore-gpu-blocklist', ...(rehearsal.software ? ['--enable-unsafe-swiftshader'] : [])] : ['--use-gl=angle', '--use-angle=d3d11', '--ignore-gpu-blocklist'] })
   try {
-    await withViteCaptureServer({ port: 2552, repoRoot: ROOT }, async ({ baseUrl }) => {
+    const serve = build ? run => withBuildServer(path.resolve(build), baseUrl => run({ baseUrl })) : run => withViteCaptureServer({ port: 2552, repoRoot: ROOT }, run)
+    await serve(async ({ baseUrl }) => {
       const context = await browser.newContext({ viewport: s.viewport, deviceScaleFactor: 1, ...(rehearsal ? { recordVideo: { dir: OUTPUT, size: s.viewport } } : {}) })
       const page = await context.newPage(), errors = []
       page.setDefaultTimeout(30000); page.on('pageerror', e => errors.push(e.message))
       if (rehearsal?.onPage) await rehearsal.onPage(page)
       try {
-        const prep = await prepare(page, baseUrl, s, { allowSoftwareRehearsal: !record && rehearsal?.software === true })
+        const prep = build ? await prepareProduction(page, baseUrl, s) : await prepare(page, baseUrl, s, { allowSoftwareRehearsal: !record && rehearsal?.software === true })
         // Opening the shipped recipe selects fixed Stock 1. Its shared selection
         // owner enables the STOCK move sphere, distinct from the WCS move sphere.
         // Toggle the real active tree button off before any recorded frame.
@@ -221,7 +297,7 @@ export async function runV01({ record = false, inspectProject = false, inspectEn
         const captureCpu = await waitForCaptureCpu()
         const raw = path.join(EVIDENCE, 'raw'); mkdirSync(raw, { recursive: true })
         for (const name of readdirSync(raw)) if (/^frame-\d+\.jpg$/.test(name) || name === 'frames.txt') rmSync(path.join(raw, name))
-        for (const name of ['V01.mp4', 'V01-strip-1fps.jpg']) rmSync(path.join(OUTPUT, name), { force: true })
+        rmSync(path.join(OUTPUT, 'V01.mp4'), { force: true }); rmSync(stripFile, { force: true })
         const session = await context.newCDPSession(page), frames = [], writes = [], diskErrors = []
         session.on('Page.screencastFrame', event => {
           // Acknowledge before I/O. Synchronous JPEG writes can stall Chromium's
@@ -241,7 +317,7 @@ export async function runV01({ record = false, inspectProject = false, inspectEn
           const sample = () => {
             const vp = window.__cncViewport, slider = document.querySelector('[data-testid="sim-stock-opacity"]')
             const rect = slider?.getBoundingClientRect(), pointer = { ...window.__v01Pointer }
-            window.__wo2552Samples.push({ t: (performance.now() - start) / 1000, wallTime: Date.now() / 1000, zoom: vp.getCamera().zoom, sim: +document.querySelector('.sim-scrubber').value, camera: vp.getCamera().position.toArray(), stockSync: document.querySelector('.sim-panel').getAttribute('data-stock-sync'), stockMs: +document.querySelector('.sim-panel').getAttribute('data-stock-ms'), playing: !!document.querySelector('button[aria-label="Pause"]'), comparePressed: document.querySelector('[data-testid="sim-display-compare"]').getAttribute('aria-pressed') === 'true', opacity: window.__camStore.getState().viewer.stockSimOpacity, sliderOpacity: slider ? +slider.value : null, materialOpacity: vp.stockSimSurfaceMesh?.material.opacity ?? vp.voxelSimMaterial?.uniforms.uAlpha.value ?? null, wcsGizmo: !!vp.scene.getObjectByName('__wcs_gizmo__'), stockGizmo: !!vp.scene.getObjectByName('__stock_gizmo__'), originMarkerVisible: vp.wcsGroup.visible && vp.wcsGroup.children.length > 0, pointer, pointerOnSlider: !!rect && pointer.x >= rect.left && pointer.x <= rect.right && pointer.y >= rect.top && pointer.y <= rect.bottom })
+            window.__wo2552Samples.push({ t: (performance.now() - start) / 1000, wallTime: Date.now() / 1000, zoom: vp.getCamera().zoom, sim: +document.querySelector('.sim-scrubber').value, camera: vp.getCamera().position.toArray(), stockSync: document.querySelector('.sim-panel').getAttribute('data-stock-sync'), stockMs: +document.querySelector('.sim-panel').getAttribute('data-stock-ms'), playing: !!document.querySelector('button[aria-label="Pause"]'), comparePressed: document.querySelector('[data-testid="sim-display-compare"]').getAttribute('aria-pressed') === 'true', opacity: Number(slider?.value ?? vp.stockSimSurfaceMesh?.material.opacity ?? vp.voxelSimMaterial?.uniforms.uAlpha.value ?? 1), sliderOpacity: slider ? +slider.value : null, materialOpacity: vp.stockSimSurfaceMesh?.material.opacity ?? vp.voxelSimMaterial?.uniforms.uAlpha.value ?? null, wcsGizmo: !!vp.scene.getObjectByName('__wcs_gizmo__'), stockGizmo: !!vp.scene.getObjectByName('__stock_gizmo__'), originMarkerVisible: vp.wcsGroup.visible && vp.wcsGroup.children.length > 0, pointer, pointerOnSlider: !!rect && pointer.x >= rect.left && pointer.x <= rect.right && pointer.y >= rect.top && pointer.y <= rect.bottom })
             if (performance.now() - start < (durationSeconds + 1) * 1000) requestAnimationFrame(sample)
           }
           requestAnimationFrame(sample)
@@ -263,8 +339,8 @@ export async function runV01({ record = false, inspectProject = false, inspectEn
         // to 40 ms. Give each image a millisecond timebase before fps conversion.
         const concat = frames.map((f, i) => `file '${f.name}'\noption framerate 1000\nduration ${Math.max(0.001, (frames[i + 1]?.timestamp ?? first + s.durationSeconds) - f.timestamp).toFixed(6)}\n`).join('') + `file '${frames.at(-1).name}'\noption framerate 1000\n`
         writeFileSync(path.join(raw, 'frames.txt'), concat)
-        ffmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', path.join(raw, 'frames.txt'), '-t', String(s.durationSeconds), '-vf', 'fps=30', '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(OUTPUT, 'V01.mp4')])
-        ffmpeg(['-y', '-i', path.join(OUTPUT, 'V01.mp4'), '-vf', `fps=1,scale=480:270,tile=8x${Math.ceil(s.durationSeconds / 8)}`, '-frames:v', '1', path.join(OUTPUT, 'V01-strip-1fps.jpg')])
+        ffmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', path.join(raw, 'frames.txt'), '-t', String(s.durationSeconds), '-vf', 'fps=30', '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-metadata', `comment=${JSON.stringify(source)}`, path.join(OUTPUT, 'V01.mp4')])
+        ffmpeg(['-y', '-i', path.join(OUTPUT, 'V01.mp4'), '-vf', `fps=1,scale=480:270,tile=8x${Math.ceil(s.durationSeconds / 8)}`, '-frames:v', '1', stripFile])
         json(path.join(EVIDENCE, 'capture.json'), { source, capturedAt: new Date().toISOString(), projectSha256: createHash('sha256').update(readFileSync(path.join(ROOT, s.project))).digest('hex'), prep, cpu, captureCpu, frames, actions, errors, bytes: statSync(path.join(OUTPUT, 'V01.mp4')).size, sha256: createHash('sha256').update(readFileSync(path.join(OUTPUT, 'V01.mp4'))).digest('hex') })
         // The analyzer cleans raw originals after measurements; --keep-raw preserves them.
         console.log('Captured frames:', frames.length)
@@ -275,6 +351,8 @@ export async function runV01({ record = false, inspectProject = false, inspectEn
     })
   } finally { await browser.close() }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  runV01({ record: process.argv.includes('--record'), inspectProject: process.argv.includes('--inspect-project'), inspectEnding: process.argv.includes('--inspect-ending') }).catch(e => { console.error(e); process.exitCode = 1 })
+if (isMain(import.meta.url)) {
+  const option = name => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : undefined
+  runV01({ record: process.argv.includes('--record'), inspectProject: process.argv.includes('--inspect-project'), inspectEnding: process.argv.includes('--inspect-ending'),
+    build: option('--build'), evidence: option('--evidence'), frozenCommit: option('--frozen-commit') }).catch(e => { console.error(e); process.exitCode = 1 })
 }

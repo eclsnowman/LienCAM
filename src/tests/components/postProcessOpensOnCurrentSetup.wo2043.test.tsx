@@ -111,7 +111,8 @@ describe('WO-2043 Post Process scope', () => {
       { name: 'Setup 4', checked: false },
       { name: 'Setup 5', checked: false },
     ])
-    expect(document.querySelector('.modal-title')?.textContent).toContain('1 setup, 3 operations')
+    // WO-2935 (ad7fabbc7a) re-saved Full Suite: Setup 1 now holds the motor-plate demo, 13 operations.
+    expect(document.querySelector('.modal-title')?.textContent).toContain('1 setup, 13 operations')
     expect(Array.from(document.querySelectorAll('.diag-err')).map((row) => row.textContent)).toEqual([])
 
     // Select the posted program download, not another export action's prefix.
@@ -122,7 +123,7 @@ describe('WO-2043 Post Process scope', () => {
 
     const pendingNames = [
       'Drill 2',
-      '3D Rough 2',
+      'X part - 6mm rough', // WO-2935: Setup 2's second operation (was 3D Rough 2)
       'Face 1',
       '3D Rough 1',
       '3D Finish 3',

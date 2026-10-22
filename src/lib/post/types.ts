@@ -55,6 +55,14 @@ export interface PostOperatorStop {
   message: string
 }
 
+/** WO-2870: an operation with nothing left to cut. It posts no motion, only
+ *  one line saying so, placed before `beforeOpId` (null = after the last). */
+export interface PostNothingToCut {
+  opId: string
+  name: string
+  beforeOpId: string | null
+}
+
 /** Ordered machine actions; positions are resolved onto emitted operations. */
 export type PostMachineAction =
   | (PostOperatorStop & { kind: 'operator_stop' })
@@ -71,6 +79,9 @@ export interface PostInput {
     operatorStops?: PostOperatorStop[]
     /** When present, replaces operatorStops and preserves mixed action order. */
     machineActions?: PostMachineAction[]
+    /** WO-2870: operations left out of `operations` because they have nothing
+     *  left to cut. Absent when there are none (byte-identical output). */
+    nothingToCut?: PostNothingToCut[]
   }
   stocks?: PhysicalStock[]
   /** The owning setup id, threaded by buildPostInput so emitted operation spans

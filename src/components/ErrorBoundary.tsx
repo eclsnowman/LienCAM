@@ -1,7 +1,12 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Bug } from 'lucide-react'
 import { PERSISTED_USER_DATA_REGISTRY } from '../store/persistedKeys'
 import { resetUserSpaceStateStorage } from '../store/userSpaceStorage'
+import { failureFromError, recordBoundaryError } from '../lib/diagnostics'
+import { textFor } from '../i18n'
+import { ReportProblemModal, openReportForFailure } from './modals/ReportProblemModal'
+
+const shellText = textFor('app-shell-settings-menus')
 
 interface Props {
   children: ReactNode
@@ -38,6 +43,13 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('[LienCAM] Unhandled render error:', error, info)
+    recordBoundaryError(error)
+  }
+
+  // WO-2911: report from the error screen itself. The app below it is gone,
+  // so the report dialog is mounted here; nothing is reset or reloaded first.
+  handleReport = () => {
+    void openReportForFailure(failureFromError(this.state.error, 'app-error-screen'))
   }
 
   handlePlainReload = () => {
@@ -118,6 +130,24 @@ export class ErrorBoundary extends Component<Props, State> {
         >
           Reload
         </button>
+        <button
+          onClick={this.handleReport}
+          data-testid="app-error-boundary-report"
+          style={{
+            padding: '6px 16px',
+            background: 'transparent',
+            color: 'var(--text-primary, #e0e0e0)',
+            border: '1px solid var(--border-subtle, #333)',
+            borderRadius: '6px',
+            fontSize: '13px',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Bug size={13} aria-hidden="true" />{shellText('ReportProblemModal.reportThisProblem')}
+        </button>
         <p style={{ margin: 0, maxWidth: '480px', textAlign: 'center', color: 'var(--text-muted, #aaa)', fontSize: '12px' }}>
           Still broken after reloading? Last resort: clears everything the app has saved --
           the current project, your tool library, holder library, machine library, app
@@ -139,6 +169,7 @@ export class ErrorBoundary extends Component<Props, State> {
         >
           Reset Project Data &amp; Reload (last resort)
         </button>
+        <ReportProblemModal />
       </div>
     )
   }

@@ -29,6 +29,7 @@ import {
   executeOperatorCycleStart,
   executeOperatorFeedHold,
   executeOperatorStopReset,
+  nextActionIsCycleStartRefusal,
 } from '../../lib/machine/operatorTransport'
 import {
   ESTOP_BLOCKS_MOTION,
@@ -800,7 +801,8 @@ export function ControlTransportBar({
         )
         return
       }
-      const result = await restartBridge(port, bridgeLaunchSettings)
+      // WO-2845: Reconnect is an operator press - after the changed-DLL line it is the second Connect.
+      const result = await restartBridge(port, bridgeLaunchSettings, { operatorPress: true })
       if (!result.ok) {
         if (result.reason === 'exited') {
           // WO-1306: a fast child exit is reported with the bridge's own last
@@ -919,9 +921,13 @@ export function ControlTransportBar({
     && (job.phase === 'empty' || (job.phase === 'ready' && state.action === 'start'))
       ? describeOperatorStop(operatorStop)
       : null
+  // WO-2885: CYCLE START's own refusal (a Load refused for the travel, an
+  // off-table program, a program not ready) is not repeated here - greyed
+  // CYCLE START carries it on hover and the console holds it. The operator, 10-16:
+  // "Redundancy of what's in the terminal and at the top of the screen".
   const nextAction = connected && estopTripped
     ? ESTOP_BLOCKS_CYCLE_START
-    : stoppedLine ?? state.nextAction
+    : stoppedLine ?? (nextActionIsCycleStartRefusal(state) ? '' : state.nextAction)
 
   // S remains the physical-controller-style shortcut for the canonical
   // button in Single Block mode. It calls the same verdict and executor.
@@ -1223,7 +1229,9 @@ export function ControlTransportBar({
             title={nextAction}
           >
             <Info size={13} className="control-banner-icon" aria-hidden="true" />
-            {nextAction}
+            {/* WO-2885: its own box, so a sentence longer than the row ends in
+                an ellipsis instead of being cut mid-word with no sign. */}
+            <span className="control-next-action-text">{nextAction}</span>
           </span>}
         </>
       )}

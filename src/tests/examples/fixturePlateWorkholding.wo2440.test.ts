@@ -19,14 +19,14 @@ let reopened: Project
 
 beforeAll(() => {
   const script = `
-    import { withExampleDriver } from './tools/examples/lib/drive.mjs';
+    import { openProjectFile, withExampleDriver } from './tools/examples/lib/drive.mjs';
     await withExampleDriver({ outDir: ${JSON.stringify(reopenOut)} }, async driver => {
       const file = ${JSON.stringify(projectFile)};
       const id = JSON.parse((await import('node:fs')).readFileSync(file, 'utf8')).id;
       await driver.step('Open fixture plate through production Open', async page => {
-        const chooser = page.waitForEvent('filechooser');
-        await page.getByRole('button', { name: 'Open project', exact: true }).click();
-        await (await chooser).setFiles(file);
+        // WO-3059: since WO-2725 Open shows the "Open a project" window first;
+        // the shared helper presses its Browse... like the operator does.
+        await openProjectFile(page, file);
       }, state => state.project.id === id, { timeoutMs: 120000 });
       // Autosave intentionally omits move arrays. Save exposes the real loaded
       // runtime results without recomputing them or importing another store.

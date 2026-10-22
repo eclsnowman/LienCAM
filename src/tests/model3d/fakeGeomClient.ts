@@ -244,6 +244,12 @@ export function createFakeGeomClient(opts: FakeGeomClientOptions = {}): FakeGeom
       }))
       return { bodies, diagnostics: [] }
     },
+    // WO-3046 (granted on PR #77): GeomClient gained the names-only read; the
+    // same configured bodies' names/colours, no handles minted. No test calls it.
+    readStepAttributes: async (): Promise<{ parts: Array<{ name?: string; color?: [number, number, number] }>; diagnostics: Diag[] }> => ({
+      parts: (opts.importedBodies ?? []).map((b) => ({ name: b.name, color: b.color })),
+      diagnostics: [],
+    }),
     // WO-1824 (out of that order's owned-paths, added because GeomClient gained
     // a method and this fake must still satisfy the interface for `tsc -b` to
     // pass): the minimum honest stand-in. It mints the same bodies importStep

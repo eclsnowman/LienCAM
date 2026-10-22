@@ -56,7 +56,20 @@ export interface BaselineRow {
   toolDiameterMm: number
   metrics: Record<string, BaselineCell>
   planMs: BaselineCell
-  asserts: ScorecardRow['asserts']
+  asserts?: ScorecardRow['asserts']
+  sourceWcsOrigin?: ScorecardRow['sourceWcsOrigin']
+  settings?: ScorecardRow['settings']
+  material?: string
+  toolRecipe?: ScorecardRow['toolRecipe']
+  settingsRuleIds?: string[]
+  settingsMeasurement?: ScorecardRow['settingsMeasurement']
+  collectorObservations?: ScorecardRow['collectorObservations']
+  hardVerdicts?: ScorecardRow['hardVerdicts']
+  engineId?: ScorecardRow['engineId']
+  status?: ScorecardRow['status']
+  operatorText?: string
+  parameterMode?: ScorecardRow['parameterMode']
+  defaultProduction?: ScorecardRow['defaultProduction']
 }
 
 export interface Baseline {
@@ -65,6 +78,7 @@ export interface Baseline {
   generatedAt: string
   /** WHY this baseline says what it says. Regeneration refuses without one. */
   reason: string
+  sourceCommit?: string
   rows: BaselineRow[]
 }
 
@@ -83,7 +97,12 @@ export function baselineFromRows(tier: string, rows: readonly ScorecardRow[], re
         Object.entries(row.metrics).map(([name, value]) => [name, baselineCell(name, value)]),
       ),
       planMs: { value: row.planMs, band: specFor('planMs').band },
-      asserts: row.asserts,
+      ...(row.engineId ? { engineId: row.engineId, status: row.status,
+        operatorText: row.operatorText, parameterMode: row.parameterMode,
+        sourceWcsOrigin: row.sourceWcsOrigin, settings: row.settings, material: row.material, toolRecipe: row.toolRecipe, settingsRuleIds: row.settingsRuleIds, settingsMeasurement: row.settingsMeasurement,
+        collectorObservations: row.collectorObservations, hardVerdicts: row.hardVerdicts,
+        defaultProduction: row.defaultProduction } : {}),
+      ...(row.assertsMeasured === false ? {} : { asserts: row.asserts }),
     })),
   }
 }
@@ -292,7 +311,7 @@ export function formatDeltaTable(rows: readonly ScorecardRow[], delta: Scorecard
           `  ${cell.verdict}${cell.note ? ` -- ${cell.note}` : ''}`,
       )
     }
-    if (row) {
+    if (row && row.assertsMeasured !== false) {
       lines.push(
         `  ASSERTS (never cells): max gouge ${fixed(row.asserts.maxGougeMm, 4)} mm ` +
           `(allowed ${fixed(row.asserts.gougeToleranceMm, 4)}), least material left under a cut ` +
@@ -348,6 +367,7 @@ export function cellsFailingLandingGate(delta: ScorecardDelta): string[] {
   return delta.rows.flatMap((rowDelta) =>
     rowDelta.cells
       .filter((cell) => {
+        if (specFor(cell.metric).informational) return false
         if (cell.verdict === 'better' || cell.verdict === 'unchanged' || cell.verdict === 'n/a') return false
         return cellMovementIsMeaningful(cell)
       })
@@ -366,6 +386,7 @@ export function formatChainTotals(results: readonly ChainResult[]): string {
   lines.push(`  ${pad('chain', 34)}${pad('moves', 12, true)}${pad('flown mm', 14, true)}` +
     `${pad('cut time ms', 14, true)}${pad('plan ms', 12, true)}`)
   for (const result of results) {
+    if (result.unmeasuredTotals) lines.push(`  ${result.chainId}: ${result.unmeasuredTotals}`)
     lines.push(
       `  ${pad(result.chainId, 34)}${pad(fixed(result.totals.moves), 12, true)}` +
         `${pad(fixed(result.totals.flownDistanceMm), 14, true)}` +

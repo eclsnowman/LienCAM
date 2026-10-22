@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -299,7 +300,7 @@ export function exportPublic(commitish, outputPath, { cwd = process.cwd(), log =
 }
 
 function isMainModule() {
-  return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  return isMain(import.meta.url)
 }
 
 if (isMainModule()) {

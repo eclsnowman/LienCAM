@@ -11,6 +11,7 @@ import {
   InMemoryDocumentStorage,
   createDocumentArchive,
   loadDocumentArchive,
+  replaceArchiveDrawings,
   stableStringify,
   recoverAutosave,
   type DocumentSaveInput,
@@ -357,6 +358,51 @@ describe('DOC-3 document archive persistence', () => {
     const loaded = loadDocumentArchive(archive)
     expect(loaded.folders.list()).toEqual([])
     for (const id of loaded.dag.nodeIds()) expect(loaded.folders.folderOf(id)).toBeNull()
+  })
+
+  // WO-2987 (WO-2750 Slice B): technical drawings ride in their own top-level
+  // `document.drawings` field -- additive, no schemaVersion bump, key written
+  // only when there is at least one drawing.
+  it('round-trips drawing documents with no schemaVersion bump and canonical key order', () => {
+    const built = scriptedDocument()
+    const drawings = { documents: [{ schemaVersion: 1, id: 'D1', zeta: 1, alpha: [3, 2, 1] }] }
+    const archive = createDocumentArchive({ ...built.input, drawings })
+    const loaded = loadDocumentArchive(archive)
+    expect(loaded.drawings).toEqual(drawings)
+    expect(loaded.manifest.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
+    const again = createDocumentArchive({ ...built.input, drawings: { documents: [{ alpha: [3, 2, 1], id: 'D1', schemaVersion: 1, zeta: 1 }] } })
+    expect(asArray(again)).toEqual(asArray(archive))
+  })
+
+  it('an archive saved with no drawings (or an empty list) is byte-identical to one saved before the field existed, and loads with none', () => {
+    const built = scriptedDocument()
+    const plain = createDocumentArchive(built.input)
+    expect(asArray(createDocumentArchive({ ...built.input, drawings: { documents: [] } }))).toEqual(asArray(plain))
+    expect(loadDocumentArchive(plain).drawings).toEqual({ documents: [] })
+    const files = unzipSync(plain)
+    expect(JSON.parse(strFromU8(files['document.json'])).drawings).toBeUndefined()
+  })
+
+  it('a malformed `document.drawings` reads as no drawings instead of failing the open', () => {
+    const built = scriptedDocument()
+    const archive = createDocumentArchive({ ...built.input, drawings: { documents: [{ id: 'D1' }] } })
+    const files = unzipSync(archive)
+    const doc = JSON.parse(strFromU8(files['document.json']))
+    doc.drawings = 'nonsense'
+    files['document.json'] = strToU8(JSON.stringify(doc))
+    const zippable: Zippable = {}
+    for (const path of Object.keys(files).sort()) zippable[path] = [files[path], ZIP_OPTIONS]
+    expect(loadDocumentArchive(zipSync(zippable, ZIP_OPTIONS)).drawings).toEqual({ documents: [] })
+  })
+
+  it('replaceArchiveDrawings changes only the drawings entry and equals a fresh save', () => {
+    const built = scriptedDocument()
+    const plain = createDocumentArchive(built.input)
+    const drawings = { documents: [{ schemaVersion: 1, id: 'D1' }] }
+    const patched = replaceArchiveDrawings(plain, drawings)
+    expect(asArray(patched)).toEqual(asArray(createDocumentArchive({ ...built.input, drawings })))
+    expect(loadDocumentArchive(patched).drawings).toEqual(drawings)
+    expect(asArray(replaceArchiveDrawings(patched, undefined))).toEqual(asArray(plain))
   })
 
   it('a stripped archive with no `document.folders` key at all (a real pre-UI-8 file) loads exactly the same way', () => {

@@ -1396,6 +1396,7 @@ export const OPERATION_KIND_LABEL: Readonly<Record<Operation['type'], string>> =
   engrave: 'engraving',
   vcarve: 'V-carve',
   chamfer: 'chamfer',
+  pattern: 'pattern',
   parallel_3d: '3D parallel',
   waterline_3d: '3D waterline',
   adaptive_3d: '3D adaptive',

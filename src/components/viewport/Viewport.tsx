@@ -56,6 +56,10 @@ import {
   type ViewportContextAction,
   type ViewportContextTarget,
 } from './ViewportContextMenu'
+import { DeviationPanel } from '../simulation/DeviationPanel'
+import { attachDeviationOverlay } from '../../lib/viewport/deviationOverlay'
+import type { DeviationResult } from '../../lib/simulation/deviationComparison'
+import type { Object3D } from 'three'
 import { SimulationPanel } from '../simulation/SimulationPanel'
 import { projectSTLToLoopsInPlane, buildPlaneFrame } from '../../lib/geometry/stlProjection'
 import type { ImportedGeometry, ToolpathMove, ProjectionPlane, Layer2D } from '../../types'
@@ -93,6 +97,17 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
   useText('cam-operations-new-operation')
   const containerRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<CNCViewport | null>(null)
+  const deviationCleanup = useRef<(() => void) | null>(null)
+  const showDeviation = useCallback((result: DeviationResult | null, opacity: number, scaleMm: number) => {
+    deviationCleanup.current?.()
+    deviationCleanup.current = null
+    // Narrow adapter to the existing scene; no second renderer or modification
+    // of stock/trail groups. CNCViewport's camera and scene are world-mm.
+    const scene = (viewportRef.current as unknown as { scene?: Object3D } | null)?.scene
+    if (scene && result) deviationCleanup.current = attachDeviationOverlay(scene, result, opacity, scaleMm)
+  }, [])
+  useEffect(() => () => { deviationCleanup.current?.() }, [])
+
   const [referenceHost, setReferenceHost] = useState<ReturnType<CNCViewport['referenceImageHost']> | null>(null)
   const [sectionDragElement, setSectionDragElement] = useState<HTMLElement | null>(null)
 
@@ -1591,6 +1606,7 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
       {!suspended && <ViewCube camera={cubeCamera} />}
       <DisplayModeControl />
       <SimulationPanel />
+      <DeviationPanel onOverlay={showDeviation} />
       <ViewportToolbar
         viewport={viewportRef}
         interactionMode={interactionMode}

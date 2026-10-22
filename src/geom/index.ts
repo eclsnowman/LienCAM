@@ -130,6 +130,9 @@ export function createGeomService(): GeomClient {
     classifyFace: (h: BodyHandle, id: StableId) => remote.classifyFace(h, id),
     importStep: (bytes: ArrayBuffer, importId: string): Promise<{ bodies: ImportedBody[]; diagnostics: Diag[] }> =>
       remote.importStep(bytes, importId),
+    // WO-3046
+    readStepAttributes: (bytes: ArrayBuffer, importId: string): Promise<{ parts: Array<{ name?: string; color?: [number, number, number] }>; diagnostics: Diag[] }> =>
+      remote.readStepAttributes(bytes, importId),
     // WO-1824
     importIges: (bytes: ArrayBuffer, importId: string): Promise<{ bodies: ImportedBody[]; diagnostics: Diag[]; content: IgesContent }> =>
       remote.importIges(bytes, importId),
@@ -177,6 +180,7 @@ export function createLocalGeomService(opts: GeomEngineOptions = {}): GeomClient
     measure: (h: BodyHandle, kind: MeasureResult['kind'], ids?: StableId[]) => engine.measure(h, kind, ids),
     classifyFace: (h: BodyHandle, id: StableId) => engine.classifyFace(h, id),
     importStep: (bytes: ArrayBuffer, importId: string) => engine.importStep(bytes, importId),
+    readStepAttributes: (bytes: ArrayBuffer, importId: string) => engine.readStepAttributes(bytes, importId), // WO-3046
     importIges: (bytes: ArrayBuffer, importId: string) => engine.importIges(bytes, importId), // WO-1824
     exportStep: (handles: BodyHandle[]) => engine.exportStep(handles),
     serializeBody: (h: BodyHandle) => engine.serializeBody(h),

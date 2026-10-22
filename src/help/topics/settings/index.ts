@@ -14,7 +14,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'The window is one scrolling list of titled sections: Opening projects, STL Projection, Units, DXF Import, Nesting, Navigation, Theme, Performance, Stock Simulation, Startup, User Data, and About. Opening projects holds Always go straight to the file browser, which skips the project picker when you click Open. Startup holds one checkbox, Show splash screen on startup. User Data lists what LienCAM keeps on this computer and backs it up (see "Backing up your data"). About shows the App version, the Project file format, and the exact Build (commit, branch, and date).',
+        text: 'The window is one scrolling list of titled sections: Opening projects, AI assistant (MCP) (desktop app only), STL Projection, Units, DXF Import, Nesting, Navigation, Theme, Performance, Stock Simulation, Startup, User Data, and About. Opening projects holds Always go straight to the file browser, which skips the project picker when you click Open. AI assistant (MCP) holds Allow MCP clients: it lets an AI assistant running on this computer read and edit the model open on the Model page. It covers modeling only, with no CAM and no machine commands, and each edit it makes is one Undo step. Startup holds one checkbox, Show splash screen on startup. User Data lists what LienCAM keeps on this computer and backs it up (see "Backing up your data"). About shows the App version, the Project file format, and the exact Build (commit, branch, and date).',
       },
       {
         kind: 'paragraph',
@@ -39,7 +39,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         status: 'done',
       },
     ],
-    keywords: 'settings preferences options application global window sections about version build schema project file format splash startup grbl controller settings where done',
+    keywords: 'settings preferences options application global window sections about version build schema project file format splash startup grbl controller settings where done ai assistant mcp',
     contextKeys: ['modal:settings'],
     relatedTopicIds: ['settings-display', 'settings-performance', 'settings-defaults', 'settings-user-data', 'units'],
     sinceVersion: '0.36.0',

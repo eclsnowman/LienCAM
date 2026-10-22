@@ -218,7 +218,7 @@ describe('computeOperationToolpath with a modeled body in the project (INT-17A-R
     expect({ status: op().status, errorMessage: op().errorMessage }).toEqual(withModel)
   })
 
-  it('an op that REFERENCES the modeled body as its declared source lands on the named CAM-BINDING Stage 1 pending state, not error', () => {
+  it('an op that REFERENCES the modeled body as its declared source lands on the named CAM-BINDING Stage 1 pending state, not error', async () => {
     // R1 resolved this to an empty source list - a silent block. R2/R3 then made
     // it a hard 'error'. CAM-BINDING Stage 1 (coordination/work-orders/
     // CAM-BINDING.md) reopens this seam DELIBERATELY: a modeled body is now a
@@ -231,7 +231,9 @@ describe('computeOperationToolpath with a modeled body in the project (INT-17A-R
     // regenerated) falls to a MORE SPECIFIC derive-failure message than
     // Stage 1's generic one, still 'unsupported', still naming the body.
     installProject([ordinaryGeo('a', 'Part A'), hostileModelGeo()], 'modelbody:F1')
-    useCamStore.getState().computeOperationToolpath('setup-1', 'op-1')
+    // WO-3059: since WO-3055 (cff84a2c7d) the modeled-body derive is an async helper, so the
+    // refusal lands when the compute promise settles, not synchronously.
+    await useCamStore.getState().computeOperationToolpath('setup-1', 'op-1')
 
     expect(op().status).toBe('unsupported')
     expect(op().errorMessage).toMatch(/Model F1/)

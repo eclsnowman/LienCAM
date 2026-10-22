@@ -121,6 +121,10 @@ const CLASSIFICATIONS: Record<string, Classification> = {
   'bodyHandlesRef.get::const handle = id === null ? undefined : bodyHandlesRef.current.get(id)':
     { verdict: 'LIVE-FILTERED', reason: 'id is the selected body row only when it is in `live` (liveBodyFeatureIds, computed on the line above), else the sole live body, else null - a consumed or failed body can never be turned into a form. The conversion itself is proven by src/tests/form/formFromBody.test.ts.' },
 
+  // --- Drawings (WO-2994): DrawingEntry and DrawingEditor share this exact prop line.
+  'bodyHandlesRef.get::getBodyHandle={(id) => bodyHandlesRef.current.get(id)}':
+    { verdict: 'LIVE-FILTERED', reason: 'both drawing components ask only for a bodyId taken from their `bodies` prop (DrawingEntry via drawingTargetBody, DrawingEditor via the row whose lineage the drawing names), and `bodies` is the Bodies panel state, set only from projectBodyLineages(dag, ..., liveIds) rows in refreshBodiesList and the staged edit sweep - a consumed or failed body never becomes a row. Rows staying on the live leaf is proven by SolidsWorkbenchPage.bodyListPanel.test.tsx "UI-28: a fillet keeps the original body identity and UI-4 bridge history while every row action targets the live leaf".' },
+
   // --- disposal bookkeeping: own-id, not a pick.
   'bodyHandlesRef.get::const handle = bodyHandlesRef.current.get(featureId)':
     { verdict: 'RAW-BY-DESIGN', reason: 'disposeFeatureBody(featureId) disposes its own explicit deletion target, not a fresh pick. Proven by SolidsWorkbenchPage.delete.test.tsx "deleting a leaf feature disposes its viewport body and drops its tree row; undo restores the node and replays the kernel op".' },

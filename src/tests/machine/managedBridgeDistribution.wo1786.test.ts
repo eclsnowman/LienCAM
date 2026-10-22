@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
-import { createRequire } from 'node:module'
+import { electronMainRequire } from '../support/electronMainRequire'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -196,7 +196,7 @@ function loadMain(fixture: Fixture, options: LoadOptions = {}): {
     powerSaveBlocker: { isStarted: vi.fn(() => false), start: vi.fn(() => 1), stop: vi.fn() },
     protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   }
-  const realRequire = createRequire(import.meta.url)
+  const realRequire = electronMainRequire
   const processValue = {
     ...process,
     argv: [],

@@ -36,6 +36,7 @@ const { OffsetsWorkspace } = await import('../../components/machine/OffsetsWorks
 const { ProbingPanel } = await import('../../components/machine/ProbingPanel')
 const { useCamStore, controlMachine } = await import('../../store')
 const { useMachineControl } = await import('../../store/machineControlStore')
+const { AVAILABLE_LANGUAGES, machineTranslationNote } = await import('../../i18n')
 
 /** Every class the product styles as text-that-is-not-a-label-value-or-button. */
 const HINT_SELECTOR = [
@@ -148,6 +149,15 @@ describe('WO-1182 clutter census - every surface stays at its post-sweep count',
       render(<Component />)
       act(() => { useCamStore.getState().openModal(id) })
       actual[name] = census()
+      if (name === 'modal:settings') {
+        // WO-2977: WO-2329's machine-translation note (operator ruling 2026-10-01: a pilot language ships
+        // "machine-translated and labelled 'corrections welcome'") is ordered text, one per such
+        // language and nothing else. It is pinned to that list here; every other hint stays at the pin.
+        const notes = document.body.querySelectorAll('[data-testid^="settings-language-note-"]')
+        expect(notes.length).toBe(AVAILABLE_LANGUAGES.filter(code => machineTranslationNote(code) !== null).length)
+        expect([...notes].every(n => n.matches(HINT_SELECTOR))).toBe(true)
+        actual[name] = { ...actual[name], hints: actual[name].hints - notes.length }
+      }
       act(() => { useCamStore.getState().closeModal() })
       cleanup()
     }

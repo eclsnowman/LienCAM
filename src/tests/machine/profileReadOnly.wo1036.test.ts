@@ -306,7 +306,8 @@ describe('WO-1036: the bridge never writes the operator\'s .pro', () => {
       const before = src.slice(Math.max(0, (m.index ?? 0) - 1200), m.index ?? 0)
       const insideLog = (/class\s+TeeWriter\b/.test(before) || /\bStartLogFile\s*\(\)/.test(before))
         && /\bpath\b/.test(target)
-      const allowed = target.includes('DefinitionCachePath') || insideLog
+      // WO-2845: the per-board DLL record beside the exe, likewise ours.
+      const allowed = target.includes('DefinitionCachePath') || target.includes('DllPin.PathBesideBridge()') || insideLog
       expect(
         allowed,
         `${file}: ${m[0].slice(0, 90)}\n`

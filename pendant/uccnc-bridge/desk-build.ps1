@@ -29,7 +29,12 @@ $sourceRoot = if ($env:LIENCAM_DESK_SOURCE_ROOT) { $env:LIENCAM_DESK_SOURCE_ROOT
   # 10-13: the dev box's .git is a junction to the SSD, so its parent is no checkout;
   # git's first worktree entry is the main one.
   if (Test-Path (Join-Path $guess '.git')) { $guess } else {
-    ((git -C $here worktree list --porcelain | Select-Object -First 1) -replace '^worktree ', '')
+    # 10-17: since the store moved to H:\LienCAM\git-main, git's first entry is the store
+    # itself and the real checkout is not listed. Use the harness's main-root setting, then
+    # any listed worktree that holds the proprietary wrapper AND the DLL.
+    $roots = @($env:LIENCAM_MAIN_ROOT) + @(git -C $here worktree list --porcelain | Where-Object { $_ -like 'worktree *' } | ForEach-Object { $_ -replace '^worktree ', '' })
+    $found = $roots | Where-Object { $_ -and (Test-Path (Join-Path $_ 'pendant\uccnc-bridge\UC100_wrapper.cs')) -and (Test-Path (Join-Path $_ 'pendant\uccnc-bridge\bin\UC100.dll')) } | Select-Object -First 1
+    if ($found) { $found } else { $guess }
   }
 }
 $boardSource = Join-Path $here 'boards'

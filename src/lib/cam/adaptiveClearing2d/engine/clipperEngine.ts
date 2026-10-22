@@ -245,6 +245,58 @@ export function intersection(a: Loops, b: Loops): Loops {
   })
 }
 
+// --- a growing cleared set kept in wasm memory -----------------------------------
+
+/** WO-3024: the windowed ride measures (processFeature rideOverloadsUncut / contourOverCap)
+ *  run capsule-minus-cleared then cleared-union-capsule once per 0.75 mm sub-step, and the
+ *  plain-JS round trip copied the whole growing cleared set across the wasm boundary three
+ *  times per step. This keeps it in wasm between steps. The Clipper calls, their argument
+ *  order and their inputs are the ones capsulePath / difference / union make: the doubles a
+ *  PathsD holds survive a copy out to JS and back unchanged, so nothing but the copying goes. */
+export interface CapsuleSweep {
+  /** |area| of (capsule a->b, radius r) minus the set, then the capsule is unioned into it. */
+  step(a: Pt, b: Pt, r: number, arcTol: number): number
+  /** Union the capsules of several segments into the set at once, measuring nothing. */
+  absorb(segments: [Pt, Pt][], r: number, arcTol: number): void
+  /** The set as plain loops. */
+  read(): Loops
+  /** Replace the set. */
+  write(loops: Loops): void
+  /** Free the wasm copy. Must be called. */
+  dispose(): void
+}
+export function capsuleSweep(initial: Loops): CapsuleSweep {
+  const m = requireMod()
+  let acc: any = toPathsD(initial)
+  return {
+    step(a, b, r, arcTol) {
+      return withWasm(own => {
+        const open = own(toPathsD([[a, b]]))
+        const capsule = own(m.InflatePathsD(open, r, m.JoinType.Round, m.EndType.Round, 2.0, PREC, arcTol))
+        const fresh = own(m.DifferenceD(capsule, acc, EVEN_ODD(), PREC))
+        const area = totalArea(fromPathsD(fresh))
+        const next = m.UnionD(acc, capsule, EVEN_ODD(), PREC)
+        acc.delete()
+        acc = next
+        return area
+      })
+    },
+    absorb(segments, r, arcTol) {
+      if (segments.length === 0) return
+      withWasm(own => {
+        const open = own(toPathsD(segments))
+        const capsules = own(m.InflatePathsD(open, r, m.JoinType.Round, m.EndType.Round, 2.0, PREC, arcTol))
+        const next = m.UnionD(acc, capsules, EVEN_ODD(), PREC)
+        acc.delete()
+        acc = next
+      })
+    },
+    read() { return fromPathsD(acc) },
+    write(loops) { const next = toPathsD(loops); acc.delete(); acc = next },
+    dispose() { if (acc) { acc.delete(); acc = null } },
+  }
+}
+
 // --- queries -------------------------------------------------------------------
 
 /** Sum of |area| of each loop -- the FreeCAD CUT-BITE convention (calcCutingArea,

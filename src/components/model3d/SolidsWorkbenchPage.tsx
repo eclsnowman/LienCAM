@@ -58,6 +58,7 @@ import {
   LEGACY_MODEL_ITEM_ID,
   peekPendingDocumentSeed,
   registerLiveDocument,
+  registerModelSession,
   seedRecordingElementMap,
   startDocumentAutosave,
   subscribeDocumentGeneration,
@@ -133,6 +134,7 @@ import {
   featureAnchorFromMesh,
   pickAcrossBodies,
   progressiveTessellate,
+  type TessPaintPhase,
   screenSpaceEdgePickThresholds,
   setBodyPresentationVisible,
   interactionOverlayVisibleForMode,
@@ -154,10 +156,12 @@ import {
 import type { PreparedCachedBody, RetainedCachedBody } from '../../viewport3d/GeometryCache'
 import { modelBodyDisplayFromCached } from '../../viewport3d/modelBodyDisplay'
 import { selectBodiesToDerive, findModelBodyGeometryRow, type DerivedModelBody } from '../../lib/cam/modelBodyAdapter'
+import { setBodyFacts } from '../../lib/agent/model/summary'
 import { PushPullGizmo, pushPullHandleAvoidRect, type CreatePushPullGizmoTestDriver, type FaceFrame } from './gizmos'
 import {
   CommandHistory,
   CompositeCommand,
+  createModelSession,
   ElementMap,
   FeatureDag,
   ParameterTable,
@@ -181,6 +185,7 @@ import {
   type DagNodeSnapshot,
   type Command,
   type CommandHistoryCheckpoint,
+  type ModelSession,
   type FeatureOp,
   type FeatureStatus,
   type RegenPassResult,
@@ -256,9 +261,12 @@ import { useCamStore, sameModelBodyShape } from '../../store'
 import { useModelSelectionBridge } from '../../store/modelSelectionBridge'
 import type { BodyResolution } from '../../lib/cam/modelReferenceResolution'
 import { referenceStableIds } from '../../lib/cam/modelReferenceResolution'
+import { AO_OFF_THREAD_KEY, AO_SKIP_KEY, onBodyAoLanded } from '../../lib/viewport/lighting/vertexAO'
 import { createDefaultSceneRuntime, type CreateSceneRuntime, type DepthClipProbe, type SceneRuntime, type WorkbenchViewName } from './sceneRuntime'
 import { FeatureTree, planFeatureDelete, visibleFeatureTreeOrder, type FeatureTreeEditEntry } from './tree'
 import { BodyListPanel, type BodyListEntry } from './BodyListPanel'
+import { DrawingEntry, type DrawingSourceStatus } from './drawing/DrawingEntry'
+import { DrawingEditor } from './drawing/DrawingEditor'
 import { ModelWorkspaceHeader } from './ModelWorkspaceHeader'
 import { isWorkbenchBodyOpType, lineageIdOf, projectBodyLineages, featureLabel, bodyFeatureIds, liveBodyFeatureIds, resolveBodyTargetLineage } from './bodyLineage'
 import { composeWorkbenchStl, mergeTessellatedBodies, type StlBodyInput } from './modelStlExport'
@@ -3191,7 +3199,7 @@ function directConsumersOf(dag: FeatureDag, id: string): string[] {
  * WO INT-14: the document-lifecycle wrapper. Opening a .camproject replaces the
  * modeling document wholesale, and that CANNOT be served by re-seating `dagRef`
  * in place: `paramTable` and `history` are each constructed exactly once from
- * the dag instance at mount (see paramTableRef/historyRef below), and the body,
+ * the dag instance at mount (see the ModelSession block below), and the body,
  * mesh, sketch-outline and appearance caches are all keyed off it. Swapping the
  * ref would leave every one of them bound to the OLD document -- a
  * half-restored workbench, which is precisely the silent partial ADR-0003
@@ -3321,18 +3329,6 @@ function SolidsWorkbenchPageDocument({
   const visibilityResetSeqRef = useRef(0)
   const sketchLinesRef = useRef<Map<string, THREE.Line>>(new Map())
   const profilePickOutlinesRef = useRef<THREE.Object3D[]>([])
-  // WO INT-4A-R1 (R1.3): parallel to CommandHistory's own past/future stacks,
-  // kept in lockstep (see this file's header comment + params/table.ts's
-  // ParameterTable, the same established pattern) -- every command executed
-  // here touches a known set of feature/sketch node ids, so a single
-  // parallel stack is enough to know WHICH nodes to re-dirty on undo/redo.
-  // WO UI-7 (BK-40): widened from string to string[] per entry -- a dialog
-  // Apply/suppress-toggle still touches exactly one id (pushes a singleton
-  // array), but a rollback-marker move can flip MANY nodes' rolled-back
-  // status at once (handleMoveMarker below), which doesn't fit the old
-  // one-id-per-command assumption.
-  const touchedPastRef = useRef<string[][]>([])
-  const touchedFutureRef = useRef<string[][]>([])
 
   /** WO INT-6A-R1 (audit major, INT-6A.audit.json findings[2]): deleting an
    *  import node used to evict its stepCache bytes IMMEDIATELY (fire-and-
@@ -3445,13 +3441,51 @@ function SolidsWorkbenchPageDocument({
   if (mapRef.current === null) mapRef.current = seedRecordingElementMap(documentSeedRef.current)
   const map = mapRef.current
 
-  const schedulerRef = useRef<RegenScheduler | null>(null)
-  if (schedulerRef.current === null) schedulerRef.current = new RegenScheduler(dag, map)
-  const scheduler = schedulerRef.current
+  // WO UI-13B: parameters table (DOC-4 engine wiring), constructed once
+  // against the SAME shared dag/scheduler every dialog Apply regenerates
+  // through; WO-2978 (G2, the operator's card 2026-10-20): it commits on the SAME
+  // history the Undo button pops, so a Parameters edit is one Undo step in
+  // order with every other Model step. Its kernelOp reads through
+  // executorRef (set below, once `executor` itself is defined) rather than
+  // capturing `executor` directly -- `executor`'s own identity changes across
+  // renders (useCallback deps), but the table must be constructed exactly
+  // once, so it needs a stable indirection to always reach the LATEST executor.
+  const executorRef = useRef<FeatureOp | null>(null)
 
-  const historyRef = useRef<CommandHistory | null>(null)
-  if (historyRef.current === null) historyRef.current = new CommandHistory(dag)
-  const history = historyRef.current
+  // WO-2978 (WO-2951 Order A): the live model -- scheduler, history, parameter
+  // table and the touched-id stacks, over this mount's dag and map -- is ONE
+  // ModelSession (src/doc/modelSession.ts), built once per mount exactly as the
+  // separate refs were, and registered in documentHolder by model item id (the
+  // effect beside registerLiveDocument below) so a headless caller reaches the
+  // same objects. The names below are aliases of the session's own members, so
+  // every existing call site is unchanged.
+  //
+  // touchedPastRef/touchedFutureRef -- WO INT-4A-R1 (R1.3): parallel to
+  // CommandHistory's own past/future stacks, kept in lockstep (see this file's
+  // header comment + params/table.ts's ParameterTable, the same established
+  // pattern) -- every command executed here touches a known set of
+  // feature/sketch node ids, so a single parallel stack is enough to know
+  // WHICH nodes to re-dirty on undo/redo. WO UI-7 (BK-40): one string[] per
+  // entry -- a dialog Apply/suppress-toggle touches exactly one id (pushes a
+  // singleton array), but a rollback-marker move can flip MANY nodes'
+  // rolled-back status at once (handleMoveMarker below).
+  const sessionRef = useRef<ModelSession<RecordingElementMap> | null>(null)
+  if (sessionRef.current === null) {
+    sessionRef.current = createModelSession({
+      modelItemId,
+      dag,
+      map,
+      kernelOp: (node) => {
+        const fn = executorRef.current
+        return fn !== null ? fn(node) : Promise.resolve({ ok: true, diagnostics: [] })
+      },
+    })
+  }
+  const session = sessionRef.current
+  const scheduler = session.scheduler
+  const history = session.history
+  const touchedPastRef = session.touchedPast
+  const touchedFutureRef = session.touchedFuture
 
   // WO SKC-5: the sketch3d planegcs solve service -- booted once alongside
   // the geometry client (see the mount effect below), never per-sketch.
@@ -3459,24 +3493,9 @@ function SolidsWorkbenchPageDocument({
   const pickEngineRef = useRef<PickEngine | null>(null)
   if (pickEngineRef.current === null) pickEngineRef.current = new PickEngine(cacheRef.current)
 
-  // WO UI-13B: parameters table (DOC-4 engine wiring) -- ParameterTable owns
-  // its OWN private CommandHistory (params/table.ts's module header: "scoped
-  // to parameter edits only, not shared with a document-wide feature-tree
-  // undo stack"), constructed once against the SAME shared dag/scheduler
-  // every dialog Apply regenerates through. Its kernelOp reads through
-  // executorRef (set below, once `executor` itself is defined) rather than
-  // capturing `executor` directly -- `executor`'s own identity changes across
-  // renders (useCallback deps), but paramTableRef must be constructed exactly
-  // once, so it needs a stable indirection to always reach the LATEST executor.
-  const executorRef = useRef<FeatureOp | null>(null)
-  const paramTableRef = useRef<ParameterTable | null>(null)
-  if (paramTableRef.current === null) {
-    paramTableRef.current = new ParameterTable(dag, scheduler, (node) => {
-      const fn = executorRef.current
-      return fn !== null ? fn(node) : Promise.resolve({ ok: true, diagnostics: [] })
-    })
-  }
-  const paramTable = paramTableRef.current
+  // WO UI-13B: the parameters table is the session's (see the session block
+  // above for why its kernelOp goes through executorRef).
+  const paramTable = session.params
   const [paramsVersion, setParamsVersion] = useState(0)
 
   // WO UI-13B: UI-4 panel suite wiring (measure/appearance/visibility/section/
@@ -5002,6 +5021,7 @@ function SolidsWorkbenchPageDocument({
 
   /** Construct a complete body presentation without publishing it to the scene. */
   const createBodyMeshPair = useCallback((featureId: string, cachedBody: CachedBody): MeshPair => {
+    cachedBody.geometry.userData[AO_OFF_THREAD_KEY] = true
     const material = createModeledBodyMaterial({ vertexColors: true })
     const pair = createBodyPresentationPair(
       cachedBody.geometry,
@@ -5035,9 +5055,16 @@ function SolidsWorkbenchPageDocument({
     runtime.registerSectionable(existing.mesh, edgeLines)
   }, [bodyEdgePresentationOptions, displayMode])
 
-  const paintCachedBody = useCallback((featureId: string, cachedBody: CachedBody): void => {
+  // WO-3044: a body's AO bake lands from a worker after its paint; draw it again.
+  useEffect(() => onBodyAoLanded(() => runtimeRef.current?.requestRender()), [])
+
+  const paintCachedBody = useCallback((featureId: string, cachedBody: CachedBody, phase?: TessPaintPhase): void => {
     const runtime = runtimeRef.current
     if (runtime === null) return
+    // WO-3044: the AO bake runs in a worker, and not at all on the coarse pass (the
+    // display pass that follows replaces this geometry and bakes it).
+    cachedBody.geometry.userData[AO_OFF_THREAD_KEY] = true
+    if (phase === 'coarse') cachedBody.geometry.userData[AO_SKIP_KEY] = true
     const theme = themeColorsRef.current
     attachHighlightAttributes(cachedBody, theme.body, theme.edge)
     // WO UI-13B: a fresh pristine snapshot on EVERY (re)ingest, mirroring
@@ -5087,7 +5114,7 @@ function SolidsWorkbenchPageDocument({
     async (featureId: string, handle: BodyHandle): Promise<void> => {
       const client = clientRef.current
       if (client === null) return
-      await progressiveTessellate(client, cacheRef.current, featureId, handle, (_phase, cachedBody) => paintCachedBody(featureId, cachedBody))
+      await progressiveTessellate(client, cacheRef.current, featureId, handle, (phase, cachedBody) => paintCachedBody(featureId, cachedBody, phase))
       // WO UI-13B: mirror this committed body into the UI-4 bridge session's
       // OWN tessellation cache too -- see this page's bridgeSessionRef doc
       // comment for why a SECOND tessellate call (rather than sharing
@@ -5177,8 +5204,8 @@ function SolidsWorkbenchPageDocument({
         },
       }
       try {
-        await progressiveTessellate(guardedClient, cacheRef.current, featureId, handle, (_phase, cachedBody) => {
-          paintCachedBody(featureId, cachedBody)
+        await progressiveTessellate(guardedClient, cacheRef.current, featureId, handle, (phase, cachedBody) => {
+          paintCachedBody(featureId, cachedBody, phase)
         })
       } catch (err) {
         if (pushPullGenerationRef.current !== generation) return // stale: swallow (wrapper throw or disposed-handle reject)
@@ -5209,9 +5236,9 @@ function SolidsWorkbenchPageDocument({
           cacheRef.current,
           featureId,
           handle,
-          (_phase, cachedBody) => {
+          (phase, cachedBody) => {
             if (!isCurrent()) throw STALE_DEFEATURE_PREVIEW_PAINT
-            paintCachedBody(featureId, cachedBody)
+            paintCachedBody(featureId, cachedBody, phase)
           },
         )
       } catch (err) {
@@ -10331,7 +10358,7 @@ function SolidsWorkbenchPageDocument({
   }, [])
 
   // WO UI-13B: keep executorRef current for paramTable's kernelOp indirection
-  // (see paramTableRef's own doc comment above -- it is constructed once,
+  // (see the ModelSession block's executorRef comment above -- it is constructed once,
   // before `executor` exists on the first render, so it can only reach the
   // LATEST executor through this ref).
   useEffect(() => {
@@ -10699,7 +10726,7 @@ function SolidsWorkbenchPageDocument({
       }
       // WO UI-13B: routed through paramTable's OWN composed executor (a
       // parameter-node-aware wrapper around this page's `executor`, see
-      // paramTableRef's doc comment) rather than `executor` directly -- a
+      // the ModelSession block's executorRef comment) rather than `executor` directly -- a
       // roots closure can never actually reach a 'parameter' node today
       // (parameters are only ever upstream of features, and markDirty only
       // expands DOWNSTREAM), but routing every scheduler.run() call through
@@ -16074,6 +16101,14 @@ function SolidsWorkbenchPageDocument({
     () => registerLiveDocument(() => buildDocumentSaveInputRef.current(), modelItemId, embedded),
     [modelItemId, embedded],
   )
+  // WO-2978: the live ModelSession, reachable by model item id for this mount's
+  // lifetime. Identity-guarded cleanup, same reasoning as the collector above.
+  useEffect(() => registerModelSession(session), [session])
+  // WO-3013: model.summary reports each body's volume as the Bodies list shows it.
+  useEffect(() => {
+    setBodyFacts(session, () => Object.fromEntries(bodies.flatMap((b) => (b.volume === undefined ? [] : [[b.bodyId, { volume: b.volume }]]))))
+    return () => setBodyFacts(session, null)
+  }, [session, bodies])
 
   // WO INT-14 (AC7): autosave. The controller and its OPFS storage are the
   // shipped DOC-3 pair (autosave.ts:22 / opfs-storage.ts:7) -- nothing here is a
@@ -18048,12 +18083,13 @@ function SolidsWorkbenchPageDocument({
    *  transitive-consumer guard (FeatureTree.tsx's DeleteConfirm dialog), just
    *  refusing outright instead of cascading (a parameter has no "confirm and
    *  cascade" UI in this WO's scope). Routed through the PAGE's own `history`
-   *  (a plain RemoveNodeCommand, same command class feature delete uses),
-   *  deliberately NOT through paramTable's private CommandHistory -- deletion
-   *  doesn't need SetParameterExpressionCommand's consumes-rewiring, and
-   *  paramTable's own undo/redo stay scoped to expression edits only (see its
-   *  module header). Returns an error string (nothing mutated) or undefined
-   *  on success. */
+   *  (a plain RemoveNodeCommand, same command class feature delete uses) --
+   *  deletion doesn't need SetParameterExpressionCommand's consumes-rewiring.
+   *  WO-2978 (G2): parameter edits now share this history, so the delete also
+   *  pushes its touched entry; without it the stacks fall out of lockstep and
+   *  a later Undo of a parameter EDIT would re-dirty nothing, leaving its
+   *  dependent features on stale geometry. Returns an error string (nothing
+   *  mutated) or undefined on success. */
   const handleParamDelete = useCallback(
     (name: string): string | undefined => {
       const id = paramNodeId(name)
@@ -18062,9 +18098,11 @@ function SolidsWorkbenchPageDocument({
         return workbenchText('SolidsWorkbenchPage.cannotDeleteReferencedBy', { value1: String(consumers.join(', ')) })
       }
       history.execute(new RemoveNodeCommand(id))
+      touchedPastRef.current.push([id])
+      touchedFutureRef.current = []
       return undefined
     },
-    [dag, history],
+    [dag, history, touchedPastRef, touchedFutureRef],
   )
 
   const handleParamChanged = useCallback(() => {
@@ -18081,8 +18119,8 @@ function SolidsWorkbenchPageDocument({
 
   /** WO-2879 (fix round 1): the operator's name for the history entry being undone/redone, read
    *  from that COMMAND's own type and target -- never from the parallel touched-id stack, which is
-   *  not pushed for every command (a parameter delete pushes none, so its top entry belongs to an
-   *  earlier step). Call it while the command's target is in the document when it can be: before
+   *  not pushed for every command (some page paths still push none, so its top entry can belong to
+   *  an earlier step). Call it while the command's target is in the document when it can be: before
    *  undo() for Undo, after redo() for Redo; a removed node is named from the command's own
    *  snapshot. undefined when the entry is not one this can name truthfully. */
   const describeHistoryStep = useCallback((cmd: Command | undefined): string | undefined => {
@@ -18114,6 +18152,9 @@ function SolidsWorkbenchPageDocument({
         case 'setConsumes':
         case 'editSketchStep':
           return id === undefined ? undefined : workbenchText('SolidsWorkbenchPage.stepEdit', { value1: nameOf(id) })
+        // WO-2978 (G2): a Parameters-table edit is now an Undo step; name it by its parameter.
+        case 'setParameterExpression':
+          return id === undefined ? undefined : workbenchText('SolidsWorkbenchPage.stepEdit', { value1: paramNameFromNodeId(id) ?? id })
         case 'setSuppressed':
           return id === undefined ? undefined : workbenchText(s.suppressed === true ? 'SolidsWorkbenchPage.stepSuppress' : 'SolidsWorkbenchPage.stepUnsuppress', { value1: nameOf(id) })
         case 'setHidden':
@@ -18160,18 +18201,16 @@ function SolidsWorkbenchPageDocument({
   const handleUndo = useCallback(async (): Promise<void> => {
     if (useFormStore.getState().active) return void useFormStore.getState().undo()
     if (chamferAdoptionPendingRef.current || shellAdoptionPendingRef.current || resizeHoleAdoptionPendingRef.current) return
-    const ids = touchedPastRef.current.pop()
-    // Capture direct consumers BEFORE undo() runs -- if this undo removes an
-    // id entirely (a genesis InsertNodeCommand), it is gone afterward and
-    // scheduler.markDirty(id) would throw (mirrors params/table.ts's undo()
-    // genesis-undo comment exactly). WO UI-7: generalized from one id to a
-    // set (a rollback-marker move touches many at once, see handleMoveMarker).
-    const priorConsumers = new Map((ids ?? []).map((id) => [id, directConsumersOf(dag, id)] as const))
-    // WO-2879: name the entry BEFORE undo() -- a genesis undo removes its feature.
+    // WO-2879: name the entry BEFORE the undo -- a genesis undo removes its feature.
     const undoneLabel = describeHistoryStep(history.lastAppliedCommand())
-    const undone = history.undo()
-    if (!undone) return
-    if (ids !== undefined) touchedFutureRef.current.push(ids)
+    // WO-2978: the history pop, the touched-stack lockstep and the rebuild roots
+    // are the session's undoStep() (src/doc/modelSession.ts), the same code a
+    // headless caller runs. Roots: the step's touched ids that still exist, and
+    // for an id this undo removed (a genesis InsertNodeCommand), the consumers
+    // captured just before it -- mirrors params/table.ts's undo() genesis-undo
+    // comment; WO UI-7: a set, since a rollback-marker move touches many.
+    const step = session.undoStep()
+    if (step === undefined) return
     const epoch = bootOwnershipEpochRef.current
     // WO SKC-15C-R1 (B2): ALWAYS resync after a successful undo -- never only when a parallel entry
     // existed. `fullResync` bumps `dagVersion`, which the active-session effect below keys on to pull
@@ -18179,24 +18218,22 @@ function SolidsWorkbenchPageDocument({
     // sketch step's own resync path). A command with a known touched set re-dirties exactly those
     // roots; anything else still gets a resync pass (roots=[]) so no undo can leave the viewport, the
     // session store, or the next gesture reading a stale document.
-    const roots = (ids ?? []).flatMap((id) => (dag.has(id) ? [id] : (priorConsumers.get(id) ?? [])))
     // WO-2879: the console's latest line says what was undone, so it never keeps reading
     // "Shell F4 applied" after that Shell is gone. Fix round 2: written only AFTER the resync
     // (finally: the undo happened even if the rebuild rejects), never inside the transition.
     try {
-      await fullResync(roots)
+      await fullResync(step.roots)
     } finally {
       reportHistoryStep(epoch, undoneLabel === undefined ? workbenchText('SolidsWorkbenchPage.undidAChange') : workbenchText('SolidsWorkbenchPage.undidFeature', { value1: undoneLabel }))
     }
-  }, [dag, history, fullResync, describeHistoryStep, reportHistoryStep])
+  }, [session, history, fullResync, describeHistoryStep, reportHistoryStep])
 
   const handleRedo = useCallback(async (): Promise<void> => {
     if (useFormStore.getState().active) return void useFormStore.getState().redo()
     if (chamferAdoptionPendingRef.current || shellAdoptionPendingRef.current || resizeHoleAdoptionPendingRef.current) return
-    const ids = touchedFutureRef.current.pop()
-    const redone = history.redo()
-    if (!redone) return
-    if (ids !== undefined) touchedPastRef.current.push(ids)
+    // WO-2978: history pop + touched-stack lockstep are the session's redoStep().
+    const step = session.redoStep()
+    if (step === undefined) return
     const epoch = bootOwnershipEpochRef.current
     // WO-2879: same latest-line contract as handleUndo; named AFTER redo() re-inserts the feature
     // (the redone entry is now the undo tail), before the resync can change the document again.
@@ -18204,11 +18241,33 @@ function SolidsWorkbenchPageDocument({
     // WO SKC-15C-R1 (B2): same always-resync contract as handleUndo -- a redone package step must pull
     // its re-applied document back into the live session, not just re-run the DAG command.
     try {
-      await fullResync(ids ?? [])
+      await fullResync(step.roots)
     } finally {
       reportHistoryStep(epoch, redoneLabel === undefined ? workbenchText('SolidsWorkbenchPage.redidAChange') : workbenchText('SolidsWorkbenchPage.redidFeature', { value1: redoneLabel }))
     }
-  }, [history, fullResync, describeHistoryStep, reportHistoryStep])
+  }, [session, history, fullResync, describeHistoryStep, reportHistoryStep])
+
+  // WO-3000: the agent's model.undo / model.redo (src/lib/agent/registry.ts) obey the SAME guards as
+  // the buttons above: while a Chamfer / Shell / Resize Hole adoption is pending, the History is not
+  // touched. The sentences are the page's own for that state (featureEditing... in editEntryFor).
+  useEffect(() => {
+    session.setHistoryGuard(() => {
+      if (chamferAdoptionPendingRef.current) return `${workbenchText('SolidsWorkbenchPage.featureEditingIsUnavailableWhileTheAcceptedChamferIs')}.`
+      if (shellAdoptionPendingRef.current) return `${workbenchText('SolidsWorkbenchPage.featureEditingIsUnavailableWhileTheAcceptedShellIs')}.`
+      if (resizeHoleAdoptionPendingRef.current) return `${workbenchText('SolidsWorkbenchPage.featureEditingIsUnavailableWhileTheAcceptedResizeHole')}.`
+      return null
+    })
+    return () => session.setHistoryGuard(null)
+  }, [session])
+
+  // WO-3000: an agent edit (ModelSession.execute / undo / redo) rebuilt the scheduler with no viewport,
+  // so repaint like any page edit would: the Parameters table, tree and Bodies list, and the viewport
+  // through the page's own fullResync on the step's roots. Errors are the resync's own; this only
+  // follows the model.
+  useEffect(() => session.subscribe((notice) => {
+    handleParamChanged()
+    void fullResync(notice.roots).catch(() => undefined)
+  }), [session, handleParamChanged, fullResync])
 
   /** WO-2121: true while the rebuild after a Cancel runs -- a second Cancel
    *  then suppresses whatever is stuck instead of undoing another change. */
@@ -21698,6 +21757,16 @@ function SolidsWorkbenchPageDocument({
   const workspaceHeaderItems = (workspaceModelItems ?? []).map((m) => ({ id: m.id, name: m.name }))
   // WO-2120: Finish says so, so the last Model-screen line (a Defeature's
   // "Removed ...") does not stay on Setup's console strip as if it were news.
+  // WO-2994: where a drawing's source body stands right now. Read from the dag
+  // on every render (a delete, suppress, rollback or undo re-renders the page),
+  // so the drawing says what happened instead of drawing a blank sheet.
+  const drawingSourceStatus = (lineageId: string): DrawingSourceStatus => {
+    if (!dag.has(lineageId)) return 'deleted'
+    if (dag.isEffectivelySuppressed(lineageId) || dag.isRolledBack(lineageId)) return 'off'
+    if (scheduler.statusOf(lineageId) === 'failed') return 'failed'
+    return 'present'
+  }
+
   const finishModelItemWithLine = (): void => {
     if (workspaceHeaderActiveItem !== null) notify('info', workbenchText('SolidsWorkbenchPage.finishedBackToSetup', { name: String(workspaceHeaderActiveItem.name) }))
     void finishModelItemAction()
@@ -21979,6 +22048,17 @@ function SolidsWorkbenchPageDocument({
             )}
           </div>
 
+          {/* WO-2994 (WO-2750 Slice C): this item's technical drawings. */}
+          <DrawingEntry
+            modelItemId={modelItemId}
+            documentId={documentIdForProject(autosaveProjectId, modelItemId)}
+            bodies={bodies}
+            selectedId={selectedBodyRowId ?? selectedId}
+            getClient={() => clientRef.current}
+            getBodyHandle={(id) => bodyHandlesRef.current.get(id)}
+            sourceStatus={drawingSourceStatus}
+          />
+
           {/* WO UI-13B Scope item 1: named-parameter table (DOC-4 engine wiring). */}
           <div className="tree-section" data-testid="workbench-section-parameters">
             <div
@@ -22131,6 +22211,15 @@ function SolidsWorkbenchPageDocument({
       second={
       <div style={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
       <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+        {/* WO-2994: an open drawing covers the Model canvas; the canvas stays mounted underneath. */}
+        <DrawingEditor
+          modelItemId={modelItemId}
+          bodies={bodies}
+          getClient={() => clientRef.current}
+          getBodyHandle={(id) => bodyHandlesRef.current.get(id)}
+          sourceStatus={drawingSourceStatus}
+          partName={(lineageId) => featureLabel(dag, lineageId)}
+        />
         <canvas
           ref={canvasRef}
           data-testid="solids-workbench-canvas"

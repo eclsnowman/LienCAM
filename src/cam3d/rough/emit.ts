@@ -64,6 +64,31 @@ const MAX_HELIX_POINTS = 5000;
  */
 const STOCK_AWARE_RAMP_CLEARANCE_MM = 0.05;
 
+/**
+ * WO-3028 switch (WO-3019 items 4-5, Mission Control card A). OFF: a later
+ * helix or plunge entry starts above the highest column whose CELL the cutter
+ * disk overlaps anywhere on the helix ring (WO-1178's hover reading). On a
+ * square stock that reading catches the uncut corner cells left at the stock
+ * top beside the ring, so the box's level-3 helixes start at Z45.05 although
+ * the material under the tool was cleared to Z39: 35.6 of each 53.6 mm ramp
+ * feeds through air. ON:
+ *  - the ramp starts above the material the cutter really meets sweeping the
+ *    ring, read the way the field carves and the traverse guard proves (a
+ *    column counts when its centre is under the cutter disk). The rapid down to
+ *    that height is still proven downstream (enforceTraverseSafety
+ *    descendSafely), so a rapid never occupies material;
+ *  - a helix or plunge entry whose descent meets nothing and whose passes, up to
+ *    the next entry, remove nothing from the live stock is dropped with them
+ *    (the cylinder's 16 empty end visits).
+ * Side (outside-in) entries are not touched. ON since WO-3050 (the operator approved the
+ * before/after 2026-10-21 4:51 PM CT); turning it back off is this one line.
+ */
+export const ADAPTIVE_ENTRY_POLICY: { entriesAtMaterial: boolean } = {
+  entriesAtMaterial: true,
+};
+/** WO-3028: removed volume at or below this (mm^3) is "the pass removes nothing". */
+const EMPTY_VISIT_VOLUME_MM3 = 1e-3;
+
 /** Exact distance between the segment a-b and the axis-aligned square [x0,x1]x[y0,y1]:
  *  0 when they meet; otherwise the nearest pair is a vertex of one against the other. */
 function segmentToSquareDistance(
@@ -210,6 +235,8 @@ export interface EmitContext {
    * the first entry emits its rapid-over as the toolpath's first move.
    */
   cursor: { x: number; y: number; z: number };
+  /** WO-3028: overrides ADAPTIVE_ENTRY_POLICY.entriesAtMaterial for this call. */
+  entriesAtMaterial?: boolean;
 }
 
 /**
@@ -292,6 +319,83 @@ export function emitLevelPasses(
     return Number.isFinite(highest) ? highest : targetZ;
   };
 
+  const entriesAtMaterial = (ctx.entriesAtMaterial ?? ADAPTIVE_ENTRY_POLICY.entriesAtMaterial)
+    && canUseStockAwareEntry;
+
+  /**
+   * WO-3028: highest tool-tip contact Z of the material the cutter really meets
+   * sweeping the closed polyline at `targetZ` -- a column counts when its centre
+   * lies under the cutter disk, the same reading the field's removal, the
+   * traverse guard and the stick's replay use (maxTraverseIntrusion). `targetZ`
+   * when nothing stands above it.
+   */
+  const highestSweptContactAlong = (points: readonly Pt[], targetZ: number): number => {
+    const proofStock = entryProofStock!;
+    let highest = targetZ;
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i];
+      const b = points[(i + 1) % points.length];
+      const hit = maxTraverseIntrusion(proofStock, { x0: a.x, y0: a.y, z0: targetZ, x1: b.x, y1: b.y, z1: targetZ }, ctx.cutter!);
+      if (hit.columnsTested > 0 && Number.isFinite(hit.contactTipZ)) highest = Math.max(highest, hit.contactTipZ);
+    }
+    return highest;
+  };
+
+  /** Sample points of the helix ring (or the single plunge point) at `center`. */
+  const entryRing = (center: Pt, radius: number): Pt[] => {
+    const r = Math.max(radius - HELIX_EDGE_BACKOFF, radius * 0.5);
+    const points: Pt[] = [];
+    const samples = radius > 0 ? HELIX_SEGMENTS_PER_TURN : 1;
+    for (let k = 0; k < samples; k++) {
+      const fi = (2 * Math.PI * k) / samples;
+      points.push({ x: center.x + r * Math.cos(fi), y: center.y + r * Math.sin(fi) });
+    }
+    return points;
+  };
+
+  /**
+   * WO-3028: true when the region entry at passes[at] would visit nothing -- its
+   * descent meets no material above the level and every pass up to the next
+   * entry removes nothing from the live stock. Read-only; judged against the
+   * stock as it stands when the entry is reached.
+   */
+  const entryVisitsNothing = (at: number): boolean => {
+    const entry = passes[at] as Extract<AdaptivePass, { type: 'entry' }>;
+    const proofStock = entryProofStock!;
+    const cutter = ctx.cutter!;
+    const helixRadius = entry.mode === 'helix' && entry.radius >= minHelixR ? entry.radius : 0;
+    if (highestSweptContactAlong(entryRing(entry.point, helixRadius), z) > z + EPS) return false;
+    let px = entry.point.x;
+    let py = entry.point.y;
+    let removed = 0;
+    const along = (pts: readonly Pt[]): void => {
+      for (const p of pts) {
+        const L = Math.hypot(p.x - px, p.y - py);
+        if (L > 1e-9) removed += engagementAt(proofStock, { x0: px, y0: py, z0: z, x1: p.x, y1: p.y, z1: z }, cutter) * L;
+        px = p.x;
+        py = p.y;
+      }
+    };
+    for (let k = at + 1; k < passes.length; k++) {
+      const pass = passes[k];
+      if (pass.type === 'entry') break;
+      if (pass.type === 'link') {
+        const b = pass.points[1];
+        if (pass.jumpType === 1) along([b]);
+        else {
+          // A lifted link lands by its own descent: that descent must meet nothing too.
+          const landing = pass.helixDescent && pass.helixDescent.radius >= minHelixR
+            ? entryRing(pass.helixDescent.center, pass.helixDescent.radius) : entryRing(b, 0);
+          if (highestSweptContactAlong(landing, z) > z + EPS) return false;
+          px = b.x;
+          py = b.y;
+        }
+      } else along(pass.points);
+      if (removed > EMPTY_VISIT_VOLUME_MM3) return false;
+    }
+    return removed <= EMPTY_VISIT_VOLUME_MM3;
+  };
+
   const stockAwareRampStart = (
     center: Pt,
     radius: number,
@@ -301,14 +405,10 @@ export function emitLevelPasses(
     // Feed Height remains the authored first-entry transition. Once the tool
     // has a real position, the carved stock becomes the re-entry authority.
     if (firstEntry) return feedZ;
-    const r = Math.max(radius - HELIX_EDGE_BACKOFF, radius * 0.5);
-    const points: Pt[] = [];
-    const samples = radius > 0 ? HELIX_SEGMENTS_PER_TURN : 1;
-    for (let k = 0; k < samples; k++) {
-      const fi = (2 * Math.PI * k) / samples;
-      points.push({ x: center.x + r * Math.cos(fi), y: center.y + r * Math.sin(fi) });
-    }
-    const contact = highestContactAlong(points, targetZ);
+    const points = entryRing(center, radius);
+    const contact = entriesAtMaterial
+      ? highestSweptContactAlong(points, targetZ)
+      : highestContactAlong(points, targetZ);
     if (contact === undefined) return feedZ;
     return Math.max(targetZ, Math.min(feedZ, contact + STOCK_AWARE_RAMP_CLEARANCE_MM));
   };
@@ -649,6 +749,12 @@ export function emitLevelPasses(
         if (pass.mode === 'side') {
           // Outside-in lateral entry: descend fully clear, then feed in with the side.
           emitSideEntry(pass);
+          break;
+        }
+        if (entriesAtMaterial && entryVisitsNothing(i)) {
+          // WO-3028: nothing to cut here -- skip the entry and its passes; the
+          // next entry repositions from wherever the tool stands.
+          while (i + 1 < passes.length && passes[i + 1].type !== 'entry') i++;
           break;
         }
         // Open a region. The first entry honors Feed Height. Later entries use

@@ -1,5 +1,7 @@
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
+const shellText = textFor('app-shell-settings-menus')
+import { create } from 'zustand'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { Sliders, Info, Move3d, Wrench, CheckCircle2, Ungroup, RefreshCw, AlertTriangle, Copy, Trash2, Eye, EyeOff, PenTool, Settings2, Pencil, X, Box, Combine, MousePointer2, Anchor } from 'lucide-react'
 import { machineActionsOf, outdatedReasonText, resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, smartHeightStockBounds, useCamStore } from '../../store'
@@ -16,6 +18,7 @@ import { lengthFieldValue } from '../../lib/format/lengthDisplay'
 import { resolveFeedrates } from '../../lib/cam/feedrates'
 import { collectOperationFolderTreeIds } from '../../lib/tree/operationFolders'
 import type { AdaptiveRoughDiagnostics, AutoStockItem, BrepSelection, FeedrateOverride, FixedStockItem, GeometryFolder, HeightParams, HeightReference, ImportedGeometry, Layer2D, LinkingParams, MachineAction, NestRecord, Operation, OperationFolder, PassParams, SelectedMove, Tool, Units, Vec3 } from '../../types'
+import { resolveFloorHopMm } from '../../lib/cam/moves'
 import { callableMachineMacros, machineActionLabel } from '../../types'
 import {
   CONTOUR_ROUGHING_STYLE_LABELS,
@@ -85,6 +88,7 @@ import { toolTypeMeta } from '../../lib/tool/toolMeta'
 import { evenTabFractions } from '../../lib/viewport/tabPlacement'
 import { isModelOriginGeometry, resolveOwningModelItemId } from '../../lib/cam/modelOrigin'
 import { resolveModelReferenceFrame } from '../../lib/cam/modelReferenceFrame'
+import { chamferAngleNote, chamferStretchOf, modeledChamferRecordOf } from '../../lib/cam/chamferFromModel'
 import {
   heightIntentAfterNumericEdit,
   operationSafetyHeightIntent,
@@ -136,6 +140,7 @@ import {
   type Waterline3dHeightDraft,
   type ResolvedHeightPlanV2,
   type ThreadMillSmartHeightDraft,
+  rebuildPatternSmartHeightIntent,
 } from '../../lib/cam/smartHeights'
 import {
   DRILL_BREAK_THROUGH_DEFAULT_MM, drillBreakThroughDefault, drillPickedHolesThrough,
@@ -187,6 +192,10 @@ type VpHandle = {
   // feature's WO-1845 source-facet ids; an edited part is renumbered).
   setHighlightedFacets?: (geoId: string, displayedFacetIds: number[] | null) => void
 }
+
+/** WO-2835: the operations whose travels between cuts use moves/ floorHop. */
+const FLOOR_HOP_OPERATION_TYPES: ReadonlySet<Operation['type']> = new Set(['adaptive_clearing_2d', 'pocket_2d', 'contour_2d'])
+
 /** The displayed-mesh triangle indices whose source-facet id is in `sourceIds`. */
 export function displayedFacetsOf(
   snapshot: { sourceFacetIds: ArrayLike<number> } | null,
@@ -604,6 +613,60 @@ function MoveProperties({ move }: { move: SelectedMove }) {
   )
 }
 
+// WO-2992: the project row at the top of the design tree. It is not a store
+// selection kind (src/store is out of this order's reach); the click records the
+// selection it happened over, and the notes show only while that selection is
+// unchanged, so every other row click still wins (ADR 0025).
+type ProjectRowViewState = Pick<ReturnType<typeof useCamStore.getState>, 'viewer' | 'project'>
+function selectionSignature(s: ProjectRowViewState, clampId: string | null): string {
+  const v = s.viewer
+  return [
+    s.project.id, v.mode, v.selectedGeometryId, v.selectedNestId, v.selectedStockId,
+    v.selectedLayerId, v.selectedLayerGeoId, v.selectedFolderId, v.selectedFolderKind,
+    v.selectedFolderSetupId, v.selectedMove ? 'move' : '', v.brepSelections.length,
+    s.project.activeSetupId, s.project.activeOperationId, clampId,
+  ].join('|')
+}
+const useProjectRowSelection = create<{ signature: string | null }>(() => ({ signature: null }))
+export function selectProjectRow(): void {
+  useProjectRowSelection.setState({
+    signature: selectionSignature(useCamStore.getState(), useClampUi.getState().selectedClampId),
+  })
+}
+
+export function clearProjectRow(): void {
+  if (useProjectRowSelection.getState().signature !== null) useProjectRowSelection.setState({ signature: null })
+}
+
+export function ProjectNotesProperties() {
+  useText('app-shell-settings-menus')
+  const name = useCamStore((s) => s.project.name)
+  const notes = useCamStore((s) => s.project.notes ?? '')
+  const updateProjectMeta = useCamStore((s) => s.updateProjectMeta)
+  return (
+    <>
+      <div className="props-group">
+        <div className="props-label">{shellText('ProjectNotes.project')}</div>
+        <div className="props-value" data-testid="project-notes-name">{name}</div>
+      </div>
+      <div className="props-group" style={{ alignItems: 'flex-start' }}>
+        <div className="props-label">{shellText('ProjectNotes.notes')}</div>
+        <div className="props-value">
+          <textarea
+            className="props-text-input"
+            data-testid="project-notes"
+            aria-label={shellText('ProjectNotes.notes')}
+            placeholder={shellText('ProjectNotes.placeholder')}
+            rows={8}
+            value={notes}
+            onChange={(e) => updateProjectMeta({ notes: e.currentTarget.value })}
+          />
+        </div>
+      </div>
+    </>
+  )
+}
+
 export function PropertiesPanel() {
   useText('cam-operations-new-operation')
   // UI-PERF-PAIR: keep SelectionKey-stable until a field the panel cascade
@@ -635,6 +698,14 @@ export function PropertiesPanel() {
   const selectedClampId = useClampUi((s) => s.selectedClampId)
   const workholding = useCamStore((s) => s.project.workholding)
   const selectedClamp = clampInstance(workholding, selectedClampId)
+  // WO-2992: project-row notes show while the selection is still the one the row was clicked over.
+  const projectRowSignature = useProjectRowSelection((s) => s.signature)
+  const liveSignature = useCamStore((s) => selectionSignature(s, selectedClampId))
+  const projectRowSelected = projectRowSignature !== null && projectRowSignature === liveSignature
+  // Once the selection moves on, forget the click so returning to the old selection does not bring the notes back.
+  useEffect(() => {
+    if (projectRowSignature !== null && projectRowSignature !== liveSignature) clearProjectRow()
+  }, [projectRowSignature, liveSignature])
   // WO-2198: a vise placed again from one definition is selected the same way.
   const selectedVise = selectedClamp ? null : viseMembershipOfInstance(workholding, selectedClampId)
 
@@ -718,6 +789,8 @@ export function PropertiesPanel() {
             view). Rendered first so it dominates the cascade. */}
         {selectedMove ? (
           <MoveProperties move={selectedMove} />
+        ) : projectRowSelected ? (
+          <ProjectNotesProperties />
         ) : (
         <>
         {/* B-rep face/edge picks (Stage 2) — shown on top of the normal cascade */}
@@ -2835,6 +2908,10 @@ const TOOL_ELIGIBILITY_FOR_OP_TYPE: Record<Operation['type'], ((t: Tool) => bool
   engrave: null,
   vcarve: hasTipAngle,
   chamfer: hasTipAngle,
+  // WO-3001: the pattern footprint is measured for ball, bull, flat and pointed
+  // cutters (pattern2d/envelope.ts footprintHalfWidth), so a V-bit or any other
+  // tool with a tip angle is offered beside the milling group.
+  pattern: (t) => isMillingTool(t) || hasTipAngle(t),
   parallel_3d: isMillingTool,
   waterline_3d: isMillingTool,
   adaptive_3d: isMillingTool,
@@ -4075,6 +4152,11 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
           ? buildChamferSmartHeightAuthority(heightIntent)
         : op.type === 'engrave' && engraveSmartPanelState?.kind === 'smart_v2' && heightIntent
           ? buildEngraveSmartHeightAuthority(heightIntent)
+        : op.type === 'pattern' && smartHeightIntent && ownerSetup && heightIntent
+          ? {
+              kind: 'smart_v2' as const,
+              intent: rebuildPatternSmartHeightIntent({ intent: smartHeightIntent, setupId: ownerSetup.id, safetyIntent: heightIntent }),
+            }
         : op.smartHeight
     updateOperation(activeSetupId, op.id, {
       heights: { ...heights, heightIntent },
@@ -4164,6 +4246,13 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
     if (!activeSetupId) return
     updateOperation(activeSetupId, op.id, {
       linking: { ...pocketLinking, ...patch },
+      ...STALE,
+    })
+  }
+  const commitFloorHop = (floorHopMm: number) => {
+    if (!activeSetupId) return
+    updateOperation(activeSetupId, op.id, {
+      linking: { ...pocketLinking, floorHopMm: Math.max(0, floorHopMm) },
       ...STALE,
     })
   }
@@ -4297,13 +4386,14 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
       ...STALE,
     })
   }
-  // Strategy = the modal's four pattern+direction buttons collapsed into one
+  // Strategy = the modal's pattern+direction buttons collapsed into one
   // select. Derivation mirrors the compute's bothWays rule (face2d/index.ts:
   // zigzag -> bidirectional, one_way -> single direction, legacy 'linear'
   // follows direction) so the shown value matches the cut that would be made.
-  type FaceStrategy = 'zigzag' | 'one_way_climb' | 'one_way_conventional' | 'offset'
+  type FaceStrategy = 'zigzag' | 'one_way_climb' | 'one_way_conventional' | 'offset' | 'spiral'
   const faceStrategy: FaceStrategy =
-    faceParams.pattern === 'offset' ? 'offset'
+    faceParams.pattern === 'spiral' ? 'spiral'
+    : faceParams.pattern === 'offset' ? 'offset'
     : faceParams.pattern === 'zigzag'
       || (faceParams.pattern === 'linear' && faceParams.direction === 'both_ways') ? 'zigzag'
     : faceParams.direction === 'conventional' ? 'one_way_conventional'
@@ -4314,7 +4404,8 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
       strategy === 'zigzag' ? { pattern: 'zigzag', direction: 'both_ways' }
       : strategy === 'one_way_climb' ? { pattern: 'one_way', direction: 'climb' }
       : strategy === 'one_way_conventional' ? { pattern: 'one_way', direction: 'conventional' }
-      : { pattern: 'offset', direction: 'climb' },
+      : strategy === 'offset' ? { pattern: 'offset', direction: 'climb' }
+      : { pattern: 'spiral', direction: 'climb' },
     )
   }
   const commitContourTabsEnabled = (enabled: boolean) => {
@@ -5955,6 +6046,15 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                 { min: -9999, step: 0.1, get title() { return tx('PropertiesPanel.Offset_from_the_reference_plane_mm_Positive_above_negative') } })}
             </>
           )}
+          {/* WO-2835: one floor-hop setting, saved in the operation's linking, on every
+              operation whose travels between cuts hop over a cleared floor. No maximum:
+              the engine caps every hop at the clearance height itself. */}
+          {FLOOR_HOP_OPERATION_TYPES.has(op.type) && (
+            <div data-testid="props-floor-hop">
+              {numRow(tx('PropertiesPanel.Floor_hop'), resolveFloorHopMm(op.linking), commitFloorHop,
+                { min: 0, step: 0.1, get title() { return tx('PropertiesPanel.Lift_over_cleared_floors_on_travel_moves') } })}
+            </div>
+          )}
         </CollapsibleGroup>
 
         {op.type === 'pocket_2d' && (
@@ -6929,6 +7029,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                     <select
                       className="props-number-input"
                       data-testid="props-face-strategy"
+                      aria-label={tx('PropertiesPanel.Strategy')}
                       value={faceStrategy}
                       onChange={(event) => commitFaceStrategy(
                         event.target.value as FaceStrategy,
@@ -6939,6 +7040,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                       <option value="one_way_climb">{tx('PropertiesPanel.One_way_climb')}</option>
                       <option value="one_way_conventional">{tx('PropertiesPanel.One_way_conventional')}</option>
                       <option value="offset">{tx('PropertiesPanel.Offset')}</option>
+                      <option value="spiral">{tx('PropertiesPanel.Inward_spiral')}</option>
                     </select>
                   </div>
                 </div>
@@ -7255,6 +7357,32 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                       <span>{unitLabel(displayUnits)}</span>
                     </div>
                   </div>
+                  {/* WO-3021: which modeled chamfer the values came from, and the
+                      one line owed when the bit's angle is not the chamfer's. */}
+                  {(() => {
+                    const record = modeledChamferRecordOf(op.params)
+                    const stretch = chamferStretchOf(op.params)
+                    if (!record && !stretch) return null
+                    const mm = (v: number) => `${fmtDim(v, displayUnits)} ${unitLabel(displayUnits)}`
+                    const deg = (d: number) => String(Number(d.toFixed(1)))
+                    const note = record ? chamferAngleNote(record, tool?.angleFromAxisDeg) : null
+                    return (
+                      <div className="props-group" data-testid="props-chamfer-from-model" style={{ flexDirection: 'column', alignItems: 'stretch', minWidth: 0 }}>
+                        {record && <p className="op-hint" style={{ margin: 0 }}>{tx('PropertiesPanel.Modeled_chamfer_source', {
+                          p1: mm(record.depthMm), p2: mm(record.topZ), p3: deg(record.angleFromAxisDeg * 2),
+                        })}</p>}
+                        {/* WO-3021: a chamfer modeled along part of a loop cuts only that stretch. */}
+                        {stretch && <p className="op-hint" style={{ margin: 0 }} data-testid="props-chamfer-stretch">{tx('PropertiesPanel.Modeled_chamfer_stretch', {
+                          p1: mm(stretch.stretchMm), p2: stretch.loops,
+                        })}</p>}
+                        {note && (
+                          <p className="op-hint op-hint-warn" style={{ margin: 0 }} data-testid="props-chamfer-angle-note">{tx('PropertiesPanel.Modeled_chamfer_angle_note', {
+                            p1: deg(note.bitIncludedDeg), p2: deg(note.chamferIncludedDeg), p3: mm(note.depthMm), p4: mm(note.cutWidthMm), p5: mm(note.modeledWidthMm),
+                          })}</p>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </>
               )}
               {op.type === 'engrave' && engraveParams.mode === 'trace' && engraveParams.side === 'center' && (

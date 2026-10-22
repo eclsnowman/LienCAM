@@ -55,6 +55,7 @@ import type { Tool, ToolpathMove } from '../../types'
 import type { StockState } from './stockState'
 import { highestMaterialOver } from './smartHeights/earlierMaterial'
 import { effectiveMoveMotion, effectiveMoveRole, isStockCuttingRole } from './stockCuttingRoles'
+import { floorHop } from './moves'
 
 /**
  * How far BELOW the tool a column's material top may read and still count as
@@ -75,6 +76,10 @@ export interface RestAir2dInput {
   readonly remaining: StockState
   /** The operation's retract plane (world Z) - where a skipped pass lifts to. */
   readonly retractZ: number
+  /** WO-2835: the operation's floor-hop height (mm). An air link at one constant depth runs
+   *  as the blended hop (moves/ floorHop) instead of a rapid along the floor. 0 or absent:
+   *  the single rapid at depth it always was. */
+  readonly floorHopMm?: number
 }
 
 export interface RestAir2dResult {
@@ -313,7 +318,18 @@ export function skipAirOnlyPasses(input: RestAir2dInput): RestAir2dResult {
     }
     const move = moves[index]
     if (airLinkAt(index)) {
-      out.push({ type: 'rapid', x: move.x, y: move.y, z: move.z, role: 'rapid' })
+      // WO-2835: a link at one depth whose start is where the tool stands hops over the
+      // floor. The line is proven air at that depth, and the remaining stock is a height
+      // field, so everything above the line is air too.
+      const from = out[out.length - 1]
+      const prior = moves[index - 1]
+      const hop = input.floorHopMm ?? 0
+      if (hop > 0 && from && from.x === prior.x && from.y === prior.y && from.z === prior.z
+        && Math.abs(from.z - move.z) <= 1e-9) {
+        floorHop(out, from, move, move.z, Math.min(hop, Math.max(0, input.retractZ - move.z)), true)
+      } else {
+        out.push({ type: 'rapid', x: move.x, y: move.y, z: move.z, role: 'rapid' })
+      }
       rapidedLinks++
     } else {
       out.push(move)
@@ -340,10 +356,12 @@ export function applyRestAir2d(
   /** The engine's operator-console channel (WO-1540), when it has one. A skip
    *  the operator cannot see is a toolpath that silently got shorter. */
   notify?: (message: string) => void,
+  /** WO-2835: the operation's floor-hop height (moves/ resolveFloorHopMm). */
+  floorHopMm = 0,
 ): ToolpathMove[] {
   if (!remaining) return moves
   try {
-    const result = skipAirOnlyPasses({ moves, tool, remaining, retractZ })
+    const result = skipAirOnlyPasses({ moves, tool, remaining, retractZ, floorHopMm })
     if (result.skippedPasses > 0) {
       const which = result.skippedPasses === result.passes
         ? `every pass (${result.passes}) had`

@@ -110,23 +110,25 @@ describe('WO-2445 production-built knob base vise', () => {
   })
 
   it('keeps every cut, lead and link above the jaw keep-out and retains the WO-2548 paths', () => {
-    // The same kit generator replayed the current source in an evidence-only
-    // copy; its Save/Open must preserve every move, not the pre-rebuild paths.
-    const report = JSON.parse(readFileSync(path.join(currentEvidence, 'verification.json'), 'utf8'))
-    const origin = JSON.parse(readFileSync(path.join(root, 'src/tests/evidence/WO-2644/knob-generator-origin.json'), 'utf8'))
-    expect(origin.input).toBe('examples/06-knob-handwheel/knob-handwheel.camproject')
-    expect(origin.inputSha256).toBe(createHash('sha256').update(raw.replaceAll('\r\n', '\n')).digest('hex'))
+    // WO-3059 re-pin: WO-2926 (e5fcb6f384, 10-17) replaced the shipped knob's
+    // toolpaths with its validated set, so WO-2644's replay receipt
+    // (knob-generator-origin.json, knob-holding/verification.json) names the
+    // pre-WO-2926 file. The shipped file is bound to WO-2926's own receipt
+    // instead: the whole-file hash pins every move byte for byte, and each
+    // operation carries the receipt's status and move count.
+    const receipt = JSON.parse(readFileSync(path.join(root, 'src/tests/evidence/WO-2926/knob-snapshot.json'), 'utf8'))
+    expect(receipt.source).toBe('examples/06-knob-handwheel/knob-handwheel.camproject')
+    expect(receipt.uncompressedSha256).toBe(createHash('sha256').update(raw.replaceAll('\r\n', '\n')).digest('hex'))
     const observed = setup.operations.map(op => {
       expect(op.toolpathMoves!.length).toBeGreaterThan(0)
       for (const move of op.toolpathMoves!) {
         expect(move.z).toBeGreaterThan(3)
         expect(move.z).toBeGreaterThanOrEqual(op.resolvedHeights!.machine.bottom - 1e-6)
       }
-      return { type: op.type, moves: op.toolpathMoves!.length,
-        sha256: createHash('sha256').update(JSON.stringify(op.toolpathMoves)).digest('hex') }
+      return { name: op.name, status: op.status, moves: op.toolpathMoves!.length }
     })
-    expect(observed).toEqual(report.beforePaths)
-    expect(observed).toEqual(report.afterPaths)
+    expect(observed).toEqual(receipt.appliedOperations.map(
+      ({ name, status, moves }: { name: string; status: string; moves: number }) => ({ name, status, moves })))
   })
 
   it('downloads a production job sheet stating vise, grip and second-setup base removal', () => {

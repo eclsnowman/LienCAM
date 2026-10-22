@@ -358,15 +358,17 @@ describe('canonical stock work-offset store action', () => {
     expect(next.setups.map((setup) => setup.wcs.label)).toEqual(['G57', 'G57'])
   })
 
-  it('refuses duplicate, invalid, and missing assignments', () => {
+  // WO-2999 (operator ruling 10-20 "share G54, separate files only"): a shared offset is
+  // allowed here; only Combined output refuses it, in the post.
+  it('shares an occupied offset and refuses invalid and missing assignments', () => {
     const a = setup('a', 54, 'stock-a')
     useCamStore.setState({
       project: project([a], [], [stock('stock-a', 54), stock('stock-b', 55)]),
       projectHistory: [],
     })
 
-    expect(() => useCamStore.getState().setStockFixtureOffset('stock-b', 54))
-      .toThrow(/already used by stock/)
+    useCamStore.getState().setStockFixtureOffset('stock-b', 54)
+    expect(useCamStore.getState().project.stocks?.map((s) => s.fixtureOffset)).toEqual([54, 54])
     expect(() => useCamStore.getState().setStockFixtureOffset('ghost', 56))
       .toThrow(/no PhysicalStock/)
     expect(() =>

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Build committed public bytes, never the private working tree or its shared install.
+import { isMain } from '../lib/is-main.mjs';
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -255,6 +256,7 @@ export async function buildFromExport({ source = 'HEAD', version = RELEASE_VERSI
     record.buildCommit = buildCommitLabel(exported.commit)
     run(tree, out, 'build', [npm, 'run', 'build', '--', '--config', isolation.viteConfig],
       { ...isolation.env, ...releaseBuildEnv(exported.commit) })
+    run(tree, out, 'lint', [npm, 'run', 'lint'], isolation.env)
     record.examples = shippedExamples(tree)
     run(tree, out, 'package', [join(tree, 'node_modules/electron-builder/cli.js'), '--win', 'nsis', 'portable', '--x64', '-c.forceCodeSigning=false'], isolation.env)
     const resources = join(tree, 'release/win-unpacked/resources')
@@ -281,7 +283,7 @@ export async function buildFromExport({ source = 'HEAD', version = RELEASE_VERSI
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const options = {}
   const args = process.argv.slice(2)
   for (let i = 0; i < args.length; i += 2) {

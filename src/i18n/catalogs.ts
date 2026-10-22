@@ -72,6 +72,21 @@ export async function loadCatalog(language: string): Promise<Record<string, Cata
   return Object.fromEntries(entries)
 }
 
+/** WO-2329: languages whose words are machine translation, with the note the
+ *  picker and Help show for them - written in that language, because the
+ *  person choosing it reads it. Corrections go through Help > Report a problem;
+ *  the terms they are checked against are docs/i18n/GLOSSARY.md. */
+const MACHINE_TRANSLATION_NOTES: Readonly<Record<string, string>> = Object.freeze({
+  de: 'Maschinell übersetzt - Korrekturen willkommen: Hilfe > Problem melden.',
+  es: 'Traducción automática - Correcciones bienvenidas: Ayuda > Informar de un problema.',
+  fr: 'Traduction automatique - Corrections bienvenues : Aide > Signaler un problème.',
+})
+
+/** The machine-translation note for a language, or null if people wrote it. */
+export function machineTranslationNote(code: string): string | null {
+  return isAvailableLanguage(code) ? MACHINE_TRANSLATION_NOTES[code] ?? null : null
+}
+
 /** A language's own name for itself ("English", "Deutsch"), for the picker. */
 export function languageName(code: string): string {
   try {

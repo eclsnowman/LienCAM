@@ -7,6 +7,8 @@ const { existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('
 const { appendFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } = require('node:fs/promises')
 const net = require('node:net')
 const path = require('node:path')
+const { createAgentChannel } = require('./agentChannel.cjs')
+const { createMcpServer } = require('./mcp/server.cjs')
 
 const APP_SCHEME = 'liencam'
 const APP_HOST = 'app'
@@ -37,6 +39,32 @@ protocol.registerSchemesAsPrivileged([{
 }])
 
 let mainWindow = null
+// WO-2995: request channel to the page's model registry. Order D (the MCP server)
+// is its caller; nothing listens on a port here.
+const agentChannel = createAgentChannel({ ipcMain, getWindow: () => mainWindow })
+// In-process handle only (no port, no IPC channel): Order D's server and the
+// WO-2995 Playwright journey (app.evaluate) call it; the page cannot reach it.
+app.agentRequest = agentChannel.request
+// WO-3010: the MCP server (WO-2951 Order D). Off until the page's Settings switch
+// turns it on; it answers only through agentChannel.request above.
+let mcpServer = null
+function mcpState() {
+  return mcpServer === null ? Object.freeze({ running: false, port: null, clientName: null }) : mcpServer.state()
+}
+function reportMcpState(state) {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.webContents.send('liencam:mcp-state-changed', state)
+}
+function mcpServerInstance() {
+  if (mcpServer === null) {
+    mcpServer = createMcpServer({
+      request: agentChannel.request,
+      endpointDir: path.join(app.getPath('userData'), 'mcp'),
+      version: app.getVersion(),
+      onState: reportMcpState,
+    })
+  }
+  return mcpServer
+}
 let pendantProcess = null
 let machineBridgeProcess = null
 let machineBridgeLastExit = null
@@ -50,7 +78,24 @@ let machineBridgeStableTimer = null
 let machineBridgeLaunchSettings = null
 let machineBridgeBuiltExecutable = null
 let machineBridgeBuildPromise = null
+let machineBridgeWinePrefix = null
+let machineBridgeLinuxNative = false
+let machineBridgeWineCleanup = null
+let machineBridgeWineCleanupFailed = null
+const machineBridgeWineRuns = new WeakMap()
 let machineBridgeMissingInstallReportedFor = null
+let machineBridgeFirmwareUpdate = null
+// WO-2847 fix round 2: the firmware-update lines the bridge could not say to a
+// live session, newest last. They belong to this app run, not to one child, so
+// a failed startup update (the child exits 11 before it listens) and the
+// operator's later Connect (which clears lastExit) do not lose them.
+const machineBridgeConsoleLines = []
+const machineBridgeConsoleRun = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+let machineBridgeConsoleSeq = 0
+// WO-2847 fix round 3: the outcome event a child handed over last, so its
+// exit 11 names the event that already carries the outcome (lastExit
+// consoleLineId) and Connect does not say the outcome a second time.
+let machineBridgeOutcomeEvent = null
 // WO-1259: only the `missing` verdict is settled at launch (one existsSync).
 // The real verdict needs the running bundle's own build provenance, so it is
 // computed when the renderer asks for it - off the cold-start path entirely.
@@ -70,6 +115,27 @@ const MACHINE_BRIDGE_STABLE_MS = 60_000
 const MACHINE_BRIDGE_STOP_TIMEOUT_MS = 5_000
 const MACHINE_BRIDGE_HARD_STOP_TIMEOUT_MS = 1_000
 const MACHINE_BRIDGE_SOCKET_INTERVAL_MS = 250
+// WO-2847 (ADR-0058 V6): UC100.dll can start a controller firmware update by
+// itself inside Open. The bridge waits it out the way UCCNC does and says so on
+// these line prefixes (Machine.cs ControllerFirmwareUpdateWait). While one runs
+// this process does not restart the bridge, and an update that ended in an
+// error exits with this code, which is not respawned: a respawn calls Open
+// again, the retry loop that interrupted updates before.
+const MACHINE_BRIDGE_FIRMWARE_UPDATE_IN_PROGRESS = '[bridge] CONTROLLER FIRMWARE UPDATE IN PROGRESS'
+const MACHINE_BRIDGE_FIRMWARE_UPDATE_FINISHED = '[bridge] CONTROLLER FIRMWARE UPDATE FINISHED'
+const MACHINE_BRIDGE_FIRMWARE_UPDATE_ENDED = '[bridge] CONTROLLER FIRMWARE UPDATE ENDED'
+const MACHINE_BRIDGE_FIRMWARE_UPDATE_ENDED_EXIT_CODE = 11
+// WO-2845 (ADR-0058 D4): the bridge found a UC100.dll other than the one the
+// board last connected with, said so in one line and did not open the board
+// (Machine.cs DllPin). Not respawned; the operator's next Connect press starts
+// it with the flag below, which opens with that DLL. A respawn never passes it.
+const MACHINE_BRIDGE_DLL_CHANGED_EXIT_CODE = 12
+const MACHINE_BRIDGE_CONNECT_WITH_CHANGED_DLL = '--connect-with-changed-dll'
+const MACHINE_BRIDGE_DLL_PINS_FILE = 'liencam-bridge.dll-pins.json'
+// Machine.cs ReportFirmwareUpdate: with LIENCAM_BRIDGE_HOST_CONSOLE=1 a line no
+// session heard comes as `<prefix><severity> <text>`, for the Control console.
+const MACHINE_BRIDGE_HOST_CONSOLE_PREFIX = '[bridge] FOR THE CONTROL CONSOLE '
+const MACHINE_BRIDGE_CONSOLE_LINES_KEPT = 20
 // The bridge may spend up to 10 seconds waiting for a released controller to
 // enumerate before it opens the board, clears stale motion, reads every axis,
 // applies the cached definition, opens the VFD, and finally starts listening.
@@ -446,7 +512,40 @@ function machineBridgeSearchRoot() {
   return process.env.LIENCAM_UCCNC_SEARCH_ROOT || 'C:\\'
 }
 
+// WO-2894: route A uses the operator's existing prefix and DLL. Never discover
+// another prefix or choose the newest install: that can change the DLL/firmware
+// pairing (ADR-0058). The prebuilt bridge needs no developer wrapper sources.
+function machineBridgeWineInstallPath(value, prefix) {
+  if (/^[cC]:[\\/]/.test(value)) return path.join(prefix, 'drive_c', ...value.slice(3).split(/[\\/]/))
+  if (/^[zZ]:[\\/]/.test(value)) return '/' + value.slice(3).replaceAll('\\', '/')
+  return path.isAbsolute(value) ? value : null
+}
+
+function machineBridgeWineDllExists(root) {
+  return ['API/DLL/UC100.dll', 'UC100.dll', 'DLL/UC100.dll']
+    .some((relative) => existsSync(path.join(root, relative)))
+}
+
 async function findMachineBridgeInstall(settings) {
+  if (process.platform === 'linux') {
+    const prefix = process.env.WINEPREFIX?.trim()
+    const configured = configuredMachineBridgeInstallRoot(settings)
+    if (configured) {
+      const root = machineBridgeWineInstallPath(configured, prefix)
+      return { installRoot: root && machineBridgeWineDllExists(root) ? root : null, lookedFor: configured }
+    }
+    const searchRoot = path.join(prefix, 'drive_c')
+    try {
+      const candidates = (await readdir(searchRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && /^UCCNC/i.test(entry.name))
+        .map((entry) => path.join(searchRoot, entry.name))
+        .filter(machineBridgeWineDllExists)
+      return { installRoot: candidates.length === 1 ? candidates[0] : null,
+        lookedFor: searchRoot, multiple: candidates.length > 1 }
+    } catch {
+      return { installRoot: null, lookedFor: searchRoot }
+    }
+  }
   const configured = configuredMachineBridgeInstallRoot(settings)
   if (configured) {
     return {
@@ -462,10 +561,38 @@ async function findMachineBridgeInstall(settings) {
       .filter((entry) => entry.isDirectory() && /^UCCNC/i.test(entry.name))
       .map((entry) => path.join(searchRoot, entry.name))
       .filter((candidate) => existsSync(machineBridgeWrapperPath(candidate)))
-      .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
-    return { installRoot: candidates[0] ?? null, lookedFor }
+    return { ...pickMachineBridgeInstall(candidates, await machineBridgePinnedInstallRoots()), lookedFor }
   } catch {
     return { installRoot: null, lookedFor }
+  }
+}
+
+// WO-2845 (ADR-0058 D4): NEVER THE NEWEST INSTALL. Another UCCNC install is
+// another UC100.dll, which can update the controller's firmware inside Open.
+// One install: that one. Several, none chosen: the one the board last
+// connected with (the bridge's liencam-bridge.dll-pins.json), else none - the
+// operator chooses on the Machine page, as the bridge's own "NOT guessing
+// between them" rule says.
+function pickMachineBridgeInstall(candidates, pinnedInstallRoots) {
+  if (candidates.length <= 1) return { installRoot: candidates[0] ?? null }
+  const key = (value) => path.resolve(value).toLowerCase()
+  const pinned = new Set(pinnedInstallRoots.map(key))
+  const recorded = candidates.filter((candidate) => pinned.has(key(candidate)))
+  if (recorded.length === 1) return { installRoot: recorded[0] }
+  return { installRoot: null, multiple: true, candidates: [...candidates] }
+}
+
+async function machineBridgePinnedInstallRoots() {
+  const dataDirectory = machineBridgeDataDirectory()
+  if (dataDirectory === null) return []
+  try {
+    const record = JSON.parse(await readFile(path.join(dataDirectory, MACHINE_BRIDGE_DLL_PINS_FILE), 'utf8'))
+    if (record?.format !== 'liencam-dll-pins' || !Array.isArray(record.boards)) return []
+    return record.boards
+      .map((board) => (typeof board?.installRoot === 'string' ? board.installRoot.trim() : ''))
+      .filter((root) => root !== '')
+  } catch {
+    return []
   }
 }
 
@@ -735,6 +862,7 @@ function firstMachineBridgeBuildError(output, error) {
 }
 
 function configuredMachineBridgeExecutable(settings) {
+  if (process.platform === 'linux') return null // prepare and validate the Wine route first
   if (!process.env.LIENCAM_BRIDGE_EXECUTABLE) return null
   machineBridgeBuiltExecutable = process.env.LIENCAM_BRIDGE_EXECUTABLE
   machineBridgeSetup = {
@@ -744,12 +872,129 @@ function configuredMachineBridgeExecutable(settings) {
   return settings ?? {}
 }
 
+function failMachineBridgeWine(error, lookedFor = null) {
+  machineBridgeBuiltExecutable = null
+  machineBridgeWinePrefix = null
+  machineBridgeLinuxNative = false
+  machineBridgeSetup = { state: 'failed', installRoot: null, lookedFor, logPath: null, error }
+  console.error(`[LienCAM] ${error}`)
+  return null
+}
+
+async function prepareMachineBridgeWine(settings) {
+  machineBridgeLinuxNative = false
+  if (process.arch !== 'x64') return failMachineBridgeWine('The Wine UCCNC bridge requires x86-64 Linux; this route cannot run on ARM.')
+  const prefix = process.env.WINEPREFIX?.trim()
+  if (!prefix || !path.isAbsolute(prefix) || !existsSync(path.join(prefix, 'drive_c'))) {
+    return failMachineBridgeWine('Set WINEPREFIX to an existing absolute path for the UCCNC Wine prefix.')
+  }
+  const source = process.env.LIENCAM_BRIDGE_EXECUTABLE
+    || path.join(machineBridgeSourceDirectory(), 'bin', MACHINE_BRIDGE_EXECUTABLE)
+  if (!existsSync(source)) return failMachineBridgeWine(`The prebuilt Wine bridge is missing at ${source}.`, source)
+  const found = await findMachineBridgeInstall(settings)
+  if (!found.installRoot) return failMachineBridgeWine(found.multiple
+    ? 'Several UCCNC installs exist in the Wine prefix; choose the install folder on the Machine page.'
+    : `UCCNC UC100.dll was not found at ${found.lookedFor}; choose its Linux install folder on the Machine page.`, found.lookedFor)
+  try {
+    let executable = source
+    if (!process.env.LIENCAM_BRIDGE_EXECUTABLE) {
+      const destination = machineBridgeDataDirectory()
+      executable = path.join(destination, MACHINE_BRIDGE_EXECUTABLE)
+      const bytes = await readFile(source)
+      // An AppImage's resources are read-only. Bridge.cs copies the operator's
+      // DLLs beside its exe and writes its runtime records there, so stage our
+      // exe (and board tables) in app data, never in the mounted package.
+      const unchanged = existsSync(executable) && bytes.equals(await readFile(executable))
+      if (machineBridgeProcess && !unchanged && !await stopMachineBridge()) return null
+      await mkdir(destination, { recursive: true })
+      if (!unchanged) await writeFile(executable, bytes)
+      const boards = path.join(machineBridgeSourceDirectory(), MACHINE_BRIDGE_BOARDS_DIRECTORY)
+      if (existsSync(boards)) await cp(boards, path.join(destination, MACHINE_BRIDGE_BOARDS_DIRECTORY), { recursive: true })
+    }
+    machineBridgeBuiltExecutable = executable
+    machineBridgeWinePrefix = prefix
+    machineBridgeSetup = { state: 'ready', installRoot: found.installRoot, lookedFor: found.lookedFor, logPath: null, error: null }
+    return { ...(settings ?? {}), installRoot: found.installRoot }
+  } catch (error) {
+    return failMachineBridgeWine(`The Wine bridge could not be prepared: ${error.message}`, source)
+  }
+}
+
+function machineBridgeNativeSource() {
+  const override = process.env.LIENCAM_BRIDGE_EXECUTABLE
+  if (override) return /\.exe$/i.test(override) ? null : override
+  // Route B is opt-in until its real-board check (OWED-CHECKS O61) passes;
+  // a bundled native runtime alone never displaces the Wine route.
+  if (process.env.LIENCAM_BRIDGE_NATIVE !== '1') return null
+  if (!['x64', 'arm64'].includes(process.arch)) return null
+  const executable = path.join(machineBridgeSourceDirectory(), 'native', `linux-${process.arch}`, 'liencam-bridge')
+  return existsSync(executable) ? executable : null
+}
+
+async function machineBridgeNativeBundleMatches(source, destination) {
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name)
+    const to = path.join(destination, entry.name)
+    if (entry.isDirectory()) {
+      if (!await machineBridgeNativeBundleMatches(from, to)) return false
+    } else if (!existsSync(to) || !(await readFile(from)).equals(await readFile(to))) return false
+  }
+  return true
+}
+
+async function prepareMachineBridgeNative(settings, source) {
+  machineBridgeWinePrefix = null
+  machineBridgeLinuxNative = false
+  const installRoot = configuredMachineBridgeInstallRoot(settings)
+  // Let Bridge.cs validate a selected .pro. A saved machine definition can
+  // configure it without Profiles, even if an old installRoot is still saved.
+  try {
+    if (!existsSync(source)) throw new Error(`native executable is missing at ${source}`)
+    let executable = source
+    if (!process.env.LIENCAM_BRIDGE_EXECUTABLE) {
+      // Separate runtime records from route A; it must never load a cached
+      // vendor DLL, and the app's mounted resources cannot be written to.
+      const nativeDirectory = path.join(path.dirname(machineBridgeDataDirectory()), 'machine-bridge-native', `linux-${process.arch}`)
+      executable = path.join(nativeDirectory, 'liencam-bridge')
+      const unchanged = await machineBridgeNativeBundleMatches(path.dirname(source), nativeDirectory)
+      if (!unchanged) {
+        if (machineBridgeProcess && !await stopMachineBridge()) return null
+        await mkdir(nativeDirectory, { recursive: true })
+        await cp(path.dirname(source), nativeDirectory, { recursive: true })
+      }
+    }
+    machineBridgeBuiltExecutable = executable
+    machineBridgeLinuxNative = true
+    machineBridgeSetup = { state: 'ready', installRoot: installRoot || null, lookedFor: source, logPath: null, error: null }
+    return settings ?? {}
+  } catch (error) {
+    return failMachineBridgeWine(`The native bridge could not be prepared: ${error.message}`, source)
+  }
+}
+
 async function buildMachineBridge(settings, { recoverArtifact = false } = {}) {
+  if (process.platform === 'linux') {
+    const native = machineBridgeNativeSource()
+    return native ? prepareMachineBridgeNative(settings, native) : prepareMachineBridgeWine(settings)
+  }
   const configuredExecutable = configuredMachineBridgeExecutable(settings)
   if (configuredExecutable !== null) return configuredExecutable
   if (process.platform !== 'win32') return null
 
   const found = await findMachineBridgeInstall(settings)
+  if (found.installRoot === null && found.multiple) {
+    // WO-2845: several installs, none chosen and none on record for the board.
+    machineBridgeBuiltExecutable = null
+    const error = `Several UCCNC installs were found (${found.candidates.join(', ')}) and none is chosen. `
+      + 'LienCAM does not pick one for you, because a different UCCNC can update the controller\'s firmware. '
+      + 'Choose the UCCNC install folder on the Machine page.'
+    machineBridgeSetup = { state: 'failed', installRoot: null, lookedFor: found.lookedFor, logPath: null, error }
+    if (machineBridgeMissingInstallReportedFor !== error) {
+      machineBridgeMissingInstallReportedFor = error
+      console.warn(`[LienCAM] ${error}`)
+    }
+    return null
+  }
   if (found.installRoot === null) {
     machineBridgeBuiltExecutable = null
     machineBridgeSetup = {
@@ -918,7 +1163,7 @@ async function ensureMachineBridge(settings, options) {
 
 function machineBridgeSpec(settings = machineBridgeLaunchSettings) {
   const executable = process.env.LIENCAM_BRIDGE_EXECUTABLE || machineBridgeBuiltExecutable
-  if (!executable) return null
+  if (!executable || (process.platform === 'linux' && !machineBridgeWinePrefix && !machineBridgeLinuxNative)) return null
   // 2026-09-03: this defaulted to NO arguments, and that made the operator's machine
   // unusable. With no `--board`, Bridge.cs falls back to
   // liencam-bridge.config.json, whose board default is the DEMO board (-19).
@@ -955,11 +1200,22 @@ function machineBridgeSpec(settings = machineBridgeLaunchSettings) {
     }
     args = parsed
   }
+  if (process.platform === 'linux' && machineBridgeWinePrefix) {
+    // Keep relative profile names and explicit Wine drive paths intact. This
+    // also covers path-valued developer overrides without shell quoting.
+    for (let index = 0; index < args.length - 1; index += 1) {
+      if (['--install-root', '--profile', '--vfd'].includes(args[index]) && args[index + 1].startsWith('/')) {
+        args[index + 1] = 'Z:' + args[index + 1].replaceAll('/', '\\')
+      }
+    }
+    return { executable, args, winePrefix: machineBridgeWinePrefix }
+  }
   return { executable, args }
 }
 
 function sameMachineBridgeSpec(left, right) {
   return left?.executable === right?.executable
+    && left?.winePrefix === right?.winePrefix
     && JSON.stringify(left?.args ?? null) === JSON.stringify(right?.args ?? null)
 }
 
@@ -1029,10 +1285,73 @@ function settleMachineBridgeExit(child, lastExit, allowRespawn = true) {
   const wasRestartStart = machineBridgeRestartProcess === child
   if (wasCurrent) machineBridgeProcess = null
   if (wasIntentional) machineBridgeIntentionalProcess = null
+  if (machineBridgeFirmwareUpdate?.child === child) machineBridgeFirmwareUpdate = null
   clearMachineBridgeStableTimer()
+  const saidThenExited = lastExit?.code === MACHINE_BRIDGE_FIRMWARE_UPDATE_ENDED_EXIT_CODE
+    || lastExit?.code === MACHINE_BRIDGE_DLL_CHANGED_EXIT_CODE
+  // Only a firmware update's outcome is linked: bridgeHost.ts then points at
+  // "the firmware update line above". WO-2845's press quotes the bridge's own
+  // last line instead (Machine.cs DllPin.HostedExitLine).
+  if (lastExit?.code === MACHINE_BRIDGE_FIRMWARE_UPDATE_ENDED_EXIT_CODE && machineBridgeOutcomeEvent?.child === child) {
+    lastExit = { ...lastExit, consoleLineId: machineBridgeOutcomeEvent.id }
+  }
   machineBridgeLastExit = lastExit
   if (wasIntentional || wasRestartStart || !wasCurrent || !allowRespawn) return
+  if (saidThenExited) {
+    // WO-2847: the bridge has said in one line how the update ended. WO-2845:
+    // or that the DLL changed. The operator's Connect starts it again; this
+    // process does not.
+    clearMachineBridgeRespawnTimer()
+    machineBridgeRespawnGaveUp = true
+    return
+  }
   scheduleMachineBridgeRespawn()
+}
+
+/** WO-2847: true while the running bridge is waiting out a firmware update. */
+function machineBridgeUpdatingFirmware() {
+  const update = machineBridgeFirmwareUpdate
+  return update !== null
+    && machineBridgeProcess === update.child
+    && update.child.exitCode === null
+}
+
+function watchMachineBridgeFirmwareUpdate(child) {
+  const stream = child.stdout
+  if (!stream || typeof stream.on !== 'function') return
+  let pending = ''
+  stream.on('data', (chunk) => {
+    pending += String(chunk)
+    const lines = pending.split(/\r?\n/)
+    pending = lines.pop() ?? ''
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (line.startsWith(MACHINE_BRIDGE_HOST_CONSOLE_PREFIX)) {
+        const rest = line.slice(MACHINE_BRIDGE_HOST_CONSOLE_PREFIX.length)
+        const space = rest.indexOf(' ')
+        const severity = rest.slice(0, space)
+        const text = rest.slice(space + 1)
+        if (space < 1 || !['info', 'warn', 'error'].includes(severity)) continue
+        const id = `${machineBridgeConsoleRun}-${++machineBridgeConsoleSeq}`
+        const progress = text.startsWith(MACHINE_BRIDGE_FIRMWARE_UPDATE_IN_PROGRESS)
+        machineBridgeConsoleLines.push({ id, severity, text, progress })
+        if (machineBridgeConsoleLines.length > MACHINE_BRIDGE_CONSOLE_LINES_KEPT) machineBridgeConsoleLines.shift()
+        // Its human copy follows on the next line and is then skipped below.
+        if (progress) machineBridgeFirmwareUpdate = { child, since: Date.now(), line: text, eventId: id }
+        else machineBridgeOutcomeEvent = { child, id }
+        continue
+      }
+      if (line.startsWith(MACHINE_BRIDGE_FIRMWARE_UPDATE_IN_PROGRESS)) {
+        if (machineBridgeFirmwareUpdate?.child === child) continue
+        machineBridgeFirmwareUpdate = { child, since: Date.now(), line, eventId: null }
+        console.warn(`[LienCAM] ${line}`)
+      } else if (line.startsWith(MACHINE_BRIDGE_FIRMWARE_UPDATE_FINISHED)
+          || line.startsWith(MACHINE_BRIDGE_FIRMWARE_UPDATE_ENDED)) {
+        if (machineBridgeFirmwareUpdate?.child === child) machineBridgeFirmwareUpdate = null
+        console.warn(`[LienCAM] ${line}`)
+      }
+    }
+  })
 }
 
 function markMachineBridgeLaunchArtifactMissing(executable, route) {
@@ -1085,7 +1404,30 @@ function captureMachineBridgeLastLine(child) {
   return () => lastLine
 }
 
+// Cleanup is tied to the child's original prefix, never mutable settings. A
+// replacement must wait for both the kill request and wineserver's exit; -k
+// alone can return before the server releases the board and socket.
+function cleanupMachineBridgeWine(child) {
+  const run = machineBridgeWineRuns.get(child)
+  if (!run) return Promise.resolve(true)
+  if (run.cleanup) return run.cleanup
+  const command = (args) => new Promise((resolve, reject) => {
+    execFile('wineserver', args, { env: run.env, timeout: 5_000, windowsHide: true },
+      (error) => error ? reject(error) : resolve())
+  })
+  run.cleanup = command(['-k']).then(() => command(['-w'])).then(() => true).catch((error) => {
+    machineBridgeWineCleanupFailed = child
+    machineBridgeRespawnGaveUp = true
+    machineBridgeSetup = { ...machineBridgeSetup, state: 'failed', error: `Wine prefix cleanup failed: ${error.message}` }
+    console.error(`[LienCAM] ${machineBridgeSetup.error}`)
+    return false
+  }).finally(() => { machineBridgeWineCleanup = null })
+  machineBridgeWineCleanup = run.cleanup
+  return run.cleanup
+}
+
 function startMachineBridge(specOverride = null) {
+  if (process.platform === 'linux' && (machineBridgeWineCleanup || machineBridgeWineCleanupFailed)) return null
   if (machineBridgeProcess && machineBridgeProcess.exitCode === null) return machineBridgeProcess
   const spec = specOverride ?? machineBridgeSpec()
   if (!spec) return null
@@ -1097,8 +1439,10 @@ function startMachineBridge(specOverride = null) {
   machineBridgeLastExit = null
   let child
   try {
-    child = spawn(spec.executable, spec.args, {
-      env: process.env,
+    child = spawn(spec.winePrefix ? 'wine' : spec.executable, spec.winePrefix ? [spec.executable, ...spec.args] : spec.args, {
+      // WO-2847: this process carries the bridge's unsaid firmware-update
+      // lines to the Control console (machineBridgeStatus consoleLines).
+      env: { ...process.env, LIENCAM_BRIDGE_HOST_CONSOLE: '1', ...(spec.winePrefix ? { WINEPREFIX: spec.winePrefix } : {}) },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -1113,22 +1457,30 @@ function startMachineBridge(specOverride = null) {
     console.error(`[LienCAM] Machine connection launch failed: ${message}`)
     return null
   }
+  if (spec.winePrefix) machineBridgeWineRuns.set(child, { env: { ...process.env, WINEPREFIX: spec.winePrefix }, cleanup: null })
   const machineBridgeLastLine = captureMachineBridgeLastLine(child)
+  watchMachineBridgeFirmwareUpdate(child)
   machineBridgeProcess = child
   machineBridgeRespawnGaveUp = false
   let settled = false
   const settle = (lastExit, allowRespawn = true) => {
     if (settled) return
     settled = true
-    settleMachineBridgeExit(child, lastExit, allowRespawn)
+    if (spec.winePrefix) {
+      void cleanupMachineBridgeWine(child).then((clean) => settleMachineBridgeExit(child, lastExit, allowRespawn && clean))
+    } else settleMachineBridgeExit(child, lastExit, allowRespawn)
   }
   child.once('error', (error) => {
-    const executableMissing = error?.code === 'ENOENT'
+    const executableMissing = (!spec.winePrefix && error?.code === 'ENOENT')
       || (managedExecutable && !existsSync(spec.executable))
     if (executableMissing) markMachineBridgeLaunchArtifactMissing(spec.executable, 'spawn')
+    else if (spec.winePrefix) {
+      machineBridgeSetup = { ...machineBridgeSetup, state: 'failed', error: `The Wine bridge could not launch: ${error.message}` }
+      machineBridgeRespawnGaveUp = true
+    }
     settle(executableMissing
       ? machineBridgeLastExit
-      : { code: null, signal: null, error: error.message }, !executableMissing)
+      : { code: null, signal: null, error: error.message }, !executableMissing && !spec.winePrefix)
   })
   child.once('exit', (code, signal) => {
     const executableMissing = managedExecutable && !existsSync(spec.executable)
@@ -1164,16 +1516,31 @@ async function stopMachineBridge() {
   clearMachineBridgeStableTimer()
   const child = machineBridgeProcess
   machineBridgeProcess = null
-  if (!child) return true
+  if (!child) {
+    if (machineBridgeWineCleanup) return machineBridgeWineCleanup
+    if (!machineBridgeWineCleanupFailed) return true
+    // Only a deliberate stop/reconnect retries a failed cleanup. Automatic
+    // respawn stays stopped; retry the original prefix, never the new settings.
+    const failedChild = machineBridgeWineCleanupFailed
+    machineBridgeWineRuns.get(failedChild).cleanup = null
+    machineBridgeWineCleanupFailed = null
+    return cleanupMachineBridgeWine(failedChild)
+  }
   machineBridgeIntentionalProcess = child
   const exited = waitForMachineBridgeExit(child, MACHINE_BRIDGE_STOP_TIMEOUT_MS)
   stopChild(child)
-  if (await exited) return true
+  if (await exited) return cleanupMachineBridgeWine(child)
 
   const hardExit = waitForMachineBridgeExit(child, MACHINE_BRIDGE_HARD_STOP_TIMEOUT_MS)
   try { child.kill('SIGKILL') } catch {}
-  if (await hardExit) return true
+  if (await hardExit) return cleanupMachineBridgeWine(child)
 
+  // Wine's loader and wineserver are separate processes. Even if the loader
+  // ignores the kill, release its server before reporting that stop failed.
+  if (machineBridgeWineRuns.has(child)) {
+    const cleaned = await cleanupMachineBridgeWine(child)
+    if (cleaned && child.exitCode !== null) return true
+  }
   if (machineBridgeIntentionalProcess === child) machineBridgeIntentionalProcess = null
   machineBridgeLastExit = {
     code: null,
@@ -1227,8 +1594,25 @@ function waitForMachineBridgeSocket(child, port) {
   })
 }
 
-async function restartMachineBridge(settings = null) {
+async function restartMachineBridge(settings = null, { operatorPress = false } = {}) {
   trace('machine bridge deliberate restart requested')
+  // WO-2845: the operator's press right after the changed-DLL line is the
+  // second Connect. Read before the stop below clears the last exit.
+  const connectWithChangedDll = operatorPress
+    && machineBridgeLastExit?.code === MACHINE_BRIDGE_DLL_CHANGED_EXIT_CODE
+    && (machineBridgeProcess === null || machineBridgeProcess.exitCode !== null)
+  if (machineBridgeUpdatingFirmware()) {
+    // WO-2847: stopping it now would interrupt the update. The bridge keeps
+    // running and connects by itself when the update finishes.
+    console.warn('[LienCAM] The machine connection was not restarted: the controller is updating its firmware. Do not close LienCAM or power off the controller.')
+    return {
+      ok: false,
+      reason: 'no-socket',
+      pid: machineBridgeProcess.pid,
+      port: machineBridgePort(machineBridgeSpec() ?? { args: [] }),
+      firmwareUpdate: true,
+    }
+  }
   const normalizedSettings = normalizeMachineBridgeLaunchSettings(settings)
   const configuredExecutable = configuredMachineBridgeExecutable(normalizedSettings)
   const preparedSettings = configuredExecutable ?? await ensureMachineBridge(
@@ -1238,8 +1622,11 @@ async function restartMachineBridge(settings = null) {
     machineBridgeLaunchSettings = preparedSettings
     void persistMachineBridgeLaunchSettings(machineBridgeLaunchSettings)
   }
-  const spec = preparedSettings === null ? null : machineBridgeSpec(preparedSettings)
-  if (!spec) return { ok: false, reason: 'not-configured' }
+  const preparedSpec = preparedSettings === null ? null : machineBridgeSpec(preparedSettings)
+  if (!preparedSpec) return { ok: false, reason: 'not-configured' }
+  const spec = connectWithChangedDll
+    ? { ...preparedSpec, args: [...preparedSpec.args, MACHINE_BRIDGE_CONNECT_WITH_CHANGED_DLL] }
+    : preparedSpec
 
   machineBridgeRespawnAttempts = 0
   machineBridgeRespawnGaveUp = false
@@ -1261,6 +1648,8 @@ async function restartMachineBridge(settings = null) {
   if (ready.exited) {
     return { ok: false, reason: 'exited', lastExit: machineBridgeLastExit }
   }
+  // WO-2847: a child still waiting out an update is not a silent one.
+  if (machineBridgeUpdatingFirmware()) return { ok: false, reason: 'no-socket', pid: child.pid, port, firmwareUpdate: true }
   return { ok: false, reason: 'no-socket', pid: child.pid, port }
 }
 
@@ -1278,6 +1667,16 @@ function machineBridgeStatus() {
       gaveUp: machineBridgeRespawnGaveUp,
       lastAttemptAt: machineBridgeLastAttemptAt,
     },
+    firmwareUpdate: machineBridgeUpdatingFirmware()
+      ? { since: machineBridgeFirmwareUpdate.since, line: machineBridgeFirmwareUpdate.line }
+      : null,
+    // WO-2847: each line once, by id (bridgeHost.ts takeBridgeConsoleLines).
+    // An outcome stays until it is said; a progress line only while its
+    // update still runs - after that it would be a stale "in progress".
+    consoleLines: machineBridgeConsoleLines
+      .filter((line) => !line.progress
+        || (machineBridgeUpdatingFirmware() && machineBridgeFirmwareUpdate.eventId === line.id))
+      .map(({ id, severity, text }) => ({ id, severity, text })),
     setup: { ...machineBridgeSetup },
     overrides: machineBridgeOverrides(),
   }
@@ -1486,7 +1885,7 @@ ipcMain.on('liencam:machine-bridge-remember', (event, settings) => {
 })
 ipcMain.handle('liencam:machine-bridge-restart', async (event, settings) => {
   if (mainWindow !== null && event.sender !== mainWindow.webContents) return undefined
-  return restartMachineBridge(settings)
+  return restartMachineBridge(settings, { operatorPress: true })
 })
 ipcMain.handle('liencam:choose-machine-path', async (event, kind) => {
   if (mainWindow !== null && event.sender !== mainWindow.webContents) return undefined
@@ -1522,6 +1921,20 @@ ipcMain.handle('liencam:open-issue-form', async (event, url) => {
     throw new Error('Unknown issue form address.')
   }
   await shell.openExternal(parsed.href)
+})
+// WO-2911 Report this problem: a picture of LienCAM's own window for the report
+// preview, where the operator sees it and can remove it. Only the main window
+// may ask, only that window is captured, and the PNG goes back to it alone.
+const APP_CAPTURE_MAX_PIXELS = 16_000_000
+ipcMain.handle('liencam:capture-app', async (event) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return null
+  let image = await mainWindow.webContents.capturePage()
+  const { width, height } = image.getSize()
+  if (width * height > APP_CAPTURE_MAX_PIXELS) {
+    const scale = Math.sqrt(APP_CAPTURE_MAX_PIXELS / (width * height))
+    image = image.resize({ width: Math.floor(width * scale), height: Math.floor(height * scale) })
+  }
+  return new Uint8Array(image.toPNG())
 })
 // WO-2725 desktop recent projects. Only dialog-selected/saved or already-recent
 // paths may be read by the renderer; listing uses stat, never project-file reads.
@@ -1618,6 +2031,22 @@ ipcMain.on('liencam:set-job-wake-lock', (event, active) => {
   else releaseJobWakeLock()
 })
 
+// WO-3010: the Settings switch and the toolbar indicator. Only the main window may
+// ask; the answer is the server's state (running, port, connected client name).
+ipcMain.handle('liencam:mcp-state', (event) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return null
+  return mcpState()
+})
+ipcMain.handle('liencam:mcp-set-enabled', async (event, enabled) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return null
+  try {
+    return enabled === true ? await mcpServerInstance().start() : await mcpServerInstance().stop()
+  } catch (error) {
+    console.warn(`[LienCAM] The MCP server could not start: ${error?.message ?? error}`)
+    return mcpState()
+  }
+})
+
 app.whenReady().then(async () => {
   trace('app ready')
   if (!existsSync(path.join(appRoot(), 'index.html'))) {
@@ -1641,8 +2070,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('will-quit', () => {
+app.on('will-quit', (event) => {
+  if (process.platform === 'linux' && (machineBridgeProcess || machineBridgeWineCleanup)) {
+    event.preventDefault()
+    releaseJobWakeLock()
+    stopPendant()
+    void stopMachineBridge().then(() => app.quit())
+    return
+  }
   releaseJobWakeLock()
   stopPendant()
   void stopMachineBridge()
+  // WO-3010: the endpoint file names a token that dies with this run.
+  if (mcpServer !== null) void mcpServer.stop()
 })

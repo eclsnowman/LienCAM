@@ -29,7 +29,7 @@ import {
 
 describe('MODEL-BODY-BIND-ADAPTIVE capability map', () => {
   it('classifies every operation and exposes adaptive as a supported profile binding', () => {
-    expect(Object.keys(MODEL_BODY_BINDING_CAPABILITIES)).toHaveLength(16)
+    expect(Object.keys(MODEL_BODY_BINDING_CAPABILITIES)).toHaveLength(17)
     // WO-1963: Face fills the modeled body's profile, as Pocket does.
     expect(MODEL_BODY_BINDING_CAPABILITIES.face).toEqual({
       mode: 'profile', computeSupported: true,
@@ -72,6 +72,11 @@ describe('MODEL-BODY-BIND-ADAPTIVE capability map', () => {
     // WO-1959: Pencil 3D traces the modeled solid's corners through the same adapter.
     expect(MODEL_BODY_BINDING_CAPABILITIES.pencil_3d).toEqual({
       mode: 'solid', computeSupported: true,
+    })
+    // WO-3001: a pattern region from a modeled body's profile is not built yet;
+    // the op names that refusal instead of computing without the region.
+    expect(MODEL_BODY_BINDING_CAPABILITIES.pattern).toEqual({
+      mode: 'profile', computeSupported: false,
     })
     expect(MODEL_BODY_BINDING_CAPABILITIES.adaptive_3d).toEqual({
       mode: 'solid', computeSupported: true,

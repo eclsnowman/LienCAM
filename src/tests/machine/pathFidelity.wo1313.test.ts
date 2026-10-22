@@ -10,7 +10,11 @@ import type { QueuedMove } from '../../lib/machine/controller'
 
 const ROOT = process.cwd()
 const EVIDENCE = join(ROOT, 'src', 'tests', 'evidence', 'WO-1313')
-const PROJECT = join(ROOT, 'src', 'tests', 'evidence', 'MACHINE-SESSION-TWO-SETUP', 'two-setup.camproject')
+// The program run 4 executed: Setup 2 of MACHINE-SESSION-TWO-SETUP/two-setup.camproject
+// as built at 30e61edc35 (WO-1921). That fixture is rebuilt through the product
+// when the CAM changes (WO-3056), so the replay keeps the captured run's own
+// program, extracted mechanically, instead of following the rebuilt one.
+const PROJECT = join(EVIDENCE, 'two-setup-run4-program.json')
 
 type Vec3 = { x: number; y: number; z: number }
 type FixtureMove = Vec3 & { type: 'rapid' | 'feed'; feed?: number }

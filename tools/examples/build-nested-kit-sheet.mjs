@@ -1,3 +1,4 @@
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -299,4 +300,4 @@ export async function buildNestedKitSheet({ resume = process.argv.includes('--re
     } finally { writeFileSync(d.output('browser-console.json'), JSON.stringify(browserEvents, null, 2)) }
   })
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildNestedKitSheet()
+if (isMain(import.meta.url)) await buildNestedKitSheet()

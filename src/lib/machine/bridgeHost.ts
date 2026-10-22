@@ -1,3 +1,4 @@
+import { readRegisteredSessionData, writeRegisteredSessionData } from '../../store/persistedKeys'
 import {
   BridgeSupervisorUnavailableError,
   supervisorBridgeStatus,
@@ -24,16 +25,45 @@ export function machineBridgeArguments(settings?: MachineBridgeLaunchSettings): 
   ]
 }
 
+/** WO-2845 (ADR-0058 D4): what an operator's Connect, Start or Restart adds to
+ *  a supervisor launch. It asks; it does not decide. supervisor.mjs strips it
+ *  and passes it to the bridge only when the bridge's last exit was the
+ *  changed-DLL exit (12), and the bridge opens only the DLL that exit named -
+ *  the same rule electron/main.cjs applies to its own restart. An automatic
+ *  start (opening the Control page) never sends it. */
+export const CONNECT_WITH_CHANGED_DLL = '--connect-with-changed-dll'
+
+export interface BridgeStartOptions {
+  /** True only for an operator's press (Connect, Start, Restart). */
+  operatorPress?: boolean
+}
+
+function supervisorLaunchArguments(settings: MachineBridgeLaunchSettings | undefined, options: BridgeStartOptions): string[] {
+  const args = machineBridgeArguments(settings)
+  return options.operatorPress ? [...args, CONNECT_WITH_CHANGED_DLL] : args
+}
+
 export interface BridgeLastExit {
   code: number | null
   signal: string | null
   error: string | null
+  /** WO-2847 fix round 3: this exit ends a firmware update whose outcome the
+   * host already carries as this console line (BridgeProcessStatus consoleLines). */
+  consoleLineId?: string
 }
 
 export interface BridgeRespawnStatus {
   attempts: number
   gaveUp: boolean
   lastAttemptAt: number | null
+}
+
+/** WO-2847: a line the bridge could not say to a live session, carried by the
+ * desktop host (electron/main.cjs) so it still reaches the Control console. */
+export interface BridgeConsoleLine {
+  id: string
+  severity: 'info' | 'warn' | 'error'
+  text: string
 }
 
 export interface BridgeProcessStatus {
@@ -46,6 +76,10 @@ export interface BridgeProcessStatus {
   health?: 'stopped' | 'starting' | 'healthy' | 'failing'
   failureReason?: string | null
   lastLogs?: string[]
+  /** WO-2847: set while the running bridge waits out a controller firmware update. */
+  firmwareUpdate?: { since: number; line: string } | null
+  /** WO-2847: host-carried console lines, each to be said once (takeBridgeConsoleLines). */
+  consoleLines?: BridgeConsoleLine[]
   setup?: {
     state: 'idle' | 'building' | 'ready' | 'missing-install' | 'failed'
     installRoot: string | null
@@ -58,7 +92,7 @@ export interface BridgeProcessStatus {
 export type BridgeRestartResult =
   | { ok: true; pid: number; port: number }
   | { ok: false; reason: 'exited'; lastExit: BridgeLastExit | null }
-  | { ok: false; reason: 'no-socket'; pid: number; port: number }
+  | { ok: false; reason: 'no-socket'; pid: number; port: number; firmwareUpdate?: boolean }
   | { ok: false; reason: 'not-configured' }
   | { ok: false; reason: 'unhosted' }
 
@@ -176,6 +210,7 @@ async function readSupervisorStatus(
 export async function startBridge(
   bridgePort = 8325,
   settings?: MachineBridgeLaunchSettings,
+  options: BridgeStartOptions = {},
 ): Promise<BridgeRestartResult> {
   const host = hostedBridgeProcess()
   if (host !== null) {
@@ -184,7 +219,7 @@ export async function startBridge(
       : host.machineBridgeRestart(settings)
   }
   try {
-    const result = await supervisorStartBridge(bridgePort, machineBridgeArguments(settings))
+    const result = await supervisorStartBridge(bridgePort, supervisorLaunchArguments(settings, options))
     supervisorAnswered(bridgePort)
     return result
   } catch (error) {
@@ -200,11 +235,12 @@ export async function startBridge(
 export async function restartBridge(
   bridgePort = 8325,
   settings?: MachineBridgeLaunchSettings,
+  options: BridgeStartOptions = {},
 ): Promise<BridgeRestartResult> {
   const host = hostedBridgeProcess()
   if (host !== null) return host.machineBridgeRestart(settings)
   try {
-    const result = await supervisorRestartBridge(bridgePort, machineBridgeArguments(settings))
+    const result = await supervisorRestartBridge(bridgePort, supervisorLaunchArguments(settings, options))
     supervisorAnswered(bridgePort)
     return result
   } catch (error) {
@@ -215,6 +251,45 @@ export async function restartBridge(
     throw error
   }
 }
+
+/**
+ * WO-2847 fix round 2 (ADR-0058 point 6): a controller firmware update runs
+ * inside the bridge's Open - at startup before it listens, or while nobody is
+ * connected - so its lines cannot depend on a socket. The desktop host keeps
+ * the ones no session heard; this hands each out ONCE per window, by id, and
+ * remembers the ids across a reload, so a later status read, a remounted
+ * Control page or a reconnect never says one again.
+ */
+let bridgeConsoleSaid: Set<string> | null = null
+
+function saidBridgeConsoleLines(): Set<string> {
+  if (bridgeConsoleSaid !== null) return bridgeConsoleSaid
+  bridgeConsoleSaid = new Set()
+  try {
+    const stored = JSON.parse(readRegisteredSessionData('bridgeConsoleSaid') ?? '[]')
+    if (Array.isArray(stored)) for (const id of stored) if (typeof id === 'string') bridgeConsoleSaid.add(id)
+  } catch {
+    // No storage: once per page life is still once per event shown here.
+  }
+  return bridgeConsoleSaid
+}
+
+export function takeBridgeConsoleLines(status: BridgeProcessStatus | null): BridgeConsoleLine[] {
+  const lines = status?.consoleLines
+  if (!Array.isArray(lines) || lines.length === 0) return []
+  const said = saidBridgeConsoleLines()
+  const fresh = lines.filter((line) => typeof line?.id === 'string' && !said.has(line.id))
+  if (fresh.length === 0) return []
+  for (const line of fresh) said.add(line.id)
+  try {
+    writeRegisteredSessionData('bridgeConsoleSaid', JSON.stringify([...said].slice(-100)))
+  } catch {
+    // As above.
+  }
+  return fresh
+}
+
+const BRIDGE_UPDATING_SENTENCE = 'Not connected yet: the controller is updating its firmware. Do not close LienCAM or power off the controller; press Connect again once the console says the update finished.'
 
 export type HostedConnectPreparation =
   | { kind: 'ready' }
@@ -227,6 +302,12 @@ export function bridgeNotStartedSentence(
   result: Exclude<BridgeRestartResult, { ok: true }>,
   status: BridgeProcessStatus | null = null,
 ): string {
+  // WO-2847 fix round 3: a firmware update's outcome has one carrier, the
+  // host's console line, so Connect says only what it adds itself.
+  if (result.reason === 'exited' && result.lastExit?.consoleLineId) {
+    return 'Not connected: Connect did not open the controller - see the firmware update line above.'
+  }
+  if (result.reason === 'no-socket' && result.firmwareUpdate) return BRIDGE_UPDATING_SENTENCE
   if (result.reason === 'exited') {
     const lastLine = result.lastExit?.error?.trim()
     return lastLine
@@ -255,6 +336,7 @@ export function bridgeNotStartedSentence(
  */
 export async function prepareHostedBridgeForConnect(
   settings?: MachineBridgeLaunchSettings,
+  onStatus?: (status: BridgeProcessStatus) => void,
 ): Promise<HostedConnectPreparation> {
   const host = hostedBridgeProcess()
   if (host === null || typeof host.machineBridgeStatus !== 'function') return { kind: 'ready' }
@@ -265,9 +347,31 @@ export async function prepareHostedBridgeForConnect(
     // Status is advisory: the socket connect reports its own concrete error.
     return { kind: 'ready' }
   }
+  // WO-2847: lines the host is still carrying (a failed startup update's
+  // outcome) are said before anything this press says.
+  onStatus?.(status)
+  if (status.running && status.firmwareUpdate) {
+    // A startup update runs before the bridge listens, so the socket may not
+    // answer yet; a lost-board update keeps listening. Try it, and if nothing
+    // answers say why, instead of a bare connection error.
+    return {
+      kind: 'not-started',
+      sentence: BRIDGE_UPDATING_SENTENCE,
+      socketMayAnswer: true,
+    }
+  }
   if (status.running) return { kind: 'ready' }
   const result = await host.machineBridgeRestart(settings)
   if (!result.ok) {
+    if (result.reason === 'exited' && result.lastExit?.consoleLineId) {
+      // The child this press started ended a firmware update: its outcome is
+      // the host's line, said here first, so the sentence below can point at it.
+      try {
+        onStatus?.(await host.machineBridgeStatus())
+      } catch {
+        // The status poll says it instead.
+      }
+    }
     return {
       kind: 'not-started',
       sentence: bridgeNotStartedSentence(result, status),

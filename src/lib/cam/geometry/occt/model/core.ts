@@ -79,9 +79,47 @@ function freeAll(list: { delete(): void }[]): void {
   for (const s of list) s.delete()
 }
 
+/** The BRepCheck_Analyzer surface WO-3046 uses (bound by WO-3047's rebuild).
+ *  OCCT 7.6.2's ctor is (S, GeomControls, theIsParallel), and ocjs names the
+ *  overloads IsValid_1(S) / IsValid_2(): the no-arg verdict is IsValid_2. The
+ *  unsuffixed and _1 spellings stay accepted for a no-arg stand-in. */
+interface BRepCheckAnalyzerLike {
+  IsValid_2?: () => boolean
+  IsValid_1?: () => boolean
+  IsValid?: () => boolean
+  delete(): void
+}
+type BRepCheckAnalyzerCtor = new (
+  shape: TopoDS_Shape,
+  geomControls: boolean,
+  parallel: boolean,
+) => BRepCheckAnalyzerLike
+
+/**
+ * WO-3046: BRepCheck_Analyzer's verdict on `shape`, or undefined when this wasm
+ * build has no such binding or the check itself fails. Only `true` lets the
+ * caller skip ShapeFix_Shape; anything else heals exactly as before.
+ */
+export function shapeIsValid(oc: OcctModelModule, shape: TopoDS_Shape): boolean | undefined {
+  const lib = oc as unknown as Record<string, unknown>
+  const Ctor = (lib.BRepCheck_Analyzer ?? lib.BRepCheck_Analyzer_1) as BRepCheckAnalyzerCtor | undefined
+  if (typeof Ctor !== 'function') return undefined
+  let analyzer: BRepCheckAnalyzerLike | undefined
+  try {
+    // ocjs has no C++ default args: GeomControls=true, parallel=false.
+    analyzer = new Ctor(shape, true, false)
+    const isValid = analyzer.IsValid_2 ?? analyzer.IsValid_1 ?? analyzer.IsValid
+    return typeof isValid === 'function' ? isValid.call(analyzer) === true : undefined
+  } catch {
+    return undefined
+  } finally {
+    analyzer?.delete()
+  }
+}
+
 /**
  * Write STEP bytes into MEMFS, read + transfer (STEPControl_Reader), heal
- * (ShapeFix_Shape). Returns the HEALED shape (caller owns it) plus its solid count.
+ * (ShapeFix_Shape; skipped when BRepCheck_Analyzer finds the shape valid). Returns the HEALED shape (caller owns it) plus its solid count.
  * Throws ModelCoreError with `.where` on every failure path.
  */
 export function readStepShape(
@@ -127,22 +165,29 @@ export function readStepShape(
   }
 
   let healed: TopoDS_Shape
+  let keptRaw = false
   try {
     if (raw.IsNull()) {
       throw new ModelCoreError('step-shape', `STEP produced a null shape for "${fileName}"`)
     }
     onPhase?.('heal')
-    const fixer = new oc.ShapeFix_Shape_2(raw)
-    const progress = new oc.Message_ProgressRange_1()
-    try {
-      fixer.Perform(progress)
-      healed = fixer.Shape()
-    } finally {
-      progress.delete()
-      fixer.delete()
+    if (shapeIsValid(oc, raw) === true) {
+      // WO-3046: BRepCheck finds nothing to repair, so the read shape is used as is.
+      healed = raw
+      keptRaw = true
+    } else {
+      const fixer = new oc.ShapeFix_Shape_2(raw)
+      const progress = new oc.Message_ProgressRange_1()
+      try {
+        fixer.Perform(progress)
+        healed = fixer.Shape()
+      } finally {
+        progress.delete()
+        fixer.delete()
+      }
     }
   } finally {
-    raw.delete()
+    if (!keptRaw) raw.delete()
   }
 
   if (healed.IsNull()) {

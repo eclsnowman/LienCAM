@@ -64,6 +64,11 @@ describe('WO-2292 production Import Post button', () => {
       expectUnits('inch')
       act(() => useCamStore.getState().closeModal())
       act(() => useCamStore.getState().openModal('post-process'))
+      // WO-2898: the same project reopens on the post last chosen. Choosing
+      // the built-in again must still restore its unchanged output.
+      expect(screen.getByTestId('post-definition-select').textContent).toContain(saved.label)
+      expectUnits('inch')
+      pickPost(UCCNC_CONFIG.id)
       expect(screen.getByTestId('post-definition-select').textContent).toContain(UCCNC_CONFIG.label)
       expectUnits('mm')
       expect(screen.getByTestId('post-gcode-preview').textContent).toBe(baseline)

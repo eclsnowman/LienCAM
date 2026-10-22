@@ -16,7 +16,7 @@ import { resolveFeedrates } from '../cam/feedrates'
 import { collectToolpathSections } from '../cam/nesting/nestRuntime'
 import { operationGenerationIsCurrent } from '../cam/generationFingerprint'
 import { resolveCoolant, resolveSpindle } from './resolve'
-import type { PostInput, PostMachineAction, PostOperation, PostOperatorStop } from './types'
+import type { PostInput, PostMachineAction, PostNothingToCut, PostOperation, PostOperatorStop } from './types'
 import { resolveSetupWorkOffset } from './workOffsets'
 import { postToolNumbersOf } from './toolNumbers'
 
@@ -99,6 +99,22 @@ export function resolveOperatorStops(
     const from = stop.beforeOpId === null ? -1 : orderedOpIds.indexOf(stop.beforeOpId)
     const beforeOpId = from < 0 ? null : orderedOpIds.slice(from).find((id) => emitted.has(id)) ?? null
     return { beforeOpId, message }
+  })
+}
+
+/** WO-2870: each operation with nothing left to cut, placed before the next
+ *  operation in order that posts (null = after the last). Undefined when there
+ *  are none, so every other setup posts exactly as before. */
+export function resolveNothingToCut(
+  orderedOpIds: readonly string[],
+  emitted: ReadonlySet<string>,
+  ops: ReadonlyArray<{ opId: string; name: string }> | undefined,
+): PostNothingToCut[] | undefined {
+  if (!Array.isArray(ops) || ops.length === 0) return undefined
+  return ops.map(({ opId, name }) => {
+    const from = orderedOpIds.indexOf(opId)
+    const beforeOpId = from < 0 ? null : orderedOpIds.slice(from).find((id) => emitted.has(id)) ?? null
+    return { opId, name, beforeOpId }
   })
 }
 
@@ -263,6 +279,27 @@ export function buildPostInput(project: Project, setup: Setup): PostInput {
     })
   }
 
+  // WO-2870: an operation with nothing left to cut (an earlier operation
+  // already cleared its region, so every move it kept is a rapid) posts no
+  // motion. Its rapid-only stream dipped below the stock top and descended
+  // diagonally through cleared air; instead the emitter writes one line saying
+  // it has nothing to cut, before the next operation that posts. Only a current
+  // ('ready') operation qualifies: any other status keeps its moves so post
+  // validation still refuses it by status.
+  const opsWithCut = new Set(
+    operations.filter((o) => o.moves.some((m) => m.type !== 'rapid')).map((o) => o.op.id),
+  )
+  const nothingToCutIds = new Set(
+    operations
+      .filter((o) => o.op.status === 'ready' && !opsWithCut.has(o.op.id))
+      .map((o) => o.op.id),
+  )
+  if (nothingToCutIds.size > 0) {
+    for (let i = operations.length - 1; i >= 0; i--) {
+      if (nothingToCutIds.has(operations[i].op.id)) operations.splice(i, 1)
+    }
+  }
+
   // CAM-12: collectToolpathSections SILENTLY DROPS a moveless op
   // (nestRuntime.ts), so an ENABLED op that produced no section never became a
   // PostOperation above and the pre-emission validators never saw it - posting
@@ -281,6 +318,7 @@ export function buildPostInput(project: Project, setup: Setup): PostInput {
   const emittedOpIds = new Set(operations.map((o) => o.op.id))
   for (const op of enabled) {
     if (emittedOpIds.has(op.id)) continue         // already a PostOperation (has a section)
+    if (nothingToCutIds.has(op.id)) continue      // WO-2870: posts its one line instead
     // A non-displayable status may still carry persisted legacy moves. It was
     // intentionally rejected by collectToolpathSections and must be re-added
     // with NO moves so post validation refuses it loudly by status. Only a
@@ -312,9 +350,20 @@ export function buildPostInput(project: Project, setup: Setup): PostInput {
     machineActionsForPost(orderedOpIds, resolvedSetup.machineActions),
   )
 
+  const nothingToCut = resolveNothingToCut(
+    orderedOpIds,
+    new Set(operations.map((o) => o.op.id)),
+    enabled.filter((op) => nothingToCutIds.has(op.id)).map((op) => ({ opId: op.id, name: op.name })),
+  )
+
   return {
     machine: project.machine,
-    setup: { wcs: resolvedSetup.wcs, operations, ...(operatorStops ? { operatorStops } : {}), ...(machineActions ? { machineActions } : {}) },
+    setup: {
+      wcs: resolvedSetup.wcs, operations,
+      ...(operatorStops ? { operatorStops } : {}),
+      ...(machineActions ? { machineActions } : {}),
+      ...(nothingToCut ? { nothingToCut } : {}),
+    },
     stocks: project.stocks,
     setupId: setup.id,
   }

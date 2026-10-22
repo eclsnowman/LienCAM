@@ -3,7 +3,7 @@
   "id": "S01",
   "name": "hero-loop",
   "project": "examples/05-name-sign/name-sign.camproject",
-  "baselineNote": "Architect re-shoot 4: name-sign lettering with production translucent toolpath reveal, stock-opacity fade and smooth top-to-three-quarter viewport orbit.",
+  "baselineNote": "Architect re-shoot 4 scene, re-paced for a first-time viewer (WO-2631, operator review 10-07 11:35 AM): 35 s - sketch 6 s, generate 6 s, simulate 21 s plus a 2 s hold on the finished part.",
   "sketchGeometry": "lettering",
   "simulationOperation": "V-carve 1",
   "playbackSpeed": "50x",
@@ -17,15 +17,16 @@
   "stages": [
     {
       "id": "sketch",
-      "seconds": 1
+      "seconds": 6
     },
     {
       "id": "generate",
-      "seconds": 2
+      "seconds": 6
     },
     {
       "id": "simulate",
-      "seconds": 8
+      "seconds": 23,
+      "finishedHoldSeconds": 2
     }
   ],
   "cameraMotion": "top-to-three-quarter-orbit",

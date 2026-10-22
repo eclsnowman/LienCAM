@@ -1,3 +1,4 @@
+import { isMain } from '../lib/is-main.mjs';
 import { mkdirSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,7 +44,7 @@ export async function buildPages({ outDir = join(root, 'dist-pages') } = {}) {
   return outDir
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2)
   if (args.length && (args.length !== 2 || args[0] !== '--outDir')) throw new Error('Usage: build-pages.mjs [--outDir <empty directory>]')
   await buildPages(args.length ? { outDir: args[1] } : undefined)

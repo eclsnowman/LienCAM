@@ -14,6 +14,7 @@
 // Slice 1 of 4 (WO-1216 plan) ships the SMOKE tier only: 2 parts x 2 operations,
 // under 3 minutes. WO-1218 fills the full matrix; the runner already takes it.
 
+import { alpha3Chains, alpha3Tools, alpha3Parts } from './alpha3Registry'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -28,9 +29,9 @@ import { loadOcctModel } from '../../lib/cam/geometry/occt/model/loader'
 // production moved the cap, and print an engagement regression as green.
 import { SIDE_ENTRY_ENGAGEMENT_CAP } from '../../cam3d/strategies/adaptiveRough'
 import type { PartMesh } from '../../cam3d/kernel/types'
-import type { OperationType, ToolType } from '../../types'
+import type { OperationType, ToolType, Tool, Project, Operation, Loop2D } from '../../types'
 
-export type BenchmarkTier = 'smoke' | 'full'
+export type BenchmarkTier = 'smoke' | 'full' | 'alpha3'
 
 /**
  * The whole benchmark tool set (WO-1216 section 3, revised by Operator ruling 2026-09-05:
@@ -56,6 +57,7 @@ export interface BenchmarkTool {
    * deeper than this needs the number raised here and the baseline regenerated.
    */
   fluteLengthMm: number
+  libraryTool?: Tool
   role: 'rough' | 'rest_rough' | 'finish' | 'fine_finish' | 'refusal_probe'
 }
 
@@ -74,7 +76,7 @@ export const TOOLS: readonly BenchmarkTool[] = [
 ]
 
 export function toolById(id: string): BenchmarkTool {
-  const found = TOOLS.find((t) => t.id === id)
+  const found = TOOLS.find(t => t.id === id) ?? alpha3Tools().find(t => t.id === id)
   if (!found) throw new Error(`benchmark registry: no tool "${id}" -- add it to TOOLS.`)
   return found
 }
@@ -163,7 +165,7 @@ function stepFixtureMesh(file: string): Promise<PartMesh> {
 }
 
 export function partById(id: string): BenchmarkPart {
-  const found = PARTS.find((p) => p.id === id)
+  const found = PARTS.find(p => p.id === id) ?? alpha3Parts().find(p => p.id === id)
   if (!found) throw new Error(`benchmark registry: no part "${id}" -- add it to PARTS.`)
   return found
 }
@@ -196,6 +198,11 @@ export interface BenchmarkStep {
    * heights and WCS survive a flip, which a single shared setup cannot.
    */
   setupLabel?: string
+  geometrySelections?: string[]
+  authoredOperation?: Operation
+  authoredSetupId?: string
+  parameterMode?: 'default' | 'declared'
+  unavailableReason?: string
   /**
    * Absolute heights this step's operation uses instead of the block-top
    * derived defaults (topZ+10 / +2 / +1), WO-1219. Exists so a second setup in
@@ -261,6 +268,8 @@ export interface BenchmarkChain {
   id: string
   partId: string
   setupLabel: string
+  /** Alpha3 alone records refusals, and uses actual library feeds/material. */
+  alpha3?: { material: string; project?: Project; planarPicks?: Loop2D[] }
   tiers: readonly BenchmarkTier[]
   steps: readonly BenchmarkStep[]
 }
@@ -429,7 +438,7 @@ export const CHAINS: readonly BenchmarkChain[] = [
 
 /** Chains in a tier, in declaration order (the row order of the scorecard). */
 export function chainsForTier(tier: BenchmarkTier): readonly BenchmarkChain[] {
-  return CHAINS.filter((chain) => chain.tiers.includes(tier))
+  return tier === 'alpha3' ? alpha3Chains() : CHAINS.filter((chain) => chain.tiers.includes(tier))
 }
 
 /**
@@ -445,3 +454,5 @@ export function rowKey(chain: BenchmarkChain, step: BenchmarkStep): string {
 export function rowKeysForTier(tier: BenchmarkTier): string[] {
   return chainsForTier(tier).flatMap((chain) => chain.steps.map((step) => rowKey(chain, step)))
 }
+
+export { alpha3Chains } from './alpha3Registry'

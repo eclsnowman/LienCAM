@@ -28,6 +28,8 @@
 //
 // PURE clipper2-wasm-free / OCCT-free: only analytic geometry + sampleArc.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import type { Pt, Loop, Loops } from './clipperEngine'
 import { sampleArc } from '../../geometry'
 
@@ -122,10 +124,10 @@ function rideAlongLoop(lp: Loop, startSeg: number, startFoot: Pt, sign: number, 
 /** Default wall-follow ride length: reaches a neighbour wall node plus an overlap that is at
  *  least the loopback fillet radius, clamped to a safe fraction of the loop perimeter so a
  *  ride never wraps. cuspGap (the straight A..B separation) folds in the adjacent-cusp sliver. */
-function rideBudget(toolRadius: number, cuspGap: number, per: number, loopbackFilletPct = 25): number {
+function rideBudget(toolRadius: number, cuspGap: number, per: number, loopbackFilletPct = AP.defaults.loopbackFilletPct): number {
   const Rf = (loopbackFilletPct / 100) * toolRadius
-  const overlap = 1.5 * Rf
-  return Math.min(Math.max(cuspGap + overlap, 3.0), 0.25 * per)
+  const overlap = AP.sharpening.rideOverlapFilletRadii * Rf
+  return Math.min(Math.max(cuspGap + overlap, AP.sharpening.rideMinMm), AP.sharpening.rideMaxPerimeterFraction * per)
 }
 
 /**
@@ -135,7 +137,7 @@ function rideBudget(toolRadius: number, cuspGap: number, per: number, loopbackFi
  * Returns null if A does not project onto any loop or the loop is degenerate.
  */
 export function buildWallFollowExit(
-  priorCut: Pt[], cutRegion: Loops, toolRadius: number, length?: number, loopbackFilletPct = 25,
+  priorCut: Pt[], cutRegion: Loops, toolRadius: number, length?: number, loopbackFilletPct = AP.defaults.loopbackFilletPct,
 ): WallFollowRide | null {
   if (priorCut.length < 2 || cutRegion.length === 0) return null
   const A = priorCut[priorCut.length - 1]
@@ -161,7 +163,7 @@ export function buildWallFollowExit(
  * sub-polyline of that loop. Returns null on degenerate input.
  */
 export function buildWallFollowEntry(
-  nextCut: Pt[], cutRegion: Loops, toolRadius: number, length?: number, loopbackFilletPct = 25,
+  nextCut: Pt[], cutRegion: Loops, toolRadius: number, length?: number, loopbackFilletPct = AP.defaults.loopbackFilletPct,
 ): WallFollowRide | null {
   if (nextCut.length < 2 || cutRegion.length === 0) return null
   const B = nextCut[0]
@@ -222,7 +224,7 @@ function forwardDistanceAlongLoop(lp: Loop, segA: number, footA: Pt, segB: numbe
  * when the next cut would leave B against the ride's own travel sense (a reversal at B).
  */
 export function buildWallFollowThrough(
-  priorCut: Pt[], nextCut: Pt[], cutRegion: Loops, toolRadius: number, maxLength?: number, loopbackFilletPct = 25,
+  priorCut: Pt[], nextCut: Pt[], cutRegion: Loops, toolRadius: number, maxLength?: number, loopbackFilletPct = AP.defaults.loopbackFilletPct,
 ): WallFollowRide | null {
   if (priorCut.length < 2 || nextCut.length < 2 || cutRegion.length === 0) return null
   const A = priorCut[priorCut.length - 1]
@@ -298,10 +300,10 @@ function loopbackArc(
   const dot = Math.max(-1, Math.min(1, d0.x * d1.x + d0.y * d1.y))
   const turnDeg = Math.acos(dot) * 180 / Math.PI
   const gap = dist(p0, p1)
-  if (turnDeg < 0.5) {
+  if (turnDeg < AP.sharpening.straightJoinTurnDeg) {
     // Straight pass-through: no fillet needed (this is the normal joint shape AFTER the
     // contact-overlap clamp re-ordered same-wall contacts). Emit a short straight stub.
-    const stub = Math.min(0.25 * gap, 0.5)
+    const stub = Math.min(AP.sharpening.straightJoinStubGapFraction * gap, AP.sharpening.straightJoinStubMaxMm)
     if (stub < 1e-9) return { fail: `zero-turn joint with zero gap (gap=${gap.toExponential(2)})` }
     const A: Pt = jointAt === 'start' ? { x: p0.x, y: p0.y } : { x: p1.x - d0.x * stub, y: p1.y - d0.y * stub }
     const B: Pt = jointAt === 'start' ? { x: p0.x + d1.x * stub, y: p0.y + d1.y * stub } : { x: p1.x, y: p1.y }
@@ -337,7 +339,7 @@ function loopbackArc(
     if (!Number.isFinite(s)) return { fail: `corner apex not finite` }
   } else {
     const sExpected = jointAt === 'start' ? 0 : gap
-    if (!Number.isFinite(s) || Math.abs(s - sExpected) > maxTanLen + 0.1 * gap + 0.05) {
+    if (!Number.isFinite(s) || Math.abs(s - sExpected) > maxTanLen + AP.sharpening.joinTangentSlackGapFraction * gap + AP.sharpening.joinTangentSlackMm) {
       return { fail: `apex displaced from joint (s=${s.toFixed(3)} expected=${sExpected.toFixed(3)} turn=${turnDeg.toFixed(1)}deg)` }
     }
   }
@@ -376,7 +378,7 @@ function loopbackArc(
   arc.push({ x: B.x, y: B.y })
   // VALIDATE: the sampled sweep equals the intended turn (a 2pi wrap reads ~360 - turn).
   const sampledSweep = Math.abs(sweepAboutCentre(arc, O))
-  if (Math.abs(sampledSweep - turnDeg) > 2.0) {
+  if (Math.abs(sampledSweep - turnDeg) > AP.sharpening.joinSweepToleranceDeg) {
     return { fail: `sampled sweep ${sampledSweep.toFixed(1)}deg != intended turn ${turnDeg.toFixed(1)}deg (2pi wrap)` }
   }
   return { arc, A, B, sweepDeg: turnDeg }
@@ -397,7 +399,7 @@ function loopbackArc(
  *  fp noise; legit U-turn far ends sit >= a stepover (~0.4mm) off the opposing ride. */
 const OVERLAP_EPS = 1e-3
 /** Forward separation E -> F' guaranteed after the clamp (mm). */
-const CLAMP_MARGIN = 0.02
+const CLAMP_MARGIN = AP.sharpening.rideClampMarginMm
 
 function nearestOnOpenPolyline(p: Pt, poly: Pt[]): { d: number; seg: number; t: number } {
   let best = { d: Infinity, seg: 0, t: 0 }
@@ -470,7 +472,7 @@ function trimExitUntilBehind(exit: Pt[], B: Pt, dir: Pt, clearance: number): Pt[
  *          null if the geometry degenerates (E==F, fillet build fails after retry).
  */
 export function buildLoopback(
-  exitRide: Pt[], entryRide: Pt[], toolRadius: number, arcTol: number, loopbackFilletPct = 25,
+  exitRide: Pt[], entryRide: Pt[], toolRadius: number, arcTol: number, loopbackFilletPct = AP.defaults.loopbackFilletPct,
   escapes?: (pts: Pt[]) => boolean,
 ): { exit: Pt[]; entry: Pt[]; loopback: Loopback } | null {
   if (exitRide.length < 2 || entryRide.length < 2) return null
@@ -526,8 +528,8 @@ export function buildLoopback(
   // zero-radius arc; this is NOT a 1.0mm floor (the old Math.max(Rf, 1.0) clamp silently pinned
   // every pct <= 50% of an R2 tool to 1.0mm, so the knob did nothing -- defect-fix 2026-06-09).
   const Rf = (loopbackFilletPct / 100) * toolRadius
-  const Rlb = Math.max(Rf, 0.05)
-  const CHORD = Math.min(Math.max(arcTol, 0.005), Rlb * 0.0015)
+  const Rlb = Math.max(Rf, AP.sharpening.loopbackMinRadiusMm)
+  const CHORD = Math.min(Math.max(arcTol, AP.sharpening.loopbackChordFloorMm), Rlb * AP.sharpening.loopbackChordRadii)
   const tEF = unit(sub(F, E))
   // ADAPTIVE Rf: per-joint tangent length <= |EF|/2 so the two fillets' traverse contacts can
   // never overshoot the traverse or cross each other; ALSO <= 90% of the fillet's OWN ride
@@ -535,8 +537,8 @@ export function buildLoopback(
   // the ride degenerated the trim into an off-ride start = the 162deg-joint token arcs).
   const polyLen = (p: Pt[]): number => { let s = 0; for (let i = 1; i < p.length; i++) s += dist(p[i - 1], p[i]); return s }
   const maxTan = dist(E, F) / 2
-  const maxTan1 = Math.min(maxTan, 0.9 * polyLen(exit0))
-  const maxTan2 = Math.min(maxTan, 0.9 * polyLen(entry0))
+  const maxTan1 = Math.min(maxTan, AP.sharpening.loopbackRideFraction * polyLen(exit0))
+  const maxTan2 = Math.min(maxTan, AP.sharpening.loopbackRideFraction * polyLen(entry0))
 
   // Signed joint turns: when both joints turn the SAME way and their sum passes 180deg, the
   // two-fillet route THROUGH the E->F chord direction goes the LONG way around (a closed
@@ -550,7 +552,7 @@ export function buildLoopback(
   // null when the geometry is not actually a corner (contacts outside the ride budget --
   // e.g. a long dog-leg whose ray intersection sits far away); the caller then falls back to
   // the normal two-fillet construction.
-  const rideBudget = Math.min(0.9 * polyLen(exit0), 0.9 * polyLen(entry0))
+  const rideBudget = Math.min(AP.sharpening.loopbackRideFraction * polyLen(exit0), AP.sharpening.loopbackRideFraction * polyLen(entry0))
   const attemptCorner = (R: number, mt: number): { exit: Pt[]; entry: Pt[]; loopback: Loopback } | null => {
     let exit = exit0.slice()
     let entry = entry0.slice()
@@ -581,15 +583,15 @@ export function buildLoopback(
     const fillet2 = arc.slice(i + 1)
     if (exit.length < 2 || entry.length < 2) return null
     // chain joints must be tangent (see the kink validation in the two-fillet path)
-    if (jointKinkDeg(arc[0], arc[1], tangentAtEnd(exit)) > 45) return null
-    if (jointKinkDeg(arc[arc.length - 2], arc[arc.length - 1], tangentAtStart(entry)) > 45) return null
+    if (jointKinkDeg(arc[0], arc[1], tangentAtEnd(exit)) > AP.sharpening.loopbackMaxKinkDeg) return null
+    if (jointKinkDeg(arc[arc.length - 2], arc[arc.length - 1], tangentAtStart(entry)) > AP.sharpening.loopbackMaxKinkDeg) return null
     return { exit, entry, loopback: { fillet1, traverse, fillet2 } }
   }
 
   const attempt = (R: number, k: number): { exit: Pt[]; entry: Pt[]; loopback: Loopback } | JointFail => {
     const mt1 = maxTan1 * k, mt2 = maxTan2 * k
 
-    if (Math.abs(sumTurn) > 181) {
+    if (Math.abs(sumTurn) > AP.sharpening.loopbackMaxTurnDeg) {
       // LONG-WAY decomposition: prefer the direct short-way corner fillet; if the geometry is
       // not a true corner (direct contacts off the rides), fall through to the two-fillet
       // dog-leg below (whose long traverse keeps it from ballooning). The ride budget is a
@@ -653,7 +655,7 @@ export function buildLoopback(
     // clears the corner.
     const kink1 = jointKinkDeg(fillet1[0], fillet1[1], tangentAtEnd(exit))
     const kink2 = jointKinkDeg(fillet2[fillet2.length - 2], fillet2[fillet2.length - 1], tangentAtStart(entry))
-    if (kink1 > 45 || kink2 > 45) {
+    if (kink1 > AP.sharpening.loopbackMaxKinkDeg || kink2 > AP.sharpening.loopbackMaxKinkDeg) {
       return { fail: `kinked chain joint (exit ${kink1.toFixed(1)}deg / entry ${kink2.toFixed(1)}deg)` }
     }
     return { exit, entry, loopback: { fillet1, traverse, fillet2 } }
@@ -664,7 +666,7 @@ export function buildLoopback(
   // (crossing the two fillets' traverse contacts) or bulge a fillet out of the cut region;
   // shrinking both restores the slack and hugs the wall corner.
   let last: JointFail = { fail: 'no attempt ran' }
-  for (const k of [1, 0.5, 0.25, 0.1]) {
+  for (const k of AP.sharpening.loopbackRadiusLadder) {
     const res = attempt(Rlb * k, k)
     if ('fail' in res) { last = res; continue }
     if (escapes) {
@@ -739,7 +741,7 @@ function trimEntryFromTangent(entry: Pt[], tan: Pt): Pt[] {
  * unit tests can exercise the same-loop coincidence/trim/tangency invariants in one call.
  */
 export function buildWallCleanTransition(
-  priorCut: Pt[], nextCut: Pt[], cutRegion: Loops, toolRadius: number, arcTol: number, loopbackFilletPct = 25,
+  priorCut: Pt[], nextCut: Pt[], cutRegion: Loops, toolRadius: number, arcTol: number, loopbackFilletPct = AP.defaults.loopbackFilletPct,
 ): WallCleanTransition | null {
   if (priorCut.length < 2 || nextCut.length < 2 || cutRegion.length === 0) return null
   const A = priorCut[priorCut.length - 1]

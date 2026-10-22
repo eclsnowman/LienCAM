@@ -17,6 +17,8 @@
 // PURE + DETERMINISTIC (D-006): no globals, no RNG, no time; fixed iteration order over
 // the offset ring, so identical inputs give byte-identical output.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import type { AdaptiveMillingDirection } from '../../types'
 import { materialSideFor } from '../../millingDirection'
 import { type Pt, type Loops, offsetClosed } from './clipperEngine'
@@ -89,7 +91,7 @@ export function getEngagePoint(
   const protrusion = toolRadius * (1 - Math.cos(theta / 2))
   const stepOverDistance = toolDiameter * stepOver
   // FINISHING_THICKNESS_SCALE = 0.1: keep the first poke very shallow.
-  const engageProtrusion = Math.min(protrusion, stepOverDistance * 0.1)
+  const engageProtrusion = Math.min(protrusion, stepOverDistance * AP.caps.engageProtrusionStepovers)
   if (!(engageProtrusion > 0)) return null
 
   // Preserve the established engage ring exactly. Cross-engine stock-trace clearance
@@ -145,7 +147,7 @@ export function getEngagePoint(
   const reach = offsetClosed(boundLoops, toolRadius, arcTol)
   if (reach.length === 0) return null
 
-  const rejectArea = 2 * targetArea // FreeCAD safety reject: area > 2*optimal*minStep
+  const rejectArea = AP.caps.engageRejectAreaMultiple * targetArea // FreeCAD safety reject: area > 2*optimal*minStep
 
   // Roll in along the actual cleared-stock frontier. The two tangents have
   // opposite cutting sides; the normal directions head into stock or back into air.

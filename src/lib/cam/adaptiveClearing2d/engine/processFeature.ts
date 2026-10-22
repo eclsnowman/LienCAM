@@ -21,11 +21,15 @@
 // from optimalCutAreaPerDist x moveDistance (an AREA), since FreeCAD's scaled
 // "moveDistance*2" was a scaled-area value, not a length.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP, adaptiveEngageMoveDistance } from '../../../../kernel/ops/adaptive/policy'
+// (separate line: WO-3018's record test pins the import above verbatim)
+import { ADAPTIVE_MOTION_SWITCHES, adaptiveKeepDownCapPolicy } from '../../../../kernel/ops/adaptive/policy'
 import type { AdaptiveMillingDirection } from '../../types'
 import { materialSideFor } from '../../millingDirection'
 import {
   type Pt, type Loop, type Loops, type PolyNode,
-  offsetClosed, offsetClosedTree, union, intersection, difference, totalArea, netArea, capsulePath, diskPath, loopArea, offsetOpenRound,
+  offsetClosed, offsetClosedTree, union, intersection, difference, totalArea, netArea, capsulePath, diskPath, loopArea, offsetOpenRound, capsuleSweep,
 } from './clipperEngine'
 import { createToolGeometry } from './toolGeometry'
 import { createStepper, type StepperOptions } from './steering'
@@ -329,7 +333,7 @@ export type AdaptivePass =
   // rapid over the clear point, rapid down through air, feed in at leadInRate). Set ONLY by
   // planGatedLanding's clear-air rung; a link without it keeps today's plunge-at-plungeRate
   // descent unchanged, because its shaft was proven only to the looser landingUncutCap.
-  | { type: 'link'; points: [Pt, Pt]; jumpType: 1 | 2; boundarySpan?: Pt[]; helixDescent?: { center: Pt; radius: number }; fallbackHelix?: { center: Pt; radius: number }; liftReason?: string; microLift?: { z: number }; clearAirLanding?: true }
+  | { type: 'link'; points: [Pt, Pt]; jumpType: 1 | 2; boundarySpan?: Pt[]; helixDescent?: { center: Pt; radius: number }; fallbackHelix?: { center: Pt; radius: number }; liftReason?: string; microLift?: { z: number; empty?: true }; clearAirLanding?: true }
   | { type: 'wallfollow'; points: Pt[] } // integral wall-follow: rides the shared wall at depth in place of a lift (replaces a jumpType-2 link)
   // A loopback pass has TWO producers, and they answer to different quality rules: the
   // wall-clean FILLET chain built in appendCutPass (must join its neighbouring wall rides
@@ -433,6 +437,15 @@ export function setProcessFeatureRequestRecorder(recorder: ProcessFeatureRequest
   processFeatureRequestRecorder = recorder
 }
 
+/** Per-call, measurement-only view of a physically accepted graph candidate, before
+ * caller selection/emission (landing callers may split it or choose another candidate).
+ * Snapshots share no mutable objects with the planner; absent observers allocate none. */
+export type AcceptedGraphRouteObserver = (route: {
+  readonly points: readonly Readonly<Pt>[]
+  readonly length: number
+  readonly maxLength: number
+}) => void
+
 export interface ProcessParams {
   /** 3D model boundaries require cleanup bounded against the original samples.
    * Omitted keeps the established 2D pass stream and corner transitions. */
@@ -463,6 +476,8 @@ export interface ProcessParams {
    *  (when a helix fits there). For emitters that hold live carved stock (the 3D rougher).
    *  Default OFF: the pass stream is byte-identical without it. */
   liftFallbackHelix?: boolean
+  /** WO-3041: overrides ADAPTIVE_MOTION_SWITCHES.plungeOpeningRing for this call. */
+  plungeOpeningRing?: boolean
   /** Integral wall-follow: replace a between-pass lift with a wall-skim at depth when its
    *  two endpoints share a boundary loop within a length budget. Default OFF (undefined =
    *  byte-identical to the lift-everywhere behavior). */
@@ -575,7 +590,7 @@ export interface FeatureResult {
   }
 }
 
-export const DEFAULT_INTEGRAL_WALL_FOLLOW_LENGTH_FACTOR = 2
+export const DEFAULT_INTEGRAL_WALL_FOLLOW_LENGTH_FACTOR = AP.caps.integralWallFollowLengthFactor
 
 /** Preserve the historical direct wall-follow budget for absent or unusable authored data. */
 export function resolveIntegralWallFollowLengthFactor(value: number | undefined): number {
@@ -585,8 +600,14 @@ export function resolveIntegralWallFollowLengthFactor(value: number | undefined)
 }
 
 // Safety caps so a geometry edge case can never hang the worker.
-const MAX_PASSES = 5000
-const MAX_POINTS_PER_PASS = 20000
+const MAX_PASSES = AP.steering.maxPasses
+const MAX_POINTS_PER_PASS = AP.steering.maxPointsPerPass
+/** WO-3057: how far (in tool radii, from the tool-centre region boundary) a free cut on a
+ *  stock-outline component must be before it steers from the last travelled heading (WO-2850)
+ *  instead of the gyro average. Measured: 1.25 re-reddens adaptiveWallBand (580.7 mm path);
+ *  1.5 / 1.75 / 2.0 hold all seven quality records and keep the WO-2850 boss rough at
+ *  7.5 / 6.9 / 7.4 % flips on its original stick (pre-WO-2850: 15.2 %). */
+const FREE_CUT_TRAVEL_HEADING_RADII = 1.5
 
 function ensureCCW(loop: Loop): Loop { return loopArea(loop) < 0 ? [...loop].reverse() : loop }
 function ensureCW(loop: Loop): Loop { return loopArea(loop) > 0 ? [...loop].reverse() : loop }
@@ -657,11 +678,10 @@ function wallRideMatchesDirection(
  * by its endpoints' arc coordinates forced a retract for every one of them on Operator's
  * modelled slab and on the taper boss. */
 function wallRouteKeepsDirection(points: Pt[], loops: Loops, direction: AdaptiveMillingDirection, near: number): boolean {
-  const tables = loops.map(buildLoopArcTable)
   for (let i = 1; i < points.length; i++) {
     const a = projectOnLoops(points[i - 1], loops), b = projectOnLoops(points[i], loops)
     if (a.loop < 0 || a.loop !== b.loop || a.dist > near || b.dist > near) continue
-    const loop = loops[a.loop], table = tables[a.loop]
+    const loop = loops[a.loop], table = cachedLoopArcTable(loop)
     if (!(table.per > 0)) continue
     const s0 = arcCoordOf(loop, table, a.seg, a.foot), s1 = arcCoordOf(loop, table, b.seg, b.foot)
     let delta = s1 - s0
@@ -830,6 +850,21 @@ function isOutsideCutRegion(toolPos: Pt, tree: PolyNode[]): boolean {
 // for the region test (exact on-boundary is rare and handled by includeBoundary callers).
 function pip2(pt: Pt, loop: Loop): -1 | 0 | 1 {
   let inside = false
+  const bands = loop.length >= SEG_GRID_MIN_SEGMENTS ? yBandsOf(loop) : null
+  if (bands) {
+    // WO-3024: only edges that straddle pt.y can flip the parity, and each band lists every
+    // edge whose y-range meets it; the parity is the full scan's (order does not matter).
+    if (!(pt.y >= bands.minY && pt.y <= bands.maxY)) return -1
+    const band = bands.edges[Math.min(bands.n - 1, Math.floor((pt.y - bands.minY) / bands.h))]
+    for (const i of band) {
+      const j = i === 0 ? loop.length - 1 : i - 1
+      const a = loop[i], b = loop[j]
+      const intersect = (a.y > pt.y) !== (b.y > pt.y) &&
+        pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x
+      if (intersect) inside = !inside
+    }
+    return inside ? 1 : -1
+  }
   for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
     const a = loop[i], b = loop[j]
     const intersect = (a.y > pt.y) !== (b.y > pt.y) &&
@@ -838,14 +873,36 @@ function pip2(pt: Pt, loop: Loop): -1 | 0 | 1 {
   }
   return inside ? 1 : -1
 }
+interface YBands { len: number; minY: number; maxY: number; h: number; n: number; edges: number[][] }
+const yBands = new WeakMap<Loop, YBands>()
+/** pip2's edges (loop[j] -> loop[i], j = i - 1) bucketed by horizontal band of y. */
+function yBandsOf(loop: Loop): YBands {
+  const cached = yBands.get(loop)
+  if (cached && cached.len === loop.length) return cached
+  let minY = Infinity, maxY = -Infinity
+  for (const q of loop) { if (q.y < minY) minY = q.y; if (q.y > maxY) maxY = q.y }
+  const n = Math.max(1, Math.ceil(Math.sqrt(loop.length)))
+  const h = Math.max((maxY - minY) / n, 1e-9)
+  const edges: number[][] = Array.from({ length: n }, () => [])
+  const band = (y: number): number => Math.min(n - 1, Math.max(0, Math.floor((y - minY) / h)))
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i], b = loop[i === 0 ? loop.length - 1 : i - 1]
+    const lo = band(Math.min(a.y, b.y)), hi = band(Math.max(a.y, b.y))
+    for (let k = lo; k <= hi; k++) edges[k].push(i)
+  }
+  const bands = { len: loop.length, minY, maxY, h, n, edges }
+  yBands.set(loop, bands)
+  return bands
+}
 
 export function processFeature(
   feat: Feature,
   params: ProcessParams,
   // Optional progress callback: fraction (0..1) of THIS feature's completion, reported at
-  // the top of each outer pass. Backward compatible (optional, last param) so existing
+  // the top of each outer pass. Backward compatible (optional) so existing
   // callers/tests are unaffected. Progress-only: emits NO geometry (bytestab invariant).
   onPassProgress?: (frac: number) => void,
+  onAcceptedGraphRoute?: AcceptedGraphRouteObserver,
 ): FeatureResult {
   if (!params.repositionTime?.trial) processFeatureRequestRecorder?.({ feature: feat, params })
   const { toolRadius, stepOver, tolerance } = params
@@ -858,7 +915,7 @@ export function processFeature(
   if (!Number.isFinite(landingUncutCap) || landingUncutCap < 0 || landingUncutCap > 1) {
     throw new Error(`processFeature: landingUncutCap must be finite and in [0, 1], got ${landingUncutCap}`)
   }
-  const arcTol = params.arcTol ?? Math.max(tolerance * 0.25, 0.01)
+  const arcTol = params.arcTol ?? Math.max(tolerance * AP.sampling.arcTolFraction, AP.sampling.arcTolFloorMm)
   const helixRadius = params.helixDiameter / 2
   const integralWallFollowLengthFactor =
     resolveIntegralWallFollowLengthFactor(params.integralWallFollowLengthFactor)
@@ -971,7 +1028,7 @@ export function processFeature(
   // Z >= 5.0"). The centre must stand inside the tool-centre region (on its wall to within the
   // same tolerance the wall skim uses), or the roll-in is not offered.
   const engageInsideRegion = (p: Pt): boolean =>
-    !isOutsideCutRegion(p, cutTree) || closestPointOnPaths(cutRegion, p).dist <= SKIM_ON_WALL_EPS
+    !isOutsideCutRegion(p, cutTree) || distToLoops(p, cutRegion) <= SKIM_ON_WALL_EPS
   // The MATERIAL region: everything the roughing pass may remove (the feature less the
   // finishing stock). Identical expression to the one the residual measure used to build
   // for itself at the end of this function -- hoisted here because WO-439 fix 2 needs it
@@ -1158,10 +1215,10 @@ export function processFeature(
         // there is a sliver the ride already takes under its cap.
         if (cross <= 0) continue
         const turn = Math.atan2(cross, dot)
-        if (turn < Math.PI / 18) continue
+        if (turn < Math.PI / AP.sharpening.cornerMinTurnDivisor) continue
         // The diagonal diverges as the turn nears 180 deg (a spike); bound the disk at four band
         // depths (a 151 deg turn) -- past that the inset region has no corner to pivot on anyway.
-        const radius = Math.min(bandDepth / Math.cos(turn / 2), 4 * bandDepth)
+        const radius = Math.min(bandDepth / Math.cos(turn / 2), AP.sharpening.cornerDiskBandDepths * bandDepth)
         cornerDisks = union(cornerDisks, diskPath(v, radius, arcTol))
       }
     }
@@ -1185,8 +1242,8 @@ export function processFeature(
   // tool radius of inscribed clearance here rejected narrow-but-valid regions
   // (notably a 15 mm bore with a 9.52 mm cutter) after cutter fit had already
   // been proven. The fallback only needs a small numerical interior margin.
-  const findEntry = (searchLoops: Loops): { pt: Pt; seedDisk: Loops; seedRadius: number } | null => {
-    const sized = findStartPointIn(searchLoops, cutTree, helixRadius, helixRadius + toolRadius, toolRadius, arcTol)
+  const findEntry = (searchLoops: Loops, entryRadius = helixRadius): { pt: Pt; seedDisk: Loops; seedRadius: number } | null => {
+    const sized = findStartPointIn(searchLoops, cutTree, entryRadius, entryRadius + toolRadius, toolRadius, arcTol)
     if (sized) {
       // WO-1103: in a straight channel the deepest point is the MIDDLE, and a spiral grown
       // there saturates across the width with work stranded at BOTH ends -- the seam
@@ -1195,14 +1252,14 @@ export function processFeature(
       // relocated: its seed disk is a FIXED helixRadius + toolRadius, so moving the point
       // cannot change the area credited to `cleared`. The fallback entry's disk is sized by
       // the clearance it found, so relocating it would silently re-credit that disk.
-      const moved = endBiasedChannelSeed(searchLoops, cutTree, sized.pt, helixRadius, stepOverDistance, arcTol)
+      const moved = endBiasedChannelSeed(searchLoops, cutTree, sized.pt, entryRadius, stepOverDistance, arcTol)
       if (moved) return { pt: moved, seedDisk: diskPath(moved, sized.seedRadius, arcTol), seedRadius: sized.seedRadius }
       return sized
     }
     const fallback = findStartPointIn(
       searchLoops,
       cutTree,
-      Math.max(tolerance * 0.5, arcTol),
+      Math.max(tolerance * AP.sampling.seedSearchTolerances, arcTol),
       undefined,
       toolRadius,
       arcTol,
@@ -1217,10 +1274,30 @@ export function processFeature(
     // largest legal helix near the point, and the seed disk credited to
     // `cleared` is exactly the disk that helix opens. Only when nothing fits is
     // the entry left as the (loud) plunge it always was.
-    const rescued = planHelixDescent(fallback.pt, cutRegion, cutTree, helixRadius, toolRadius)
+    const rescued = planHelixDescent(fallback.pt, cutRegion, cutTree, entryRadius, toolRadius)
     if (!rescued) return fallback
     const seedRadius = rescued.radius + toolRadius
     return { pt: rescued.center, seedDisk: diskPath(rescued.center, seedRadius, arcTol), seedRadius }
+  }
+  // WO-3041 (switch, default OFF): the operator's plunge (no helix) is kept, and the entry is
+  // searched where the disk a default helix would open fits, so an opening ring can grow the
+  // plunge hole to that disk at depth before the walker starts. Where that disk does not fit
+  // (or the switch is off) the entry is exactly today's.
+  const plungeOpening = (params.plungeOpeningRing ?? ADAPTIVE_MOTION_SWITCHES.plungeOpeningRing)
+    && helixRadius < MIN_DESCENT_HELIX_RADIUS
+  const openingRadius = (AP.defaults.helixDiameterPctOfTool / 100) * toolRadius
+  // `opening` is the planned ring, measured against `belief` plus the plunge's own hole; a ring
+  // that cannot stay under the slot ceiling leaves today's plain plunge.
+  const findSeed = (searchLoops: Loops, belief: Loops): { pt: Pt; seedDisk: Loops; seedRadius: number; opening?: Pt[] } | null => {
+    if (plungeOpening) {
+      const opened = findEntry(searchLoops, openingRadius)
+      if (opened && opened.seedRadius - toolRadius >= MIN_DESCENT_HELIX_RADIUS) {
+        const hole = union(belief, diskPath(opened.pt, toolRadius, arcTol))
+        const ring = planPlungeOpeningRing(opened.pt, opened.seedRadius - toolRadius, toolRadius, stepOverDistance, forwardTravel, arcTol, hole)
+        if (ring) return { ...opened, opening: ring }
+      }
+    }
+    return findEntry(searchLoops)
   }
 
   // WO-1178: with an exterior seed the region holds the seed's air; the interior fallback entry
@@ -1228,7 +1305,7 @@ export function processFeature(
   const stockRegion: Loops = params.clearedSeed && params.clearedSeed.length > 0
     ? difference(cutRegion, params.clearedSeed)
     : cutRegion
-  const start = findEntry(stockRegion)
+  const start = findSeed(stockRegion, params.clearedSeed ?? [])
   // WO-1194: the same distinction stockRegion draws (region-over-stock vs region-over-air),
   // as a measurement the tier-1 keep-down router can ask about ONE POINT AT A TIME. Built only
   // when the caller supplied the exterior seed; null otherwise, which leaves every routed ride
@@ -1236,6 +1313,8 @@ export function processFeature(
   const exteriorAirAt = params.clearedSeed && params.clearedSeed.length > 0
     ? exteriorAirDepth(params.clearedSeed)
     : null
+  // WO-3057: the WO-2850 travelled-heading rule belongs to the stock-outline component only.
+  const steersFreeCutsFromTravel = !!params.clearedSeed && params.clearedSeed.length > 0
 
   // Opt-in outside-in first entry (FreeCAD getEngagePoint roll-in): seed `cleared` with the
   // caller-supplied exterior region and place the tool CENTRE out in that cleared air just
@@ -1269,7 +1348,9 @@ export function processFeature(
   if (!start && !sideStart) return { ...empty, stats: { ...empty.stats, aborted: 'no-start-point' } }
 
   // start! safe: non-null whenever sideStart is null (guarded by the return above)
-  let cleared: Loops = sideStart ? params.clearedSeed! : start!.seedDisk
+  // WO-3041: an opening entry starts from the plunge's own tool-wide hole; the opening ring
+  // (below, before the walk) is what credits the rest of its disk.
+  let cleared: Loops = sideStart ? params.clearedSeed! : start!.opening ? (params.clearedSeed ?? []) : start!.seedDisk
   const startPoint: Pt = sideStart ? sideStart.pt : start!.pt
 
   // Every region's entry (initial + each re-seed) is recorded so Phase 5 ramps it in
@@ -1336,7 +1417,7 @@ export function processFeature(
   // make a region of. The stage on each record says which of the two declined it.
   const droppedSliverRegions: DroppedComponent[] = [...prevented.dropped]
   type ReseedEntry =
-    | { mode: 'interior'; pt: Pt; seedDisk: Loops; seedRadius: number }
+    | { mode: 'interior'; pt: Pt; seedDisk: Loops; seedRadius: number; opening?: Pt[] }
     | { mode: 'side'; pt: Pt; clearPoint: Pt; dir: Pt; frontier: Loops }
   const reseed = (): ReseedEntry | null => {
     const remaining = difference(cutRegion, cleared)
@@ -1394,7 +1475,7 @@ export function processFeature(
         console.warn(`[side-entry] reseed roll-in at (${side.pt.x.toFixed(2)}, ${side.pt.y.toFixed(2)}) is not proven clear at its descent point -- interior entry instead (ADR-0003)`)
       }
     }
-    const entry = findEntry(remaining)
+    const entry = findSeed(remaining, cleared)
     if (entry) {
       // Prove the REGION cannot fit the exact shared descent floor. The capacity search below
       // is deliberately only a measurement: it returns a lower-bound estimate and may stop
@@ -1426,7 +1507,7 @@ export function processFeature(
         const capacity = findStartPointIn(
           remaining,
           cutTree,
-          Math.max(tolerance * 0.5, arcTol),
+          Math.max(tolerance * AP.sampling.seedSearchTolerances, arcTol),
           undefined,
           toolRadius,
           arcTol,
@@ -1461,7 +1542,7 @@ export function processFeature(
   // The top-level loadSetpoint (default 0.95) wins over any stepper.loadSetpoint so the
   // ProcessParams knob is authoritative; a per-call stepper override is still respected
   // when the top-level field is left undefined.
-  const stepper = createStepper(tool, { ...params.stepper, materialSide: materialSideFor(millingDirection), loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? 0.95 })
+  const stepper = createStepper(tool, { ...params.stepper, materialSide: materialSideFor(millingDirection), loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? AP.steering.loadSetpoint })
   // WO-439 fix 2: the walker measures its bite inside targetRegion -- the material a
   // roughing pass may actually take. What that excludes is exactly what the raw disk bite
   // used to count and no pass can ever remove: the finishing-stock rim outside the tool's
@@ -1525,7 +1606,7 @@ export function processFeature(
   const coverTables = gapFillCanRun && params.repositionTime ? cutRegion.map(buildLoopArcTable) : []
   const coverFillable = wallBandContour.map(loop => cutRegion.indexOf(loop)).filter(li => li >= 0)
   const coverSoFar: [number, number][][] = cutRegion.map(() => [])
-  const coverTol = Math.max(arcTol * 4, toolRadius * 0.05)
+  const coverTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
   let coverScanned = 0
   const newWallCoverMm = (rides: Pt[][], extra: Pt[][]): number => {
     if (wallCleanupDirectionFallback.rejected) return 0
@@ -1560,15 +1641,17 @@ export function processFeature(
   // entries take real load-setpoint bites; reseed's no-progress guard then terminates
   // the region honestly). Without this, honest belief re-engages forever on wall-rim
   // crumbs (measured: 5000 passes, 9-48 s/level).
-  const engageMoveDistance = stepOverDistance / 4 + tolerance
+  // WO-3030 (switch, default OFF): both keep-down cap sites read one MD-119 form.
+  const engageMoveDistance = adaptiveEngageMoveDistance('walker', stepOverDistance, tolerance, arcTol,
+    adaptiveKeepDownCapPolicy(ADAPTIVE_MOTION_SWITCHES.keepDownCapForm))
   // The walker's UPPER band edge: the most uncut material it may hand a fresh pass.
-  const maxEngageBite = 1.5 * optimal * engageMoveDistance
+  const maxEngageBite = AP.caps.engageBandBiteFactor * optimal * engageMoveDistance
   // The smallest disk bite that counts as stock rather than a belief sliver (2% of the band
   // ceiling): the floor the walker was handed before WO-1178 raised its START floor to
   // minPassBite below. The ride-on rule's stock-ahead proof keeps this lower number on
   // purpose -- a ride is continued when any real stock stands one radius ahead, while a fresh
   // pass is only PLANTED where a progressing bite (minPassBite) is on offer.
-  const walkerMinBite = 0.02 * maxEngageBite
+  const walkerMinBite = AP.caps.walkerMinBiteFraction * maxEngageBite
   // WO-439 fix 3 -- THE PROGRESS FLOOR MUST BE REACHABLE. It used to BE maxEngageBite:
   // the identical expression, to the digit (0.3529 mm^2 at canonical settings). A fresh
   // pass may start standing in at most maxEngageBite of material, so the only way to clear
@@ -1579,7 +1662,7 @@ export function processFeature(
   // what stops the measured 5000-pass crumb loop (see the WALKER/STEPPER ENGAGE CONTRACT
   // note above: BootL dust passes of ~0.02 mm^2 burning every pass slot). The floor now
   // sits at a named fraction of the ceiling, still ~4x above that measured dust.
-  const MIN_PASS_BITE_RATIO = 0.25
+  const MIN_PASS_BITE_RATIO = AP.caps.minPassBiteRatio
   const minPassBite = MIN_PASS_BITE_RATIO * maxEngageBite
   let lastProgressOdometer = 0
   let bitesSinceProgress = 0 // WO-439 census: in-band bites offered since the last progressing pass
@@ -1590,6 +1673,22 @@ export function processFeature(
   // Side entry starts AT the in-band boundary point (like a between-pass start): the walker
   // tangent is the initial direction, and the first bite is a normal bounded engagement, not
   // a plunge. Default entry starts inside the seed disk and cuts outward (unchanged).
+  // WO-3041: plant the operator's plunge at `e.pt` and, at depth, run its planned opening ring,
+  // which grows the plunge's tool-wide hole to the seed disk (pass + entry appended, entry
+  // recorded). Returns the belief after the ring. May throw UnsafeReentryError (re-seeds).
+  const openPlungeHole = (e: { pt: Pt; opening: Pt[] }, before: Loops, pas: number): Loops => {
+    const belief = union(before, diskPath(e.pt, toolRadius, arcTol))
+    const entry: AdaptiveEntry = { point: e.pt, radius: 0, mode: 'plunge' }
+    const swept = expandCleared(belief, e.opening, toolRadius, arcTol)
+    const after = appendCutPass(passes, e.opening, swept, belief, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, entry, null, false, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'cut', null, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, false, mainRepositionTime, onAcceptedGraphRoute)
+    if (fragCensus.enabled) fragCensus.entries.push({ pass: pas, x: entry.point.x, y: entry.point.y, mode: entry.mode, radius: entry.radius })
+    entries.push(entry)
+    return after
+  }
+  if (!sideStart && start!.opening) {
+    cleared = openPlungeHole({ pt: start!.pt, opening: start!.opening }, params.clearedSeed ?? [], -1)
+    pendingEntry = null
+  }
   const firstSeedStart = sideStart ? null : seedStart(startPoint, start!.seedRadius, cleared)
   let toolPos: Pt = sideStart
     ? { x: sideStart.pt.x, y: sideStart.pt.y }
@@ -1605,17 +1704,15 @@ export function processFeature(
   const wallTangentAt = (p: Pt, heading: Pt): Pt | null => {
     let bestD2 = Infinity
     let dir: Pt | null = null
-    for (const loop of cutRegion) {
-      for (let i = 0; i < loop.length; i++) {
-        const a = loop[(i - 1 + loop.length) % loop.length]
-        const b = loop[i]
-        const { distSq } = closestOnSegment(a, b, p)
-        if (distSq >= bestD2) continue
-        const L = Math.hypot(b.x - a.x, b.y - a.y)
-        if (L <= 1e-9) continue
-        bestD2 = distSq
-        dir = { x: (b.x - a.x) / L, y: (b.y - a.y) / L }
-      }
+    for (const { lp: loop, g } of nearestEdgeCandidates(p, cutRegion)) {
+      const a = loop[g]
+      const b = loop[(g + 1) % loop.length]
+      const { distSq } = closestOnSegment(a, b, p)
+      if (distSq >= bestD2) continue
+      const L = Math.hypot(b.x - a.x, b.y - a.y)
+      if (L <= 1e-9) continue
+      bestD2 = distSq
+      dir = { x: (b.x - a.x) / L, y: (b.y - a.y) / L }
     }
     if (!dir) return null
     const dot = dir.x * heading.x + dir.y * heading.y
@@ -1646,23 +1743,22 @@ export function processFeature(
   // The fillet is never tighter than a quarter of the tool's radius and never used against a
   // vertex (a corner apex has no single wall to blend into): those joins stay as they were.
   const WALL_FILLET_R = toolRadius
-  const WALL_FILLET_MIN_R = toolRadius / 4
-  const WALL_FILLET_MIN_TURN = 5 * Math.PI / 180
-  const wallJoinTol = Math.max(arcTol * 4, toolRadius * 0.05)
+  const WALL_FILLET_MIN_R = toolRadius / AP.sharpening.wallFilletMinRadiusDivisor
+  const WALL_FILLET_MIN_TURN = AP.sharpening.wallFilletMinTurnDeg * Math.PI / 180
+  const wallJoinTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
   const nearestWallSegment = (p: Pt): { dir: Pt; foot: Pt; dist: number; t: number; segLen: number } | null => {
     let best: { dir: Pt; foot: Pt; dist: number; t: number; segLen: number } | null = null
-    for (const loop of cutRegion) {
-      for (let i = 0; i < loop.length; i++) {
-        const a = loop[(i - 1 + loop.length) % loop.length]
-        const b = loop[i]
-        const L = Math.hypot(b.x - a.x, b.y - a.y)
-        if (L <= 1e-9) continue
-        const { clp, distSq } = closestOnSegment(a, b, p)
-        if (best && distSq >= best.dist * best.dist) continue
-        const dir = { x: (b.x - a.x) / L, y: (b.y - a.y) / L }
-        const t = ((clp.x - a.x) * dir.x + (clp.y - a.y) * dir.y) / L
-        best = { dir, foot: clp, dist: Math.sqrt(distSq), t, segLen: L }
-      }
+    // WO-3024: only the edges that could be nearest, in the full scan's order (same answer).
+    for (const { lp: loop, g } of nearestEdgeCandidates(p, cutRegion)) {
+      const a = loop[g]
+      const b = loop[(g + 1) % loop.length]
+      const L = Math.hypot(b.x - a.x, b.y - a.y)
+      if (L <= 1e-9) continue
+      const { clp, distSq } = closestOnSegment(a, b, p)
+      if (best && distSq >= best.dist * best.dist) continue
+      const dir = { x: (b.x - a.x) / L, y: (b.y - a.y) / L }
+      const t = ((clp.x - a.x) * dir.x + (clp.y - a.y) * dir.y) / L
+      best = { dir, foot: clp, dist: Math.sqrt(distSq), t, segLen: L }
     }
     return best
   }
@@ -1672,7 +1768,7 @@ export function processFeature(
   // and meets less of the thickening rim, so it is what the load allows where the full radius
   // would exceed the cap. 'later' = the full-radius fillet has not begun yet (a smaller radius
   // begins later still, so the ladder stops there); null = no radius fits or proves.
-  const WALL_FILLET_LADDER = [WALL_FILLET_R, WALL_FILLET_R / 2, WALL_FILLET_R / 4]
+  const WALL_FILLET_LADDER = AP.sharpening.wallFilletLadderDivisors.map(divisor => WALL_FILLET_R / divisor)
   const planWallFillet = (from: Pt, heading: Pt, step: number, clearedNow: Loops): WallFillet | null => {
     for (const radius of WALL_FILLET_LADDER) {
       const fit = planWallFilletAt(from, heading, step, clearedNow, radius)
@@ -1709,7 +1805,7 @@ export function processFeature(
     const apds: number[] = []
     let prev = from
     const take = (p: Pt, dir: Pt): boolean => {
-      if (isOutsideCutRegion(p, cutTree) && closestPointOnPaths(cutRegion, p).dist > SKIM_ON_WALL_EPS) return false
+      if (isOutsideCutRegion(p, cutTree) && distToLoops(p, cutRegion) > SKIM_ON_WALL_EPS) return false
       const m = tool.cutArea(prev, p, clearedNow)
       if (m.areaPerDist > optimal) return false
       points.push(p); dirs.push(dir); areas.push(m.area); apds.push(m.areaPerDist)
@@ -1811,7 +1907,7 @@ export function processFeature(
   let pasCount = 0
   // WO-1178: planted starts the landing gate refused and the walk skipped (see the catch in
   // the pass loop); past the bound the region is stopped as before.
-  const MAX_UNSAFE_STARTS = 32
+  const MAX_UNSAFE_STARTS = AP.steering.maxUnsafeStarts
   let unsafeStarts = 0
   for (let pas = 0; pas < MAX_PASSES; pas++) {
     pasCount = pas + 1
@@ -1827,12 +1923,12 @@ export function processFeature(
     // PHYSICALLY removed when it executes. (Reference copy is safe: `cleared` is only ever
     // reassigned, never mutated in place.)
     const clearedAtPassStart = cleared
-    const gyro: Pt[] = [toolDir, toolDir, toolDir, toolDir, toolDir]
+    const gyro: Pt[] = Array.from({ length: AP.steering.headingSamples }, () => toolDir)
     toolDir = normalize(sumv(gyro))
     const engagePoint = toolPos
     const engageDirection = toolDir
     let passTravelDistance = 0
-    const cycleCellSize = Math.max(tolerance * 2, arcTol * 4)
+    const cycleCellSize = Math.max(tolerance * AP.sampling.cycleCellTolerances, arcTol * AP.sampling.cycleCellArcTols)
     const cycleVisits = new Map<string, { distance: number; direction: Pt }>()
     const cycleKey = (point: Pt): string => (
       `${Math.round(point.x / cycleCellSize)},${Math.round(point.y / cycleCellSize)}`
@@ -1873,7 +1969,19 @@ export function processFeature(
       totalPoints++
       toolDir = normalize(sumv(gyro))
 
-      const { dist: distToBoundary } = closestPointOnPaths(cutRegion, toolPos)
+      const distToBoundary = distToLoops(toolPos, cutRegion)
+      // WO-2850: away from wall transitions, steer from the last travelled
+      // heading. Averaging five old headings here adds a second lag to the
+      // stepper's deflection history and makes straight stock-edge cuts hunt
+      // across the load band. Inside the wall-fillet reach, retain the wall
+      // transition heading policy and its existing arrival/departure proofs.
+      // WO-3057: only where WO-2850 measured the hunting -- a stock-outline
+      // component (the 3D rougher's open stock edge, clearedSeed) -- and only
+      // FREE_CUT_TRAVEL_HEADING_RADII clear of every wall. Everywhere else the
+      // gyro average stands, as the approved 2D/3D quality records hold it.
+      if (steersFreeCutsFromTravel && distToBoundary >= FREE_CUT_TRAVEL_HEADING_RADII * toolRadius) {
+        toolDir = gyro[gyro.length - 1]
+      }
       if (i === 0 && distToBoundary <= wallJoinTol) {
         departAnchor = toolPos
         // A pass that carries an entry opens with its helix, not with a wall ride's tail.
@@ -1881,8 +1989,8 @@ export function processFeature(
       }
       endDistToBoundary = distToBoundary // WO-439 census: value at the point the pass stops on
       const distToEngagePoint = magnitude(sub(toolPos, engagePoint))
-      const relDistToBoundary = 2 * distToBoundary / toolRadius
-      const minCut = optimal / 3
+      const relDistToBoundary = AP.steering.boundaryTaperRadii * distToBoundary / toolRadius
+      const minCut = optimal / AP.steering.minCutDivisor
 
       const targetArea = (relDistToBoundary > 1 || distToEngagePoint < toolRadius)
         ? optimal
@@ -1891,10 +1999,10 @@ export function processFeature(
       // Adaptive step (scale-free port of FreeCAD's 4.0/deflectionAngle): tight turns
       // and wall/engage proximity -> small steps; straight runs -> up to toolRadius/2.
       let step: number
-      if (distToBoundary < toolRadius || distToEngagePoint < toolRadius) step = tolerance * 2
-      else if (Math.abs(deflectionAngle) > 1e-4) step = (0.5 * tolerance) / Math.abs(deflectionAngle)
-      else step = tolerance * 4
-      step = Math.min(Math.max(step, tolerance * 2), toolRadius / 2)
+      if (distToBoundary < toolRadius || distToEngagePoint < toolRadius) step = tolerance * AP.steering.nearStepTolerances
+      else if (Math.abs(deflectionAngle) > 1e-4) step = (AP.steering.turnStepTolerances * tolerance) / Math.abs(deflectionAngle)
+      else step = tolerance * AP.steering.straightStepTolerances
+      step = Math.min(Math.max(step, tolerance * AP.steering.minStepTolerances), toolRadius / AP.steering.maxStepRadiusDivisor)
 
       const r = stepper.findNextPoint(cleared, toolPos, toolDir, step, targetArea)
       if (r.blockedByMillingSide) {
@@ -1924,7 +2032,7 @@ export function processFeature(
       //  - Leaving a ride-on slide or an arrival fillet mid-pass: an ordinary step of the cut,
       //    under the cut's cap `optimal`.
       if (departAnchor) {
-        if (magnitude(sub(toolPos, departAnchor)) >= 1.5 * departRadius) {
+        if (magnitude(sub(toolPos, departAnchor)) >= AP.sharpening.departReachRadii * departRadius) {
           departAnchor = null
           departHeadOpen = false
         } else {
@@ -1934,7 +2042,7 @@ export function processFeature(
           if (Math.abs(turn) > step / departRadius) {
             // The radius ladder: the current radius first, then tighter ones; a radius once
             // tightened stays tightened for the rest of this departure.
-            const cap = departHeadOpen ? 1.5 * stepOverDistance : optimal
+            const cap = departHeadOpen ? AP.caps.rideCapStepovers * stepOverDistance : optimal
             for (const radius of WALL_FILLET_LADDER) {
               if (radius > departRadius) continue
               const maxTurn = step / radius
@@ -2023,7 +2131,7 @@ export function processFeature(
           // SKIM_ON_WALL_EPS (see its definition) is genuinely leaving; everything inside
           // that tolerance goes to the stay-down load cap below, which decides.
           const slideLeavesRegion = isOutsideCutRegion(slide, cutTree)
-            && closestPointOnPaths(cutRegion, slide).dist > SKIM_ON_WALL_EPS
+            && distToLoops(slide, cutRegion) > SKIM_ON_WALL_EPS
           if (!slideLeavesRegion) {
             const ms = tool.cutArea(toolPos, slide, cleared)
             // WO-1178 RIDE-ON: this slide is no longer only the stalled-rim rescue -- since the
@@ -2109,15 +2217,15 @@ export function processFeature(
         // ordinary walker, reseed, cleanup, and residual gates still decide
         // whether any real material remains.
         const closesAtEngage = !firstEngagePoint
-          && passTravelDistance >= Math.max(toolDia, stepOverDistance * 2)
-          && magnitude(sub(newToolPos, engagePoint)) <= Math.max(tolerance * 2, step * 1.5)
-          && newToolDir.x * engageDirection.x + newToolDir.y * engageDirection.y >= 0.5
+          && passTravelDistance >= Math.max(toolDia, stepOverDistance * AP.steering.orbitCloseStepovers)
+          && magnitude(sub(newToolPos, engagePoint)) <= Math.max(tolerance * AP.steering.orbitCloseTolerances, step * AP.steering.orbitCloseSteps)
+          && newToolDir.x * engageDirection.x + newToolDir.y * engageDirection.y >= AP.steering.orbitCloseDot
         const visitKey = cycleKey(newToolPos)
         const priorVisit = cycleVisits.get(visitKey)
         const closesRepeatedOrbit = !firstEngagePoint
           && priorVisit !== undefined
-          && passTravelDistance - priorVisit.distance >= Math.max(toolDia, stepOverDistance * 2)
-          && newToolDir.x * priorVisit.direction.x + newToolDir.y * priorVisit.direction.y >= 0.5
+          && passTravelDistance - priorVisit.distance >= Math.max(toolDia, stepOverDistance * AP.steering.orbitCloseStepovers)
+          && newToolDir.x * priorVisit.direction.x + newToolDir.y * priorVisit.direction.y >= AP.steering.orbitCloseDot
         if (closesAtEngage || closesRepeatedOrbit) {
           endReason = 'orbit-close' // WO-439 census
           endDetail = closesAtEngage ? 'back at engage point' : 'repeat of a visited cell'
@@ -2195,13 +2303,13 @@ export function processFeature(
     const keepPass = passToolPath.length > 1 && cumulativeCuttingArea > 1e-12
     if (keepPass) {
       const cleaned = params.boundedPathCleanup
-        ? boundedCleanPath(passToolPath, tolerance * 0.25, filletPoints)
-        : cleanPathKeeping(passToolPath, tolerance * 0.25, filletPoints)
+        ? boundedCleanPath(passToolPath, tolerance * AP.sampling.pathCleanTolerances, filletPoints)
+        : cleanPathKeeping(passToolPath, tolerance * AP.sampling.pathCleanTolerances, filletPoints)
       // The departure fillet's points survive cleaning by construction (filletPoints), so the
       // run is still the first `departHeadCount` points after the start.
       const departHead = Math.min(departHeadCount, Math.max(0, cleaned.length - 2))
       try {
-        cleared = appendCutPass(passes, cleaned, cleared, clearedAtPassStart, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, pendingEntry, pendingBoundarySpan, !!params.integralWallFollow, integralWallFollowLengthFactor, !!params.wallCleanupAsWeGo && !singleWallPass, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, wallCleanupDirectionFallback, !!params.liftFallbackHelix, 'cut', null, departHead, exteriorAirAt, singleWallPass ? wallBandContour : null, false, mainRepositionTime)
+        cleared = appendCutPass(passes, cleaned, cleared, clearedAtPassStart, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, pendingEntry, pendingBoundarySpan, !!params.integralWallFollow, integralWallFollowLengthFactor, !!params.wallCleanupAsWeGo && !singleWallPass, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, wallCleanupDirectionFallback, !!params.liftFallbackHelix, 'cut', null, departHead, exteriorAirAt, singleWallPass ? wallBandContour : null, false, mainRepositionTime, onAcceptedGraphRoute)
       } catch (err) {
         if (!(err instanceof UnsafeReentryError)) throw err
         // WO-1178 (attempt 3): AN UNREACHABLE START IS SKIPPED, NOT FATAL. The gate refused every
@@ -2272,7 +2380,7 @@ export function processFeature(
       })
     }
 
-    if (overCutStreak > 5) { aborted = 'over-cut'; break }
+    if (overCutStreak > AP.steering.maxOverCutStreak) { aborted = 'over-cut'; break }
 
     // Find where to start the next pass.
     // WO-410: did THIS pass progress (>= the walker's minimum engage bite)? Judged on
@@ -2362,6 +2470,21 @@ export function processFeature(
         // WO-443: same walker responsibility on the reseed reconstruction as on the first
         // build above -- a fresh frontier does not re-acquire the credited finish band.
         walker = createEngagementWalker(rs.frontier, tool, forwardTravel, walkerRegion)
+      } else if (rs.opening) {
+        // WO-3041: the plunge and its opening ring go into the stream now; the walk starts on
+        // the opened disk's rim exactly as it would from a helix seed. A refused way back in
+        // stops the region as the pass loop does for a pass carrying its entry (WO-400).
+        try {
+          cleared = openPlungeHole({ pt: rs.pt, opening: rs.opening }, cleared, pas)
+        } catch (err) {
+          if (!(err instanceof UnsafeReentryError)) throw err
+          console.warn(`[lift-landing] region stopped: ${err.message}`)
+          aborted = 'unsafe-re-entry'
+          break
+        }
+        const opening = seedStart(rs.pt, rs.seedRadius, cleared)
+        toolPos = opening.pos
+        toolDir = opening.dir
       } else {
         pendingSeed = { disk: rs.seedDisk, before: cleared }
         cleared = union(cleared, rs.seedDisk)
@@ -2410,7 +2533,7 @@ export function processFeature(
     // loops (the actual retained part walls) remain mandatory.
     if (params.skipOuterBoundaryCleanup && loopArea(loop) > 0) return settle()
     const contour = orientClosedTravel(
-      (params.boundedPathCleanup ? boundedCleanPath : cleanPath)(closePath(loop), tolerance * 0.25),
+      (params.boundedPathCleanup ? boundedCleanPath : cleanPath)(closePath(loop), tolerance * AP.sampling.pathCleanTolerances),
       forwardTravel,
     )
     // A finishing contour that removes nothing is not emitted (2026-08-20, Operator's
@@ -2424,7 +2547,7 @@ export function processFeature(
     // finish is already finished or never existed. A contour that does remove
     // material (a pocket wall, a stock edge the passes left) is unchanged.
     const rideCorridor = intersection(offsetOpenRound(contour, toolRadius, arcTol), featLoops)
-    if (totalArea(difference(rideCorridor, cleared)) <= tolerance * 2.0) return settle()
+    if (totalArea(difference(rideCorridor, cleared)) <= tolerance * AP.caps.emptyRideAreaTolerances) return settle()
     // WO-410 STALLED WALL RIM, contour side of the decision: a rim the roughing could not
     // take (too thick for the tangent skim, no roll-in reached it) is EXPLICITLY LEFT to
     // this contour -- but the contour is geometry-only, and riding it through a standing
@@ -2437,8 +2560,8 @@ export function processFeature(
     // withdrawn 08-20 span-drop guard: nothing is silently dropped -- under-cap rims are
     // still ridden whole, over-cap rims fail the region loudly (Operator's ruling A on
     // WO-409: keep refusing).
-    const overload = contourOverCap(contour, cleared, toolRadius, 0.75 * (2 * toolRadius), arcTol)
-    if (overload.overLen > 2.0) {
+    const overload = contourOverCap(contour, cleared, toolRadius, AP.caps.slotCeilingDiameters * (2 * toolRadius), arcTol)
+    if (overload.overLen > AP.caps.rideOverLenMaxMm) {
       // WO-1901: an EARLY ride is an optimisation, never a new way to fail. Hand the loop
       // back to the trailing driver unmarked and say nothing: by then `cleared` can only
       // have grown, so the verdict there is the one this region always got.
@@ -2470,7 +2593,7 @@ export function processFeature(
     const seamedContour = reseamClosedTravel(contour, seamSource)
     const enterContour = (seamed: Pt[]): UnsafeReentryError | null => {
       try {
-        cleared = appendCutPass(passes, seamed, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, cleanupEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'cut', null, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, true, params.repositionTime ?? null)
+        cleared = appendCutPass(passes, seamed, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, cleanupEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'cut', null, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, true, params.repositionTime ?? null, onAcceptedGraphRoute)
         return null
       } catch (err) {
         if (!(err instanceof UnsafeReentryError)) throw err
@@ -2589,7 +2712,7 @@ export function processFeature(
     // (GOOD-SPEC section 1). That loop and its fold are untouchable.
     const cleanupContourRodeTheWholeBoundary = !params.wallCleanupAsWeGo || wallCleanupDirectionFallback.rejected
     if (!cleanupContourRodeTheWholeBoundary && wallBandContour.length > 0) {
-      const wallTol = Math.max(arcTol * 4, toolRadius * 0.05)
+      const wallTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
       // NAMED EPSILON. Below this a "gap" is not a stretch of standing wall, it is the
       // polygon's own faceting: the belief errs by ~arcTol at a corridor edge by
       // construction (GOOD-SPEC section 4), and refusing to chase that artifact is the same
@@ -2612,7 +2735,7 @@ export function processFeature(
         // A 3D wall-reaching cut can continue along the wall before it ends.
         // That motion already removed its wall band; assigning it again to a
         // gap pass sends the cutter backward over the just-cut tail.
-        const proofTol = pass.type === 'cut' ? Math.min(wallTol, tolerance * 0.25 + arcTol) : wallTol
+        const proofTol = pass.type === 'cut' ? Math.min(wallTol, tolerance * AP.sampling.pathCleanTolerances + arcTol) : wallTol
         if (singleWallPass && pass.type === 'wallfollow') cleared = expandCleared(cleared, pts, toolRadius, arcTol)
         creditWallRide(covered, pts, cutRegion, arcTables, proofTol, arcTol)
       }
@@ -2775,18 +2898,18 @@ export function processFeature(
         let plannedCleared = cleared
         for (const candidate of sequence) {
           const rideCorridor = intersection(offsetOpenRound(candidate.ride, toolRadius, arcTol), featLoops)
-          if (totalArea(difference(rideCorridor, plannedCleared)) <= tolerance * 2.0) continue
-          const overload = contourOverCap(candidate.ride, plannedCleared, toolRadius, 0.75 * (2 * toolRadius), arcTol)
-          if (overload.overLen > 2.0) continue
+          if (totalArea(difference(rideCorridor, plannedCleared)) <= tolerance * AP.caps.emptyRideAreaTolerances) continue
+          const overload = contourOverCap(candidate.ride, plannedCleared, toolRadius, AP.caps.slotCeilingDiameters * (2 * toolRadius), arcTol)
+          if (overload.overLen > AP.caps.rideOverLenMaxMm) continue
           plannedCleared = expandCleared(plannedCleared, candidate.ride, toolRadius, arcTol)
           at = rideEndOf(candidate)
         }
         const firstFinishLoop = wallContour[0]
         if (!at || !firstFinishLoop || firstFinishLoop.length < 3) return false
-        const oriented = orientClosedTravel((params.boundedPathCleanup ? boundedCleanPath : cleanPath)(closePath(firstFinishLoop), tolerance * 0.25), forwardTravel)
+        const oriented = orientClosedTravel((params.boundedPathCleanup ? boundedCleanPath : cleanPath)(closePath(firstFinishLoop), tolerance * AP.sampling.pathCleanTolerances), forwardTravel)
         const target = reseamClosedTravel(oriented, at)[0]
         const wallTree = offsetClosedTree(featLoops, -toolRadius, arcTol)
-        const cheapTierCap = 1.5 * stepOverDistance
+        const cheapTierCap = AP.caps.rideCapStepovers * stepOverDistance
         const stopShort = planStopShortKeepDown({
           source: at,
           target,
@@ -2856,11 +2979,11 @@ export function processFeature(
         // coverage gap -- riding it would be air-grazing travel, and on a stock outline it
         // manufactures corner re-entry landings.
         const rideCorridor = intersection(offsetOpenRound(ride, toolRadius, arcTol), featLoops)
-        if (totalArea(difference(rideCorridor, cleared)) <= tolerance * 2.0) { wallCoverStats.skippedEmpty++; continue }
+        if (totalArea(difference(rideCorridor, cleared)) <= tolerance * AP.caps.emptyRideAreaTolerances) { wallCoverStats.skippedEmpty++; continue }
         // WO-410 STALLED WALL RIM, unchanged contract and live-state input: a rim too thick
         // for a contour ride is REFUSED loudly rather than ridden as a near-slot.
-        const overload = contourOverCap(ride, cleared, toolRadius, 0.75 * (2 * toolRadius), arcTol)
-        if (overload.overLen > 2.0) {
+        const overload = contourOverCap(ride, cleared, toolRadius, AP.caps.slotCeilingDiameters * (2 * toolRadius), arcTol)
+        if (overload.overLen > AP.caps.rideOverLenMaxMm) {
           console.warn(`[wall-coverage] gap ride REFUSED: ${overload.overLen.toFixed(1)} mm of a ${gap.len.toFixed(1)} mm span sustains > 75% of a slot (peak ${(overload.peak / (2 * toolRadius) * 100).toFixed(0)}% near (${overload.at.x.toFixed(2)}, ${overload.at.y.toFixed(2)})) against standing stock -- span left unfinished, region reported partial (WO-410)`)
           operatorNotice('a stretch of wall was left uncut because riding it would overload the tool.')
           wallCoverStats.refusedOverload++
@@ -2888,7 +3011,7 @@ export function processFeature(
         const seamedRide = reseamClosedTravel(ride, toolPosition)
         let afterRide: Loops
         try {
-          afterRide = appendCutPass(passes, seamedRide, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, gapEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'wallfollow', priorWallRide, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, false, params.repositionTime ?? null)
+          afterRide = appendCutPass(passes, seamedRide, cleared, cleared, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, gapEntry, null, !!params.integralWallFollow, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'wallfollow', priorWallRide, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, false, params.repositionTime ?? null, onAcceptedGraphRoute)
         } catch (err) {
           if (!(err instanceof UnsafeReentryError)) throw err
           // REFUSED GAPS STAY LOUD (WO-447 method 4): this span cannot be reached safely,
@@ -2946,7 +3069,7 @@ export function processFeature(
     // WO-443's residual accounting folds no finish pass, and this local copy keeps that
     // promise, so every residual/stat number stays bit-for-bit what it was.
     let finishCleared: Loops = cleared
-    const cheapTierCap = 1.5 * stepOverDistance
+    const cheapTierCap = AP.caps.rideCapStepovers * stepOverDistance
 
     /** The connection into `contour` from where the tool physically is. Tier 3 with a gated
      *  descent, attributed -- including the measured verdict of the cheaper tiers' own
@@ -3046,6 +3169,7 @@ export function processFeature(
         // A CLOSED lap has no skippable head: re-seaming it forward would drop that stretch
         // of wall from the only pass that finishes it.
         allowReseam: false,
+        onAcceptedGraphRoute,
       }
       let plan: ReturnType<typeof planGatedLanding>
       try {
@@ -3094,7 +3218,7 @@ export function processFeature(
       if (singleWallPass) continue
       if (loop.length < 3) continue
       const orientedContour = orientClosedTravel(
-        (params.boundedPathCleanup ? boundedCleanPath : cleanPath)(closePath(loop), tolerance * 0.25),
+        (params.boundedPathCleanup ? boundedCleanPath : cleanPath)(closePath(loop), tolerance * AP.sampling.pathCleanTolerances),
         forwardTravel,
       )
       if (orientedContour.length < 3) continue
@@ -3205,7 +3329,7 @@ export function processFeature(
   // QUARANTINED CAVEAT CARRIES TO THIS CALL SITE UNCHANGED (GOOD-SPEC section 4): this
   // inscribed-radius search under-reports by up to its 0.05 mm step, and it feeds a
   // fail-loud abort, so any consumer of residualMaxInscribedR must account for that step.
-  const residualMaxInscribedR = maxInscribedRadius(residualWalker, toolRadius * 1.5, Math.max(arcTol, 0.05))
+  const residualMaxInscribedR = maxInscribedRadius(residualWalker, toolRadius * AP.sampling.residualSearchToolRadii, Math.max(arcTol, AP.sampling.searchResolutionFloorMm))
 
   // FAIL-LOUD termination accounting: the pass loop can end three ways that are NOT a
   // normal completion -- reseed's no-progress guard, no entry found in the remaining
@@ -3244,7 +3368,7 @@ export function processFeature(
  *  See the placement comment inside `endBiasedChannelSeed` -- the overlap is what stops the
  *  spiral leaving the end corners behind it, and the fraction is the middle of the measured
  *  band in which every one of the order's acceptance numbers holds. */
-const END_OVERLAP_STEPOVERS = 0.8
+const END_OVERLAP_STEPOVERS = AP.steering.endOverlapStepovers
 
 /** WO-1103. Is `region` a straight channel that `seed` sits in the MIDDLE of, and if so
  *  where should the entry go instead?
@@ -3359,7 +3483,7 @@ function endBiasedChannelSeed(region: Loops, validTree: PolyNode[], seed: Pt, mi
   // Slide out along the axis, and if the far end is tighter than the helix needs, walk back
   // until the point is a legal tool centre again. Never return the seed itself: that is the
   // caller's own answer and it says "declined" more honestly as null.
-  const step = Math.max(arcTol * 4, stepOverDistance / 4)
+  const step = Math.max(arcTol * AP.sampling.slideStepArcTols, stepOverDistance / AP.sampling.slideStepStepoverDivisor)
   for (let t = target; t > 0; t -= step) {
     const candidate = { x: seed.x + axis.x * t, y: seed.y + axis.y * t }
     if (isOutsideCutRegion(candidate, validTree)) continue
@@ -3379,7 +3503,7 @@ function findStartPointIn(searchLoops: Loops, validTree: PolyNode[], minInscribe
   const bb = polyBBoxOf(searchLoops)
   const maxLen = Math.max(bb.maxX - bb.minX, bb.maxY - bb.minY)
   let startingOffset = maxLen / 2
-  const step = toolRadius / 4
+  const step = toolRadius / AP.sampling.startSearchStepDivisor
   // Always sample the requested minimum exactly. A fixed decrement can jump
   // from just above the minimum to below it and miss the only valid interval
   // in a tight region.
@@ -3396,6 +3520,34 @@ function findStartPointIn(searchLoops: Loops, validTree: PolyNode[], minInscribe
     return null
   }
   let lastFailing = Number.POSITIVE_INFINITY
+  // WO-3024: the rungs above the region's clearance each cost a full inward offset that comes
+  // back empty (34 s on the Form cylinder, mostly re-seeds into small leftovers). Erosion only
+  // shrinks as the offset grows, so the highest non-empty rung is found by bisection over the
+  // same rung values (built with the same arithmetic) and the walk resumes one rung above it:
+  // that rung, every later one, the bisection below and its `lastFailing` are what the full
+  // walk would have seen. Rungs closer together than the offset's own arc tolerance keep the
+  // full walk.
+  if (step > 8 * arcTol) {
+    const rungs: number[] = []
+    for (let r = startingOffset; ; r = Math.max(minInscribe, r - step)) {
+      if (r < minInscribe) break
+      rungs.push(r)
+      if (r === minInscribe) break
+    }
+    if (rungs.length > 4) {
+      let lo = 0, hi = rungs.length // first non-empty rung lies in [lo, hi]; hi = none
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (offsetClosed(searchLoops, -rungs[mid], arcTol).length > 0) hi = mid
+        else lo = mid + 1
+      }
+      const resume = Math.max(0, Math.min(lo, rungs.length - 1) - 1)
+      if (resume > 0) {
+        lastFailing = rungs[resume - 1]
+        startingOffset = rungs[resume]
+      }
+    }
+  }
   while (startingOffset >= minInscribe) {
     let pt = probe(startingOffset)
     if (pt) {
@@ -3523,7 +3675,7 @@ function dropUnenterableCutRegionComponents(
       loops, cutTree, MIN_DESCENT_HELIX_RADIUS, toolRadius + MIN_DESCENT_HELIX_RADIUS, toolRadius, arcTol,
     )
     if (legal) continue
-    const capacity = findStartPointIn(loops, cutTree, Math.max(tolerance * 0.5, arcTol), undefined, toolRadius, arcTol)
+    const capacity = findStartPointIn(loops, cutTree, Math.max(tolerance * AP.sampling.seedSearchTolerances, arcTol), undefined, toolRadius, arcTol)
     dropped.push({
       loops,
       toolCentreArea: Math.abs(netArea(loops)),
@@ -3575,18 +3727,146 @@ function maxInscribedRadius(region: Loops, maxR: number, step: number): number {
  *  null when the ride is safe to keep down. */
 export function rideOverloadsUncut(ride: Pt[], cleared: Loops, toolRadius: number, cap: number, arcTol: number): { width: number; at: Pt; sStart: number; sEnd: number; rideLen: number } | null {
   if (ride.length < 2) return null
-  const WINDOW = 2.0 // mm of sustained path length
+  const fast = rideOverloadsUncutBy(ride, cleared, toolRadius, cap, arcTol, RIDE_MEASURE.local)
+  if (fast !== NEAR_TIE) return fast
+  RIDE_MEASURE.nearTies++
+  return rideOverloadsUncutBy(ride, cleared, toolRadius, cap, arcTol, false) as ReturnType<typeof rideOverloadsUncut>
+}
+
+// WO-3024: the ride measures below are what the Form cylinder and the knob spent half their
+// planning time in. They now (1) scan lazily -- a ride stops being measured at its first
+// tripping window, which is where the scan always returned -- (2) keep the growing cleared set
+// in wasm between sub-steps (capsuleSweep), and (3) when `local`, hand Clipper only the part of
+// the cleared set the rest of the ride can reach (clearedNear), and skip the stretches of a long
+// ride a cheap bound proves hold no tripping window (provenSafeStretches). (1) and (2) are the same Clipper
+// calls on the same inputs. (3) is the same region, but Clipper's integer sweep rounds an
+// intersection by the scanlines of the whole input, so a measured width can move in its sixth
+// significant digit. So every comparison against a cap is checked for a near tie, and a near
+// tie is measured again with `local` off -- the full set, exactly as before -- and that answer
+// is the one returned. Every decision is therefore the one the full measure makes.
+const NEAR_TIE = Symbol('near-tie')
+/** Test oracle only: `local: false` measures every ride against the whole cleared set, step by
+ *  step, as before WO-3024; the planned result must not change (adaptiveSpeed.wo3024.test.ts).
+ *  The counts say how often the fast measure skipped steps and re-measured a near tie. */
+export const RIDE_MEASURE = { local: true, skippedSteps: 0, nearTies: 0 }
+const NEAR_TIE_WIDTH_MM = 1e-4 // a measured width (mm^2/mm) this close to its cap is re-measured
+const nearTie = (value: number, cap: number, scale = 1): boolean => Math.abs(value - cap) <= NEAR_TIE_WIDTH_MM * scale
+
+function rideOverloadsUncutBy(ride: Pt[], cleared: Loops, toolRadius: number, cap: number, arcTol: number, local: boolean): { width: number; at: Pt; sStart: number; sEnd: number; rideLen: number } | null | typeof NEAR_TIE {
+  const WINDOW = AP.sampling.rideWindowMm // mm of sustained path length
 
   // Cheap short-circuit: a tripping window must remove > cap*WINDOW mm^2 of uncut material,
   // so if the WHOLE ride's corridor removes no more than that, no window can trip. This
   // skips the per-step boolean loop for the common legitimate ride -- the wall-cleanup skim
   // along a thin (sub-stepover) uncut wall sliver.
+  const base = local ? clearedNear(cleared, ride, toolRadius, arcTol) : cleared
   const corridor = offsetOpenRound(ride, toolRadius, arcTol)
-  if (totalArea(difference(corridor, cleared)) <= cap * WINDOW) return null
+  const corridorUncut = difference(corridor, base)
+  const corridorArea = totalArea(corridorUncut)
+  if (local && nearTie(corridorArea, cap * WINDOW, WINDOW)) return NEAR_TIE
+  if (corridorArea <= cap * WINDOW) return null
 
-  // Resample at <= ds spacing (keeping original vertices) so window content does not depend
-  // on the boundary polyline's vertex spacing.
-  const ds = 0.75
+  // Per-step freshly-removed area against the growing accumulator, measured as far as the
+  // window scan needs it.
+  const sweep = rideSweep(resampleRide(ride), base, toolRadius, arcTol, local)
+  try {
+    const { stepLen, stepMid } = sweep
+    const n = stepLen.length
+    const safeUntil = local ? provenSafeStretches(corridorUncut, sweep, toolRadius, arcTol, cap * WINDOW, WINDOW) : null
+    // Sliding minimal window of >= WINDOW mm (two-pointer): trip when the window's area
+    // density (mm^2 per mm = average effective width) exceeds the cap. Tail windows shorter
+    // than WINDOW keep the WINDOW denominator (the short-ride clamp described above).
+    const rideLen = stepLen.reduce((s, l) => s + l, 0)
+    let i = 0, j = 0, lenSum = 0, areaSum = 0, sCursor = 0
+    while (i < n) {
+      const next = safeUntil ? safeUntil(i) : i
+      if (next > i) {
+        // No window starting before `next` can trip: skip to it and restart the window there.
+        RIDE_MEASURE.skippedSteps += next - i
+        for (; i < next; i++) sCursor += stepLen[i]
+        j = i; lenSum = 0; areaSum = 0
+        continue
+      }
+      while (j < n && lenSum < WINDOW) { lenSum += stepLen[j]; areaSum += sweep.areaAt(j); j++ }
+      const width = areaSum / Math.max(lenSum, WINDOW)
+      if (local && nearTie(width, cap)) return NEAR_TIE
+      if (width > cap) return { width, at: stepMid[i], sStart: sCursor, sEnd: sCursor + lenSum, rideLen }
+      lenSum -= stepLen[i]; areaSum -= sweep.areaAt(i)
+      sCursor += stepLen[i]
+      i++
+    }
+    return null
+  } finally { sweep.dispose() }
+}
+
+/** WO-3024: stretches of a ride that provably hold no tripping window. The ride's steps are cut
+ *  into chunks at least one window (plus its longest step) long, so every window that starts in
+ *  chunk c ends by the end of chunk c+1. A window's fresh area is at most the area its capsules
+ *  cover outside the cleared set. Those capsules lie in a corridor round chunks c and c+1 drawn
+ *  two arc tolerances wider than the tool, and in the ride's true swept band. The ride's own
+ *  uncleared corridor (the short-circuit's `difference`) misses that band only by the slivers
+ *  between its round joins and their arcs, each at most an arc tolerance deep, so at most
+ *  arcTol x r x (turning + a full turn for the ends) in area. So the window's fresh area is at
+ *  most (uncleared corridor within the chunk corridor) + that sliver allowance. When that bound
+ *  sits clearly under the trip area (cap x WINDOW) and has no hole (a cleared island inside
+ *  the corridor, which the per-step area would count), no window starting in chunk c trips and
+ *  the scan may jump to chunk c+1 without measuring a step. A chunk no uncleared piece comes near
+ *  needs no Clipper call. Returns, for a step index, the first step the scan must still look
+ *  at. */
+const RIDE_CHUNK_MIN_MM = 6 // shortest chunk; long enough that one bound covers several windows
+const RIDE_BOUND_MARGIN_MM2 = 1e-2 // the bound must clear the trip area by this much
+function provenSafeStretches(uncutLoops: Loops, sweep: RideSweep, toolRadius: number, arcTol: number, tripArea: number, WINDOW: number): (i: number) => number {
+  const { stepLen, stepA, stepB } = sweep
+  const n = stepLen.length
+  const chunkLen = Math.max(RIDE_CHUNK_MIN_MM, WINDOW + Math.max(0, ...stepLen))
+  const starts: number[] = [0]
+  const chunkOf = new Int32Array(n)
+  let run = 0
+  for (let k = 0; k < n; k++) {
+    if (run >= chunkLen) { starts.push(k); run = 0 }
+    chunkOf[k] = starts.length - 1
+    run += stepLen[k]
+  }
+  starts.push(n)
+  const chunkR = toolRadius + 2 * arcTol
+  const uncutBoxes = uncutLoops.map(l => polyBBoxOf([l]))
+  const safe = new Map<number, boolean>()
+  return (i: number): number => {
+    const c = chunkOf[i]
+    let ok = safe.get(c)
+    if (ok === undefined) {
+      const from = starts[c], to = starts[Math.min(c + 2, starts.length - 1)]
+      const path = [stepA[from], ...stepB.slice(from, to)]
+      let turning = 2 * Math.PI
+      for (let k = 1; k + 1 < path.length; k++) {
+        const a = path[k - 1], b = path[k], d = path[k + 1]
+        turning += Math.abs(Math.atan2((b.x - a.x) * (d.y - b.y) - (b.y - a.y) * (d.x - b.x), (b.x - a.x) * (d.x - b.x) + (b.y - a.y) * (d.y - b.y)))
+      }
+      const room = tripArea - RIDE_BOUND_MARGIN_MM2 - arcTol * toolRadius * turning
+      const pb = polyBBoxOf([path])
+      const box = { minX: pb.minX - chunkR, minY: pb.minY - chunkR, maxX: pb.maxX + chunkR, maxY: pb.maxY + chunkR }
+      const near = uncutLoops.filter((_, k) => !boxesMiss(uncutBoxes[k], box))
+      // Whole pieces first: if every uncleared piece the chunk comes near is small, so is the part
+      // of them the chunk can cover.
+      const whole = near.reduce((sum, l) => sum + Math.abs(loopArea(l)), 0)
+      if (room <= 0) ok = false
+      else if (whole <= room) ok = true
+      else {
+        const piece = intersection(offsetOpenRound(path, chunkR, arcTol), near)
+        const area = totalArea(piece)
+        ok = area <= room && Math.abs(area - netArea(piece)) <= RIDE_BOUND_MARGIN_MM2
+      }
+      safe.set(c, ok)
+    }
+    return ok ? starts[c + 1] : i
+  }
+}
+const boxesMiss = (a: Box, b: Box): boolean => a.maxX < b.minX || a.minX > b.maxX || a.maxY < b.minY || a.minY > b.maxY
+
+/** Resample at <= ds spacing (keeping original vertices) so window content does not depend
+ *  on the boundary polyline's vertex spacing. */
+function resampleRide(ride: Pt[]): Pt[] {
+  const ds = AP.sampling.rideResampleMm
   const pts: Pt[] = [ride[0]]
   for (let i = 1; i < ride.length; i++) {
     const a = ride[i - 1], b = ride[i]
@@ -3594,36 +3874,156 @@ export function rideOverloadsUncut(ride: Pt[], cleared: Loops, toolRadius: numbe
     const n = Math.max(1, Math.ceil(L / ds))
     for (let k = 1; k <= n; k++) pts.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n })
   }
+  return pts
+}
 
-  // Per-step freshly-removed area against the growing accumulator.
+/** The windowed ride measure's sub-steps: each step's fresh area is its capsule minus the
+ *  accumulator, then the capsule is unioned in, in step order. Steps are measured on demand.
+ *  When `local`, every RIDE_LOCAL_EVERY steps the accumulator is cut down to the boxes of the
+ *  steps still to come (clearedNearBoxes), so neither the corridor already swept nor cleared
+ *  ground the rest of the ride cannot reach rides along through every Clipper call. */
+const RIDE_LOCAL_EVERY = 8
+interface RideSweep { stepLen: number[]; stepMid: Pt[]; stepA: Pt[]; stepB: Pt[]; areaAt: (k: number) => number; dispose: () => void }
+function rideSweep(pts: Pt[], cleared: Loops, toolRadius: number, arcTol: number, local: boolean): RideSweep {
+  const as: Pt[] = [], bs: Pt[] = []
   const stepLen: number[] = []
-  const stepArea: number[] = []
   const stepMid: Pt[] = []
-  let acc = cleared
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1], b = pts[i]
     const L = Math.hypot(b.x - a.x, b.y - a.y)
     if (L < 1e-9) continue
-    const capsule = capsulePath(a, b, toolRadius, arcTol)
+    as.push(a); bs.push(b)
     stepLen.push(L)
-    stepArea.push(totalArea(difference(capsule, acc)))
     stepMid.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-    acc = union(acc, capsule)
   }
+  const stepArea: number[] = []
+  const acc = capsuleSweep(cleared)
+  const trim = (s: number): void => {
+    const boxes: Box[] = []
+    for (let c = s; c < as.length; c += RIDE_LOCAL_EVERY) boxes.push(polyBBoxOf([[...as.slice(c, c + RIDE_LOCAL_EVERY), ...bs.slice(c, c + RIDE_LOCAL_EVERY)]]))
+    const now = acc.read()
+    const near = clearedNearBoxes(now, boxes, toolRadius, arcTol)
+    if (near !== now) acc.write(near)
+  }
+  // Steps the scan proved hold no trip and skipped (only when `local`). Their capsules still
+  // belong to the cleared set: each joins it before the first measured step it comes near.
+  const skipped: number[] = []
+  const areaAt = (k: number): number => {
+    for (let s = stepArea.length; s < k; s++) { skipped.push(s); stepArea.push(NaN) }
+    while (stepArea.length <= k) {
+      const s = stepArea.length
+      if (local && s > 0 && s % RIDE_LOCAL_EVERY === 0) trim(s)
+      if (skipped.length > 0) {
+        const reach = 2 * toolRadius + 4 * arcTol + 1e-3
+        const minX = Math.min(as[s].x, bs[s].x) - reach, maxX = Math.max(as[s].x, bs[s].x) + reach
+        const minY = Math.min(as[s].y, bs[s].y) - reach, maxY = Math.max(as[s].y, bs[s].y) + reach
+        const join: [Pt, Pt][] = []
+        for (let q = skipped.length - 1; q >= 0; q--) {
+          const t = skipped[q], a = as[t], b = bs[t]
+          if (Math.max(a.x, b.x) < minX || Math.min(a.x, b.x) > maxX || Math.max(a.y, b.y) < minY || Math.min(a.y, b.y) > maxY) continue
+          join.push([a, b]); skipped.splice(q, 1)
+        }
+        acc.absorb(join, toolRadius, arcTol)
+      }
+      stepArea.push(acc.step(as[s], bs[s], toolRadius, arcTol))
+    }
+    return stepArea[k]
+  }
+  return { stepLen, stepMid, stepA: as, stepB: bs, areaAt, dispose: () => acc.dispose() }
+}
 
-  // Sliding minimal window of >= WINDOW mm (two-pointer): trip when the window's area
-  // density (mm^2 per mm = average effective width) exceeds the cap. Tail windows shorter
-  // than WINDOW keep the WINDOW denominator (the short-ride clamp described above).
-  const rideLen = stepLen.reduce((s, l) => s + l, 0)
-  let j = 0, lenSum = 0, areaSum = 0, sCursor = 0
-  for (let i = 0; i < stepLen.length; i++) {
-    while (j < stepLen.length && lenSum < WINDOW) { lenSum += stepLen[j]; areaSum += stepArea[j]; j++ }
-    const width = areaSum / Math.max(lenSum, WINDOW)
-    if (width > cap) return { width, at: stepMid[i], sStart: sCursor, sEnd: sCursor + lenSum, rideLen }
-    lenSum -= stepLen[i]; areaSum -= stepArea[i]
-    sCursor += stepLen[i]
+// WO-3024: `cleared` as the ride's corridor sees it. Even-odd fill decides each point by the
+// parity of the loops around it, so any edit to `cleared` that keeps that parity at every point
+// of the corridor's box leaves every boolean the ride measures the same region, built from the
+// same edges. Two such edits: a loop that misses the box and does not enclose it is dropped,
+// and a run of edges that never enters the box is replaced by its chord when run and chord
+// together wind zero times round the box (else the run is halved and each half tried). The
+// edges that enter the box are kept exactly. The measure then stops dragging the whole level's
+// cleared set through Clipper once per 0.75 mm sub-step.
+interface Box { minX: number; minY: number; maxX: number; maxY: number }
+const segMissesBox = (a: Pt, b: Pt, box: Box): boolean =>
+  Math.max(a.x, b.x) < box.minX || Math.min(a.x, b.x) > box.maxX || Math.max(a.y, b.y) < box.minY || Math.min(a.y, b.y) > box.maxY
+/** Winding number of the closed polygon lp[from..to] (indices taken cyclically) round `c`. */
+function windingOfRun(lp: Loop, from: number, count: number, c: Pt): number {
+  let w = 0
+  for (let k = 0; k < count; k++) {
+    const a = lp[(from + k) % lp.length], b = lp[(from + (k + 1) % count) % lp.length]
+    if (a.y <= c.y) { if (b.y > c.y && (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y) > 0) w++ }
+    else if (b.y <= c.y && (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y) < 0) w--
   }
-  return null
+  return w
+}
+function clearedNear(cleared: Loops, ride: Pt[], toolRadius: number, arcTol: number): Loops {
+  return clearedNearBoxes(cleared, [polyBBoxOf([ride])], toolRadius, arcTol)
+}
+/** clearedNear for the union of several boxes (each padded by a tool radius): the run test and
+ *  the chord test hold for every box, and a closed run + chord that avoids them all has one
+ *  winding number per box, so it is checked at each box's centre. */
+function clearedNearBoxes(cleared: Loops, rawBoxes: Box[], toolRadius: number, arcTol: number): Loops {
+  const pad = toolRadius + 4 * arcTol + 1e-3
+  const boxes = rawBoxes.map(r => ({ minX: r.minX - pad, minY: r.minY - pad, maxX: r.maxX + pad, maxY: r.maxY + pad }))
+  const hull = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  for (const r of boxes) {
+    hull.minX = Math.min(hull.minX, r.minX); hull.minY = Math.min(hull.minY, r.minY)
+    hull.maxX = Math.max(hull.maxX, r.maxX); hull.maxY = Math.max(hull.maxY, r.maxY)
+  }
+  const centres = boxes.map(r => ({ x: (r.minX + r.maxX) / 2, y: (r.minY + r.maxY) / 2 }))
+  const missesAll = (a: Pt, b: Pt): boolean => {
+    if (segMissesBox(a, b, hull)) return true
+    for (const r of boxes) if (!segMissesBox(a, b, r)) return false
+    return true
+  }
+  const out: Loops = []
+  let changed = false
+  for (const lp of cleared) {
+    const n = lp.length
+    const keep = new Uint8Array(n)
+    let kept = 0
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n
+      if (!missesAll(lp[i], lp[j])) { if (!keep[i]) { keep[i] = 1; kept++ } if (!keep[j]) { keep[j] = 1; kept++ } }
+    }
+    if (kept === n) { out.push(lp); continue }
+    changed = true
+    if (kept === 0) {
+      // Wholly outside every box: it adds parity 1 or 0 to each box. All 0: dropped. All 1: one
+      // rectangle round them all. Mixed: kept as it is.
+      const odd = centres.map(c => windingOfRun(lp, 0, n, c) % 2 !== 0)
+      if (odd.every(o => !o)) continue
+      if (odd.every(o => o)) out.push([{ x: hull.minX - pad, y: hull.minY - pad }, { x: hull.maxX + pad, y: hull.minY - pad }, { x: hull.maxX + pad, y: hull.maxY + pad }, { x: hull.minX - pad, y: hull.maxY + pad }])
+      else out.push(lp)
+      continue
+    }
+    // Each run of dropped vertices between two kept ones (k1 .. k2) is replaced by chords.
+    const simplified: Pt[] = []
+    let first = 0
+    while (!keep[first]) first++
+    // A chord in line with the kept edge beside it would let Clipper merge the two, which
+    // moves that edge's far end; such a run is split instead.
+    const inLine = (p: Pt, q: Pt, r: Pt): boolean => {
+      const cross = (q.x - p.x) * (r.y - q.y) - (q.y - p.y) * (r.x - q.x)
+      return Math.abs(cross) <= 1e-9 * (Math.hypot(q.x - p.x, q.y - p.y) * Math.hypot(r.x - q.x, r.y - q.y) + 1e-12)
+    }
+    const emitRun = (k1: number, span: number): void => {
+      // lp[k1] then the vertices up to (excluding) lp[k1 + span]; chord k1 -> k1 + span tried first.
+      const k2 = (k1 + span) % n
+      if (span <= 1) { simplified.push(lp[k1]); return }
+      if (missesAll(lp[k1], lp[k2]) && centres.every(c => windingOfRun(lp, k1, span + 1, c) === 0)
+        && !inLine(lp[(k1 - 1 + n) % n], lp[k1], lp[k2]) && !inLine(lp[k1], lp[k2], lp[(k2 + 1) % n])) { simplified.push(lp[k1]); return }
+      const half = Math.floor(span / 2)
+      emitRun(k1, half)
+      emitRun((k1 + half) % n, span - half)
+    }
+    let i = first
+    do {
+      let span = 1
+      while (!keep[(i + span) % n]) span++
+      emitRun(i, span)
+      i = (i + span) % n
+    } while (i !== first)
+    out.push(simplified)
+  }
+  return changed ? out : cleared
 }
 
 /** WO-410: TOTAL over-cap length of a ride (same incremental windowed measure as
@@ -3640,45 +4040,87 @@ export function rideOverloadsUncut(ride: Pt[], cleared: Loops, toolRadius: numbe
 export function contourOverCap(ride: Pt[], cleared: Loops, toolRadius: number, cap: number, arcTol: number, measurePeak = false): { overLen: number; peak: number; at: Pt; maxStep: number } {
   const none = { overLen: 0, peak: 0, at: ride[0] ?? { x: 0, y: 0 }, maxStep: 0 }
   if (ride.length < 2) return none
-  const WINDOW = 2.0
+  const fast = contourOverCapBy(ride, cleared, toolRadius, cap, arcTol, measurePeak, none, RIDE_MEASURE.local)
+  if (fast !== NEAR_TIE) return fast
+  RIDE_MEASURE.nearTies++
+  return contourOverCapBy(ride, cleared, toolRadius, cap, arcTol, measurePeak, none, false) as typeof none
+}
+function contourOverCapBy(ride: Pt[], cleared: Loops, toolRadius: number, cap: number, arcTol: number, measurePeak: boolean,
+  none: { overLen: number; peak: number; at: Pt; maxStep: number }, local: boolean): { overLen: number; peak: number; at: Pt; maxStep: number } | typeof NEAR_TIE {
+  const WINDOW = AP.sampling.rideWindowMm
   // Cheap short-circuit, as rideOverloadsUncut: no window can trip if the whole corridor
   // removes no more than one tripping window's worth of material.
+  const base = local ? clearedNear(cleared, ride, toolRadius, arcTol) : cleared
   const corridor = offsetOpenRound(ride, toolRadius, arcTol)
-  if (!measurePeak && totalArea(difference(corridor, cleared)) <= cap * WINDOW) return none
-  const ds = 0.75
-  const pts: Pt[] = [ride[0]]
-  for (let i = 1; i < ride.length; i++) {
-    const a = ride[i - 1], b = ride[i]
-    const L = Math.hypot(b.x - a.x, b.y - a.y)
-    const n = Math.max(1, Math.ceil(L / ds))
-    for (let k = 1; k <= n; k++) pts.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n })
+  if (!measurePeak) {
+    const corridorArea = totalArea(difference(corridor, base))
+    if (local && nearTie(corridorArea, cap * WINDOW, WINDOW)) return NEAR_TIE
+    if (corridorArea <= cap * WINDOW) return none
   }
-  const stepLen: number[] = []
-  const stepArea: number[] = []
-  const stepMid: Pt[] = []
-  let acc = cleared
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1], b = pts[i]
-    const L = Math.hypot(b.x - a.x, b.y - a.y)
-    if (L < 1e-9) continue
-    const capsule = capsulePath(a, b, toolRadius, arcTol)
-    stepLen.push(L)
-    stepArea.push(totalArea(difference(capsule, acc)))
-    stepMid.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-    acc = union(acc, capsule)
-  }
+  const sweep = rideSweep(resampleRide(ride), base, toolRadius, arcTol, local)
+  let stepArea: number[]
+  try { stepArea = sweep.stepLen.map((_, k) => sweep.areaAt(k)) } finally { sweep.dispose() }
+  const { stepLen, stepMid } = sweep
   let j = 0, lenSum = 0, areaSum = 0
   let overLen = 0, peak = 0, at = none.at, maxStep = 0
   for (let i = 0; i < stepLen.length; i++) {
     while (j < stepLen.length && lenSum < WINDOW) { lenSum += stepLen[j]; areaSum += stepArea[j]; j++ }
     const width = areaSum / Math.max(lenSum, WINDOW)
+    const stepWidth = stepArea[i] / stepLen[i]
+    // The callers decide on overLen and maxStep (against this same cap); peak and its
+    // position are only reported.
+    if (local && (nearTie(width, cap) || nearTie(stepWidth, cap))) return NEAR_TIE
     if (width > peak) { peak = width; at = stepMid[i] }
     if (width > cap) overLen += stepLen[i]
-    const stepWidth = stepArea[i] / stepLen[i]
     if (stepWidth > maxStep) maxStep = stepWidth
     lenSum -= stepLen[i]; areaSum -= stepArea[i]
   }
   return { overLen, peak, at, maxStep }
+}
+
+/** WO-3041: the opening ring a kept plunge runs at depth. A plunge leaves a hole exactly one
+ *  tool wide, so a straight first pass out of it is a full slot (WO-3024 finding). The ring
+ *  leaves the hole by a short radial lead, then spirals outward with the radial growth per
+ *  turn sized so the material removed per mm of travel -- the width the engine's own
+ *  contourOverCap measures -- stays at the operator's stepover (growth = width x r / (r + R)
+ *  per turn, so it starts gently where the circle is short), and closes with one full circle
+ *  at `ringRadius`. It turns in the milling sense of the seed's opening pass and ends on the
+ *  disk's bottom point, where that pass starts, heading the same way. Each candidate is
+ *  measured against `belief` (which holds the plunge hole) and the 75%-of-slot ceiling; the
+ *  width halves until the sustained width stays under it. Null when none does or the ring
+ *  has no room: the caller then keeps today's plain plunge. */
+export function planPlungeOpeningRing(centre: Pt, ringRadius: number, toolRadius: number, stepOverDistance: number,
+  forwardTravel: boolean, arcTol: number, belief: Loops): Pt[] | null {
+  if (!(ringRadius > 0) || !(stepOverDistance > 0)) return null
+  const cap = AP.caps.slotCeilingDiameters * (2 * toolRadius)
+  for (const fraction of [1, 0.5, 0.25]) {
+    const ring = plungeOpeningRingPath(centre, ringRadius, toolRadius, Math.min(stepOverDistance, cap) * fraction, forwardTravel, arcTol)
+    if (contourOverCap(ring, belief, toolRadius, cap, arcTol).overLen === 0) return ring
+  }
+  return null
+}
+
+function plungeOpeningRingPath(centre: Pt, ringRadius: number, toolRadius: number, width: number, forwardTravel: boolean, arcTol: number): Pt[] {
+  const sense = forwardTravel ? 1 : -1
+  const angleStep = (r: number): number => Math.min(Math.PI / 8, 2 * Math.acos(Math.max(-1, 1 - arcTol / Math.max(r, arcTol))))
+  // (angle travelled, radius) samples: the lead's end, the spiral, then the closing circle.
+  let r = Math.min(ringRadius, width / 2)
+  let angle = 0
+  const polar: [number, number][] = [[angle, r]]
+  while (r < ringRadius) {
+    const step = angleStep(r)
+    r = Math.min(ringRadius, r + step * width * r / (2 * Math.PI * (r + toolRadius)))
+    angle += step
+    polar.push([angle, r])
+  }
+  const circleSteps = Math.max(16, Math.ceil((2 * Math.PI) / angleStep(ringRadius)))
+  for (let i = 1; i <= circleSteps; i++) polar.push([angle + (2 * Math.PI * i) / circleSteps, ringRadius])
+  const phase = -Math.PI / 2 - sense * polar[polar.length - 1][0]
+  const ring: Pt[] = [{ x: centre.x, y: centre.y }]
+  for (const [a, radius] of polar) {
+    ring.push({ x: centre.x + radius * Math.cos(phase + sense * a), y: centre.y + radius * Math.sin(phase + sense * a) })
+  }
+  return ring
 }
 
 /** WO-438's T5 TRAVERSE BOUND, in one place so every rung that travels at depth meets the
@@ -3690,8 +4132,9 @@ export function contourOverCap(ride: Pt[], cleared: Loops, toolRadius: number, c
  *  hand the stepper -- bounded BY CONSTRUCTION by the progress contract, not chosen here.
  *  Extracted verbatim from rung (b)(4) by WO-466; the arithmetic is unchanged. */
 function traverseKeepDownCap(stepOverDistance: number, optimal: number, arcTol: number): number {
-  const engageMoveDistance = stepOverDistance / 4 + arcTol * 4
-  return Math.max(arcTol, 1.5 * optimal * engageMoveDistance / 2.0)
+  const engageMoveDistance = adaptiveEngageMoveDistance('traverse', stepOverDistance, undefined, arcTol,
+    adaptiveKeepDownCapPolicy(ADAPTIVE_MOTION_SWITCHES.keepDownCapForm))
+  return Math.max(arcTol, AP.caps.engageBandBiteFactor * optimal * engageMoveDistance / AP.sampling.rideWindowMm)
 }
 
 /** WO-466: STAY DOWN, STOP SHORT OF THE SKIN, AND FEED THE LAST BIT.
@@ -3824,7 +4267,7 @@ export function planStopShortKeepDown(args: {
   // boundary, and the value kept is always one that was MEASURED clean, never interpolated.
   let lo = sMin
   let hi = chordLen
-  for (let i = 0; i < 8 && hi - lo > Math.max(arcTol, 0.05); i++) {
+  for (let i = 0; i < 8 && hi - lo > Math.max(arcTol, AP.sampling.searchResolutionFloorMm); i++) {
     const mid = (lo + hi) / 2
     if (travelClear(source, at(mid))) hi = mid
     else lo = mid
@@ -3858,7 +4301,7 @@ export function planStopShortKeepDown(args: {
  *  walker-point landing passes by construction (measured walker landings: <= 0.2% uncut,
  *  25x margin) -- while the measured cusp-ride failures (23% BootL, 97% Bar full-width
  *  center plunge) are rejected with >= 4.6x margin. */
-const LANDING_UNCUT_CAP = 0.05
+const LANDING_UNCUT_CAP = AP.caps.landingUncutCap
 /** WO-437 tier 2 (GOOD-SPEC.md section 3): the micro-lift hover height above a level's
  *  floor, in mm. WHY 2.0: the ancestor's own keep-down default (FreeCAD GenerateGCode.py
  *  jumpType-1 rapid at passEndDepth + Lift Distance) and the machinist norm of a 2-5mm
@@ -3866,7 +4309,7 @@ const LANDING_UNCUT_CAP = 0.05
  *  either side of it. This is a WORKING ASSUMPTION -- GOOD-SPEC section 7 Q2 -- Operator rules
  *  on it at the WO-432 picture gate; it buys ZERO tolerance to uncut stock (the corridor
  *  proof below is the SAME full-width clear test tier 1 uses, never loosened for height). */
-export const LIFT_DISTANCE = 2.0
+export const LIFT_DISTANCE = AP.caps.liftDistanceMm
 /** WO-438 tier 1 DETOUR BUDGET (GOOD-SPEC.md section 3, "a keep-down route much longer than
  *  the direct distance is worse than the lift it avoids"). The ancestor gates the same thing
  *  with its user-facing `keepToolDownDistRatio` -- "Max length of keep tool down path compared
@@ -3878,14 +4321,14 @@ export const LIFT_DISTANCE = 2.0
  *  bound (how much floor travel is worth avoiding one retract), never a safety allowance: a
  *  route inside this budget still has to pass the same full-width clearance proof every other
  *  tier-1 rung passes. */
-export const KEEP_TOOL_DOWN_DIST_RATIO = 3.0
+export const KEEP_TOOL_DOWN_DIST_RATIO = AP.caps.keepToolDownDistRatio
 /** A side (outside-in) RESEED must descend with the whole cutter in proven-cleared
  *  air: at most this fraction of the tool disk at its clear point may be uncut
  *  (numerical slack for the offset ring's arc sampling only, never a bite). */
-const SIDE_RESEED_CLEAR_UNCUT_MAX = 0.005
+const SIDE_RESEED_CLEAR_UNCUT_MAX = AP.caps.sideReseedClearUncutMax
 /** Below this entry-ride length (mm) a shrunk cusp ride scrubs no meaningful wall sliver --
  *  drop the relocation entirely instead and land at the walker's safe point. */
-const MIN_LANDING_RIDE_LEN = 0.5
+const MIN_LANDING_RIDE_LEN = AP.caps.minLandingRideLenMm
 
 /** Fraction of the tool-radius disk at `p` that is UNCUT in `cleared`. emit plunges straight
  *  down at a jumpType-2 link's landing point, so this disk is exactly the material that
@@ -3935,7 +4378,7 @@ function nearestClearAirCentres(
     }
   }
   found.sort((a, b) => a.distance2 - b.distance2 || a.order - b.order)
-  const spacing = Math.max(arcTol, toolRadius * 0.25)
+  const spacing = Math.max(arcTol, toolRadius * AP.sampling.clearAirSpacingToolRadii)
   const out: Pt[] = []
   for (const { point } of found) {
     if (out.some((p) => Math.hypot(p.x - point.x, p.y - point.y) < spacing)) continue
@@ -3995,8 +4438,8 @@ function buildTangentLandingLead(
   }
   const sweep = endAngle - startAngle
   if (Math.abs(sweep) > Math.PI + 1e-6) return null
-  const segments = Math.ceil((radius * Math.abs(sweep)) / Math.max(maxChord, 0.05))
-  if (segments < 1 || segments > 128) return null
+  const segments = Math.ceil((radius * Math.abs(sweep)) / Math.max(maxChord, AP.sampling.chordFloorMm))
+  if (segments < 1 || segments > AP.sampling.maxArcSegments) return null
 
   const points: Pt[] = [start]
   for (let index = 1; index < segments; index++) {
@@ -4035,8 +4478,8 @@ function buildTangentLandingCurve(
     y: end.y - ty * handleLength,
   }
   const estimate = Math.hypot(control.x - start.x, control.y - start.y) + handleLength
-  const segments = Math.ceil(estimate / Math.max(maxChord, 0.05))
-  if (segments < 2 || segments > 128) return null
+  const segments = Math.ceil(estimate / Math.max(maxChord, AP.sampling.chordFloorMm))
+  if (segments < 2 || segments > AP.sampling.maxArcSegments) return null
   const points: Pt[] = [start]
   for (let index = 1; index < segments; index++) {
     const t = index / segments
@@ -4101,8 +4544,8 @@ function buildCornerFilletLead(
   }
   const sweep = endAngle - startAngle
   if (Math.abs(sweep) > Math.PI + 1e-6) return null
-  const segments = Math.ceil(radius * Math.abs(sweep) / Math.max(maxChord, 0.05))
-  if (segments < 1 || segments > 128) return null
+  const segments = Math.ceil(radius * Math.abs(sweep) / Math.max(maxChord, AP.sampling.chordFloorMm))
+  if (segments < 1 || segments > AP.sampling.maxArcSegments) return null
   const points: Pt[] = [clearPoint]
   if (Math.hypot(a.x - clearPoint.x, a.y - clearPoint.y) > 1e-9) points.push(a)
   for (let index = 1; index < segments; index++) {
@@ -4129,10 +4572,10 @@ export class UnsafeReentryError extends Error {
  *  "helix" degenerates into a wobbling plunge, so the planner never labels one 'helix'
  *  (makeEntry), never offers one as a descent (planHelixDescent), and emit's default
  *  minHelixRadius reads this same constant so the two cannot drift. */
-export const MIN_DESCENT_HELIX_RADIUS = 0.2
+export const MIN_DESCENT_HELIX_RADIUS = AP.helix.minDescentRadiusMm
 /** emit's helix rides its tool-centre circle HELIX_EDGE_BACKOFF (0.01mm) INSIDE the nominal
  *  radius, so the fit check may credit exactly that backoff against the wall clearance. */
-const HELIX_FIT_EPS = 0.01
+const HELIX_FIT_EPS = AP.helix.fitEpsMm
 
 /** Plan a HELIX DESCENT for an UNSAFE lift landing (the 472eb61 lift-landing gate's known
  *  remaining hole): early in the job the raw engagement-walker landing itself can sit in
@@ -4160,7 +4603,7 @@ const HELIX_FIT_EPS = 0.01
 function planHelixDescent(landing: Pt, cutRegion: Loops, cutTree: PolyNode[], helixRadius: number, toolRadius: number): { center: Pt; radius: number } | null {
   const rhMax = Math.min(helixRadius, toolRadius)
   const fits = (center: Pt, rh: number): boolean =>
-    !isOutsideCutRegion(center, cutTree) && closestPointOnPaths(cutRegion, center).dist >= rh - HELIX_FIT_EPS
+    !isOutsideCutRegion(center, cutTree) && distToLoops(center, cutRegion) >= rh - HELIX_FIT_EPS
   // Local boundary normal at the landing (projection is radius-independent; compute once).
   const proj = projectOnLoops(landing, cutRegion)
   let normal: Pt | null = null
@@ -4234,6 +4677,17 @@ function buildLoopArcTable(lp: Loop): LoopArcTable {
     s += Math.hypot(b.x - a.x, b.y - a.y)
   }
   return { per: s, cum }
+}
+
+// WO-3024: wallRouteKeepsDirection rebuilt every loop's table on every call (38 s inclusive on
+// the Form cylinder). A loop is never mutated once built, so its table is built once.
+const loopArcTables = new WeakMap<Loop, LoopArcTable>()
+function cachedLoopArcTable(lp: Loop): LoopArcTable {
+  const cached = loopArcTables.get(lp)
+  if (cached && cached.cum.length === lp.length) return cached
+  const table = buildLoopArcTable(lp)
+  loopArcTables.set(lp, table)
+  return table
 }
 
 /** Arc coordinate (in [0, per)) of a point that projects onto segment `seg` at `foot`. */
@@ -4444,6 +4898,7 @@ export interface LandingGateContext {
    *  reposition time model plans the lift before it is chosen, and holds these lines until
    *  that lift is actually emitted. */
   warn?: (message: string) => void
+  onAcceptedGraphRoute?: AcceptedGraphRouteObserver
 }
 
 interface ClearedLandingApproach {
@@ -4565,7 +5020,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
   // First choice: descend through a cutter-diameter shaft that prior
   // motion has proven clear, then arc into the next cut horizontally.
   // This avoids a redundant helix through air beside known-clear stock.
-  const leadCap = 1.5 * stepOverDistance
+  const leadCap = AP.caps.rideCapStepovers * stepOverDistance
   const tangentArcStarts: Pt[] = []
 
   // Prefer compact, conventional tangent leads immediately behind the next cut. A clear
@@ -4887,7 +5342,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
   // (measured on Bar: 3.59 mm2/mm at a 2.30mm reposition, 3.17 at 3.61mm, 2.96 once the
   // approach flattens) -- so the shallow end of the ladder is what makes this rung legal
   // under the existing cap rather than a looser one.
-  const sideLandingCap = 0.75 * (2 * toolRadius)
+  const sideLandingCap = AP.caps.slotCeilingDiameters * (2 * toolRadius)
   // WO-1091 (audit round 2): the rung COUNTS what it rejected, so the helix warn below can
   // name WHICH of the two cases kept the helix -- no cleared air reaches this landing (the
   // island of stock the helix was always for), or cleared air stands right beside it but
@@ -4976,7 +5431,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       if (pass.type === 'cut') priorMotion.push(...pass.points)
       else if (pass.type === 'entry') priorMotion.push(pass.clearPoint ?? pass.point)
     }
-    const wallTol = Math.max(arcTol * 4, toolRadius * 0.05)
+    const wallTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
     const graph = buildClearedTrackGraph(passes, toolRadius, stepOverDistance, cutTree, wallTol)
     const budget = KEEP_TOOL_DOWN_DIST_RATIO * direct
 
@@ -4995,7 +5450,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       } else {
         const routedTravel = planKeepDownRoute(
           source, clearPoint, priorCut?.points ?? null, priorMotion, graph, clearedBeforePass,
-          cutTree, toolRadius, stepOverDistance, arcTol, sideLandingCap, budget,
+          cutTree, toolRadius, stepOverDistance, arcTol, sideLandingCap, budget, null, g.onAcceptedGraphRoute,
         )
         if (routedTravel) {
           departureAndTravel = splitDepartureToClearStock(
@@ -5025,7 +5480,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
       if (!lead) {
         const routedLead = planKeepDownRoute(
           clearPoint, landing, null, priorMotion, graph, clearedBeforePass, cutTree, toolRadius,
-          stepOverDistance, arcTol, routedLandingCap, remainingBudget,
+          stepOverDistance, arcTol, routedLandingCap, remainingBudget, null, g.onAcceptedGraphRoute,
         )
         if (routedLead) { lead = routedLead.points; family = routedLead.family }
       }
@@ -5070,7 +5525,7 @@ export function planGatedLanding(g: LandingGateContext, source: Pt, landing: Pt,
   )
 }
 
-function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, clearedBeforePass: Loops, cutTree: PolyNode[], cutRegion: Loops, toolRadius: number, helixRadius: number, stepOverDistance: number, arcTol: number, optimal: number, entry: AdaptiveEntry | null, boundarySpan: Pt[] | null = null, integralWallFollow = false, integralWallFollowLengthFactor = 2, wallCleanupAsWeGo = false, loopbackFilletPct = 25, millingDirection: AdaptiveMillingDirection = 'climb', landingUncutCap = LANDING_UNCUT_CAP, directionFallback?: WallCleanupDirectionFallback, liftFallbackHelix = false, passType: 'cut' | 'wallfollow' = 'cut', prevMotion: Pt[] | null = null, departHead = 0, exteriorAirDepthAt: ((p: Pt) => number) | null = null, strictWallLoops: Loops | null = null, ringEntry = false, repositionTime: RepositionTimeModel | null = null): Loops {
+function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, clearedBeforePass: Loops, cutTree: PolyNode[], cutRegion: Loops, toolRadius: number, helixRadius: number, stepOverDistance: number, arcTol: number, optimal: number, entry: AdaptiveEntry | null, boundarySpan: Pt[] | null = null, integralWallFollow = false, integralWallFollowLengthFactor = 2, wallCleanupAsWeGo = false, loopbackFilletPct = 25, millingDirection: AdaptiveMillingDirection = 'climb', landingUncutCap = LANDING_UNCUT_CAP, directionFallback?: WallCleanupDirectionFallback, liftFallbackHelix = false, passType: 'cut' | 'wallfollow' = 'cut', prevMotion: Pt[] | null = null, departHead = 0, exteriorAirDepthAt: ((p: Pt) => number) | null = null, strictWallLoops: Loops | null = null, ringEntry = false, repositionTime: RepositionTimeModel | null = null, onAcceptedGraphRoute?: AcceptedGraphRouteObserver): Loops {
   if (points.length < 1) return cleared
   // WO-1235: the 3D single-owner contract names the loops whose wall DIRECTION it protects:
   // the islands and bosses of the wall band it finishes. That contract only engages when the
@@ -5107,9 +5562,17 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     // where the corridor proof fails), so this guard is latent-only and changes no corpus
     // motion -- it exists for the geometry that WILL combine them someday.
     if (link.helixDescent) return
-    const cap = 1.5 * stepOverDistance
+    const cap = AP.caps.rideCapStepovers * stepOverDistance
     if (rideOverloadsUncut(link.points, clearedBeforePass, toolRadius, cap, arcTol)) return
     link.microLift = { z: LIFT_DISTANCE }
+    // WO-2835: the proof above tolerates slivers under its cap, which a LIFT_DISTANCE hover
+    // clears wherever the stepdown is below it; a floor-setting hop (0.3 mm) would not. So the
+    // hop at the setting is offered only for a corridor (landing disk included) with NO uncut
+    // stock at full tool width -- the keep-down's own plowsUncut test. Non-enumerable, like
+    // liftReason, so the byte-stability fingerprint of the pass stream is unchanged.
+    if (totalArea(difference(offsetOpenRound(link.points, toolRadius, arcTol), clearedBeforePass)) <= 1e-6) {
+      Object.defineProperty(link.microLift, 'empty', { value: true, enumerable: false })
+    }
   }
   // WO-435 T1: attach liftReason NON-ENUMERABLE so it stays readable by direct property
   // access (the tripwire test) but invisible to JSON.stringify -- the byte-stability
@@ -5143,7 +5606,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         all.push(pass.clearPoint ?? pass.point)
       }
     }
-    const MAX_SAMPLES = 4000
+    const MAX_SAMPLES = AP.sampling.maxPriorMotionSamples
     if (all.length <= MAX_SAMPLES) { priorMotionCache = all; return all }
     const stride = Math.ceil(all.length / MAX_SAMPLES)
     const thinned: Pt[] = []
@@ -5155,7 +5618,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
   // connection actually reaches the routed rung.
   let trackGraphCache: ClearedTrackGraph | null | undefined
   const buildTrackGraph = (): ClearedTrackGraph | null => {
-    if (trackGraphCache === undefined) trackGraphCache = buildClearedTrackGraph(passes, toolRadius, stepOverDistance, cutTree, Math.max(arcTol * 4, toolRadius * 0.05))
+    if (trackGraphCache === undefined) trackGraphCache = buildClearedTrackGraph(passes, toolRadius, stepOverDistance, cutTree, Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii))
     return trackGraphCache
   }
   // WO-429: DOES THIS ENTRY ACTUALLY OPEN THIS CUT?
@@ -5263,7 +5726,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     // the identical call it always was -- context assembled from exactly what it captured.
     const landingGate: LandingGateContext = {
       passes, clearedBeforePass, cutRegion, cutTree, toolRadius, helixRadius, stepOverDistance,
-      arcTol, landingUncutCap, millingDirection, points, boundarySpan, allowReseam: true,
+      arcTol, landingUncutCap, millingDirection, points, boundarySpan, allowReseam: true, onAcceptedGraphRoute,
     }
     const gateLiftLanding = (source: Pt, landing: Pt, nextCutPoint: Pt) =>
       planGatedLanding(landingGate, source, landing, nextCutPoint)
@@ -5299,7 +5762,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     // WO-1178 (Operator's Tee finding): ONE forward ride A -> B when the next cut starts a short way
     // ahead on the same wall, in place of overlapping cusp rides joined by a backward hop.
     let throughRide: WallFollowRide | null = null
-    const wallTol = Math.max(arcTol * 4, toolRadius * 0.05)
+    const wallTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
     if (wallCleanupAsWeGo && !entry) {
       wallCleanStats.transitions++
       const projPrior = projectOnLoops(lastPoint, cutRegion)
@@ -5318,7 +5781,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         // the connection was. Ride the wall once, forward, from A to B, held to the cusp cap
         // and the milling-direction gate like every other cusp ride. Nothing else changes: the
         // cut passes, the belief and every non-overlapping transition are untouched.
-        const cuspCap = 1.5 * stepOverDistance
+        const cuspCap = AP.caps.rideCapStepovers * stepOverDistance
         const through = buildWallFollowThrough(prevCut!.points, points, cutRegion, toolRadius, undefined, loopbackFilletPct)
         if (through) {
           const thOver = rideOverloadsUncut(through.points, clearedBeforePass, toolRadius, cuspCap, arcTol)
@@ -5345,7 +5808,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         // a ride over the cap is dropped, the connection is then planned between the raw cut
         // ends exactly as when cleanup does not fire, and the wall stretch it would have
         // ridden stays for the walker's own passes and the gap-fill ride, which are gated.
-        const cuspCap = 1.5 * stepOverDistance
+        const cuspCap = AP.caps.rideCapStepovers * stepOverDistance
         const exOver = ex ? rideOverloadsUncut(ex.points, clearedBeforePass, toolRadius, cuspCap, arcTol) : null
         const enOver = en ? rideOverloadsUncut(en.points, clearedBeforePass, toolRadius, cuspCap, arcTol) : null
         if (ex && en && (exOver || enOver)) {
@@ -5632,7 +6095,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         // 0.4D stepover, over the 75%-of-slot engagement gate every consumer downstream holds a
         // fed move to -- the uploaded bore died on exactly one such 4.7 mm cut-through at 78%.
         // A fed connection is held to the lower of the two: the over-cut ceiling, and the gate.
-        const cutThroughCap = Math.min(2 * optimal, 0.75 * (2 * toolRadius))
+        const cutThroughCap = Math.min(AP.caps.cutThroughOptimalMultiple * optimal, AP.caps.slotCeilingDiameters * (2 * toolRadius))
         const cutThroughOverload = rideOverloadsUncut(
           [connStart, connEnd], clearedBeforePass, toolRadius, cutThroughCap, arcTol,
         )
@@ -5684,7 +6147,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     let connectionRide: { points: Pt[]; kind: 'wallfollow' | 'loopback'; feedFrom?: number } | null = null
     if (integralWallFollow && jumpType === 2 && !entry) {
       const chord = Math.hypot(connEnd.x - connStart.x, connEnd.y - connStart.y)
-      const cap = 1.5 * stepOverDistance
+      const cap = AP.caps.rideCapStepovers * stepOverDistance
       // Both boundary arcs between the endpoints, SHORTER-FIRST. arcs[0] is the DIRECT ride
       // (identical to the pre-B8-stage-2 boundaryArcBetween pick); arcs[1] is the OTHER way
       // round the shared wall (e.g. the far side of an island). arcs is [] when the two
@@ -5912,7 +6375,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         const routed = (!timeModel || budget > chord)
           ? planKeepDownRoute(
             connStart, connEnd, prevCut!.points, collectPriorMotion(), buildTrackGraph(), clearedBeforePass, cutTree,
-            toolRadius, stepOverDistance, arcTol, traverseCap, budget, exteriorAirDepthAt,
+            toolRadius, stepOverDistance, arcTol, traverseCap, budget, exteriorAirDepthAt, onAcceptedGraphRoute,
           )
           : null
         if (routed) {
@@ -5954,7 +6417,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         // traverse cap for a move at traverse speed, and the tier-0 cut-through cap for a
         // move at feed. Neither is loosened for the split.
         const stopShortTraverseCap = traverseKeepDownCap(stepOverDistance, optimal, arcTol)
-        const stopShortFeedCap = Math.min(2 * optimal, 0.75 * (2 * toolRadius)) // WO-1178: as the tier-0 cap above
+        const stopShortFeedCap = Math.min(AP.caps.cutThroughOptimalMultiple * optimal, AP.caps.slotCeilingDiameters * (2 * toolRadius)) // WO-1178: as the tier-0 cap above
         const stopShort = planStopShortKeepDown({
           source: connStart,
           target: connEnd,
@@ -6281,7 +6744,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
             const rideLinkGouges = centrePathExitsCutRegion(connStart, connEnd, cutTree, toolRadius)
             const rideLinkOverload = rideLinkGouges
               ? null
-              : rideOverloadsUncut([connStart, connEnd], clearedBeforePass, toolRadius, 1.5 * stepOverDistance, arcTol)
+              : rideOverloadsUncut([connStart, connEnd], clearedBeforePass, toolRadius, AP.caps.rideCapStepovers * stepOverDistance, arcTol)
             if (!bareGouges && !rideLinkGouges && !rideLinkOverload) {
               console.warn(`[wall-clean] ${reason} ${where} -- ride-free link unproven (${unproven}); keeping the wall rides and the E->F link, which proves clear of gouge and under the 1.5x stepover cap against clearedBeforePass (WO-1090)`)
               emitRideAndLinkShape()
@@ -6291,7 +6754,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
             const efUnproven = rideLinkGouges
               ? 'the E->F link gouges finish'
               : rideLinkOverload
-                ? `the E->F link sustains ${rideLinkOverload.width.toFixed(3)}mm over the ${(1.5 * stepOverDistance).toFixed(3)}mm cap at (${rideLinkOverload.at.x.toFixed(2)}, ${rideLinkOverload.at.y.toFixed(2)})`
+                ? `the E->F link sustains ${rideLinkOverload.width.toFixed(3)}mm over the ${(AP.caps.rideCapStepovers * stepOverDistance).toFixed(3)}mm cap at (${rideLinkOverload.at.x.toFixed(2)}, ${rideLinkOverload.at.y.toFixed(2)})`
                 : 'no keep-down shape is offered against a finish gouge on the cut-to-cut corridor'
             const liftReasonText = `wall-clean-unjoinable@(${connStart.x.toFixed(1)}, ${connStart.y.toFixed(1)})`
             console.warn(`[wall-clean] ${reason} ${where} -- ride-free link unproven (${unproven}) and ${efUnproven}; RETRACTING instead of emitting an unproven keep-down (WO-1069/WO-1090)`)
@@ -6376,7 +6839,7 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
       if (!entry || staleEntry) {
         let effectiveJumpType: 1 | 2 = jumpType
         if (jumpType === 1) {
-          const cap = 0.75 * (2 * toolRadius)
+          const cap = AP.caps.slotCeilingDiameters * (2 * toolRadius)
           const overload = rideOverloadsUncut([lastPoint, nextPoint], clearedBeforePass, toolRadius, cap, arcTol)
           if (overload) {
             effectiveJumpType = 2
@@ -6452,8 +6915,9 @@ function pointEscapesCutRegion(p: Pt, cutTree: PolyNode[], tol: number): boolean
 /** Min distance from p to any contour edge in the cut tree (roots + their island children). */
 function distToTree(p: Pt, cutTree: PolyNode[]): number {
   let best = Infinity
+  // WO-3024: the same per-edge distance, over only the edges the grid cannot rule out.
   const measure = (loop: Loop) => {
-    for (let i = 0; i < loop.length; i++) {
+    visitNearEdges(p, loop, () => best * best, i => {
       const a = loop[i], b = loop[(i + 1) % loop.length]
       const abx = b.x - a.x, aby = b.y - a.y
       const L2 = abx * abx + aby * aby
@@ -6462,7 +6926,7 @@ function distToTree(p: Pt, cutTree: PolyNode[]): number {
       const dx = p.x - (a.x + abx * t), dy = p.y - (a.y + aby * t)
       const d = Math.hypot(dx, dy)
       if (d < best) best = d
-    }
+    })
   }
   for (const node of cutTree) { measure(node.contour); for (const h of node.children) measure(h.contour) }
   return best
@@ -6620,7 +7084,7 @@ interface ClearedTrackGraph {
   shortestPath(from: Pt, sources: number[], to: Pt, sinks: Set<number>, maxLength: number, banned: Set<number>): number[] | null
 }
 
-function buildClearedTrackGraph(passes: AdaptivePass[], toolRadius: number, stepOverDistance: number, cutTree: PolyNode[], wallTol: number): ClearedTrackGraph | null {
+export function buildClearedTrackGraph(passes: AdaptivePass[], toolRadius: number, stepOverDistance: number, cutTree: PolyNode[], wallTol: number): ClearedTrackGraph | null {
   const spacing = Math.max(toolRadius * 0.75, 1e-3)
   const hop = Math.max(toolRadius, stepOverDistance)
   const nodes: Pt[] = []
@@ -6630,10 +7094,12 @@ function buildClearedTrackGraph(passes: AdaptivePass[], toolRadius: number, step
   // own points. -1/-1 for an entry's clear point (it belongs to no track).
   const nodePass: number[] = []
   const nodeIdx: number[] = []
+  // Distance along the original cut track, matching expand's full-resolution replay.
+  const nodeDistance: number[] = []
   const trackPoints: Pt[][] = []
-  const addNode = (p: Pt, track: number, idx: number): number => {
+  const addNode = (p: Pt, track: number, idx: number, distance = 0): number => {
     nodes.push({ x: p.x, y: p.y }); adjTo.push([]); adjW.push([])
-    nodePass.push(track); nodeIdx.push(idx)
+    nodePass.push(track); nodeIdx.push(idx); nodeDistance.push(distance)
     return nodes.length - 1
   }
   const link = (i: number, j: number, weight: number): void => {
@@ -6647,11 +7113,14 @@ function buildClearedTrackGraph(passes: AdaptivePass[], toolRadius: number, step
     trackPoints.push(pass.points)
     let prevNode = addNode(pass.points[0], track, 0)
     let acc = 0
+    let distance = 0
     for (let i = 1; i < pass.points.length; i++) {
-      acc += Math.hypot(pass.points[i].x - pass.points[i - 1].x, pass.points[i].y - pass.points[i - 1].y)
+      const segment = Math.hypot(pass.points[i].x - pass.points[i - 1].x, pass.points[i].y - pass.points[i - 1].y)
+      acc += segment
+      distance += segment
       if (acc >= spacing || i === pass.points.length - 1) {
         if (acc < 1e-9) continue
-        const node = addNode(pass.points[i], track, i)
+        const node = addNode(pass.points[i], track, i, distance)
         link(prevNode, node, acc)
         prevNode = node
         acc = 0
@@ -6693,7 +7162,15 @@ function buildClearedTrackGraph(passes: AdaptivePass[], toolRadius: number, step
       if (j <= i) continue
       if (adjTo[i].includes(j)) continue
       if (routeEscapingSegment([nodes[i], nodes[j]], cutTree, toolRadius, wallTol) >= 0) continue
-      link(i, j, Math.hypot(nodes[j].x - nodes[i].x, nodes[j].y - nodes[i].y))
+      // WO-2937: spatial neighbours can be nonconsecutive samples of the SAME pass
+      // (including a wrap back near its seam). expand replays that entire track range,
+      // in either orientation, so charging the short chord hides the actual detour.
+      // Dijkstra must price the motion it will emit, before selecting a budgeted route;
+      // otherwise an underpriced over-budget replay can mask an available legal route.
+      const weight = nodePass[i] >= 0 && nodePass[i] === nodePass[j]
+        ? Math.abs(nodeDistance[j] - nodeDistance[i])
+        : Math.hypot(nodes[j].x - nodes[i].x, nodes[j].y - nodes[i].y)
+      link(i, j, weight)
     }
   }
 
@@ -6849,7 +7326,7 @@ function wallChainInDirection(a: Pt, b: Pt, loops: Loops, direction: AdaptiveMil
  *  (traverse), so that cap is the traverse bound -- far tighter than the cutting-role wall
  *  ride's. A route longer than `maxLength` is rejected outright (the detour budget), which is
  *  why the caller can name 'route-detour>budget' honestly when nothing in budget is legal. */
-function planKeepDownRoute(
+export function planKeepDownRoute(
   a: Pt,
   b: Pt,
   priorTrack: Pt[] | null,
@@ -6863,6 +7340,7 @@ function planKeepDownRoute(
   cap: number,
   maxLength: number,
   airDepth: ((p: Pt) => number) | null = null,
+  onAcceptedGraphRoute?: AcceptedGraphRouteObserver,
 ): { points: Pt[]; length: number; family: 'backtrack' | 'detour' | 'via-cleared' } | null {
   const direct = Math.hypot(b.x - a.x, b.y - a.y)
   if (direct <= 1e-9 || !Number.isFinite(maxLength) || maxLength <= 0) return null
@@ -6952,7 +7430,7 @@ function planKeepDownRoute(
   // DESIGNED recovery wins a tie against a synthetic perpendicular hop.
   candidates.sort((p, q) => p.length - q.length)
 
-  const wallTol = Math.max(arcTol * 4, toolRadius * 0.05)
+  const wallTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
   // WO-1194 THE AIR VETO. Every proof above measures a route against MATERIAL, so ground that
   // has no material -- the air outside the stock the caller's exterior seed names -- passes
   // all of them for free. A detour that leaves the stock to swing back in is therefore the one
@@ -7012,7 +7490,15 @@ function planKeepDownRoute(
         // bans the offending leg exactly as an overload does, so the search keeps going.
         const air = escaping >= 0 ? null : airExcursion(route)
         const trip = escaping >= 0 || air ? null : rideOverloadsUncut(route, clearedBeforePass, toolRadius, cap, arcTol)
-        if (escaping < 0 && !air && !trip) return { points: route, length, family: 'via-cleared' }
+        if (escaping < 0 && !air && !trip) {
+          // WO-2937: observe only after ALL original physical proofs. Deep-copy
+          // only when enabled, so even an untyped observer cannot alter motion.
+          onAcceptedGraphRoute?.(Object.freeze({
+            points: Object.freeze(route.map(p => Object.freeze({ x: p.x, y: p.y }))),
+            length, maxLength,
+          }))
+          return { points: route, length, family: 'via-cleared' }
+        }
         // Where the ride failed, in coordinates. `route` is the EXPANDED motion, so its index
         // no longer maps to a graph edge -- locate the failure geometrically instead and ban
         // whichever leg of the node path owns it, then look for the next-shortest ride.
@@ -7068,18 +7554,154 @@ function projectOnLoops(p: Pt, loops: Loops): LoopProj {
   let best: LoopProj = { dist: Infinity, foot: p, loop: -1, seg: -1 }
   for (let li = 0; li < loops.length; li++) {
     const lp = loops[li]
+    const grid = lp.length >= SEG_GRID_MIN_SEGMENTS ? segGridOf(lp) : null
+    if (grid && p.x >= grid.minX && p.x <= grid.maxX && p.y >= grid.minY && p.y <= grid.maxY) {
+      best = projectOnLoopGrid(p, lp, li, grid, best)
+      continue
+    }
     for (let i = 0; i < lp.length; i++) {
-      const a = lp[i], b = lp[(i + 1) % lp.length]
-      const abx = b.x - a.x, aby = b.y - a.y
-      const L2 = abx * abx + aby * aby
-      let t = L2 > 1e-12 ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / L2 : 0
-      t = Math.max(0, Math.min(1, t))
-      const foot = { x: a.x + abx * t, y: a.y + aby * t }
-      const d = Math.hypot(p.x - foot.x, p.y - foot.y)
-      if (d < best.dist) best = { dist: d, foot, loop: li, seg: i }
+      const proj = projectOnSegment(p, lp, i)
+      if (proj.d < best.dist) best = { dist: proj.d, foot: proj.foot, loop: li, seg: i }
     }
   }
   return best
+}
+
+/** One edge's projection, the arithmetic projectOnLoops has always used. */
+function projectOnSegment(p: Pt, lp: Loop, i: number): { d: number; foot: Pt } {
+  const a = lp[i], b = lp[(i + 1) % lp.length]
+  const abx = b.x - a.x, aby = b.y - a.y
+  const L2 = abx * abx + aby * aby
+  let t = L2 > 1e-12 ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / L2 : 0
+  t = Math.max(0, Math.min(1, t))
+  const foot = { x: a.x + abx * t, y: a.y + aby * t }
+  return { d: Math.hypot(p.x - foot.x, p.y - foot.y), foot }
+}
+
+// WO-3024: a uniform grid over one loop's edges, so projectOnLoops visits only the edges near
+// the query instead of every vertex of every loop (30 s self time on the Form cylinder). The
+// answer is the linear scan's to the bit: every edge that could be nearest is measured with the
+// same arithmetic, and ties go to the lowest edge index, which is what the scan's strict `<`
+// keeps. Loops are never mutated after they are built; the length check is a guard.
+const SEG_GRID_MIN_SEGMENTS = 64
+interface SegGrid { len: number; minX: number; minY: number; maxX: number; maxY: number; cell: number; nx: number; ny: number; cells: number[][] }
+const segGrids = new WeakMap<Loop, SegGrid>()
+function segGridOf(lp: Loop): SegGrid {
+  const cached = segGrids.get(lp)
+  if (cached && cached.len === lp.length) return cached
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const q of lp) {
+    if (q.x < minX) minX = q.x
+    if (q.x > maxX) maxX = q.x
+    if (q.y < minY) minY = q.y
+    if (q.y > maxY) maxY = q.y
+  }
+  const span = Math.max(maxX - minX, maxY - minY, 1e-6)
+  const cell = Math.max(span / Math.ceil(Math.sqrt(lp.length)), 1e-6)
+  const nx = Math.max(1, Math.ceil((maxX - minX) / cell) + 1)
+  const ny = Math.max(1, Math.ceil((maxY - minY) / cell) + 1)
+  const cells: number[][] = Array.from({ length: nx * ny }, () => [])
+  const cx = (x: number): number => Math.min(nx - 1, Math.max(0, Math.floor((x - minX) / cell)))
+  const cy = (y: number): number => Math.min(ny - 1, Math.max(0, Math.floor((y - minY) / cell)))
+  for (let i = 0; i < lp.length; i++) {
+    const a = lp[i], b = lp[(i + 1) % lp.length]
+    const x0 = cx(Math.min(a.x, b.x)), x1 = cx(Math.max(a.x, b.x))
+    const y0 = cy(Math.min(a.y, b.y)), y1 = cy(Math.max(a.y, b.y))
+    for (let gy = y0; gy <= y1; gy++) for (let gx = x0; gx <= x1; gx++) cells[gy * nx + gx].push(i)
+  }
+  const grid = { len: lp.length, minX, minY, maxX, maxY, cell, nx, ny, cells }
+  segGrids.set(lp, grid)
+  return grid
+}
+/** Rings of cells outward from the query's cell: every edge in ring k lies at least (k - 1)
+ *  cells away, so once that bound passes the best distance found, no farther edge can win. */
+function projectOnLoopGrid(p: Pt, lp: Loop, li: number, grid: SegGrid, best: LoopProj): LoopProj {
+  const { nx, ny, cell, cells } = grid
+  const px = Math.min(nx - 1, Math.max(0, Math.floor((p.x - grid.minX) / cell)))
+  const py = Math.min(ny - 1, Math.max(0, Math.floor((p.y - grid.minY) / cell)))
+  let localD = Infinity, localSeg = -1, localFoot: Pt = p
+  const visit = (gx: number, gy: number): void => {
+    for (const i of cells[gy * nx + gx]) {
+      const proj = projectOnSegment(p, lp, i)
+      if (proj.d < localD || (proj.d === localD && i < localSeg)) { localD = proj.d; localSeg = i; localFoot = proj.foot }
+    }
+  }
+  const maxRing = Math.max(nx, ny)
+  for (let k = 0; k <= maxRing; k++) {
+    if ((k - 1) * cell > Math.min(localD, best.dist) + 1e-9) break
+    for (let gx = px - k; gx <= px + k; gx++) {
+      if (gx < 0 || gx >= nx) continue
+      if (py - k >= 0) visit(gx, py - k)
+      if (k > 0 && py + k < ny) visit(gx, py + k)
+    }
+    for (let gy = py - k + 1; gy <= py + k - 1; gy++) {
+      if (gy < 0 || gy >= ny) continue
+      if (px - k >= 0) visit(px - k, gy)
+      if (k > 0 && px + k < nx) visit(px + k, gy)
+    }
+  }
+  return localSeg >= 0 && localD < best.dist ? { dist: localD, foot: localFoot, loop: li, seg: localSeg } : best
+}
+
+/** WO-3024: closestOnSegment's squared distance from `p` to edge g (lp[g] -> lp[g + 1]), the
+ *  arithmetic of every `loop[i - 1] -> loop[i]` scan below (i = g + 1). */
+function edgeDistSq(p: Pt, lp: Loop, g: number): number {
+  return closestOnSegment(lp[g], lp[(g + 1) % lp.length], p).distSq
+}
+const edgeIsPoint = (lp: Loop, g: number): boolean => {
+  const a = lp[g], b = lp[(g + 1) % lp.length]
+  return Math.hypot(b.x - a.x, b.y - a.y) <= 1e-9
+}
+/** Visit the edges of `lp` near `p`, ring by ring, until no farther edge can be within
+ *  `limitSq()` (re-read after every ring, so a shrinking best tightens the search). */
+function visitNearEdges(p: Pt, lp: Loop, limitSq: () => number, visit: (g: number) => void): void {
+  const grid = lp.length >= SEG_GRID_MIN_SEGMENTS ? segGridOf(lp) : null
+  if (!grid || p.x < grid.minX || p.x > grid.maxX || p.y < grid.minY || p.y > grid.maxY) {
+    for (let g = 0; g < lp.length; g++) visit(g)
+    return
+  }
+  const { nx, ny, cell, cells } = grid
+  const px = Math.min(nx - 1, Math.max(0, Math.floor((p.x - grid.minX) / cell)))
+  const py = Math.min(ny - 1, Math.max(0, Math.floor((p.y - grid.minY) / cell)))
+  const cellAt = (gx: number, gy: number): void => { for (const g of cells[gy * nx + gx]) visit(g) }
+  const maxRing = Math.max(nx, ny)
+  for (let k = 0; k <= maxRing; k++) {
+    const reach = (k - 1) * cell
+    if (k > 1 && reach * reach > limitSq() * (1 + 1e-9) + 1e-12) break
+    for (let gx = px - k; gx <= px + k; gx++) {
+      if (gx < 0 || gx >= nx) continue
+      if (py - k >= 0) cellAt(gx, py - k)
+      if (k > 0 && py + k < ny) cellAt(gx, py + k)
+    }
+    for (let gy = py - k + 1; gy <= py + k - 1; gy++) {
+      if (gy < 0 || gy >= ny) continue
+      if (px - k >= 0) cellAt(px - k, gy)
+      if (k > 0 && px + k < nx) cellAt(px + k, gy)
+    }
+  }
+}
+/** closestPointOnPaths(loops, p).dist, to the bit: the same per-edge arithmetic, a minimum
+ *  over the edges the grid cannot rule out. */
+function distToLoops(p: Pt, loops: Loops): number {
+  let minSq = Infinity
+  for (const lp of loops) visitNearEdges(p, lp, () => minSq, g => { const d = edgeDistSq(p, lp, g); if (d < minSq) minSq = d })
+  return Math.sqrt(minSq)
+}
+/** The edges a `loop[i - 1] -> loop[i]` scan for the nearest non-degenerate edge to `p` could
+ *  pick, in that scan's own order (loop by loop, i ascending, so edge g sorts as g + 1, the
+ *  closing edge first). Callers run their unchanged scan body over this list. */
+function nearestEdgeCandidates(p: Pt, loops: Loops): { lp: Loop; g: number }[] {
+  let minSq = Infinity
+  for (const lp of loops) visitNearEdges(p, lp, () => minSq, g => { if (edgeIsPoint(lp, g)) return; const d = edgeDistSq(p, lp, g); if (d < minSq) minSq = d })
+  const limit = minSq * (1 + 1e-9) + 1e-12
+  const out: { lp: Loop; g: number }[] = []
+  for (const lp of loops) {
+    const found = new Set<number>()
+    visitNearEdges(p, lp, () => limit, g => { if (!edgeIsPoint(lp, g) && edgeDistSq(p, lp, g) <= limit) found.add(g) })
+    const n = lp.length
+    for (const g of [...found].sort((u, v) => (u + 1) % n - (v + 1) % n)) out.push({ lp, g })
+  }
+  return out
 }
 
 /** WO-1178: geom's cleanPath, except that the points in `keep` (a pass's wall-fillet samples)

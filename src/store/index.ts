@@ -1,3 +1,6 @@
+import { frameRef, worldRingsToDisplayLocalMm, type FrameRef } from '../lib/geometry/coordinateFrames'
+import { prepareCamCommands } from '../kernel/camCommands'
+import type { CamCommand, CamCommandResult, CamAuthoringCheck, CamCommandServices } from '../kernel/camCommands'
 import { textFor } from '../i18n'
 import { installOperatorTextLookup } from '../i18n/locales/en/console-and-operator-messages'
 const operatorText = textFor('console-and-operator-messages')
@@ -62,7 +65,12 @@ import {
   projectOperationFingerprint,
   projectOperationFingerprintMatches,
   reconcileProjectGenerationFreshness,
+  setGenerationEngineResolver,
 } from '../lib/cam/generationFingerprint'
+import { createEngineRouter, createEngineSelector, kernelPlanners } from '../kernel/planning'
+import type { FacePilotEnvelope } from '../kernel/planners/face'
+import { ADAPTIVE_OPERATION_RECORDS, adaptiveShadowRecord, createAdaptivePlanner,
+  type AdaptiveKernelPlan, type AdaptivePilotEnvelope, type AdaptiveShadowRecord } from '../kernel/ops/adaptive'
 import {
   envelopeFromResolvedMachineHeights,
   envelopeFromResolvedWcsHeights,
@@ -96,6 +104,9 @@ import {
   resolveSteepShallow3dSmartHeights,
   resolveWaterline3dSmartHeights,
   resolveFaceSmartHeights,
+  resolvePatternSmartHeights,
+  withPatternScriptDepth,
+  buildPatternSmartHeightEvidenceContext,
   resolveDrillBoreSmartHeights,
   resolveThreadMillSmartHeights,
   resolveChamferSmartHeights,
@@ -113,6 +124,7 @@ import {
   validatePersistedSmartHeightState,
   type MaterialRegionXY,
   type ResolvedFaceSmartHeights,
+  type ResolvedPatternSmartHeights,
   type ResolvedDrillBoreSmartHeights,
   type ResolvedThreadMillSmartHeights,
   type ResolvedChamferSmartHeights,
@@ -156,14 +168,13 @@ import { APP_VERSION } from '../version'
 import { UnknownSchemaVersionError } from './migrations/schemaMigration'
 import { assignGeometryToStocks, deriveStockBounds, derivedStockMembers, resolveStockMembershipState, effectiveStockIdForCompute, findDerivedStock, stockWorldBounds, setupStockConsistency } from './stockAssignment'
 import {
-  conflictingWorkOffsetClaim,
   isFixtureOffset,
   wcsBoundStockId,
   wcsStockCornerBinding,
   type FixtureOffset,
 } from '../lib/post/workOffsets'
 import { resolveFeedrates } from '../lib/cam/feedrates'
-import { resolveSpindle } from '../lib/post/resolve'
+import { requestedSpindleRpm, resolveSpindle } from '../lib/post/resolve'
 import { normalizeToolCutHand } from '../lib/tool/cutHand'
 import { validateToolGeometry } from '../lib/tool/toolValidation'
 import { mergeIncomingHolders, resolveIncomingHolder } from '../lib/tool/holderIdentity'
@@ -274,11 +285,13 @@ import {
 import {
   computeAdaptive3dMoves, readAdaptive3dParams, stockBoundsFromMesh,
   resolveStockOutlineMode, resolveRestStart, stockFootprintIsPartBox,
+  adaptive3dStockEdgeReach, resolvePartBoundsEntryFallback,
   type Adaptive3dParams, type RetainedRoughField,
 } from '../cam3d/integration/adaptive3dOperation'
 import { resolveAdaptive3dPartSource } from '../cam3d/integration/adaptive3dPartSource'
 import { lowerFinishLinksOverRemovedStock } from '../cam3d/integration/finishLinksOverRemovedStock'
 import { rapidAirFeedsOverRemovedStock } from '../cam3d/integration/airFeedOverRemovedStock'
+import { ADAPTIVE_ENTRY_POLICY } from '../cam3d/rough/emit'
 import type { Box3 } from '../cam3d/stock'
 import type { ClearanceMesh } from '../lib/cam/holderClearance'
 import type { StockState } from '../lib/cam/stockState'
@@ -422,6 +435,12 @@ function getViewportHandle(): ReloadableViewport | null {
     .__cncViewport as ReloadableViewport | undefined) ?? null
 }
 
+import {
+  buildOperationStockInputs, observeOperationStockState, operationStockAuthorityFor,
+  operationStockWorldFrame, nextOperationStockChange, STOCK_END_OPERATION_ID,
+} from './operationStockInputs'
+import type { OperationStockAuthority, StockToken, StockRead } from '../lib/cam/operationStockAuthority'
+
 // ---- Shared helpers ----
 
 // Layer colors for B-rep derived-loop layers (cycled by existing plane-layer
@@ -433,6 +452,19 @@ const DERIVED_LAYER_COLORS = ['#00e5ff', '#ff9d2e', '#4cff88', '#ff80ab', '#ffd7
 const TOOLPATH_REGEN_ALL_CONCURRENCY = 3
 const CAM3D_PREPROCESS_STALL_TIMEOUT_MS = 600_000
 const CAM3D_COMPUTE_STALL_TIMEOUT_MS = 180_000
+
+const requestedEngine = () => typeof process !== 'undefined' ? process.env.LIENCAM_ENGINE :
+  import.meta.env.VITE_LIENCAM_ENGINE ?? import.meta.env.LIENCAM_ENGINE
+const engineRouter = createEngineRouter(kernelPlanners, requestedEngine)
+const faceEngineId = createEngineSelector(['face'], requestedEngine)
+// WO-3018: both adaptive aliases select like Face; planning.ts registrations stay empty.
+const adaptiveEngineId = createEngineSelector(['adaptive_clearing_2d', 'adaptive_3d'], requestedEngine)
+const generationEngineId = (type: Operation['type']) => type === 'face'
+  ? faceEngineId(type)
+  : type === 'adaptive_clearing_2d' || type === 'adaptive_3d' ? adaptiveEngineId(type) : engineRouter.engineId(type)
+setGenerationEngineResolver(generationEngineId)
+// A newer Face request owns publication even when its authored inputs match.
+const faceComputeRequests = new Map<string, symbol>()
 
 // Default display color stored on a freshly imported B-rep (STEP) part so the
 // Design Tree color swatch is populated from import. Mirrors the renderer's
@@ -3283,6 +3315,7 @@ function lowerFinishLinksAfterEarlierOperations(input: {
   moves: ToolpathMove[]
   /** What the earlier operations left, in the moves' frame (earlierMaterialInPartFrame). */
   remaining: StockState | undefined
+  preceding?: Parameters<typeof rapidAirFeedsOverRemovedStock>[0]['preceding']
   clearanceZ: number
   workholding: readonly ClearanceMesh[]
   operationLabel: string
@@ -3304,7 +3337,7 @@ function lowerFinishLinksAfterEarlierOperations(input: {
     }
     // WO-1641: and no fed move travels through material that is already gone.
     const air = rapidAirFeedsOverRemovedStock({
-      moves: lowered.moves, tool, remaining,
+      moves: lowered.moves, tool, remaining, preceding: input.preceding,
     })
     if (air.rapided > 0) {
       console.info(
@@ -3334,7 +3367,8 @@ function earlierMaterialInPartFrame(input: {
   rotZDeg: number
   stockBounds: Box3 | undefined
   operationLabel: string
-}): { remaining: StockState | undefined; noEarlierOperations: boolean } {
+}): { remaining: StockState | undefined; noEarlierOperations: boolean;
+  preceding?: Parameters<typeof rapidAirFeedsOverRemovedStock>[0]['preceding'] } {
   const { state, setup, op, stockBounds } = input
   const index = setup.operations.findIndex(candidate => candidate.id === op.id)
   const noEarlierOperations = index <= 0
@@ -3352,7 +3386,7 @@ function earlierMaterialInPartFrame(input: {
       min: { x: stockBounds.minX, y: stockBounds.minY, z: stockBounds.minZ },
       max: { x: stockBounds.maxX, y: stockBounds.maxY, z: stockBounds.maxZ },
     })
-    return { remaining: remaining?.stock, noEarlierOperations }
+    return { remaining: remaining?.stock, noEarlierOperations, preceding }
   } catch (err) {
     console.warn(operatorText('index43', { value1: String(input.operationLabel) }), err)
     return { remaining: undefined, noEarlierOperations }
@@ -3394,20 +3428,7 @@ function worldMovesToLocalFrame(
 // lines up with the mesh when the part carries a group transform: inverse of
 // world = position + Rz(local). No-op for an un-posed part.
 function worldRingsToLocalFrame(rings: Ring[], position: Vec3, rotZDeg: number): Ring[] {
-  if (position.x === 0 && position.y === 0 && rotZDeg === 0) return rings
-  const rad = (rotZDeg * Math.PI) / 180
-  const c = Math.cos(rad)
-  const s = Math.sin(rad)
-  return rings.map((r) => {
-    const out = new Float64Array(r.length)
-    for (let i = 0; i < r.length; i += 2) {
-      const dx = r[i] - position.x
-      const dy = r[i + 1] - position.y
-      out[i] = dx * c + dy * s // inverse rotation (Rz^-1)
-      out[i + 1] = -dx * s + dy * c
-    }
-    return out
-  })
+  return worldRingsToDisplayLocalMm(rings, position, rotZDeg)
 }
 
 // Orchestrate a parallel_3d compute end to end: resolve the source solid, fetch
@@ -3714,7 +3735,7 @@ async function computeParallel3dToolpath(
     })
     // WO-1620: links stay low over what earlier operations removed (rest machining plans its own).
     const linked = lowerFinishLinksAfterEarlierOperations({
-      op, tool, moves: reach.moves, remaining: earlier.remaining,
+      op, tool, moves: reach.moves, remaining: earlier.remaining, preceding: earlier.preceding,
       clearanceZ: resolvedHeights.clearanceZ, workholding: localWorkholding, operationLabel,
     })
     const moves = linked.moves
@@ -4232,7 +4253,7 @@ async function computeWaterline3dToolpath(
     })
     // WO-1620: links stay low over what earlier operations removed.
     const linked = lowerFinishLinksAfterEarlierOperations({
-      op, tool, moves: reach.moves, remaining: earlier.remaining,
+      op, tool, moves: reach.moves, remaining: earlier.remaining, preceding: earlier.preceding,
       clearanceZ: resolvedHeights.clearanceZ, workholding: localWorkholding, operationLabel: operatorText('index92'),
     })
     const moves = linked.moves
@@ -5100,6 +5121,8 @@ interface FaceSmartRuntimeResolution {
   usesSmartHeightV2: boolean
   smart?: ResolvedFaceSmartHeights
   earlierMaterial?: EarlierMaterialStart
+  material?: { authority: OperationStockAuthority; token: StockToken }
+  stockBounds?: { min: Vec3; max: Vec3 }
 }
 
 export function setupProvenStockId(setup: Setup, project: Project): string | undefined {
@@ -5178,6 +5201,143 @@ export function smartHeightModelTop(
     modelTopMachineMm: top,
     geometryIds,
     fingerprint: smartHeightEvidenceFingerprint({ stockId, geometryIds, tops }),
+  }
+}
+
+// Stock domains follow the existing project compute lifetime, including same-ID
+// opens. Raw state edits are also observed synchronously below.
+const faceMaterialResults = new Map<string, { epoch: string; inputKey: string }>()
+const operationStockEpoch = () => `${cam3dComputeRuntime.generation}:${useCamStore.getState().project.id}`
+// The producer's input witness includes actual ordered move bytes. The
+// generationFingerprint's predecessor signature only carries presence/count.
+function faceMaterialResultKey(setup: Setup, op: Operation): string {
+  const end = setup.operations.findIndex(candidate => candidate.id === op.id)
+  return JSON.stringify(setup.operations.slice(0, end).filter(candidate => candidate.enabled !== false).map(candidate =>
+    [candidate.id, candidate.toolpathMoves, candidate.generationFingerprint, candidate.status]))
+}
+class FaceStockPending extends Error {
+  readonly authority: OperationStockAuthority
+  readonly read: Extract<StockRead, { status: 'recomputing' }>
+  constructor(authority: OperationStockAuthority, read: Extract<StockRead, { status: 'recomputing' }>) {
+    super('Remaining stock is recomputing.')
+    this.authority = authority; this.read = read
+  }
+}
+
+function operationMaterialStockId(project: Project, setup: Setup, op: Operation): string | null {
+  const references = operationReferencedGeometryIds(op)
+  const ids = references.includes('__all__')
+    ? project.geometry.filter(geo => !isWorkholdingGeometry(geo)).map(geo => geo.id)
+    : references.filter(id => id !== '__stock__')
+  if (ids.length) {
+    const memberships = ids.map(id => {
+      const geo = project.geometry.find(candidate => candidate.id === id)
+      return geo ? effectiveStockIdForCompute(geo, project.nests ?? [], project.stocks ?? []) : undefined
+    })
+    return memberships.every(id => id && id === memberships[0]) ? memberships[0]! : null
+  }
+  const validated = validatePersistedSmartHeightState(op.smartHeight)
+  const scope = validated.ok ? validated.state.intent.machining.scope.value : undefined
+  if (scope?.kind === 'stock_footprint') return scope.stockId
+  return setupProvenStockId(setup, project) ?? null
+}
+
+/** Shared production stock domain. All consumers use store-owned live inputs,
+ * generation witnesses and project lifetime; callers supply only domain IDs. */
+export function getOperationStockDomain(setupId: string, stockId: string): {
+  authority: OperationStockAuthority; frame: FrameRef<'world'>; finalOperationId: string
+} {
+  const state = useCamStore.getState()
+  if (!state.project.setups.some(candidate => candidate.id === setupId)) {
+    throw new Error(`Remaining stock setup '${setupId}' is unavailable.`)
+  }
+  if (!state.project.stocks?.some(candidate => candidate.id === stockId)) {
+    throw new Error(`Remaining stock '${stockId}' is unavailable.`)
+  }
+  const epoch = operationStockEpoch()
+  observeOperationStockState(epoch, state.project, state.toolLibrary)
+  const authority = operationStockAuthorityFor(epoch, setupId, stockId, () => {
+    const live = useCamStore.getState()
+    const liveSetup = live.project.setups.find(candidate => candidate.id === setupId)
+    return buildOperationStockInputs({ epoch: operationStockEpoch(), project: live.project,
+      setup: liveSetup, toolLibrary: live.toolLibrary, stockId,
+      stockBounds: smartHeightStockBounds(live.project, stockId),
+      stockIdOf: candidate => liveSetup ? operationMaterialStockId(live.project, liveSetup, candidate) : null,
+      resultIsCurrent: candidate => {
+        if (!liveSetup || !operationGenerationIsCurrent({ ...live.project, toolLibrary: live.toolLibrary }, liveSetup, candidate)) return false
+        const result = faceMaterialResults.get(candidate.id)
+        // A restored shared-material Face needs a fresh witness; a saved height
+        // fingerprint alone cannot certify same-count predecessor move edits.
+        if (candidate.type === 'face' && candidate.resolvedHeightPlan?.machining.materialArtifact?.artifactId.startsWith('shared-stock:')) {
+          return !!result && result.epoch === operationStockEpoch() &&
+            result.inputKey === faceMaterialResultKey(liveSetup, candidate)
+        }
+        return true
+      },
+    })
+  })
+  const frame = operationStockWorldFrame(epoch)
+  return { authority, frame, finalOperationId: STOCK_END_OPERATION_ID }
+}
+
+function faceMaterialBefore(setup: Setup, op: Operation, stockId: string,
+  stockBounds: { min: Vec3; max: Vec3 }, region: MaterialRegionXY | undefined) {
+  if (!region) throw new Error('Face material region is unavailable.')
+  const { authority, frame, finalOperationId } = getOperationStockDomain(setup.id, stockId)
+  const read = authority.readBefore({ beforeOperationId: setup.operations.some(candidate => candidate.id === op.id)
+    ? op.id : finalOperationId, frame, maxCellMm: Number.MAX_VALUE })
+  if (read.status === 'recomputing') throw new FaceStockPending(authority, read)
+  if (read.status !== 'ready') throw new Error(read.reason)
+  const query = authority.query(read.token, { kind: 'highest-material', frame,
+    bounds: { ...region, minZ: stockBounds.min.z, maxZ: stockBounds.max.z } })
+  if (query.status !== 'ready') throw new Error(query.reason)
+  if (typeof query.value !== 'number') throw new Error('No remaining material intersects the Face region.')
+  const material: EarlierMaterialStart = {
+    evidence: { stockId, artifactId: `shared-stock:${read.snapshotId}`,
+      boundsMachineMm: { minX: stockBounds.min.x, minY: stockBounds.min.y, minZ: stockBounds.min.z,
+        maxX: stockBounds.max.x, maxY: stockBounds.max.y, maxZ: stockBounds.max.z },
+      materialTopMachineMm: query.value,
+      fingerprint: smartHeightEvidenceFingerprint({ token: read.token, quality: read.quality, region }),
+      representation: 'material-left-by-earlier-operations', compatible: true },
+    sourceOperationId: op.id, sourceOperationName: 'enabled earlier operations',
+  }
+  return { material: { authority, token: read.token }, earlier: material, quality: read.quality, frame }
+}
+
+/** Both public preview and generation use this retry boundary. Only the next
+ * missing predecessor is scheduled. A failed/cancelled attempt is not retried
+ * or suppressed, and changed target inputs never continue an older request. */
+async function readyFaceSmartRuntime(get: () => CamStore, setupId: string, draft: Operation,
+  ownsRequest: () => boolean = () => true): Promise<FaceSmartRuntimeResolution> {
+  const epoch = operationStockEpoch()
+  const attempted = new Set<string>()
+  const useLive = get().project.setups.find(candidate => candidate.id === setupId)?.operations
+    .some(candidate => candidate === draft) ?? false
+  for (;;) {
+    if (operationStockEpoch() !== epoch || !ownsRequest()) throw new Error('Face request was replaced.')
+    const state = get()
+    const setup = state.project.setups.find(candidate => candidate.id === setupId)
+    if (!setup) throw new Error('Face setup is unavailable.')
+    const liveOp = setup.operations.find(candidate => candidate.id === draft.id)
+    if (useLive && !liveOp) throw new Error('Face operation was removed.')
+    const op = useLive ? liveOp! : draft
+    try { return resolveFaceSmartRuntime({ state, setup, op }) } catch (error) {
+      if (!(error instanceof FaceStockPending)) throw error
+      const id = error.read.waitingFor[0]
+      if (!id) { await nextOperationStockChange(error.authority); continue }
+      const running = toolpathComputesInFlightByOp.get(id)
+      if (running?.size) {
+        await Promise.allSettled([...running])
+        attempted.add(id)
+      } else {
+        const prior = setup.operations.find(candidate => candidate.id === id)
+        if (!prior || prior.status === 'computing' || attempted.has(id)) {
+          throw new Error('Earlier operation did not produce current material removal (cancelled or stale).')
+        }
+        attempted.add(id)
+        await get().computeOperationToolpath(setupId, id)
+      }
+    }
   }
 }
 
@@ -5303,10 +5463,12 @@ function resolveFaceSmartRuntime(input: {
   const faceRegion = params.boundarySource === 'geometry' && params.geometryId
     ? operationRegionXY(state, [params.geometryId], params.loopIds, 0)
     : { minX: stockBounds.min.x, minY: stockBounds.min.y, maxX: stockBounds.max.x, maxY: stockBounds.max.y }
-  const earlierMaterial = earlierMaterialStartFor({
-    state, setup, op, start: intent.machining.start, stockId, stockBounds, region: faceRegion,
-  })
-  const resolved = resolveWithEarlierMaterial(earlierMaterial, earlier => {
+  const start = intent.machining.start
+  const shared = start.owner.kind !== 'user_override' &&
+    ['current_material', 'policy_default', 'geometry_tool_formula'].includes(start.value.kind)
+    ? faceMaterialBefore(setup, op, stockId, stockBounds, faceRegion) : undefined
+  const earlier = shared?.earlier
+  const resolve = () => {
     const evidence = buildFaceSmartHeightEvidenceContext({
       revision,
       wcsOriginMachineMm: setup.wcs.origin.z,
@@ -5328,11 +5490,20 @@ function resolveFaceSmartRuntime(input: {
       ...(earlier ? { remainingMaterial: earlier.evidence } : {}),
     })
     return resolveFaceSmartHeights({ intent, evidence, geometryIds, stockId })
-  })
+  }
+  const smart = resolve()
+  if (shared && smart.plan.machining.materialArtifact) {
+    // The legacy schema says machine; these values are project world mm, not
+    // controller machine coordinates. Preserve explicit frame and quality.
+    Object.assign(smart.plan.machining.materialArtifact, { sourceFrame: shared.frame, stockQuality: shared.quality })
+  }
   return {
     usesSmartHeightV2: true,
-    smart: resolved.result,
-    earlierMaterial: resolved.earlier,
+    smart,
+    earlierMaterial: shared && shared.earlier.evidence.materialTopMachineMm < stockBounds.max.z - 1e-6
+      ? shared.earlier : undefined,
+    material: shared?.material,
+    stockBounds,
   }
 }
 
@@ -5350,21 +5521,106 @@ function snapshotFaceSmartRuntime(
   )
 }
 
+/** WO-3001: the pattern operation's Smart Height V2 runtime. Material Start
+ *  is the setup's stock top (the operator's Top Height row replaces it, e.g.
+ *  for a pattern cut into an already faced top); Target End is the stated
+ *  depth below it. */
+interface PatternSmartRuntimeResolution {
+  smart: ResolvedPatternSmartHeights
+}
+
+function resolvePatternSmartRuntime(input: {
+  state: CamStore
+  setup: Setup
+  op: Operation
+}): PatternSmartRuntimeResolution {
+  const { state, setup, op } = input
+  const validated = validatePersistedSmartHeightState(op.smartHeight)
+  if (!validated.ok) throw new Error(validated.message)
+  // One depth authority: the script's constant depth feeds the Target End.
+  const intent = withPatternScriptDepth(validated.state.intent, (op.params as { spec?: unknown }).spec)
+  const scope = intent.machining.scope.value
+  if (scope.kind !== 'stock_footprint') {
+    throw new Error('A pattern measures its depth from the setup\'s stock; its saved height scope names none.')
+  }
+  const stockId = scope.stockId
+  const setupStockId = setupProvenStockId(setup, state.project)
+  if (!setupStockId || setupStockId !== stockId) {
+    throw new Error(`This pattern's heights belong to stock '${stockId}', which is not this setup's stock.`)
+  }
+  const stockBounds = smartHeightStockBounds(state.project, stockId)
+  if (!stockBounds) throw new Error(`Stock '${stockId}' has no bounds to measure the pattern from.`)
+  const stock = (state.project.stocks ?? []).find(candidate => candidate.id === stockId)
+  const evidence = buildPatternSmartHeightEvidenceContext({
+    revision: {
+      projectRevision: smartHeightEvidenceFingerprint({
+        schemaVersion: state.project.schemaVersion,
+        geometry: state.project.geometry,
+        placements: state.project.modelItemPlacements,
+        stocks: state.project.stocks,
+        sceneStock: state.project.sceneStock,
+        machine: state.project.machine,
+      }),
+      setupRevision: smartHeightEvidenceFingerprint({ id: setup.id, wcs: setup.wcs, stock: setup.stock }),
+      operationRevision: smartHeightEvidenceFingerprint({
+        id: op.id, type: op.type, enabled: op.enabled, toolId: op.toolId,
+        geometrySelections: op.geometrySelections, params: op.params, passes: op.passes,
+        smartHeight: op.smartHeight,
+      }),
+    },
+    wcsOriginMachineMm: setup.wcs.origin.z,
+    operationId: op.id,
+    owningStock: {
+      stockId,
+      artifactId: `stock-box:${stockId}`,
+      boundsMachineMm: {
+        minX: stockBounds.min.x, minY: stockBounds.min.y, minZ: stockBounds.min.z,
+        maxX: stockBounds.max.x, maxY: stockBounds.max.y, maxZ: stockBounds.max.z,
+      },
+      fingerprint: smartHeightEvidenceFingerprint({ stockId, stock, bounds: stockBounds }),
+      representation: 'axis-aligned-stock-box',
+    },
+  })
+  return { smart: resolvePatternSmartHeights({ intent, evidence, stockId }) }
+}
+
+function snapshotPatternSmartRuntime(
+  setup: Setup,
+  resolution: ResolvedPatternSmartHeights,
+): ResolvedHeightSnapshotV1 {
+  return snapshotHeightEnvelope(
+    envelopeFromResolvedWcsHeights(resolution.workerHeights, setup.wcs.origin.z, resolution.dependencyIds),
+    resolution.snapshotIntent,
+  )
+}
+
 interface SmartHeightPreview {
   snapshot: ResolvedHeightSnapshotV1
   plan: ResolvedHeightPlanV2
 }
 
-function previewFaceSmartHeightRuntime(
+function previewPatternSmartHeightRuntime(
   get: () => CamStore,
   setupId: string,
   op: Operation,
 ): SmartHeightPreview {
+  const state = get()
+  const setup = state.project.setups.find(candidate => candidate.id === setupId)
+  if (!setup) throw new Error(operatorText('index136'))
+  const { smart } = resolvePatternSmartRuntime({ state, setup, op })
+  return { snapshot: snapshotPatternSmartRuntime(setup, smart), plan: smart.plan }
+}
+
+async function previewFaceSmartHeightRuntime(
+  get: () => CamStore,
+  setupId: string,
+  op: Operation,
+): Promise<SmartHeightPreview> {
   if (op.type !== 'face') throw new Error(operatorText('index135'))
   const state = get()
   const setup = state.project.setups.find(candidate => candidate.id === setupId)
   if (!setup) throw new Error(operatorText('index136'))
-  const resolution = resolveFaceSmartRuntime({ state, setup, op })
+  const resolution = await readyFaceSmartRuntime(get, setupId, op)
   if (!resolution.smart) {
     throw new Error(operatorText('index137'))
   }
@@ -6691,6 +6947,304 @@ function snapshotChamferSmartRuntime(
   )
 }
 
+/** What a model-origin op's geometry resolves to once its modeled body has been
+ *  turned into the shape the op's 2.5D builder consumes. ONE resolver: compute
+ *  and the Smart-Height preview both call it, so the preview can never refuse a
+ *  body compute cuts (WO-3055, rule 11). */
+interface ModelOriginDerivation {
+  geoSources: ImportedGeometry[]
+  /** Drill: the live stamped hole loop ids compute must select. */
+  drillLoopIds?: string[]
+  /** Edge chain: the derived chain loop ids compute must select. */
+  edgeChainLoopIds?: string[]
+}
+
+interface ModelOriginDerivationHooks {
+  /** Compute only: re-section a stale Section-at-Z layer, persist it, and hand
+   *  back the refreshed state and the op's carried-forward loop ids. */
+  refreshStaleSections?: (opLoopIds: string[]) => { state: CamStore; opLoopIds: string[] }
+  /** Compute only: persist the edge-chain migration note on the op. */
+  onEdgeChainNote?: (note: string | undefined) => void
+}
+
+async function deriveModelOriginGeoSources(args: {
+  state: CamStore
+  op: Operation
+  refGeo: ImportedGeometry
+  subject: string
+  modelBindingCapability: (typeof MODEL_BODY_BINDING_CAPABILITIES)[Operation['type']]
+  modelEdgeChainRef: NonNullable<Operation['modelReferences']>[number] | undefined
+  hooks?: ModelOriginDerivationHooks
+}): Promise<ModelOriginDerivation> {
+  const { op, refGeo, subject, modelBindingCapability, modelEdgeChainRef } = args
+  const hooks = args.hooks ?? {}
+  let state = args.state
+  let geoSources: ImportedGeometry[] = []
+  let drillLoopIds: string[] | undefined
+  let edgeChainLoopIds: string[] | undefined
+  const refGeoSourceIdentity = modelReferenceSourceIdentity(
+    refGeo,
+    resolveOwningModelItemId(refGeo),
+    state.project.geometry,
+    modelItemHistoricalLineageLookup(resolveOwningModelItemId(refGeo)),
+  )
+  // CAM-BINDING Stage 5: a picked-FACE machining-boundary
+  // ModelReference takes PRIORITY over Stage 4's persisted
+  // section-selection and Stage 2's whole-body default - it is
+  // the most SPECIFIC binding the op carries. Re-derived FRESH
+  // every compute (never a landed/cached snapshot, unlike
+  // Stage 4's section): a landed snapshot would give the CAM-1
+  // re-resolution hook (badge amber/red) nothing to invalidate
+  // against, defeating this stage's entire purpose. Only a
+  // 'machining-boundary'-role reference on THIS body is
+  // consulted - 'stock'/'origin' roles are a future stage.
+  const boundaryRef = op.modelReferences?.find(
+    (ref) => ref.role === 'machining-boundary'
+      && modelReferenceMatchesSource(ref, refGeoSourceIdentity),
+  )
+  const edgeChainRef = modelEdgeChainRef
+  // CAM-DRILL-ADAPTER: a drill-targets reference means re-run
+  // Model-kernel hole recognition and derive fresh circles over
+  // the live BODY before building -- never the landed wizard
+  // snapshot alone (same always-re-derive philosophy as Stage 5
+  // face boundary). Falls through to the refuse path when
+  // recognition cannot run OR finds no holes.
+  const drillTargetsRef = modelBindingCapability.mode === 'hole-targets'
+    ? op.modelReferences?.find(
+      (ref) => ref.role === 'drill-targets'
+        && modelReferenceMatchesSource(ref, refGeoSourceIdentity),
+    )
+    : undefined
+  const boreTargetRef = modelBindingCapability.mode === 'cylinder-targets'
+    ? op.modelReferences?.find(
+      (ref) => ref.role === 'bore-target'
+        && modelReferenceMatchesSource(ref, refGeoSourceIdentity),
+    )
+    : undefined
+  // CAM-BINDING Stage 4: if this op is bound to specific
+  // PERSISTED loops (e.g. a Section-at-Z the wizard already
+  // derived and landed onto refGeo.loops via deriveBrepLayer,
+  // exactly the same landing path the STEP/brep Section-at-Z
+  // flow already uses), those loops ARE the user's chosen
+  // cross-section - a snapshot, per the charter ("a slice is a
+  // derived snapshot at compute time, not a durable
+  // ModelReference"), not re-derived here. Falling back to
+  // deriveModelBodyProfile's whole-body default only when the
+  // op has no such selection (op.params.loopIds empty) keeps
+  // Stage 2's existing behavior byte-identical for every
+  // model-origin profile op that never ran Section-at-Z.
+  let opLoopIds = (op.params as { loopIds?: string[] }).loopIds ?? []
+  if (opLoopIds.length > 0 && hooks.refreshStaleSections) {
+    const refreshed = hooks.refreshStaleSections(opLoopIds)
+    state = refreshed.state
+    opLoopIds = refreshed.opLoopIds
+  }
+  const liveRefGeo = state.project.geometry.find((g) => g.id === refGeo.id) ?? refGeo
+  const persistedSelected = opLoopIds.length > 0
+    ? (liveRefGeo.loops ?? []).filter((l) => opLoopIds.includes(l.id))
+    : []
+  if (modelBindingCapability.mode === 'hole-targets') {
+    if (drillTargetsRef !== undefined) {
+      const bodyId = refGeo.modelBody?.ref.bodyId
+      if (!bodyId) {
+        throw new ModelBodyDeriveError(
+          operatorText('index472', { value1: String(subject) }),
+        )
+      }
+      // WO-365: same self-heal as deriveBrepLayer's 'holes' kind
+      // above - a compute that runs after an ordinary refresh
+      // (no Model-tab visit this page load) must not misreport
+      // a durably-checkpointed document as never having existed.
+      const modelItemId = resolveOwningModelItemId(refGeo) ?? LEGACY_MODEL_ITEM_ID
+      await ensureDocumentArchiveHydrated(
+        state.project.id, modelItemId, state.project.modelItems?.find((m) => m.id === modelItemId),
+      )
+      const verdicts = await recognizeModelBodyHoles(bodyId, modelItemId)
+      const derived = deriveModelBodyDrillTargets(
+        refGeo, state.project.modelItemPlacements ?? [], verdicts,
+      )
+      // Refresh targets FRESH - all currently recognized drillable
+      // holes. Binding face ids on the ModelReference still drive
+      // CAM-1 amber/red via reresolve; compute always takes the
+      // live recognition set (same "always re-derive" philosophy
+      // as Stage 5 face boundary).
+      const stamped = derived.loops.map((l, j) => ({
+        ...l,
+        id: `mdh:${derived.targets[j].featureKey}`,
+        layerId: 'model_drill_holes',
+      }))
+      geoSources = [{
+        ...refGeo,
+        loops: stamped,
+        layers2d: [{
+          id: 'model_drill_holes',
+          name: operatorText('index473'),
+          color: '#888888',
+          visible: true,
+          derived: true,
+          holes: derived.holes.map((h, j) => ({
+            ...h,
+            loopId: stamped[j].id,
+          })),
+        }],
+      }]
+      // Force selection to the live stamped set for this compute
+      // (op.params.loopIds may still name the wizard-landed ids).
+      drillLoopIds = stamped.map((l) => l.id)
+    } else if ((refGeo.loops ?? []).length > 0 && (persistedSelected.length > 0 || opLoopIds.length === 0)) {
+      // Wizard-landed Detect holes snapshot (geometry_local /
+      // world-baked circles + layer.holes). Builder filters by
+      // loopIds; empty loopIds = all closed loops.
+      geoSources = [{ ...refGeo }]
+    } else {
+      throw new ModelBodyDeriveError(
+        operatorText('index474', { value1: String(subject) }),
+      )
+    }
+  } else if (modelBindingCapability.mode === 'cylinder-targets') {
+    // WO-1942: Thread Mill binds its picked hole or boss wall
+    // through this same 'bore-target' reference and replay.
+    const isThreadMillTarget = op.type === 'thread_mill'
+    const opLabel = isThreadMillTarget ? operatorText('index475') : operatorText('index476')
+    const wallLabel = isThreadMillTarget ? operatorText('index477') : operatorText('index478')
+    const bodyId = refGeo.modelBody?.ref.bodyId
+    if (!bodyId) {
+      throw new ModelBodyDeriveError(
+        operatorText('index479', { value1: String(opLabel), value2: String(subject) }),
+      )
+    }
+    if (!boreTargetRef) {
+      throw new ModelBodyDeriveError(
+        operatorText('index480', { value1: String(opLabel), value2: String(subject), value3: String(wallLabel) }),
+      )
+    }
+    if (boreTargetRef.stableIds.length !== 1) {
+      throw new ModelBodyDeriveError(
+        operatorText('index481', { value1: String(opLabel), value2: String(subject), value3: String(boreTargetRef.stableIds.length), value4: String(wallLabel) }),
+      )
+    }
+    const faceStableId = boreTargetRef.stableIds[0]
+    // WO-365: same self-heal as the drill-targets branch above.
+    const modelItemId = resolveOwningModelItemId(refGeo) ?? LEGACY_MODEL_ITEM_ID
+    await ensureDocumentArchiveHydrated(
+      state.project.id, modelItemId, state.project.modelItems?.find((m) => m.id === modelItemId),
+    )
+    const { snapshot, verdicts } = await readModelBodyFaceFacts(bodyId, faceStableId, modelItemId)
+    if (isThreadMillTarget) {
+      const derived = deriveModelThreadMillTarget(
+        refGeo, state.project.modelItemPlacements ?? [], faceStableId, snapshot, verdicts,
+      )
+      geoSources = [{
+        ...refGeo,
+        loops: [derived.loop],
+        layers2d: [{
+          id: derived.loop.layerId,
+          name: operatorText('index482'),
+          color: '#888888',
+          visible: true,
+          derived: true,
+          cylinders: [derived.cylinder],
+        }],
+      }]
+    } else {
+      const derived = deriveModelBodyBoreTarget(
+        refGeo, state.project.modelItemPlacements ?? [], faceStableId, snapshot, verdicts,
+      )
+      geoSources = [{
+        ...refGeo,
+        loops: [derived.loop],
+        layers2d: [{
+          id: 'model_bore_target',
+          name: operatorText('index483'),
+          color: '#888888',
+          visible: true,
+          derived: true,
+          cylinders: [derived.cylinder],
+        }],
+      }]
+    }
+  } else {
+    let edgeChainNote: string | undefined
+    const edgeChainLoops = edgeChainRef !== undefined
+      ? (() => {
+          // WO-1939: Engrave follows an open chain as an open path.
+          const derived = deriveModelBodyEdges(
+            refGeo, edgeChainRef.stableIds, state.project.modelItemPlacements ?? [],
+            { openPaths: modelEdgeChainAllowsOpenPaths(op.type) },
+          )
+          if (derived.migratedEdgeIds.length > 0) {
+            edgeChainNote =
+              operatorText('index484', { value1: String(derived.migratedEdgeIds.length), value2: String(derived.migratedEdgeIds.join(', ')) })
+          }
+          edgeChainLoopIds = derived.loops.map((loop) => loop.id)
+          return derived.loops
+        })()
+      : undefined
+    if (edgeChainRef !== undefined) {
+      hooks.onEdgeChainNote?.(edgeChainNote)
+    }
+    const derivedLoops = edgeChainLoops !== undefined
+      ? edgeChainLoops
+      : boundaryRef !== undefined
+      ? deriveModelBodyFace(
+          refGeo, boundaryRef.stableIds[0], state.project.modelItemPlacements ?? [],
+        ).loops
+      : persistedSelected.length > 0
+      ? persistedSelected
+      : op.type === 'adaptive_clearing_2d' && opLoopIds.length === 0
+      ? adaptiveAllLoopsOfModelBody(
+          deriveModelBodyProfile(refGeo, state.project.modelItemPlacements ?? []).loops,
+        )
+      // Fall through to the ordinary 2.5D resolution chain below,
+      // fed from this ephemeral, world-space-baked stand-in instead
+      // of the real (excluded-by-format) geometry list. Nothing is
+      // persisted onto state.project.geometry - a re-compute always
+      // re-derives from the LIVE model, never a stale cache.
+      : deriveModelBodyProfile(refGeo, state.project.modelItemPlacements ?? []).loops
+    // WO-1941: a picked chain's stand-in carries what its op's
+    // Smart Height binds by (a Chamfer's loop layer).
+    geoSources = [edgeChainLoops !== undefined
+      ? modelEdgeChainSourceGeometry(op.type, refGeo, derivedLoops)
+      : { ...refGeo, loops: derivedLoops }]
+  }
+  return { geoSources, drillLoopIds, edgeChainLoopIds }
+}
+
+/** The Smart-Height preview's model-body source: the SAME derivation compute
+ *  runs, minus compute's persistence hooks. Undefined when the op does not name
+ *  a modeled body (the ordinary resolver then applies). */
+async function previewModelOriginGeoSources(
+  get: () => CamStore,
+  op: Operation,
+): Promise<{ geoSources: ImportedGeometry[]; op: Operation } | undefined> {
+  const state = get()
+  const refId = operationReferencedGeometryIds(op).find(
+    (id) => isModelOriginGeometry(state.project.geometry.find((g) => g.id === id)),
+  )
+  const refGeo = refId ? state.project.geometry.find((g) => g.id === refId) : undefined
+  if (!refGeo) return undefined
+  const modelBindingCapability = MODEL_BODY_BINDING_CAPABILITIES[op.type]
+  if (!modelBindingCapability.computeSupported || modelBindingCapability.mode === 'solid') return undefined
+  try {
+    const derivation = await deriveModelOriginGeoSources({
+      state, op, refGeo,
+      subject: refGeo.name || refId || operatorText('index462'),
+      modelBindingCapability,
+      modelEdgeChainRef: op.modelReferences?.find((ref) => ref.role === MODEL_EDGE_CHAIN_ROLE),
+    })
+    // Compute selects the live stamped drill holes, not the ids the op saved.
+    return {
+      geoSources: derivation.geoSources,
+      op: derivation.drillLoopIds
+        ? { ...op, params: { ...op.params, loopIds: derivation.drillLoopIds } } as Operation
+        : op,
+    }
+  } catch (err) {
+    if (err instanceof ModelBodyDeriveError) throw new Error(err.message, { cause: err })
+    throw err
+  }
+}
+
 function previewChamferSmartHeightRuntime(
   get: () => CamStore,
   setupId: string,
@@ -7511,7 +8065,9 @@ async function computeAdaptive3dToolpath(
     // rows carry the stock's id and turned the knob's rough into a part-bounds
     // interior-entry run that refused at the engagement cap).
     let solidPartsOnStock = 1
-    if (clearWholeStock) {
+    // WO-2922: the default part-bounds rough needs the same count for its entry fallback.
+    const mayNeedEntryFallback = !clearWholeStock && worldStock !== null && partRotation.z === 0
+    if (clearWholeStock || mayNeedEntryFallback) {
       const nestsForCompute = state.project.nests ?? []
       const stocksForCompute = state.project.stocks ?? []
       const myStockId = effectiveStockIdForCompute(geo, nestsForCompute, stocksForCompute)
@@ -7567,8 +8123,7 @@ async function computeAdaptive3dToolpath(
         // the engine's cutter-centre inset, then the authored overshoot. AUTO
         // permits one full radius beyond the real stock for a clear side entry;
         // explicit 0 keeps the cutter centre on the stock edge.
-        const toolRadius = tool.diameter / 2
-        reachStockEdgeBy = toolRadius + (params.stockEdgeOvershoot ?? toolRadius)
+        reachStockEdgeBy = adaptive3dStockEdgeReach(tool.diameter, params.stockEdgeOvershoot)
       } else if (!params.useStockBoundary) {
         // WO-2145 part-box stock the gate turned down: clear around the part, as asked.
         stockBounds = partBoundsStock
@@ -7592,6 +8147,26 @@ async function computeAdaptive3dToolpath(
     // the worker handle, so preview/dispatch cannot disagree about rest stock.
     const restStart = restStartFor(stockBounds)
     const startFromStock = restStart.handle
+    // WO-2922: Clear around part models none of the stock around the part, so on a
+    // rounded part in proud stock its every entry may be a helix too small to cut.
+    // Hand the adapter the proven real stock field (the Clear all stock field,
+    // under the same gate) to re-plan on only if this plan refuses its entry.
+    const partBoundsEntryFallback = mayNeedEntryFallback
+      ? resolvePartBoundsEntryFallback({
+          useStockBoundary: params.useStockBoundary,
+          stockBoundsAreRealStock,
+          startsFromRetainedField: startFromStock !== undefined,
+          unspun: partRotation.z === 0,
+          solidPartsOnStock,
+          stockFieldBounds: resolveAdaptive3dStockBounds(
+            partMesh, partPosition.z, worldStock,
+            worldRingsToLocalFrame([loopDataToRing(stockBoundsToLoop(worldStock!))], partPosition, partRotation.z)[0],
+          ),
+          toolDiameter: tool.diameter,
+          stockEdgeOvershoot: params.stockEdgeOvershoot,
+          opName: op.name,
+        })
+      : undefined
     // WO-1656: this rough's result is only as current as the retained field it
     // started from. A predecessor that goes stale, gets disabled, edited, or
     // reordered past this op must outdate it the same way the other families'
@@ -7706,30 +8281,61 @@ async function computeAdaptive3dToolpath(
 
     watchdogPhase = 'cam3d'
     watchdog.pulse(operatorText('index286'))
+    const adaptive3dRequest: Parameters<typeof computeAdaptive3dMoves>[0] = {
+      partMesh,
+      tool,
+      spindleRotation: resolveSpindle(op, tool, state.project.machine).dir,
+      feedrateOverride: op.feedrateOverride,
+      params: planParams,
+      stockBounds,
+      ...(stockBoundsAreRealStock ? { stockBoundsAreRealStock: true } : {}),
+      resolvedHeights,
+      boundary,
+      ...(reachStockEdgeBy !== undefined ? { reachStockEdgeBy } : {}),
+      ...(sideEntry ? { sideEntry: true } : {}),
+      ...(partBoundsEntryFallback !== undefined ? { partBoundsEntryFallback } : {}),
+      ...(startFromStock !== undefined ? { startFromStock } : {}),
+      client,
+      signal: aborter.signal,
+      onProgress: emitProgress,
+    }
+    const runAdaptive3dStrategy = () => Promise.race([computeAdaptive3dMoves(adaptive3dRequest), watchdog.failure])
+    // WO-3018: the adaptive kernel route (engine selector `kernel` or `both`), with today's
+    // strategy as its facade. `both` cannot run a rest start twice: the cam3d worker keeps
+    // ONE carved field and the first run replaces it, so that comparison is recorded as
+    // not run and only the current engine plans.
+    const adaptive3dEngine = generationEngineId('adaptive_3d')
+    let strategyResult: Awaited<ReturnType<typeof runAdaptive3dStrategy>>
+    if (adaptive3dEngine === 'current' || (adaptive3dEngine === 'both' && startFromStock !== undefined)) {
+      if (adaptive3dEngine === 'both') {
+        console.info('LIENCAM_ENGINE comparison', opId, { engine: 'both', type: 'adaptive_3d',
+          notRun: 'rest start: the retained carved field serves one run' })
+      }
+      strategyResult = await runAdaptive3dStrategy()
+    } else {
+      let kernelResult: typeof strategyResult | undefined
+      let currentResult: typeof strategyResult | undefined
+      let plan: AdaptiveKernelPlan | undefined
+      const planner = createAdaptivePlanner(ADAPTIVE_OPERATION_RECORDS.adaptive_3d, {
+        resolve: async () => ({ request: adaptive3dRequest, resolvedHeights: resolvedHeightSnapshot, resolvedHeightPlan: heightPlan }),
+        assertCurrent: () => {
+          if (computeGeneration !== cam3dComputeRuntime.generation) throw new Error('Adaptive kernel: superseded 3D Rough request.')
+        },
+        engine: { run: async request => (kernelResult = await Promise.race([computeAdaptive3dMoves(request), watchdog.failure])) },
+      })
+      await createEngineRouter({ adaptive_3d: async input => (plan = await planner(input)) }, () => adaptive3dEngine)
+        .plan({ operation: op, setup, project: state.project, tool },
+          async () => { currentResult = await runAdaptive3dStrategy() },
+          () => { currentResult = kernelResult },
+          () => console.info('LIENCAM_ENGINE comparison', opId, adaptiveShadowRecord('adaptive_3d', currentResult!.moves, plan!)),
+        )
+      strategyResult = currentResult!
+    }
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     const {
       moves: strategyMoves, computeTimeMs, carvedStock, carvedStockWarning, diagnostics, heightTruth,
-      carvedStockHandle, cellSize: carvedCellSize, notices: strategyNotices,
-    } = await Promise.race([
-      computeAdaptive3dMoves({
-        partMesh,
-        tool,
-        spindleRotation: resolveSpindle(op, tool, state.project.machine).dir,
-        feedrateOverride: op.feedrateOverride,
-        params: planParams,
-        stockBounds,
-        ...(stockBoundsAreRealStock ? { stockBoundsAreRealStock: true } : {}),
-        resolvedHeights,
-        boundary,
-        ...(reachStockEdgeBy !== undefined ? { reachStockEdgeBy } : {}),
-        ...(sideEntry ? { sideEntry: true } : {}),
-        ...(startFromStock !== undefined ? { startFromStock } : {}),
-        client,
-        signal: aborter.signal,
-        onProgress: emitProgress,
-      }),
-      watchdog.failure,
-    ])
-    if (computeGeneration !== cam3dComputeRuntime.generation) return
+      carvedStockHandle, cellSize: carvedCellSize, notices: strategyNotices, plannedStockBounds,
+    } = strategyResult
     // WO-1678: the one tool-reach seam, straight after the strategy. The block is
     // the block as loaded (crashStockBounds), never the rougher's field box.
     const reach = trimToToolReachInPartFrame({
@@ -7738,7 +8344,7 @@ async function computeAdaptive3dToolpath(
       stockBounds: crashStockBounds, part: partMesh, partToleranceMm: planParams.tolerance, params: op.params,
       workholding: localWorkholding,
       remainingStock: earlier.remaining, noEarlierOperations: earlier.noEarlierOperations,
-      wcsLabel: setup.wcs.label,
+      wcsLabel: setup.wcs.label, dropEmptyVisits: ADAPTIVE_ENTRY_POLICY.entriesAtMaterial,
     })
     const moves = reach.moves
     const notices = [...(strategyNotices ?? []), ...reach.notices]
@@ -7834,7 +8440,8 @@ async function computeAdaptive3dToolpath(
           setupId,
           opId,
           geometryId: geo.id,
-          stockBounds,
+          // WO-2922: the field this run carved (the entry fallback may have widened it).
+          stockBounds: plannedStockBounds ?? stockBounds,
           cellSize: carvedCellSize,
           upstreamChainFingerprint: adaptive3dMaterialChainFingerprint(
             landedSetup.operations.slice(0, landedOpIndex + 1),
@@ -7893,6 +8500,7 @@ async function computeAdaptive3dToolpath(
  */
 function invalidateProjectComputeWork(): void {
   cam3dComputeRuntime.generation++
+  faceMaterialResults.clear()
   cancelAllSerializedCam3dComputes()
   for (const aborter of parallel3dAborters.values()) aborter.abort()
   for (const aborter of adaptive3dAborters.values()) aborter.abort()
@@ -8599,21 +9207,6 @@ function withVcarveClearingOrder(operations: Operation[]): Operation[] {
 // edit (params, heights, tool, name, enabled...) and compute publication
 // (status, progress, toolpath, timings). An edit is an undo step; publication
 // never is. A patch that touches only these generated fields is publication.
-const OPERATION_RESULT_FIELDS: ReadonlySet<string> = new Set<keyof Operation>([
-  'status', 'toolpathMoves', 'computeTimeMs', 'estimatedCutTimeMs',
-  'estimatedCutTimeMsError', 'errorMessage', 'progress', 'progressPhase',
-  'resolvedHeights', 'resolvedHeightPlan', 'generationFingerprint',
-  'diagnostics', 'contourTabPreview', 'modelReferences', 'modelReferenceNote',
-  'outdatedReason',
-])
-
-function isAuthoredOperationUpdate(updates: Partial<Operation>): boolean {
-  // WO-1582: a published result records whether it was built on what earlier
-  // operations left; that stamp is part of the publication, not an edit.
-  return Object.keys(updates).some((key) => !OPERATION_RESULT_FIELDS.has(key)
-    && !(key === 'dependsOnPredecessors' && updates.status === 'ready'))
-}
-
 // WO-2663: an operation that turns 'outdated' says why. Every route that
 // outdates an operation - this store's own helpers, the generation-freshness
 // reconcile in lib/cam, the Properties panel's edits, SetupModal, fixtures,
@@ -10879,7 +11472,9 @@ interface CamStore extends CarriedUserData {
   setFixedStockLocked: (id: string, locked: boolean) => void
   removeFixedStock: (id: string) => void
   /** Assign G54-G59 to a PhysicalStock and mirror it to every setup whose
-   *  unified WCS binding names that stock. Invalid/duplicate assignments fail. */
+   *  unified WCS binding names that stock. An invalid slot or a missing stock
+   *  fails; an offset another stock holds is allowed (separate files share it,
+   *  only a Combined post refuses it - WO-2983). */
   setStockFixtureOffset: (
     stockId: string,
     fixtureOffset: FixtureOffset,
@@ -11341,6 +11936,7 @@ interface CamStore extends CarriedUserData {
   moveSketchDrag: (world: Vec2) => void
   endSketchDrag: (constraint?: SketchConstraint) => void
 
+  executeCamCommands: (commands: readonly CamCommand[], check?: CamAuthoringCheck) => CamCommandResult
   // Setups
   addSetup: (setup: Setup) => void
   updateSetup: (
@@ -13230,6 +13826,120 @@ export function installPersistedStateUnloadJournal(
   return installUserSpaceUnloadJournal(userSpaceStateStorage, target)
 }
 
+/** WO-2911: the .camproject Save would write, assembled from the live store and
+ *  returned instead of written. packageProjectToFile writes exactly this; the
+ *  problem report's "Current project" offers exactly this, so the two cannot differ. */
+async function assembleProjectFile(get: () => CamStore, set: CamSet) {
+    // A cold browser reload restores only the lightweight manifest. Acquire
+    // and validate every authored archive, and force the live item through
+    // durable storage, before packaging anything. A missing/corrupt item
+    // aborts the whole Save instead of being silently omitted.
+    const modelItemsToSave = [...(get().project.modelItems ?? [])]
+    for (const item of modelItemsToSave) {
+      if (!await get().flushModelItemDocument(item.id)) return 'failed'
+    }
+    // WO-1456: the project carries every imported face its text is drawn
+    // with (healed from the registry if an undo dropped the asset), so the
+    // file and the persisted project both resolve their own fonts.
+    const fontHealed = withReferencedFontAssets(get().project)
+    if (fontHealed !== get().project) set({ project: fontHealed })
+    // WO-2698: the project half of the file, built ONCE here by the same
+    // builder New's "unsaved?" fingerprint uses. Captured before any await,
+    // so an edit that races the save is not in it and stays unsaved.
+    const { project, toolLibrary, toolLibraries, holders } = get()
+    const fileSnapshot = buildProjectFileSnapshot(project, toolLibrary, toolLibraries, holders)
+    const thumbnail = await captureProjectThumbnail()
+    // Schema v4 (ADR-0027): embed each root STL/STEP part's raw bytes (base64)
+    // so the file is self-contained across browsers/machines. Fail loud
+    // (ADR-0003): if a part's binary cannot be found, abort the save rather
+    // than silently write an incomplete file. (2D-only projects get undefined
+    // -> the `binaries` field is omitted, byte-identical to the pre-v4 form.)
+    let binaries
+    try {
+      binaries = await collectProjectBinaries(project.geometry)
+    } catch (e) {
+      if (e instanceof MissingGeometryBinaryError) {
+        pushTransientFooterNotice(
+          set,
+          operatorText('index324', { value1: String(e.message) }),
+          'error',
+          'project',
+        )
+        return 'failed'
+      }
+      throw e
+    }
+    // Schema v9 (WO INT-14): embed the parametric modeling document so the
+    // model rides inside this one file. `collectDocumentArchive` returns the
+    // LIVE workbench document when the Model workspace is mounted, and
+    // otherwise re-emits the bytes this project was loaded with, verbatim --
+    // that pass-through is what stops a load -> save without ever opening the
+    // Model workspace from silently dropping the model (documentHolder.ts).
+    // Undefined = this project has no modeling document, and the field is
+    // omitted entirely, exactly as `binaries` is omitted for a 2D-only
+    // project (projectBinaries.ts:98 -> the conditional spread below).
+    // Fail loud (ADR-0003): a document that cannot be archived aborts the
+    // save rather than writing a file that has silently lost the model.
+    // WO INT-17C Stage C1 CLOSURE (gap 1): every NON-legacy Model Item gets
+    // the SAME treatment as the legacy `document` above, one archive per
+    // item, keyed by the item's own id -- `collectDocumentArchive` is
+    // already a keyed registry (INT-17C step 4), this is simply the first
+    // caller that iterates it past the one hardcoded legacy key. Same
+    // fail-loud contract: a non-legacy item whose archive cannot be
+    // packaged aborts the WHOLE save, named, exactly like the legacy
+    // document above (never a file with SOME items saved and others
+    // silently missing).
+    let modelDocument: string | undefined
+    let modelItemDocuments: Record<string, string> | undefined
+    const itemArchives: Uint8Array[] = []
+    // WO-2698: the model edits these archives hold (read in the same turn).
+    const modelEditsSaved = modelDocumentEditCount()
+    try {
+      const documentBytes = collectDocumentArchive()
+      modelDocument =
+        documentBytes === undefined
+          ? undefined
+          : arrayBufferToBase64(new Uint8Array(documentBytes).buffer)
+      if (documentBytes !== undefined) itemArchives.push(documentBytes)
+      for (const item of project.modelItems ?? []) {
+        if (item.id === LEGACY_MODEL_ITEM_ID) continue
+        const itemBytes = collectDocumentArchive(item.id)
+        if (itemBytes === undefined) continue
+        modelItemDocuments ??= {}
+        modelItemDocuments[item.id] = arrayBufferToBase64(new Uint8Array(itemBytes).buffer)
+        itemArchives.push(itemBytes)
+      }
+      // WO-1898: embed the bytes each Model Item's import node replays from.
+      binaries = await embedModelItemImportBinaries(itemArchives, binaries)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      pushTransientFooterNotice(
+        set,
+        operatorText('index325', { value1: String(message) }),
+        'error',
+        'project',
+      )
+      return 'failed'
+    }
+    // The project half comes from buildProjectFileSnapshot (above); the
+    // holder-owned halves (binaries, model archives) are added here.
+    const snapshot = {
+      ...fileSnapshot,
+      thumbnail,
+      ...(binaries ? { binaries } : {}),
+      ...(modelDocument ? { document: modelDocument } : {}),
+      ...(modelItemDocuments ? { modelItemDocuments } : {}),
+    }
+  return { snapshot, fileSnapshot, project, thumbnail, modelEditsSaved }
+}
+
+/** WO-2911: the current project as Save would write it (unsaved changes included,
+ *  an unfinished sketch draft not). Writes no file and changes no saved state. */
+export async function snapshotCurrentProjectFile(): Promise<string | null> {
+  const assembled = await assembleProjectFile(useCamStore.getState, useCamStore.setState)
+  return assembled === 'failed' ? null : JSON.stringify(assembled.snapshot, null, 2)
+}
+
 export const useCamStore = create<CamStore>()(
   persistRegistered('activeProject',
     (rawSet, get) => {
@@ -13238,6 +13948,47 @@ export const useCamStore = create<CamStore>()(
     // outdate operations (the nest and workholding followers at the bottom of
     // this file) record theirs explicitly.
     const set = recordingOutdatedReasons(rawSet)
+    const applyCamCommands = (commands: readonly CamCommand[], check?: CamAuthoringCheck, joinCurrentAction = false): CamCommandResult => {
+        const state = get()
+        const services: CamCommandServices = {
+          normalizeOperation: (operation) => { ensureOperationSmartHeightAuthority(operation); return operation },
+          orderOperations: withVcarveClearingOrder,
+          removeOperation: (setup, operationId) => withMachineActionsKept(setup, {
+            ...setup, operations: setup.operations.filter(op => op.id !== operationId),
+          }),
+          updateSetup: (setup, patch) => {
+            const nextWcs = patch.wcs ? { ...setup.wcs, ...patch.wcs } : setup.wcs
+            const stockBindingChanged = patch.wcs
+              ? boundWcsStockId(setup.wcs) !== boundWcsStockId(nextWcs) : false
+            const nextSetup: Setup = { ...setup, ...patch, wcs: nextWcs,
+              operations: patch.operations ?? setup.operations }
+            const updated = patch.wcs?.origin ? outdateOps(
+              { ...nextSetup, wcs: { ...nextWcs, origin: setup.wcs.origin } }, patch.wcs.origin,
+            ) : nextSetup
+            return stockBindingChanged ? outdateReadyOps(updated) : updated
+          },
+          reconcile: (project, setupId, previous) => reconcileProjectGenerationFreshness(
+            project, setupId, previous, toolId => state.toolLibrary.find(tool => tool.id === toolId),
+          ),
+        }
+        const result = prepareCamCommands(state.project, commands, services, check)
+        if (!result.ok || result.project === state.project) return result
+        // Explicit calls each own one snapshot, even in the same JS turn. Legacy
+        // screen wrappers below retain their handler-level coalescing contract.
+        if (result.authored && !(joinCurrentAction && historyAlreadyPushedThisTurn(state.projectHistory))) get().pushHistory()
+        set(s => ({ project: result.project,
+          ...(result.addedOperation ? { viewer: { ...s.viewer, selectedNestId: null } } : {}),
+        }))
+        for (const command of commands) {
+          if (command.kind === 'operation.remove') adaptive3dCarvedStock.delete(command.operationId)
+          if (command.kind === 'operation.update' && command.patch.status === 'error' && command.patch.errorMessage) {
+            pushConsoleEvent(set, { severity: 'error', source: 'compute', message: command.patch.errorMessage,
+              entityRef: { kind: 'op', id: command.operationId } })
+          }
+        }
+        return result
+      }
+
     return ({
       // WO-1642: a fresh install starts on the neutral starter, never on any
       // one person's machine. The library holds only that starter, so the
@@ -13556,106 +14307,9 @@ export const useCamStore = create<CamStore>()(
       },
 
       packageProjectToFile: async (bundle = false) => {
-        // A cold browser reload restores only the lightweight manifest. Acquire
-        // and validate every authored archive, and force the live item through
-        // durable storage, before packaging anything. A missing/corrupt item
-        // aborts the whole Save instead of being silently omitted.
-        const modelItemsToSave = [...(get().project.modelItems ?? [])]
-        for (const item of modelItemsToSave) {
-          if (!await get().flushModelItemDocument(item.id)) return 'failed'
-        }
-        // WO-1456: the project carries every imported face its text is drawn
-        // with (healed from the registry if an undo dropped the asset), so the
-        // file and the persisted project both resolve their own fonts.
-        const fontHealed = withReferencedFontAssets(get().project)
-        if (fontHealed !== get().project) set({ project: fontHealed })
-        // WO-2698: the project half of the file, built ONCE here by the same
-        // builder New's "unsaved?" fingerprint uses. Captured before any await,
-        // so an edit that races the save is not in it and stays unsaved.
-        const { project, toolLibrary, toolLibraries, holders } = get()
-        const fileSnapshot = buildProjectFileSnapshot(project, toolLibrary, toolLibraries, holders)
-        const thumbnail = await captureProjectThumbnail()
-        // Schema v4 (ADR-0027): embed each root STL/STEP part's raw bytes (base64)
-        // so the file is self-contained across browsers/machines. Fail loud
-        // (ADR-0003): if a part's binary cannot be found, abort the save rather
-        // than silently write an incomplete file. (2D-only projects get undefined
-        // -> the `binaries` field is omitted, byte-identical to the pre-v4 form.)
-        let binaries
-        try {
-          binaries = await collectProjectBinaries(project.geometry)
-        } catch (e) {
-          if (e instanceof MissingGeometryBinaryError) {
-            pushTransientFooterNotice(
-              set,
-              operatorText('index324', { value1: String(e.message) }),
-              'error',
-              'project',
-            )
-            return 'failed'
-          }
-          throw e
-        }
-        // Schema v9 (WO INT-14): embed the parametric modeling document so the
-        // model rides inside this one file. `collectDocumentArchive` returns the
-        // LIVE workbench document when the Model workspace is mounted, and
-        // otherwise re-emits the bytes this project was loaded with, verbatim --
-        // that pass-through is what stops a load -> save without ever opening the
-        // Model workspace from silently dropping the model (documentHolder.ts).
-        // Undefined = this project has no modeling document, and the field is
-        // omitted entirely, exactly as `binaries` is omitted for a 2D-only
-        // project (projectBinaries.ts:98 -> the conditional spread below).
-        // Fail loud (ADR-0003): a document that cannot be archived aborts the
-        // save rather than writing a file that has silently lost the model.
-        // WO INT-17C Stage C1 CLOSURE (gap 1): every NON-legacy Model Item gets
-        // the SAME treatment as the legacy `document` above, one archive per
-        // item, keyed by the item's own id -- `collectDocumentArchive` is
-        // already a keyed registry (INT-17C step 4), this is simply the first
-        // caller that iterates it past the one hardcoded legacy key. Same
-        // fail-loud contract: a non-legacy item whose archive cannot be
-        // packaged aborts the WHOLE save, named, exactly like the legacy
-        // document above (never a file with SOME items saved and others
-        // silently missing).
-        let modelDocument: string | undefined
-        let modelItemDocuments: Record<string, string> | undefined
-        const itemArchives: Uint8Array[] = []
-        // WO-2698: the model edits these archives hold (read in the same turn).
-        const modelEditsSaved = modelDocumentEditCount()
-        try {
-          const documentBytes = collectDocumentArchive()
-          modelDocument =
-            documentBytes === undefined
-              ? undefined
-              : arrayBufferToBase64(new Uint8Array(documentBytes).buffer)
-          if (documentBytes !== undefined) itemArchives.push(documentBytes)
-          for (const item of project.modelItems ?? []) {
-            if (item.id === LEGACY_MODEL_ITEM_ID) continue
-            const itemBytes = collectDocumentArchive(item.id)
-            if (itemBytes === undefined) continue
-            modelItemDocuments ??= {}
-            modelItemDocuments[item.id] = arrayBufferToBase64(new Uint8Array(itemBytes).buffer)
-            itemArchives.push(itemBytes)
-          }
-          // WO-1898: embed the bytes each Model Item's import node replays from.
-          binaries = await embedModelItemImportBinaries(itemArchives, binaries)
-        } catch (e) {
-          const message = e instanceof Error ? e.message : String(e)
-          pushTransientFooterNotice(
-            set,
-            operatorText('index325', { value1: String(message) }),
-            'error',
-            'project',
-          )
-          return 'failed'
-        }
-        // The project half comes from buildProjectFileSnapshot (above); the
-        // holder-owned halves (binaries, model archives) are added here.
-        const snapshot = {
-          ...fileSnapshot,
-          thumbnail,
-          ...(binaries ? { binaries } : {}),
-          ...(modelDocument ? { document: modelDocument } : {}),
-          ...(modelItemDocuments ? { modelItemDocuments } : {}),
-        }
+        const assembled = await assembleProjectFile(get, set)
+        if (assembled === 'failed') return 'failed'
+        const { snapshot, fileSnapshot, project, thumbnail, modelEditsSaved } = assembled
         // WO-1456 (BUG-505): Save is not complete while a state write is still
         // in flight -- an immediate reload after Save must find what was saved.
         await userSpaceStateStorage.flushPendingWrites()
@@ -17877,21 +18531,8 @@ export const useCamStore = create<CamStore>()(
           )
         }
 
-        const conflict = conflictingWorkOffsetClaim(
-          project,
-          fixtureOffset,
-          stockId,
-          options?.exceptSetupId,
-        )
-        if (conflict) {
-          const owner = conflict.kind === 'stock'
-            ? operatorText('index438', { value1: String(conflict.name) })
-            : operatorText('index439', { value1: String(conflict.name) })
-          throw new Error(
-            operatorText('index440', { value1: String(fixtureOffset), value2: String(owner) }),
-          )
-        }
-
+        // Another stock may hold this offset: separate files share one (WO-2983);
+        // only a Combined post refuses it, and the post says so.
         if (!options?.skipHistory) get().pushHistory()
         set((state) => ({
           project: {
@@ -18404,45 +19045,11 @@ export const useCamStore = create<CamStore>()(
         get().reanchorProjectionLayers()
       },
 
-      addSetup: (setup) => {
-        get().pushHistory()
-        set((s) => ({
-          project: {
-            ...s.project,
-            setups: [...s.project.setups, setup],
-            activeSetupId: setup.id,
-          },
-        }))
-      },
+      executeCamCommands: (commands, check) => applyCamCommands(commands, check),
 
+      addSetup: (setup) => { get().executeCamCommands([{ kind: 'setup.add', setup }]) },
       updateSetup: (id, updates) => {
-        get().pushHistory()
-        set((s) => ({
-          project: {
-            ...s.project,
-            setups: s.project.setups.map((st) => {
-              if (st.id !== id) return st
-              const nextWcs = updates.wcs ? { ...st.wcs, ...updates.wcs } : st.wcs
-              const stockBindingChanged = updates.wcs
-                ? boundWcsStockId(st.wcs) !== boundWcsStockId(nextWcs)
-                : false
-              const nextSetup: Setup = {
-                ...st,
-                ...updates,
-                wcs: nextWcs,
-                operations: updates.operations ?? st.operations,
-              }
-              let updatedSetup = nextSetup
-              if (updates.wcs?.origin) {
-                updatedSetup = outdateOps(
-                  { ...nextSetup, wcs: { ...nextWcs, origin: st.wcs.origin } },
-                  updates.wcs.origin,
-                )
-              }
-              return stockBindingChanged ? outdateReadyOps(updatedSetup) : updatedSetup
-            }),
-          },
-        }))
+        get().executeCamCommands([{ kind: 'setup.update', setupId: id, patch: updates }])
       },
 
       removeSetup: (id) => {
@@ -18498,95 +19105,17 @@ export const useCamStore = create<CamStore>()(
       },
 
       addOperation: (setupId, op) => {
+        // WO-2936: this legacy void API must still throw its authority error;
+        // typed transactions retain their structured, atomic rejection below.
         ensureOperationSmartHeightAuthority(op)
-        const operationWithHeightAuthority = op
-        get().pushHistory()
-        set((s) => ({
-          project: {
-            ...s.project,
-            setups: s.project.setups.map((st) =>
-              st.id === setupId
-                ? { ...st, operations: withVcarveClearingOrder([...st.operations, operationWithHeightAuthority]) }
-                : st
-            ),
-            activeOperationId: operationWithHeightAuthority.id,
-          },
-          // Mutual exclusion (N1a): the new op becomes active -> clear any
-          // selected nest so at most one of {geometry, op, nest} is selected.
-          viewer: { ...s.viewer, selectedNestId: null },
-        }))
+        get().executeCamCommands([{ kind: 'operation.add', setupId, operation: op }])
       },
 
       updateOperation: (setupId, opId, updates) => {
-        // A recompute owns a new toolpath generation. The previous path must
-        // disappear in the SAME state write that announces computing/error;
-        // otherwise a refused worker result can leave the old path visible,
-        // simulatable, or eligible for posting behind a red operation row.
-        // Deliberately preserve last-known paths for outdated/degraded states -
-        // those are established model-reference fallback semantics.
-        const invalidatesComputedPath =
-          updates.status === 'computing' || updates.status === 'error'
-        const safeUpdates: Partial<Operation> =
-          updates.status !== undefined && updates.status !== 'ready'
-            ? {
-                ...updates,
-                ...(invalidatesComputedPath
-                  ? {
-                      toolpathMoves: undefined,
-                      computeTimeMs: undefined,
-                      estimatedCutTimeMs: undefined,
-                      estimatedCutTimeMsError: undefined,
-                    }
-                  : {}),
-                resolvedHeights: undefined,
-                resolvedHeightPlan: undefined,
-                generationFingerprint: undefined,
-              }
-            : updates
-        // WO-1434: an operator's edit is one undo step; compute publication is none.
-        if (isAuthoredOperationUpdate(updates)) {
-          const { project, projectHistory } = get()
-          const exists = project.setups.some((st) =>
-            st.id === setupId && st.operations.some((op) => op.id === opId))
-          if (exists && !historyAlreadyPushedThisTurn(projectHistory)) get().pushHistory()
-        }
-        set((s) => {
-          const project = {
-            ...s.project,
-            setups: s.project.setups.map((st) =>
-              st.id === setupId
-                ? {
-                    ...st,
-                    operations: st.operations.map((op) =>
-                      op.id === opId ? { ...op, ...safeUpdates } : op
-                    ),
-                  }
-                : st
-            ),
-          }
-          return {
-            project: reconcileProjectGenerationFreshness(
-              project,
-              setupId,
-              s.project,
-              (toolId) => s.toolLibrary.find((candidate) => candidate.id === toolId),
-            ),
-          }
-        })
-        // WO UI-11B COMPUTE lane: every op compute error — whichever of the
-        // many fail-loud call sites triggered it (plane-ordering validation,
-        // a resolver throw, TOOLPATH_ERROR, worker.onerror/crash, the 3D
-        // finish/adaptive3d paths) — sets status:'error' through THIS one
-        // writer, so it's the single hook-in point (mirrors showSketchNotice's
-        // "one function, many callers" pattern). Browser-console logging at
-        // the individual sites (e.g. worker.onerror's console.error) is
-        // untouched — this is additive.
-        if (updates.status === 'error' && updates.errorMessage) {
-          pushConsoleEvent(set, {
-            severity: 'error', source: 'compute', message: updates.errorMessage,
-            entityRef: { kind: 'op', id: opId },
-          })
-        }
+        // WO-1434: old panel handlers may push history themselves and make
+        // several synchronous writes. Only that legacy wrapper coalesces;
+        // explicit typed transactions always get one undo per call.
+        applyCamCommands([{ kind: 'operation.update', setupId, operationId: opId, patch: updates }], undefined, true)
       },
 
       removeOperation: (setupId, opId) => {
@@ -19001,7 +19530,11 @@ export const useCamStore = create<CamStore>()(
 
       previewFaceSmartHeights: (setupId, op) => {
         ensureOperationSmartHeightAuthority(op)
-        return previewFaceSmartHeightRuntime(get, setupId, op).snapshot
+        const state = get()
+        const setup = state.project.setups.find(candidate => candidate.id === setupId)
+        if (!setup) throw new Error('Face setup is unavailable.')
+        const resolution = resolveFaceSmartRuntime({ state, setup, op })
+        return snapshotFaceSmartRuntime(setup, resolution.smart!)
       },
 
       previewPlanarRoughSmartHeights: (setupId, op) => {
@@ -19034,8 +19567,17 @@ export const useCamStore = create<CamStore>()(
         return previewEngraveSmartHeightRuntime(get, setupId, op, geoSourcesOverride).snapshot
       },
 
-      previewOperationSmartHeightPlan: async (setupId, op, geoSourcesOverride) => {
-        ensureOperationSmartHeightAuthority(op)
+      previewOperationSmartHeightPlan: async (setupId, callerOp, callerGeoSources) => {
+        ensureOperationSmartHeightAuthority(callerOp)
+        // WO-3055: a model-body source resolves the way compute resolves it, so
+        // the preview never refuses a body compute cuts.
+        const modelOrigin = callerGeoSources === undefined && (
+          callerOp.type === 'drill' || callerOp.type === 'bore' || callerOp.type === 'thread_mill'
+          || callerOp.type === 'chamfer' || callerOp.type === 'engrave' || callerOp.type === 'vcarve')
+          ? await previewModelOriginGeoSources(get, callerOp)
+          : undefined
+        const op = modelOrigin?.op ?? callerOp
+        const geoSourcesOverride = callerGeoSources ?? modelOrigin?.geoSources
         switch (op.type) {
           case 'adaptive_3d':
             return (await previewAdaptive3dSmartHeightRuntime(get, setupId, op)).plan
@@ -19047,7 +19589,7 @@ export const useCamStore = create<CamStore>()(
           case 'waterline_3d':
             return (await previewWaterline3dSmartHeightRuntime(get, setupId, op)).plan
           case 'face':
-            return previewFaceSmartHeightRuntime(get, setupId, op).plan
+            return (await previewFaceSmartHeightRuntime(get, setupId, op)).plan
           case 'pocket_2d':
           case 'adaptive_clearing_2d':
             return (await previewPlanarRoughSmartHeightRuntime(get, setupId, op)).plan
@@ -19064,6 +19606,8 @@ export const useCamStore = create<CamStore>()(
             return (await previewEngraveSmartHeightRuntimeAsync(get, setupId, op, geoSourcesOverride)).plan
           case 'vcarve':
             return previewVCarveSmartHeightRuntime(get, setupId, op, geoSourcesOverride).plan
+          case 'pattern':
+            return previewPatternSmartHeightRuntime(get, setupId, op).plan
           default:
             throw new Error(operatorText('index450', { value1: String(op.type) }))
         }
@@ -19092,6 +19636,10 @@ export const useCamStore = create<CamStore>()(
           return
         }
 
+        const faceRequestKey = `${state.project.id}:${setupId}:${opId}`
+        const faceRequestToken = op.type === 'face' ? Symbol(opId) : undefined
+        if (faceRequestToken) faceComputeRequests.set(faceRequestKey, faceRequestToken)
+
         // Smart Height V2 is the only runtime authority. Refuse a missing,
         // malformed, mismatched, or inactive envelope before tool lookup,
         // geometry acquisition, meshing, or worker dispatch. The project and
@@ -19119,6 +19667,25 @@ export const useCamStore = create<CamStore>()(
           )
           completeBatchOperation()
           return
+        }
+
+        if (op.type === 'face') {
+          const owns = () => computeGeneration === cam3dComputeRuntime.generation &&
+            faceComputeRequests.get(faceRequestKey) === faceRequestToken && get().project.id === state.project.id
+          try {
+            await readyFaceSmartRuntime(get, setupId, op, owns)
+          } catch (error) {
+            if (owns()) setOperationComputeError(get, setupId, opId,
+              error instanceof Error ? error.message : String(error))
+            completeBatchOperation()
+            return
+          }
+          if (!owns()) { completeBatchOperation(); return }
+          state = get()
+          setup = state.project.setups.find(candidate => candidate.id === setupId)!
+          op = setup?.operations.find(candidate => candidate.id === opId)
+          tool = op ? state.toolLibrary.find(candidate => candidate.id === op!.toolId) ?? null : null
+          if (!op || !tool || op.enabled === false) { completeBatchOperation(); return }
         }
 
         // Machining-boundary, drill-target and bore-target references are all
@@ -19296,320 +19863,126 @@ export const useCamStore = create<CamStore>()(
               }
             } else if (modelBindingCapability.computeSupported && refGeo) {
               try {
-                const refGeoSourceIdentity = modelReferenceSourceIdentity(
-                  refGeo,
-                  resolveOwningModelItemId(refGeo),
-                  state.project.geometry,
-                  modelItemHistoricalLineageLookup(resolveOwningModelItemId(refGeo)),
-                )
-                // CAM-BINDING Stage 5: a picked-FACE machining-boundary
-                // ModelReference takes PRIORITY over Stage 4's persisted
-                // section-selection and Stage 2's whole-body default - it is
-                // the most SPECIFIC binding the op carries. Re-derived FRESH
-                // every compute (never a landed/cached snapshot, unlike
-                // Stage 4's section): a landed snapshot would give the CAM-1
-                // re-resolution hook (badge amber/red) nothing to invalidate
-                // against, defeating this stage's entire purpose. Only a
-                // 'machining-boundary'-role reference on THIS body is
-                // consulted - 'stock'/'origin' roles are a future stage.
-                const boundaryRef = op.modelReferences?.find(
-                  (ref) => ref.role === 'machining-boundary'
-                    && modelReferenceMatchesSource(ref, refGeoSourceIdentity),
-                )
-                const edgeChainRef = modelEdgeChainRef
-                // CAM-DRILL-ADAPTER: a drill-targets reference means re-run
-                // Model-kernel hole recognition and derive fresh circles over
-                // the live BODY before building -- never the landed wizard
-                // snapshot alone (same always-re-derive philosophy as Stage 5
-                // face boundary). Falls through to the refuse path when
-                // recognition cannot run OR finds no holes.
-                const drillTargetsRef = modelBindingCapability.mode === 'hole-targets'
-                  ? op.modelReferences?.find(
-                    (ref) => ref.role === 'drill-targets'
-                      && modelReferenceMatchesSource(ref, refGeoSourceIdentity),
-                  )
-                  : undefined
-                const boreTargetRef = modelBindingCapability.mode === 'cylinder-targets'
-                  ? op.modelReferences?.find(
-                    (ref) => ref.role === 'bore-target'
-                      && modelReferenceMatchesSource(ref, refGeoSourceIdentity),
-                  )
-                  : undefined
-                // CAM-BINDING Stage 4: if this op is bound to specific
-                // PERSISTED loops (e.g. a Section-at-Z the wizard already
-                // derived and landed onto refGeo.loops via deriveBrepLayer,
-                // exactly the same landing path the STEP/brep Section-at-Z
-                // flow already uses), those loops ARE the user's chosen
-                // cross-section - a snapshot, per the charter ("a slice is a
-                // derived snapshot at compute time, not a durable
-                // ModelReference"), not re-derived here. Falling back to
-                // deriveModelBodyProfile's whole-body default only when the
-                // op has no such selection (op.params.loopIds empty) keeps
-                // Stage 2's existing behavior byte-identical for every
-                // model-origin profile op that never ran Section-at-Z.
-                let opLoopIds = (op.params as { loopIds?: string[] }).loopIds ?? []
-                // WO-1401: a persisted Section-at-Z selection can point at a
-                // layer the model has since moved past (`sectionStale`). Refresh
-                // exactly the tracked layer(s) this op's own selection resolves
-                // against BEFORE reading their loops, rather than silently
-                // computing from the frozen pre-edit points - the defect this WO
-                // fixes (rule 11: the software can re-section a live body, so it
-                // does, instead of refusing or computing a lie). The op's OWN
-                // selection is carried forward onto the refreshed layer's current
-                // loops (persisted, so the next regen sees a resolving selection
-                // too, not a one-time patch that reorphans on the very next run).
-                if (opLoopIds.length > 0) {
-                  const oldLoopLayerById = new Map(
-                    (refGeo.loops ?? []).map((loop) => [loop.id, loop.layerId] as const),
-                  )
-                  const staleLayerIds = new Set(
-                    opLoopIds
-                      .map((id) => oldLoopLayerById.get(id))
-                      .filter((layerId): layerId is string =>
-                        layerId !== undefined &&
-                        (refGeo.layers2d ?? []).some(
-                          (layer) => layer.id === layerId && layer.sectionStale === true,
-                        ),
-                      ),
-                  )
-                  if (staleLayerIds.size > 0) {
-                    const refreshedSection = refreshStaleModelSectionLayers(
-                      refGeo, staleLayerIds, state.project.modelItemPlacements ?? [],
-                    )
-                    if (refreshedSection.refreshedLayerNames.length > 0) {
-                      // Content-hashed ids: a selected loop that survived the
-                      // refresh keeps its id and stays selected as-is. One the
-                      // refresh orphaned is carried only onto the NEW loop that
-                      // replaced it (rebindRefreshedSectionLoops); without one,
-                      // the id stays and orphans into the builder's existing
-                      // missing-geometry handling.
-                      const rebindByLayer = new Map<string, Map<string, string>>()
-                      for (const [layerId, freshIds] of refreshedSection.newLoopIdsByLayer) {
-                        const before = (refGeo.loops ?? []).filter((l) => l.layerId === layerId)
-                        const beforeIds = new Set(before.map((l) => l.id))
-                        const freshIdSet = new Set(freshIds)
-                        rebindByLayer.set(layerId, rebindRefreshedSectionLoops(
-                          before.filter((l) => !freshIdSet.has(l.id)),
-                          (refreshedSection.geo.loops ?? []).filter(
-                            (l) => l.layerId === layerId && freshIdSet.has(l.id) && !beforeIds.has(l.id),
-                          ),
-                        ))
-                      }
-                      const nextLoopIds: string[] = []
-                      let orphanedCount = 0
-                      for (const id of opLoopIds) {
-                        const layerId = oldLoopLayerById.get(id)
-                        const freshIds = layerId ? refreshedSection.newLoopIdsByLayer.get(layerId) : undefined
-                        let nextId = id
-                        if (freshIds && !freshIds.includes(id)) {
-                          const replacement = rebindByLayer.get(layerId!)?.get(id)
-                          if (replacement) nextId = replacement
-                          else orphanedCount++
-                        }
-                        if (!nextLoopIds.includes(nextId)) nextLoopIds.push(nextId)
-                      }
-                      set((s) => ({
-                        project: {
-                          ...s.project,
-                          geometry: s.project.geometry.map((g) =>
-                            g.id === refGeo.id ? refreshedSection.geo : g,
-                          ),
-                          setups: s.project.setups.map((st) =>
-                            st.id !== setupId ? st : {
-                              ...st,
-                              operations: st.operations.map((candidate) =>
-                                candidate.id !== opId
-                                  ? candidate
-                                  : { ...candidate, params: { ...candidate.params, loopIds: nextLoopIds } },
-                              ),
-                            },
-                          ),
-                        },
-                      }))
-                      state = get()
-                      setup = state.project.setups.find((s) => s.id === setupId)!
-                      op = setup.operations.find((o) => o.id === opId)!
-                      opLoopIds = nextLoopIds
-                      const names = refreshedSection.refreshedLayerNames.map((n) => `"${n}"`).join(', ')
-                      const orphanNote = orphanedCount > 0
-                        ? operatorText('index470', { value1: String(orphanedCount) })
-                        : ''
-                      pushConsoleEvent(set, {
-                        severity: 'info', source: 'compute',
-                        message: operatorText('index471', { value1: String(subject), value2: String(names), value3: String(op.name), value4: String(orphanNote) }),
-                        entityRef: { kind: 'op', id: opId },
-                      })
-                    }
-                  }
-                }
-                const liveRefGeo = state.project.geometry.find((g) => g.id === refGeo.id) ?? refGeo
-                const persistedSelected = opLoopIds.length > 0
-                  ? (liveRefGeo.loops ?? []).filter((l) => opLoopIds.includes(l.id))
-                  : []
-                if (modelBindingCapability.mode === 'hole-targets') {
-                  if (drillTargetsRef !== undefined) {
-                    const bodyId = refGeo.modelBody?.ref.bodyId
-                    if (!bodyId) {
-                      throw new ModelBodyDeriveError(
-                        operatorText('index472', { value1: String(subject) }),
-                      )
-                    }
-                    // WO-365: same self-heal as deriveBrepLayer's 'holes' kind
-                    // above - a compute that runs after an ordinary refresh
-                    // (no Model-tab visit this page load) must not misreport
-                    // a durably-checkpointed document as never having existed.
-                    const modelItemId = resolveOwningModelItemId(refGeo) ?? LEGACY_MODEL_ITEM_ID
-                    await ensureDocumentArchiveHydrated(
-                      state.project.id, modelItemId, state.project.modelItems?.find((m) => m.id === modelItemId),
-                    )
-                    const verdicts = await recognizeModelBodyHoles(bodyId, modelItemId)
-                    const derived = deriveModelBodyDrillTargets(
-                      refGeo, state.project.modelItemPlacements ?? [], verdicts,
-                    )
-                    // Refresh targets FRESH - all currently recognized drillable
-                    // holes. Binding face ids on the ModelReference still drive
-                    // CAM-1 amber/red via reresolve; compute always takes the
-                    // live recognition set (same "always re-derive" philosophy
-                    // as Stage 5 face boundary).
-                    const stamped = derived.loops.map((l, j) => ({
-                      ...l,
-                      id: `mdh:${derived.targets[j].featureKey}`,
-                      layerId: 'model_drill_holes',
-                    }))
-                    modelDerivedGeoSources = [{
-                      ...refGeo,
-                      loops: stamped,
-                      layers2d: [{
-                        id: 'model_drill_holes',
-                        name: operatorText('index473'),
-                        color: '#888888',
-                        visible: true,
-                        derived: true,
-                        holes: derived.holes.map((h, j) => ({
-                          ...h,
-                          loopId: stamped[j].id,
-                        })),
-                      }],
-                    }]
-                    // Force selection to the live stamped set for this compute
-                    // (op.params.loopIds may still name the wizard-landed ids).
-                    modelDrillLoopIdsOverride = stamped.map((l) => l.id)
-                  } else if ((refGeo.loops ?? []).length > 0 && (persistedSelected.length > 0 || opLoopIds.length === 0)) {
-                    // Wizard-landed Detect holes snapshot (geometry_local /
-                    // world-baked circles + layer.holes). Builder filters by
-                    // loopIds; empty loopIds = all closed loops.
-                    modelDerivedGeoSources = [{ ...refGeo }]
-                  } else {
-                    throw new ModelBodyDeriveError(
-                      operatorText('index474', { value1: String(subject) }),
-                    )
-                  }
-                } else if (modelBindingCapability.mode === 'cylinder-targets') {
-                  // WO-1942: Thread Mill binds its picked hole or boss wall
-                  // through this same 'bore-target' reference and replay.
-                  const isThreadMillTarget = op.type === 'thread_mill'
-                  const opLabel = isThreadMillTarget ? operatorText('index475') : operatorText('index476')
-                  const wallLabel = isThreadMillTarget ? operatorText('index477') : operatorText('index478')
-                  const bodyId = refGeo.modelBody?.ref.bodyId
-                  if (!bodyId) {
-                    throw new ModelBodyDeriveError(
-                      operatorText('index479', { value1: String(opLabel), value2: String(subject) }),
-                    )
-                  }
-                  if (!boreTargetRef) {
-                    throw new ModelBodyDeriveError(
-                      operatorText('index480', { value1: String(opLabel), value2: String(subject), value3: String(wallLabel) }),
-                    )
-                  }
-                  if (boreTargetRef.stableIds.length !== 1) {
-                    throw new ModelBodyDeriveError(
-                      operatorText('index481', { value1: String(opLabel), value2: String(subject), value3: String(boreTargetRef.stableIds.length), value4: String(wallLabel) }),
-                    )
-                  }
-                  const faceStableId = boreTargetRef.stableIds[0]
-                  // WO-365: same self-heal as the drill-targets branch above.
-                  const modelItemId = resolveOwningModelItemId(refGeo) ?? LEGACY_MODEL_ITEM_ID
-                  await ensureDocumentArchiveHydrated(
-                    state.project.id, modelItemId, state.project.modelItems?.find((m) => m.id === modelItemId),
-                  )
-                  const { snapshot, verdicts } = await readModelBodyFaceFacts(bodyId, faceStableId, modelItemId)
-                  if (isThreadMillTarget) {
-                    const derived = deriveModelThreadMillTarget(
-                      refGeo, state.project.modelItemPlacements ?? [], faceStableId, snapshot, verdicts,
-                    )
-                    modelDerivedGeoSources = [{
-                      ...refGeo,
-                      loops: [derived.loop],
-                      layers2d: [{
-                        id: derived.loop.layerId,
-                        name: operatorText('index482'),
-                        color: '#888888',
-                        visible: true,
-                        derived: true,
-                        cylinders: [derived.cylinder],
-                      }],
-                    }]
-                  } else {
-                    const derived = deriveModelBodyBoreTarget(
-                      refGeo, state.project.modelItemPlacements ?? [], faceStableId, snapshot, verdicts,
-                    )
-                    modelDerivedGeoSources = [{
-                      ...refGeo,
-                      loops: [derived.loop],
-                      layers2d: [{
-                        id: 'model_bore_target',
-                        name: operatorText('index483'),
-                        color: '#888888',
-                        visible: true,
-                        derived: true,
-                        cylinders: [derived.cylinder],
-                      }],
-                    }]
-                  }
-                } else {
-                  let edgeChainNote: string | undefined
-                  const edgeChainLoops = edgeChainRef !== undefined
-                    ? (() => {
-                        // WO-1939: Engrave follows an open chain as an open path.
-                        const derived = deriveModelBodyEdges(
-                          refGeo, edgeChainRef.stableIds, state.project.modelItemPlacements ?? [],
-                          { openPaths: modelEdgeChainAllowsOpenPaths(op.type) },
+                // The refresh hook records what it persisted here; the outer
+                // state/setup/op are re-pointed after the call (not inside the
+                // closure) so their narrowing survives.
+                const refreshed: { state?: CamStore; setup?: Setup; op?: Operation } = {}
+                const derivation = await deriveModelOriginGeoSources({
+                  state, op, refGeo, subject, modelBindingCapability, modelEdgeChainRef,
+                  hooks: {
+                    refreshStaleSections: (opLoopIds) => {
+                      // WO-1401: a persisted Section-at-Z selection can point at a
+                      // layer the model has since moved past (`sectionStale`). Refresh
+                      // exactly the tracked layer(s) this op's own selection resolves
+                      // against BEFORE reading their loops, rather than silently
+                      // computing from the frozen pre-edit points - the defect this WO
+                      // fixes (rule 11: the software can re-section a live body, so it
+                      // does, instead of refusing or computing a lie). The op's OWN
+                      // selection is carried forward onto the refreshed layer's current
+                      // loops (persisted, so the next regen sees a resolving selection
+                      // too, not a one-time patch that reorphans on the very next run).
+                      if (opLoopIds.length > 0) {
+                        const oldLoopLayerById = new Map(
+                          (refGeo.loops ?? []).map((loop) => [loop.id, loop.layerId] as const),
                         )
-                        if (derived.migratedEdgeIds.length > 0) {
-                          edgeChainNote =
-                            operatorText('index484', { value1: String(derived.migratedEdgeIds.length), value2: String(derived.migratedEdgeIds.join(', ')) })
+                        const staleLayerIds = new Set(
+                          opLoopIds
+                            .map((id) => oldLoopLayerById.get(id))
+                            .filter((layerId): layerId is string =>
+                              layerId !== undefined &&
+                              (refGeo.layers2d ?? []).some(
+                                (layer) => layer.id === layerId && layer.sectionStale === true,
+                              ),
+                            ),
+                        )
+                        if (staleLayerIds.size > 0) {
+                          const refreshedSection = refreshStaleModelSectionLayers(
+                            refGeo, staleLayerIds, state.project.modelItemPlacements ?? [],
+                          )
+                          if (refreshedSection.refreshedLayerNames.length > 0) {
+                            // Content-hashed ids: a selected loop that survived the
+                            // refresh keeps its id and stays selected as-is. One the
+                            // refresh orphaned is carried only onto the NEW loop that
+                            // replaced it (rebindRefreshedSectionLoops); without one,
+                            // the id stays and orphans into the builder's existing
+                            // missing-geometry handling.
+                            const rebindByLayer = new Map<string, Map<string, string>>()
+                            for (const [layerId, freshIds] of refreshedSection.newLoopIdsByLayer) {
+                              const before = (refGeo.loops ?? []).filter((l) => l.layerId === layerId)
+                              const beforeIds = new Set(before.map((l) => l.id))
+                              const freshIdSet = new Set(freshIds)
+                              rebindByLayer.set(layerId, rebindRefreshedSectionLoops(
+                                before.filter((l) => !freshIdSet.has(l.id)),
+                                (refreshedSection.geo.loops ?? []).filter(
+                                  (l) => l.layerId === layerId && freshIdSet.has(l.id) && !beforeIds.has(l.id),
+                                ),
+                              ))
+                            }
+                            const nextLoopIds: string[] = []
+                            let orphanedCount = 0
+                            for (const id of opLoopIds) {
+                              const layerId = oldLoopLayerById.get(id)
+                              const freshIds = layerId ? refreshedSection.newLoopIdsByLayer.get(layerId) : undefined
+                              let nextId = id
+                              if (freshIds && !freshIds.includes(id)) {
+                                const replacement = rebindByLayer.get(layerId!)?.get(id)
+                                if (replacement) nextId = replacement
+                                else orphanedCount++
+                              }
+                              if (!nextLoopIds.includes(nextId)) nextLoopIds.push(nextId)
+                            }
+                            set((s) => ({
+                              project: {
+                                ...s.project,
+                                geometry: s.project.geometry.map((g) =>
+                                  g.id === refGeo.id ? refreshedSection.geo : g,
+                                ),
+                                setups: s.project.setups.map((st) =>
+                                  st.id !== setupId ? st : {
+                                    ...st,
+                                    operations: st.operations.map((candidate) =>
+                                      candidate.id !== opId
+                                        ? candidate
+                                        : { ...candidate, params: { ...candidate.params, loopIds: nextLoopIds } },
+                                    ),
+                                  },
+                                ),
+                              },
+                            }))
+                            const refreshedState = get()
+                            const refreshedSetup = refreshedState.project.setups.find((s) => s.id === setupId)!
+                            const refreshedOp = refreshedSetup.operations.find((o) => o.id === opId)!
+                            refreshed.state = refreshedState
+                            refreshed.setup = refreshedSetup
+                            refreshed.op = refreshedOp
+                            opLoopIds = nextLoopIds
+                            const names = refreshedSection.refreshedLayerNames.map((n) => `"${n}"`).join(', ')
+                            const orphanNote = orphanedCount > 0
+                              ? operatorText('index470', { value1: String(orphanedCount) })
+                              : ''
+                            pushConsoleEvent(set, {
+                              severity: 'info', source: 'compute',
+                              message: operatorText('index471', { value1: String(subject), value2: String(names), value3: String(refreshedOp.name), value4: String(orphanNote) }),
+                              entityRef: { kind: 'op', id: opId },
+                            })
+                          }
                         }
-                        modelEdgeChainLoopIdsOverride = derived.loops.map((loop) => loop.id)
-                        return derived.loops
-                      })()
-                    : undefined
-                  if (edgeChainRef !== undefined) {
-                    get().updateOperation(setupId, opId, { modelReferenceNote: edgeChainNote })
-                  }
-                  const derivedLoops = edgeChainLoops !== undefined
-                    ? edgeChainLoops
-                    : boundaryRef !== undefined
-                    ? deriveModelBodyFace(
-                        refGeo, boundaryRef.stableIds[0], state.project.modelItemPlacements ?? [],
-                      ).loops
-                    : persistedSelected.length > 0
-                    ? persistedSelected
-                    : op.type === 'adaptive_clearing_2d' && opLoopIds.length === 0
-                    ? adaptiveAllLoopsOfModelBody(
-                        deriveModelBodyProfile(refGeo, state.project.modelItemPlacements ?? []).loops,
-                      )
-                    // Fall through to the ordinary 2.5D resolution chain below,
-                    // fed from this ephemeral, world-space-baked stand-in instead
-                    // of the real (excluded-by-format) geometry list. Nothing is
-                    // persisted onto state.project.geometry - a re-compute always
-                    // re-derives from the LIVE model, never a stale cache.
-                    : deriveModelBodyProfile(refGeo, state.project.modelItemPlacements ?? []).loops
-                  // WO-1941: a picked chain's stand-in carries what its op's
-                  // Smart Height binds by (a Chamfer's loop layer).
-                  modelDerivedGeoSources = [edgeChainLoops !== undefined
-                    ? modelEdgeChainSourceGeometry(op.type, refGeo, derivedLoops)
-                    : { ...refGeo, loops: derivedLoops }]
+                      }
+                      return { state: refreshed.state ?? state, opLoopIds }
+                    },
+                    onEdgeChainNote: (note) => {
+                      get().updateOperation(setupId, opId, { modelReferenceNote: note })
+                    },
+                  },
+                })
+                if (refreshed.state && refreshed.setup && refreshed.op) {
+                  state = refreshed.state
+                  setup = refreshed.setup
+                  op = refreshed.op
                 }
+                modelDerivedGeoSources = derivation.geoSources
+                modelDrillLoopIdsOverride = derivation.drillLoopIds
+                modelEdgeChainLoopIdsOverride = derivation.edgeChainLoopIds
               } catch (deriveErr) {
                 const deriveMessage = deriveErr instanceof ModelBodyDeriveError
                   ? deriveErr.message
@@ -19639,12 +20012,15 @@ export const useCamStore = create<CamStore>()(
           }
         }
 
-        if (op.type !== 'contour_2d' && op.type !== 'pocket_2d' && op.type !== 'drill' && op.type !== 'bore' && op.type !== 'chamfer' && op.type !== 'face' && op.type !== 'engrave' && op.type !== 'vcarve' && op.type !== 'adaptive_clearing_2d' && op.type !== 'thread_mill' && op.type !== 'parallel_3d' && op.type !== 'adaptive_3d' && op.type !== 'waterline_3d' && op.type !== 'steep_shallow_3d' && op.type !== 'scallop_3d' && op.type !== 'pencil_3d') {
+        if (op.type !== 'contour_2d' && op.type !== 'pocket_2d' && op.type !== 'drill' && op.type !== 'bore' && op.type !== 'chamfer' && op.type !== 'face' && op.type !== 'engrave' && op.type !== 'vcarve' && op.type !== 'adaptive_clearing_2d' && op.type !== 'thread_mill' && op.type !== 'pattern' && op.type !== 'parallel_3d' && op.type !== 'adaptive_3d' && op.type !== 'waterline_3d' && op.type !== 'steep_shallow_3d' && op.type !== 'scallop_3d' && op.type !== 'pencil_3d') {
           setOperationComputeError(get, setupId, opId, operatorText('index490', { value1: String(op.name), value2: String(op.type) }))
           completeBatchOperation()
           return
         }
 
+        // WO-2944: Face selection happens at the prepared manifest request.
+        // Other families retain the current preparation and transport.
+        const computeCurrent = async () => {
         // parallel_3d (3D finish) runs through the cam3d worker, NOT toolpathWorker
         // (D-018). Branch BEFORE all the 2.5D geometry/loop/stock/height resolution
         // below (none of which applies to a solid-model finishing pass) and hand off
@@ -20091,6 +20467,7 @@ export const useCamStore = create<CamStore>()(
         let engraveSmartRuntime: EngraveSmartRuntimeResolution | undefined
         let vcarveSmartRuntime: VCarveSmartRuntimeResolution | undefined
         let faceSmartRuntime: FaceSmartRuntimeResolution | undefined
+        let patternSmartRuntime: PatternSmartRuntimeResolution | undefined
         const planarRoughRequestsSmartHeightV2 =
           op.type === 'pocket_2d' || op.type === 'adaptive_clearing_2d'
         if (planarRoughRequestsSmartHeightV2) {
@@ -20222,6 +20599,15 @@ export const useCamStore = create<CamStore>()(
             return
           }
         }
+        if (op.type === 'pattern') {
+          try {
+            patternSmartRuntime = resolvePatternSmartRuntime({ state, setup, op })
+          } catch (err) {
+            setOperationComputeError(get, setupId, opId, err instanceof Error ? err.message : String(err))
+            completeBatchOperation()
+            return
+          }
+        }
         if (op.type === 'face') {
           try {
             faceSmartRuntime = resolveFaceSmartRuntime({ state, setup, op })
@@ -20237,6 +20623,12 @@ export const useCamStore = create<CamStore>()(
             return
           }
         }
+        const faceEngine = generationEngineId(op.type)
+        // WO-2953: all Face engines consume the fully prepared rest loops and
+        // regionHoles below through the same native builder. Blocking here
+        // also blocked BOTH's authoritative current output. Material readiness
+        // and post-preparation currency checks still apply to every engine.
+
         // WO-1820: 'rest' resolves its BASE boundary exactly like 'stock' or
         // 'geometry' here (whichever the op names), and the earlier-pocket
         // subtraction happens at dispatch below, where the face's own resolved
@@ -20253,22 +20645,16 @@ export const useCamStore = create<CamStore>()(
             : fp.boundarySource
           faceRestRequested = fp.boundarySource === 'rest'
           if (faceSource === 'stock') {
-            // Prefer the rendered stock AABB (works for fixed AND auto). Fall back
-            // to the project-data footprint for fixed stock when the viewport is
-            // unavailable; auto stock cannot be resolved without it.
-            const bounds = getStockBoundsFromViewport(setup.wcs.stockId ?? undefined)
-            if (bounds) {
-              resolvedLoops = [stockBoundsToLoop(bounds)]
-            } else {
-              const rect = synthesizeStockFootprintLoop(setup, state.project.sceneStock)
-              if (!rect) {
-                get().updateOperation(setupId, opId, { status: 'error',
-                  errorMessage: operatorText('index504') })
-                completeBatchOperation()
-                return
-              }
-              resolvedLoops = [rect]
+            // The same persisted world-mm domain supplies both material Top
+            // and the cutting footprint. A viewport/scene-stock approximation
+            // must not silently plan over another block.
+            const bounds = faceSmartRuntime?.stockBounds
+            if (!bounds) {
+              setOperationComputeError(get, setupId, opId, 'Face stock bounds are unavailable.')
+              completeBatchOperation()
+              return
             }
+            resolvedLoops = [stockBoundsToLoop(bounds)]
           } else if (faceSource === 'geometry') {
             // Face a selected contour/geometry. `loops` was already built from the
             // face's geometryId; filter to the chosen loopIds (empty = all). The
@@ -20378,7 +20764,7 @@ export const useCamStore = create<CamStore>()(
           engraveSmartRuntime?.smart ?? vcarveSmartRuntime?.smart ??
           drillBoreSmartRuntime?.smart ??
           contourSmartRuntime?.smart ?? planarRoughSmartRuntime?.smart ??
-          faceSmartRuntime?.smart
+          faceSmartRuntime?.smart ?? patternSmartRuntime?.smart
         if (!initialSmartResolution) {
           throw new Error(operatorText('index510', { value1: String(op.type) }))
         }
@@ -20397,6 +20783,7 @@ export const useCamStore = create<CamStore>()(
         let chamferSmartResolution: ResolvedChamferSmartHeights | undefined
         let engraveSmartResolution: ResolvedEngraveSmartHeights | undefined
         let vcarveSmartResolution: ResolvedVCarveSmartHeights | undefined
+        let patternSmartResolution: ResolvedPatternSmartHeights | undefined
 
         try {
 
@@ -20447,6 +20834,11 @@ export const useCamStore = create<CamStore>()(
         } else if (planarRoughSmartRuntime?.smart) {
           planarRoughSmartResolution = planarRoughSmartRuntime.smart
           opHeights = planarRoughSmartResolution.workerHeights
+          resolvedTopPlane = opHeights.topHeight
+          resolvedBottomPlane = opHeights.bottomHeight
+        } else if (patternSmartRuntime?.smart) {
+          patternSmartResolution = patternSmartRuntime.smart
+          opHeights = patternSmartResolution.workerHeights
           resolvedTopPlane = opHeights.topHeight
           resolvedBottomPlane = opHeights.bottomHeight
         } else if (op.type === 'face') {
@@ -20525,11 +20917,13 @@ export const useCamStore = create<CamStore>()(
           ? snapshotPlanarRoughSmartRuntime(setup, planarRoughSmartResolution)
           : faceSmartResolution
           ? snapshotFaceSmartRuntime(setup, faceSmartResolution)
+          : patternSmartResolution
+          ? snapshotPatternSmartRuntime(setup, patternSmartResolution)
           : (() => { throw new Error(operatorText('index513', { value1: String(op.type) })) })()
         const resolvedHeightPlan = (
           threadMillSmartResolution ?? chamferSmartResolution ?? engraveSmartResolution ??
           vcarveSmartResolution ?? drillBoreSmartResolution ?? contourSmartResolution ??
-          planarRoughSmartResolution ?? faceSmartResolution
+          planarRoughSmartResolution ?? faceSmartResolution ?? patternSmartResolution
         )?.plan
         if (!resolvedHeightPlan) {
           throw new Error(operatorText('index514', { value1: String(op.type) }))
@@ -20574,7 +20968,7 @@ export const useCamStore = create<CamStore>()(
           (op.params as unknown as ChamferParams).entryPolicy === 'clear_space'
         // The existing fingerprint covers predecessor inputs, tool, result
         // presence and order (not move bytes), even when replay is unavailable.
-        const dependsOnRestStock = restStock !== undefined || (chamferClearSpace && precedingOperations.length > 0)
+        const dependsOnRestStock = faceSmartRuntime?.material !== undefined || restStock !== undefined || (chamferClearSpace && precedingOperations.length > 0)
         // WO-1625: nothing precedes this operation at all - the stock as
         // loaded IS the remaining stock, so the reach trim's console line
         // never claims it was not told what earlier operations removed.
@@ -20594,6 +20988,43 @@ export const useCamStore = create<CamStore>()(
           (toolId) => state.toolLibrary.find((candidate) => candidate.id === toolId),
         )
 
+        // The existing fingerprint owns geometry/height/tool/stock currency.
+        // The request token additionally guards project replacement and two
+        // concurrent requests with identical inputs (success AND error routes).
+        const faceOwnsRequest = () => !faceRequestToken || (
+          computeGeneration === cam3dComputeRuntime.generation &&
+          faceComputeRequests.get(faceRequestKey) === faceRequestToken &&
+          get().project.id === state.project.id
+        )
+        const faceInputsCurrent = () => {
+          if (!faceOwnsRequest()) return false
+          if (faceSmartRuntime?.material && !faceSmartRuntime.material.authority.isCurrent(faceSmartRuntime.material.token)) return false
+          const live = get()
+          const liveSetup = live.project.setups.find(candidate => candidate.id === setupId)
+          const liveOp = liveSetup?.operations.find(candidate => candidate.id === opId)
+          return !!liveSetup && !!liveOp && projectOperationFingerprintMatches(
+            dispatchFingerprint, live.project, liveSetup,
+            withRestStockDependency(liveOp, dependsOnRestStock), resolvedHeightSnapshot,
+            live.toolLibrary.find(candidate => candidate.id === liveOp.toolId),
+            toolId => live.toolLibrary.find(candidate => candidate.id === toolId),
+          )
+        }
+        // WO-2944 F1: stale inputs and obsolete ownership are different. A
+        // still-owned worker that terminates must leave computing even when its
+        // inputs changed; an older request must never touch its replacement.
+        const discardStaleFaceRequest = () => {
+          if (!faceRequestToken || faceInputsCurrent()) return false
+          if (faceOwnsRequest()) get().updateOperation(setupId, opId, {
+            status: 'outdated', toolpathMoves: undefined, generationFingerprint: undefined,
+            errorMessage: operatorText('index516'), progress: undefined, progressPhase: undefined,
+          })
+          return true
+        }
+        if (faceRequestToken && !faceInputsCurrent()) {
+          completeBatchOperation()
+          return
+        }
+
         get().updateOperation(setupId, opId, { status: 'computing', errorMessage: undefined, progress: 0, progressPhase: undefined, estimatedCutTimeMs: undefined })
 
         const worker = new Worker(
@@ -20607,14 +21038,31 @@ export const useCamStore = create<CamStore>()(
         const settleWorker = () => {
           if (workerSettled) return
           workerSettled = true
+          watchdog.stop()
           completeBatchOperation()
           worker.terminate()
           resolveWorkerDone()
         }
+        const watchdog = createInactivityWatchdog({
+          label: op.name,
+          timeoutMs: CAM3D_COMPUTE_STALL_TIMEOUT_MS,
+          onTimeout: settleWorker,
+        })
+        // Attach the rejection handler before arming; timeout follows the same
+        // terminal error/batch path as a worker crash, exactly once.
+        void watchdog.failure.catch((error: Error) => {
+          if (!discardStaleFaceRequest()) setOperationComputeError(get, setupId, opId, error.message)
+        })
 
         worker.onmessage = (event: MessageEvent<WorkerResponseMsg>) => {
+          if (workerSettled) return
           const msg = event.data
+          if (discardStaleFaceRequest()) {
+            settleWorker()
+            return
+          }
           if (msg.type === 'TOOLPATH_PROGRESS') {
+            watchdog.pulse(msg.phase ?? 'Computing toolpath')
             // Live recompute progress — update and keep the worker alive.
             get().updateOperation(setupId, opId, {
               progress: msg.progress,
@@ -20663,6 +21111,10 @@ export const useCamStore = create<CamStore>()(
             const cutTime = estimateRuntimeMsOrError(
               msg.moves, rapidRate, fastTraverseRate, finishRate, machineCutTimeMotion(proj.machine),
             )
+            if (faceSmartRuntime?.material && currentSetup && currentOp) {
+              faceMaterialResults.set(opId, { epoch: operationStockEpoch(),
+                inputKey: faceMaterialResultKey(currentSetup, currentOp) })
+            }
             get().updateOperation(setupId, opId, {
               status: 'ready',
               toolpathMoves: msg.moves,
@@ -20690,6 +21142,10 @@ export const useCamStore = create<CamStore>()(
                 ? [operatorText('index517')]
                 : []),
             ])
+            // WO-3018: `both` records the adaptive kernel route's equality beside the
+            // published current moves; nothing the operator sees changes.
+            const adaptiveShadow = (msg as { adaptiveShadow?: AdaptiveShadowRecord }).adaptiveShadow
+            if (adaptiveShadow) console.info('LIENCAM_ENGINE comparison', opId, adaptiveShadow)
           } else if (msg.type === 'TOOLPATH_ERROR') {
             get().updateOperation(setupId, opId, {
               status: 'error',
@@ -20710,6 +21166,8 @@ export const useCamStore = create<CamStore>()(
         }
 
         worker.onerror = (e) => {
+          if (workerSettled) return
+          if (discardStaleFaceRequest()) { settleWorker(); return }
           console.error(operatorText('index519'), e.message, e.filename, e.lineno, e.error)
           const detail = [e.message, e.filename ? `${e.filename}:${e.lineno}` : ''].filter(Boolean).join(' @ ')
           get().updateOperation(setupId, opId, {
@@ -20933,7 +21391,8 @@ export const useCamStore = create<CamStore>()(
           faceDispatch = { loops: resolvedLoops, regionHoles: faceRestHoles ?? [] }
         }
 
-        worker.postMessage(computeRoute.buildRequest({
+        watchdog.pulse('Computing toolpath')
+        const preparedRequest = computeRoute.buildRequest({
           op,
           machineRapidRate: state.project.machine.rapidRate,
           basePayload,
@@ -20955,7 +21414,36 @@ export const useCamStore = create<CamStore>()(
           contour: contourDispatch,
           // WO-1820: face only, and only for boundary source 'rest'.
           face: faceDispatch,
-        }))
+          // WO-3001: what the pattern reports its spindle and feed against.
+          ...(op.type === 'pattern' ? { pattern: {
+            spindleRpm: requestedSpindleRpm(op, tool),
+            machine: {
+              ...(state.project.machine.minSpindleRpm !== undefined ? { minSpindleRpm: state.project.machine.minSpindleRpm } : {}),
+              ...(state.project.machine.maxSpindleRpm !== undefined ? { maxSpindleRpm: state.project.machine.maxSpindleRpm } : {}),
+            },
+          } } : {}),
+        })
+        let facePilot: FacePilotEnvelope | undefined
+        let adaptivePilot: AdaptivePilotEnvelope | undefined
+        if (preparedRequest.type === 'COMPUTE_ADAPTIVE_CLEARING' && faceEngine !== 'current') {
+          // WO-3018: the adaptive kernel route rides the prepared request like Face's.
+          adaptivePilot = { engine: faceEngine, input: { operation: op, setup, project: state.project, tool },
+            resolvedHeights: resolvedHeightSnapshot, resolvedHeightPlan }
+        }
+        if (preparedRequest.type === 'COMPUTE_FACE' && faceEngine !== 'current') {
+          facePilot = {
+            engine: faceEngine,
+            frame: frameRef({ kind: 'world', projectEpoch: state.project.id,
+              entityId: 'world', revision: dispatchFingerprint }),
+            input: { operation: op, setup, project: state.project, tool },
+            resolvedHeights: resolvedHeightSnapshot, resolvedHeightPlan,
+          }
+        }
+        // Rest-boundary preparation may await WASM after the first currency
+        // check. Do not dispatch a payload whose material changed during it.
+        if (workerSettled || discardStaleFaceRequest()) { settleWorker(); return }
+        worker.postMessage(facePilot ? { ...preparedRequest, facePilot }
+          : adaptivePilot ? { ...preparedRequest, adaptivePilot } : preparedRequest)
 
         if (computeRoute.derivesTabPreview && contourParams) {
           // Tabs v2: derive the finish-contour preview the in-viewport tab
@@ -20997,6 +21485,37 @@ export const useCamStore = create<CamStore>()(
           }
         }
         await workerDone
+        }
+        if (op.type === 'face') await computeCurrent()
+        else await engineRouter.plan({ operation: op, setup, project: state.project, tool }, computeCurrent,
+        (plan) => {
+          const currentSetup = get().project.setups.find((candidate) => candidate.id === setupId)
+          const currentOp = currentSetup?.operations.find((candidate) => candidate.id === opId)
+          if (!currentSetup || !currentOp) { completeBatchOperation(); return }
+          const cutTime = estimateRuntimeMsOrError(
+            plan.moves, state.project.machine.rapidRate,
+            resolveFeedrates(tool, op.feedrateOverride, state.project.machine.rapidRate).fastTraverseRate,
+            resolveFeedrates(tool, op.feedrateOverride, state.project.machine.rapidRate).finishRate,
+            machineCutTimeMotion(state.project.machine),
+          )
+          get().updateOperation(setupId, opId, {
+            status: 'ready', toolpathMoves: plan.moves, computeTimeMs: plan.computeTimeMs,
+            resolvedHeights: plan.resolvedHeights, resolvedHeightPlan: plan.resolvedHeightPlan,
+            generationFingerprint: projectOperationFingerprint(
+              state.project, setup, op, plan.resolvedHeights, tool,
+              (toolId) => state.toolLibrary.find((candidate) => candidate.id === toolId),
+            ),
+            estimatedCutTimeMs: cutTime.ms, estimatedCutTimeMsError: cutTime.error,
+            errorMessage: undefined, progress: undefined, progressPhase: undefined,
+          })
+          completeBatchOperation()
+        }, (plan) => {
+          const current = get().project.setups.find((candidate) => candidate.id === setupId)
+            ?.operations.find((candidate) => candidate.id === opId)
+          console.info('LIENCAM_ENGINE comparison', opId, {
+            equal: JSON.stringify(current?.toolpathMoves) === JSON.stringify(plan.moves),
+          })
+        })
       })()),
 
       stageOperationsForEmission: async (setupId, includedOpIds) => {
@@ -25818,6 +26337,12 @@ export const useCamStore = create<CamStore>()(
     }
   )
 )
+
+// Observe every semantic write, including raw setState and history restore.
+// Generated status/progress does not renew the semantic edit serial.
+useCamStore.subscribe(state => {
+  observeOperationStockState(operationStockEpoch(), state.project, state.toolLibrary)
+})
 
 // WO-1541: reconcile operation status against nest.needsRecompute after every
 // store change. Runs from the store itself (not a single mutator) because

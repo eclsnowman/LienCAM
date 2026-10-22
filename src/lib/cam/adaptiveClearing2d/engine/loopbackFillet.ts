@@ -25,6 +25,8 @@
 //   kink, a reversal, or a retract. Only when the whole ladder fails does the caller see null
 //   and fall back, exactly as before.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import type { Pt } from './clipperEngine'
 import { buildLoopback, type Loopback } from './wallCleanLoop'
 
@@ -95,7 +97,7 @@ export function loopbackContactsStayOnRides(
  *  Rf, which is what pulls an off-ride contact back onto its ride. Four rungs reach 12.5% of the
  *  requested rounding -- past that the fillet is smaller than buildLoopback's own 0.05mm floor
  *  for every pct the UI can produce. */
-const PCT_LADDER = [1, 0.5, 0.25, 0.125]
+const PCT_LADDER = AP.sharpening.loopbackPctLadder
 
 /**
  * Build the loopback and ACCEPT it only if its trimmed rides are still forward wall rides.
@@ -103,7 +105,7 @@ const PCT_LADDER = [1, 0.5, 0.25, 0.125]
  * rung of retries at reduced fillet percentage before giving up.
  */
 export function buildAcceptedLoopback(
-  exitRide: Pt[], entryRide: Pt[], toolRadius: number, arcTol: number, loopbackFilletPct = 25,
+  exitRide: Pt[], entryRide: Pt[], toolRadius: number, arcTol: number, loopbackFilletPct = AP.defaults.loopbackFilletPct,
   escapes?: (pts: Pt[]) => boolean,
 ): { exit: Pt[]; entry: Pt[]; loopback: Loopback } | null {
   for (const k of PCT_LADDER) {
@@ -131,8 +133,8 @@ export function buildAcceptedLoopback(
 // Kidney pct25 transitions). That is not a fillet, it is a reversal wearing one, and no machine
 // benefits from it.
 
-const MAX_ARC_SWEEP_DEG = 185
-const REVERSAL_DEG = 175
+const MAX_ARC_SWEEP_DEG = AP.sharpening.loopbackMaxArcSweepDeg
+const REVERSAL_DEG = AP.sharpening.loopbackReversalDeg
 
 /** Least-squares (Kasa) circle through `pts`; null when the normal equations are singular. */
 function circleFit(pts: Pt[]): { cx: number; cy: number; r: number } | null {

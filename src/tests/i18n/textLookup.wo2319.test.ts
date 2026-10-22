@@ -4,12 +4,14 @@
 // if a wrong key or area ever stops being an error (the directive goes unused),
 // so "a missing key is a type-check error" is guarded by the normal tsc run.
 import { describe, expect, it } from 'vitest'
+import { readdirSync } from 'node:fs'
 import {
   AVAILABLE_LANGUAGES,
   SOURCE_LANGUAGE,
   i18n,
   isAvailableLanguage,
   languageName,
+  machineTranslationNote,
   textFor,
   type Translation,
 } from '../../i18n'
@@ -39,13 +41,28 @@ describe('WO-2319: typed text lookup', () => {
 })
 
 describe('WO-2319: catalog layout', () => {
-  it('offers exactly the languages that have a catalog - English only today', () => {
-    expect(AVAILABLE_LANGUAGES).toEqual(['en'])
+  it('offers every on-disk language with a catalog, English first and others sorted', () => {
+    // Read the files independently of the production discovery/export.
+    const root = new URL('../../i18n/locales/', import.meta.url)
+    const discovered = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory()
+        && readdirSync(new URL(`${entry.name}/`, root)).some((file) => file.endsWith('.ts')))
+      .map((entry) => entry.name)
+    expect(AVAILABLE_LANGUAGES).toEqual(['en', ...discovered.filter((code) => code !== 'en').sort()])
     expect(SOURCE_LANGUAGE).toBe('en')
-    expect(isAvailableLanguage('en')).toBe(true)
-    expect(isAvailableLanguage('de')).toBe(false)
+    for (const code of discovered) expect(isAvailableLanguage(code), code).toBe(true)
+    expect(isAvailableLanguage('xx-unavailable')).toBe(false)
     expect(isAvailableLanguage(undefined)).toBe(false)
     expect(languageName('en')).toBe('English')
+  })
+
+  it('keeps English and unavailable languages free of translation notices', () => {
+    expect(machineTranslationNote('en')).toBeNull()
+    expect(machineTranslationNote('xx-unavailable')).toBeNull()
+    for (const code of ['de', 'es', 'fr']) {
+      if (isAvailableLanguage(code)) expect(machineTranslationNote(code), code).toBeTruthy()
+      else expect(machineTranslationNote(code), `${code} has no catalog yet`).toBeNull()
+    }
   })
 
   it('collects one area per English file, each a tree of plain strings', () => {

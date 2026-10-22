@@ -2,10 +2,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BACKED_UP_LOCAL_STORAGE_RECORDS,
   PERSISTED_USER_DATA_REGISTRY,
+  readRegisteredSessionData,
+  writeRegisteredSessionData,
+  registeredBrowserStateStorage,
 } from '../../store/persistedKeys'
 import {
   createShopDataBackup,
@@ -19,6 +22,8 @@ const ESCAPE_PROBE_FILE = resolve(SOURCE_ROOT, 'tests/evidence/WO-245/escapeProb
 const REQUIRED_KEYS = [
   'cnc-cam-project',
   'geo26.glowCandidate',
+  // WO-2979: the AI model pick stays on this computer (never backed up).
+  'liencam-ai-model-choice',
   'liencam-boot-preferences',
   'liencam-machine-actions',
   'liencam-probe-routine-library',
@@ -27,6 +32,8 @@ const REQUIRED_KEYS = [
   'liencam-user-space-reset-pending--',
   // WO-2639: the WO-1505 unload journal is registered so it can save (never backed up).
   'liencam-user-space-unload-journal--',
+  'liencam.bridgeConsoleSaid',
+  'liencam.firmwareConsoleSaid',
   'liencam.machine.programPreviewGrid',
   'liencam.userPosts',
   'liencamStockRemovalBody',
@@ -239,6 +246,28 @@ describe('WO-245 persisted user-data registry boundary', () => {
       .join('\n')
 
     expect(duplicates, detail || 'registered keys are declared only once').toEqual([])
+  })
+
+  it('keeps console receipts in the window session and rejects them at the local-storage sink', () => {
+    const session = new MemoryLegacyStorage()
+    const local = new MemoryLegacyStorage()
+    vi.stubGlobal('window', { sessionStorage: session })
+    vi.stubGlobal('localStorage', local)
+    try {
+      for (const id of ['bridgeConsoleSaid', 'firmwareConsoleSaid'] as const) {
+        const definition = PERSISTED_USER_DATA_REGISTRY[id]
+        expect(definition.storage).toBe('session-storage')
+        expect(definition.backup).toBe(false)
+        expect(readRegisteredSessionData(id)).toBeNull()
+        writeRegisteredSessionData(id, '["accepted"]')
+        expect(session.getItem(definition.key)).toBe('["accepted"]')
+        expect(readRegisteredSessionData(id)).toBe('["accepted"]')
+        expect(() => registeredBrowserStateStorage()!.setItem(definition.key, 'wrong scope')).toThrow()
+      }
+      expect(local.values.size).toBe(0)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('backs up exactly the local records selected by the registry', async () => {

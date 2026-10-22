@@ -1,4 +1,4 @@
-(LienCAM 0.36.0-alpha.2 - 08 Gear pair - grblhal)
+(LienCAM 0.37.0-alpha.3 - 08 Gear pair - grblhal)
 ( grblHAL )
 G90 G94 G17 G21
 ( Setup 1 )

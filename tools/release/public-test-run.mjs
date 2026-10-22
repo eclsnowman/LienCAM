@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -183,7 +184,7 @@ async function main(args) {
   return 0
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).then(code => { process.exitCode = code }).catch(error => {
     console.error(`public tests: ${error.message}`)
     process.exitCode = 1

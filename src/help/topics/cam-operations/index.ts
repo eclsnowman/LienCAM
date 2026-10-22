@@ -488,6 +488,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'V-Carve has no Linking tab. It refuses by name when the tool has no usable tip angle, and when a Flat depth is deeper than the bit can cut.',
       },
       { kind: 'image', slot: 'result' },
+      {
+        kind: 'paragraph',
+        text: 'V-carve finishes nearby cuts of each letter together and follows connected corner grooves without retracting for each branch. Short links over already carved space lift only as far as needed and run at feed; links across uncut space or farther away rise to Retract. Clearance is used for the first entry and final exit. This reduces repositioning without changing the carved shape.',
+      },
     ],
     images: [
       {
@@ -508,6 +512,33 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     keywords: 'v-carve vcarve carve lettering sign v-bit centre line flat depth floor clearing separate end mill start depth allowance pick edges',
     contextKeys: ['selection:operation:vcarve'],
     relatedTopicIds: ['engrave', 'chamfer-op', 'operation-sources'],
+    sinceVersion: '0.36.0',
+  },
+  {
+    id: 'pattern-op',
+    title: 'Pattern',
+    category: 'cam-operations',
+    summary: 'Pattern cuts a decorative pattern, such as a rose spiral, a wave raster or a line moire, at a shallow depth below the stock top.',
+    sections: [
+      {
+        kind: 'steps',
+        steps: [
+          'A Pattern operation comes in with a project that already holds one. It is not in the New Operation list yet, and Edit operation has no pattern editor: opening one there says so, and the operation still computes and posts as it was saved.',
+          'The pattern itself is a list of curves (a preset rose spiral, sine raster, epitrochoid or line moire, or curves written as formulas), with copies, turns and mirrors, and a depth.',
+          'The region is optional. It is made from the closed loops of the geometry the operation uses; an open loop never bounds it. A pattern placed at the region centre, or trimmed to the region, needs a region and refuses without one.',
+          'On the Heights tab, Top Height starts at the stock top and Bottom Height is the pattern depth below it. A Bottom Height you set wins over the depth written in the pattern.',
+          'Use a ball, bull nose, flat or pointed cutter. Each curve is cut at feed at that depth; between curves the tool rises to Retract, moves across and plunges again.',
+        ],
+      },
+      {
+        kind: 'paragraph',
+        text: 'It refuses only what it cannot do: a pattern it cannot read (the message names the field), a depth the flutes cannot reach, or a missing region. Anything else it makes, and the Console says what it did: how many points and passes, how much path was trimmed at the region edge, where neighbouring grooves overlap, and a feed or spindle speed beyond what the machine states (the controller caps it).',
+      },
+    ],
+    images: [],
+    keywords: 'pattern decorative engine turning guilloche rose spiral sine raster epitrochoid line moire curves formula copies polar array mirror region clip trim depth ball end mill shallow',
+    contextKeys: ['selection:operation:pattern'],
+    relatedTopicIds: ['engrave', 'vcarve', 'operation-sources'],
     sinceVersion: '0.36.0',
   },
   {

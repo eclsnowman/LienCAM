@@ -125,6 +125,9 @@ export const MODEL_BODY_BINDING_CAPABILITIES: Readonly<
   vcarve: { mode: 'edge-paths', computeSupported: true },
   // WO-1941: Chamfer bevels the closed loop a picked edge chain forms.
   chamfer: { mode: 'edge-paths', computeSupported: true },
+  // WO-3001: a pattern region from a modeled body's profile is not built yet;
+  // the op names that refusal rather than computing without the region.
+  pattern: { mode: 'profile', computeSupported: false },
   // WO-1954: Parallel 3D finishes the body's tessellated solid through the
   // same PartMesh adapter Adaptive 3D uses.
   parallel_3d: { mode: 'solid', computeSupported: true },

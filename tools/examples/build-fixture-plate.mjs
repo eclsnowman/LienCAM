@@ -1,5 +1,6 @@
 // Original release example. Run after npm run build, from the repository root.
 // All project construction, computation, saving and posting use production UI.
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, writeFileSync, statSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
@@ -452,4 +453,4 @@ async function walkthroughs(driver, saved) {
   await shot('W2-5', () => page.getByTestId('control-gcode-list').isVisible())
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await build({ captureOnly: process.argv.includes('--capture-only'), walkthroughOnly: process.argv.includes('--walkthrough-only') })
+if (isMain(import.meta.url)) await build({ captureOnly: process.argv.includes('--capture-only'), walkthroughOnly: process.argv.includes('--walkthrough-only') })

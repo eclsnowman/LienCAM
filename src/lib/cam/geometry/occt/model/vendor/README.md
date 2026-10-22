@@ -20,18 +20,38 @@ build author's draft `sanity.node.mjs`, now removed).
 bash build.sh
 ```
 
-Run from WSL (Ubuntu-24.04), where docker is available. Docker is only
-needed to REGENERATE the artifacts (pinned image
-`donalffons/opencascade.js:2.0.0-beta.b5ff984`); consumers just use the
-committed `occt-model.{js,wasm,d.ts}`.
+Needs docker (WSL Ubuntu-24.04 on the dev box, or any Linux host). Docker is
+only needed to REGENERATE the artifacts (pinned image
+`donalffons/opencascade.js:2.0.0-beta.b5ff984`, OCCT 7.6.2, emscripten
+3.1.14); consumers just use the committed `occt-model.{js,wasm,d.ts}`.
+
+WO-3047: the image ships its OCCT objects precompiled with `-Os` and
+emscripten's JS-emulated exceptions (`-fexceptions`). With that emulation
+every C++ call that can throw leaves wasm for a JS `invoke_*` trampoline and
+comes back; a CPU profile of a STEP read spent ~44% of its time there.
+`build-inside.py` recompiles the same OCCT sources and the bound classes with
+native wasm exceptions (`-fwasm-exceptions`) and `-O3`, then links with the
+image's own `buildFromYaml.py`. Same OCCT commit and source files, so the model
+is byte-identical (src/tests/import/occtModelReaderSpeed.wo3047.test.ts); the
+STEP read + heal is ~4-5x faster (src/tests/evidence/WO-3047/). The image's
+OCCT is built without `OCC_CONVERT_SIGNALS`, so it never calls `setjmp` and
+native exceptions need no `SUPPORT_LONGJMP`. Objects are cached in
+`OCCT_MODEL_CACHE`: the first build compiles ~5,400 files (about an hour on 4
+cores), later builds only relink (~17 min). buildFromYaml.py writes the d.ts in
+filesystem order; the committed d.ts keeps its old order with new classes
+inserted, so its diff stays readable (same lines, `sort | diff` is empty).
 
 ## Artifact size
 
-- `occt-model.wasm`: 11593758 bytes raw / 3910909 bytes gzip.
+- `occt-model.wasm` (WO-3047 build): 15916308 bytes raw / about 4.83 MB gzip.
+  Before WO-3047 (`-Os`, JS exceptions): 11593758 raw / 3880699 gzip.
 - This exceeds the 10 MiB soft tripwire in docs/brep/PLAN.md Stage 0 and
   is ACCEPTED: the module lazy-loads only on STEP import, in a dedicated
   worker, so it costs nothing on app startup or for users who never
-  import STEP. Served gzipped it is ~3.9 MB on the wire.
+  import STEP.
+- Runtime: native wasm exceptions need Chrome 95+, Firefox 100+, Safari 15.2+
+  (and any current Electron/Node); the app's other OCCT module (occt-wasm)
+  already uses them.
 
 ## Binding / signature gotchas (measured against this exact build)
 
@@ -140,3 +160,12 @@ Added during Stage 1 (model worker core, core.ts):
     (loc.Transformation() returns an owned gp_Trsf — delete it) via
     gp_Pnt.Transform(trsf) in place. BRepAdaptor_Curve, by contrast, already
     applies the edge location — its sampled points are world-space.
+
+16. (WO-3047) BRepCheck_Analyzer is bound: `new oc.BRepCheck_Analyzer(shape,
+    geomControls, isParallel)` (three args, no defaults), then `IsValid_2()`.
+    `Result()` returns the unbound Handle_BRepCheck_Result; do not call it.
+
+17. (WO-3047) With native wasm exceptions, a C++ exception that escapes to JS
+    arrives as a `WebAssembly.Exception`, not as a bare number (the old
+    emulation threw the exception's heap pointer). `catch {}` / `catch (e)`
+    catch both; nothing in the app reads the thrown value's type.

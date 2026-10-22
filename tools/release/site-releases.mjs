@@ -5,6 +5,7 @@
 // --output writes a copy of the page for isolated fixture builds. No network
 // is used by default. GitHub's /latest omits alpha releases, so --latest reads
 // the published release list (including prereleases) and its metadata asset.
+import { isMain } from '../lib/is-main.mjs';
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -106,7 +107,7 @@ export async function writeDownloadPage({ file, latest = false, tag, output = pa
   return data
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try {
     let file, output, tag, latest = false
     const args = process.argv.slice(2)

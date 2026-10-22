@@ -100,6 +100,7 @@ export const SMART_HEIGHT_LIVE_VARIANT_PROOFS = {
   engrave: {},
   vcarve: {},
   chamfer: {},
+  pattern: {},
   parallel_3d: {},
   waterline_3d: {},
   adaptive_3d: {},

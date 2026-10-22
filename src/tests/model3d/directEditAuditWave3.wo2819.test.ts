@@ -44,7 +44,10 @@ const { stepCache, stlCache } = vi.hoisted(() => ({
   stepCache: new Map<string, ArrayBuffer>(),
   stlCache: new Map<string, ArrayBuffer>(),
 }))
-vi.mock('../../lib/stepCache', () => typedMock<typeof import('../../lib/stepCache')>({
+vi.mock('../../lib/stepCache', async (original) => typedMock<typeof import('../../lib/stepCache')>({
+  ...await original<typeof import('../../lib/stepCache')>(),
+  loadCachedStepDisplay: async () => null,
+  cacheStepDisplay: async () => {},
   cacheStep: async (id, bytes) => { stepCache.set(id, bytes) },
   loadCachedStep: async (id) => stepCache.get(id) ?? null,
   removeCachedStep: async (id) => { stepCache.delete(id) },
@@ -81,8 +84,8 @@ const PARTS = resolve(process.cwd(), 'src/tests/evidence/WO-2757')
 const part = (name: string) => resolve(PARTS, name)
 
 type V3 = { x: number; y: number; z: number }
-type Verdict = 'WORKS' | 'REFUSES' | 'WRONG' | 'SILENT'
-interface Outcome { verdict: Verdict; message: string; detail: Record<string, unknown> }
+export type Verdict = 'WORKS' | 'REFUSES' | 'WRONG' | 'SILENT'
+export interface Outcome { verdict: Verdict; message: string; detail: Record<string, unknown> }
 
 let restoreCanvas2d: (() => void) | null = null
 beforeEach(() => {
@@ -90,6 +93,7 @@ beforeEach(() => {
   useFormStore.getState().closeSession()
   useReliefStore.getState().closeSession()
   formGizmos.length = 0
+  fixtureInputs.clear()
   memory.clear()
   stepCache.clear()
   stlCache.clear()
@@ -123,6 +127,7 @@ function hooks(): SolidsWorkbenchHooks {
 const canvas = () => screen.getByTestId('solids-workbench-canvas')
 
 function bytesOf(path: string): ArrayBuffer {
+  fixtureInputs.add(path)
   const b = readFileSync(path)
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
 }
@@ -190,15 +195,44 @@ const EXPECTED: Record<string, Verdict> = {
   "STL-EXPORT-STEP": "WORKS"
 }
 const cells: Record<string, Outcome> = {}
-function record(cell: string, outcome: Outcome): Outcome {
+// WO-2912 reuses these exact production-route actions, fixtures and oracles.
+// Configuration happens during test collection, before any registered test runs.
+interface AuditOptions {
+  label: string
+  evidenceDir: string
+  onRecord?: (cell: string, outcome: Outcome) => Promise<void>
+  wrapClient?: (client: ReturnType<typeof createLocalGeomService>) => ReturnType<typeof createLocalGeomService>
+}
+let audit: AuditOptions = { label: 'WO-2819', evidenceDir: 'src/tests/evidence/WO-2819' }
+export function configureActionAudit(options: AuditOptions): void { audit = options }
+let mountProps: Parameters<typeof SolidsWorkbenchPage>[0]
+const fixtureInputs = new Set<string>()
+function mountWorkbench(props: Parameters<typeof SolidsWorkbenchPage>[0]): void {
+  mountProps = props
+  const factory = props.createClient
+  render(createElement(SolidsWorkbenchPage, audit.wrapClient && factory
+    ? { ...props, createClient: () => audit.wrapClient!(factory()) } : props))
+}
+export const actionAudit = {
+  cells, hooks, volumeOf, commitField, commitLabel,
+  get consoleLines() { return [...consoleLines] },
+  openStep, openPrismaticStl, facesOf, findFace, aimAtFace, aimAt, click, judgeApplied, previewThenApply,
+  fixtureInputs,
+  clearCaches: () => { stepCache.clear(); stlCache.clear() },
+  unmount: cleanup,
+  remount: () => mountWorkbench(mountProps),
+}
+
+async function record(cell: string, outcome: Outcome): Promise<Outcome> {
   cells[cell] = outcome
-  console.log(`WO-2819 CELL ${cell} ${JSON.stringify(outcome)}`)
+  console.log(`${audit.label} CELL ${cell} ${JSON.stringify(outcome)}`)
+  await audit.onRecord?.(cell, outcome)
   if (outcome.verdict === 'WORKS') expect(typeof outcome.detail.expectedDelta === 'number' || typeof outcome.detail.check === 'string').toBe(true)
   expect(outcome.verdict, cell + ': ' + outcome.message).toBe(EXPECTED[cell])
   return outcome
 }
 afterAll(() => {
-  writeFileSync(resolve(process.cwd(), 'src/tests/evidence/WO-2819/cells.json'), JSON.stringify({ source: '849c2fc3e7', route: 'SolidsWorkbenchPage; real createLocalGeomService; WO-2757 fixtures', cells }, null, 2) + '\n')
+  writeFileSync(resolve(process.cwd(), audit.evidenceDir + '/cells.json'), JSON.stringify({ source: audit.label === 'WO-2819' ? '849c2fc3e7' : 'see matrix.json', route: 'SolidsWorkbenchPage; real createLocalGeomService; WO-2757 fixtures', cells }, null, 2) + '\n')
 })
 interface StepSession { runtime: FakeSceneRuntime; volume: number }
 
@@ -209,7 +243,7 @@ async function openStep(path: string, bodyIds: string[] = ['IMP1']): Promise<Ste
   // Anchored value entries render only while their anchor projects on screen.
   runtime.projectToCanvasResult = { x: 200, y: 200 }
   const createPushPullTestDriver: CreatePushPullGizmoTestDriver = () => ({} as PushPullGizmoTestDriver)
-  render(createElement(SolidsWorkbenchPage, { createClient: createLocalGeomService, createSceneRuntime: () => runtime, createPushPullTestDriver }))
+  mountWorkbench({ createClient: createLocalGeomService, createSceneRuntime: () => runtime, createPushPullTestDriver })
   await waitFor(() => expect(screen.getByTestId('solids-workbench-status').textContent).toMatch(/ready/i), { timeout: 30_000 })
   const input = screen.getByTestId('workbench-import-step-input') as HTMLInputElement
   const name = path.split(/[\\/]/).pop()!
@@ -465,7 +499,7 @@ async function openStl(name: string): Promise<StlSession> {
   if (wrapped?.ok !== true) throw new StlOpenRefused(`Edit as model refused: ${wrapped?.reason ?? '?'} ${lastConsole()}`)
   const runtime = createFakeSceneRuntime()
   runtime.projectToCanvasResult = { x: 300, y: 200 }
-  render(createElement(SolidsWorkbenchPage, { modelItemId: useCamStore.getState().activeModelItemId ?? undefined, createClient: createLocalGeomService, createSceneRuntime: () => runtime }))
+  mountWorkbench({ modelItemId: useCamStore.getState().activeModelItemId ?? undefined, createClient: createLocalGeomService, createSceneRuntime: () => runtime })
   await waitFor(() => expect(screen.getByTestId('solids-workbench-status').textContent).toMatch(/ready/i), { timeout: 30_000 })
   try {
     await waitFor(() => expect(screen.getByTestId(`body-row-stl-body:${id}`)).toBeTruthy(), { timeout: 30_000 })
@@ -520,25 +554,25 @@ for (const format of ['STEP', 'STL'] as const) {
     it(`${format}-${tool}: new 1 mm blend on imported sharp rib edge`, async () => {
       const s = format === 'STEP' ? await openStep(part('rib_part.step')) : await openPrismaticStl()
       const expected = tool === 'fillet' ? -(1 - Math.PI / 4) * 50 : -0.5 * 50
-      record(`${format}-${tool}`, await blendStep(tool, s, [() => aimAt(s.runtime, { x: 30, y: -12, z: 40 }, { x: 30, y: 8, z: 20 })], '1', expected))
+      await record(`${format}-${tool}`, await blendStep(tool, s, [() => aimAt(s.runtime, { x: 30, y: -12, z: 40 }, { x: 30, y: 8, z: 20 })], '1', expected))
     }, 180_000)
   }
 }
 
 // Prismatic STL must use Edit as model, not rename an STL to STEP.
-async function openPrismaticStl(): Promise<StepSession> {
+async function openPrismaticStl(fixture = 'rib_part'): Promise<StepSession> {
   const id = 'rib-prismatic'
-  const bytes = bytesOf(part('rib_part.stl'))
+  const bytes = bytesOf(part(fixture + '.stl'))
   stlCache.set(id, bytes)
   act(() => useCamStore.setState((st) => ({ project: { ...st.project, geometry: [{
-    id, name: 'rib_part.stl', filename: 'rib_part.stl', type: 'mesh', format: 'stl', loaded: true,
+    id, name: fixture + '.stl', filename: fixture + '.stl', type: 'mesh', format: 'stl', loaded: true,
     boundingBox: { min: { x: 0, y: 0, z: 0 }, max: { x: 60, y: 40, z: 20 }, size: { x: 60, y: 40, z: 20 }, center: { x: 30, y: 20, z: 10 } },
     position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 },
   }] } })))
   await act(async () => { expect((await useCamStore.getState().wrapImportedGeometryAsModelItem(id)).ok).toBe(true) })
   const runtime = createFakeSceneRuntime()
   runtime.projectToCanvasResult = { x: 200, y: 200 }
-  render(createElement(SolidsWorkbenchPage, { modelItemId: useCamStore.getState().activeModelItemId ?? undefined, createClient: createLocalGeomService, createSceneRuntime: () => runtime }))
+  mountWorkbench({ modelItemId: useCamStore.getState().activeModelItemId ?? undefined, createClient: createLocalGeomService, createSceneRuntime: () => runtime })
   await waitFor(() => expect(hooks().dag.featureOrder().some((id) => hooks().getBodyHandle(id) !== undefined)).toBe(true), { timeout: 30_000 })
   const body = hooks().dag.featureOrder().find((id) => hooks().getBodyHandle(id) !== undefined)!
   await waitFor(() => expect(hooks().scheduler.statusOf(body)).toBe('ok'), { timeout: 30_000 })
@@ -558,7 +592,7 @@ for (const format of ['STEP', 'STL'] as const) {
         })()
         : await fromBody(format, fixture)
       const cell = `${format}-FORM-${fixture}`
-      if (s.refusal) { record(cell, s.refusal); return }
+      if (s.refusal) { await record(cell, s.refusal); return }
       const original = useFormStore.getState().cage.positions.map((p) => [...p])
       fireEvent.click(screen.getByTestId('form-select-all'))
       fireEvent.click(screen.getByTestId('form-transform-rotate'))
@@ -572,7 +606,7 @@ for (const format of ['STEP', 'STL'] as const) {
       const sourceId = useFormStore.getState().sourceBodyId!
       const outcome = await finishForm(s, 0)
       await captureWrong(cell, outcome, sourceId)
-      record(cell, { ...outcome, detail: { ...outcome.detail, pointQuarterTurnError: error, check: 'every cage point matches an independent 90 degree turn; finished volume must equal source' } })
+      await record(cell, { ...outcome, detail: { ...outcome.detail, pointQuarterTurnError: error, check: 'every cage point matches an independent 90 degree turn; finished volume must equal source' } })
     }, 180_000)
   }
 }
@@ -591,7 +625,7 @@ for (const op of ['fuse', 'cut', 'intersect']) {
     // A-A is empty, which cannot be represented as one solid: a truthful refusal.
     const outcome = await judgeApplied(before, s.volume, op === 'cut' ? -16500 : 0)
     await captureWrong(`STEP-BOOLEAN-${op}`, outcome, 'IMP1')
-    record(`STEP-BOOLEAN-${op}`, outcome)
+    await record(`STEP-BOOLEAN-${op}`, outcome)
   }, 180_000)
 }
 
@@ -647,7 +681,7 @@ for (const pair of ['STL+STL', 'STL+STEP'] as const) {
       await waitFor(() => expect(hooks().getBodyHandle('IMP1')).toBeDefined(), { timeout: 60_000 })
       await waitFor(() => expect(hooks().scheduler.statusOf('IMP1')).toBe('ok'), { timeout: 60_000 })
     } catch {
-      record(`${pair}-BOOLEAN`, { verdict: 'REFUSES', message: consoleLines.slice(importStart).join(' | '), detail: { stage: 'Import', name } })
+      await record(`${pair}-BOOLEAN`, { verdict: 'REFUSES', message: consoleLines.slice(importStart).join(' | '), detail: { stage: 'Import', name } })
       return
     }
     const secondVolume = await volumeOf('IMP1')
@@ -684,11 +718,11 @@ for (const pair of ['STL+STL', 'STL+STEP'] as const) {
         expect(['ok', 'failed', 'degraded']).toContain(hooks().scheduler.statusOf(resultId))
       }, { timeout: 120_000 })
     } catch {
-      record(`${pair}-BOOLEAN`, { verdict: 'SILENT', message: `no Boolean landed after Apply: ${text('boolean-apply-error')} ${lastConsole()}`, detail: {} })
+      await record(`${pair}-BOOLEAN`, { verdict: 'SILENT', message: `no Boolean landed after Apply: ${text('boolean-apply-error')} ${lastConsole()}`, detail: {} })
       return
     }
     if (hooks().scheduler.statusOf(resultId) !== 'ok') {
-      record(`${pair}-BOOLEAN`, { verdict: 'REFUSES', message: `${resultId} ${hooks().scheduler.statusOf(resultId)}: ${JSON.stringify(hooks().scheduler.diagnosticsOf(resultId))}`, detail: { id: resultId } })
+      await record(`${pair}-BOOLEAN`, { verdict: 'REFUSES', message: `${resultId} ${hooks().scheduler.statusOf(resultId)}: ${JSON.stringify(hooks().scheduler.diagnosticsOf(resultId))}`, detail: { id: resultId } })
       return
     }
     await waitFor(() => expect(hooks().getBodyHandle(resultId)).toBeDefined(), { timeout: 30_000 })
@@ -699,7 +733,7 @@ for (const pair of ['STL+STL', 'STL+STEP'] as const) {
     // The STL operands are faceted: their own |faceted - exact| volume, plus 1 mm3.
     const tolerance = Math.abs(s.volume - BOSS_VOLUME) + (pair === 'STL+STL' ? Math.abs(secondVolume - STEPPED_VOLUME) : 0) + 1
     const ok = Math.abs(measured - expected) <= tolerance
-    record(`${pair}-BOOLEAN`, {
+    await record(`${pair}-BOOLEAN`, {
       verdict: ok ? 'WORKS' : 'WRONG',
       message: ok ? 'second body offered as target and tool both ways; STL fuse second body applied' : `fused volume ${measured.toFixed(3)}, expected ${expected.toFixed(3)} +/- ${tolerance.toFixed(3)}`,
       detail: {
@@ -718,7 +752,7 @@ for (const format of ['STEP', 'STL'] as const) {
     const s = format === 'STEP' ? await openStep(part('rib_part.step')) : await openStl('boss_fillet_base.stl')
     aimAt(s.runtime, { x: 15, y: 20, z: 100 }, { x: 15, y: 20, z: 5 }); click()
     const button = screen.getByTestId('workbench-relief') as HTMLButtonElement
-    if (button.disabled) { record(`${format}-RELIEF`, { verdict: 'REFUSES', message: `Relief disabled: ${button.title}`, detail: { stage: 'button' } }); return }
+    if (button.disabled) { await record(`${format}-RELIEF`, { verdict: 'REFUSES', message: `Relief disabled: ${button.title}`, detail: { stage: 'button' } }); return }
     fireEvent.click(button)
     await waitFor(() => expect(useReliefStore.getState().target).not.toBeNull(), { timeout: 30_000 })
     // A 4x4 opaque white PNG, generated without a browser decoder. Pure white
@@ -749,7 +783,7 @@ for (const format of ['STEP', 'STL'] as const) {
     fireEvent.click(screen.getByTestId('relief-apply'))
     const outcome = await judgeApplied(before, s.volume, expectedRelief)
     await captureWrong(`${format}-RELIEF`, outcome, 'IMP1')
-    record(`${format}-RELIEF`, { ...outcome, detail: { ...outcome.detail, settings, oracle: "16*(1-1/(2*38))^2, zero boundary ring" } })
+    await record(`${format}-RELIEF`, { ...outcome, detail: { ...outcome.detail, settings, oracle: "16*(1-1/(2*38))^2, zero boundary ring" } })
   }, 180_000)
 }
 
@@ -799,7 +833,7 @@ ${lines(before, '#9a9a9a', 4)}
 ${lines(after, '#d0302f', 1.6)}
 </svg>
 `
-  writeFileSync(resolve(process.cwd(), 'src/tests/evidence/WO-2819', `${cell}-section.svg`), svg)
+  writeFileSync(resolve(process.cwd(), audit.evidenceDir, `${cell}-section.svg`), svg)
 }
 
 
@@ -822,31 +856,31 @@ for (const format of ['STEP', 'STL'] as const) {
         return { ...s, refusal: undefined as Outcome | undefined }
       })()
       const cell = `${format}-CHAIN-${next}`
-      if (s.refusal) { record(cell, s.refusal); return }
+      if (s.refusal) { await record(cell, s.refusal); return }
       fireEvent.click(screen.getByTestId('form-select-all'))
       fireEvent.click(screen.getByTestId('form-transform-rotate'))
       fireEvent.change(screen.getByLabelText('Centre rotation axis'), { target: { value: 'z' } })
       commitLabel('Rotation angle', '90'); fireEvent.click(screen.getByTestId('form-rotation-apply'))
       const form = await finishForm(s, 0)
-      if (form.verdict !== 'WORKS') { record(cell, { ...form, detail: { ...form.detail, stage: 'Form' } }); return }
+      if (form.verdict !== 'WORKS') { await record(cell, { ...form, detail: { ...form.detail, stage: 'Form' } }); return }
       const formed = { ...s, volume: await volumeOf(String(form.detail.id)) }
       const blend = await blendStep('fillet', formed, [() => aimAt(s.runtime, { x: 62, y: 20, z: 40 }, { x: 42, y: 20, z: 20 })], '1', -(1 - Math.PI / 4) * 50)
       // Compare the blend to the measured Form output; conversion's own
       // approximation is checked separately, never charged to a later edit.
-      if (blend.verdict !== 'WORKS') { record(cell, { ...blend, detail: { ...blend.detail, stage: 'fillet' } }); return }
+      if (blend.verdict !== 'WORKS') { await record(cell, { ...blend, detail: { ...blend.detail, stage: 'fillet' } }); return }
       const id = String(blend.detail.id)
       const current = { ...s, volume: await volumeOf(id) }
       const faces = await facesOf(id)
       if (next === 'pushpull') {
         const f = findFace(faces, 'unfilleted rib top', (f) => f.type === 'plane' && f.normal.z > 0.99 && Math.abs(f.centroid.z - 20) < 0.01 && f.centroid.x < 25)
-        record(cell, await pushPullStep(current, f, 1, 150))
+        await record(cell, await pushPullStep(current, f, 1, 150))
       } else {
         const before = hooks().dag.featureOrder()
         fireEvent.click(screen.getByTestId('workbench-hole'))
         aimAt(s.runtime, { x: 30, y: 20, z: 100 }, { x: 30, y: 20, z: 5 }); click()
         await waitFor(() => expect(screen.queryByTestId('hole-diameter')).not.toBeNull(), { timeout: 10_000 })
         commitField('hole-diameter', '5'); commitField('hole-blind-distance', '3')
-        record(cell, await previewThenApply('hole', current, before, -Math.PI * 2.5 ** 2 * 3))
+        await record(cell, await previewThenApply('hole', current, before, -Math.PI * 2.5 ** 2 * 3))
       }
     }, 180_000)
   }
@@ -932,7 +966,7 @@ for (const format of ['STEP', 'STL'] as const) {
         expected = mode === 'scale' ? 16500 * 7 : 0
       }
       const outcome = await finishForm(s, expected)
-      record(cell, { ...outcome, detail: { ...outcome.detail, check: 'every point matches independent transform; translation/rotation preserve 16500 mm3; double scale gives 132000 mm3' } })
+      await record(cell, { ...outcome, detail: { ...outcome.detail, check: 'every point matches independent transform; translation/rotation preserve 16500 mm3; double scale gives 132000 mm3' } })
     }, 180_000)
   }
 }
@@ -951,20 +985,20 @@ for (const format of ['STEP', 'STL'] as const) {
     await apply()
     const frame = (id: string) => hooks().dag.getNode(id)!.payload.lastGoodFrame as { origin: V3; normal: V3 }
     expect(frame('datum:RP1').origin.z).toBeCloseTo(20, 8)
-    record(`${format}-OFFSET`, { verdict: 'WORKS', message: '20 mm from XY', detail: { check: 'datum origin z=20', measured: frame('datum:RP1') } })
+    await record(`${format}-OFFSET`, { verdict: 'WORKS', message: '20 mm from XY', detail: { check: 'datum origin z=20', measured: frame('datum:RP1') } })
     fireEvent.click(screen.getByTestId('workbench-midplane'))
     fireEvent.change(screen.getByTestId('offset-plane-source'), { target: { value: 'datum:XY' } })
     fireEvent.change(screen.getByTestId('construction-plane-second-source'), { target: { value: 'datum:RP1' } })
     await apply()
     expect(frame('datum:RP2').origin.z).toBeCloseTo(10, 8)
-    record(`${format}-MIDPLANE`, { verdict: 'WORKS', message: 'halfway between z=0 and z=20', detail: { check: 'datum origin z=10', measured: frame('datum:RP2') } })
+    await record(`${format}-MIDPLANE`, { verdict: 'WORKS', message: 'halfway between z=0 and z=20', detail: { check: 'datum origin z=10', measured: frame('datum:RP2') } })
     fireEvent.click(screen.getByTestId('workbench-angle-plane'))
     fireEvent.change(screen.getByTestId('offset-plane-source'), { target: { value: 'datum:XY' } })
     fireEvent.change(screen.getByTestId('construction-plane-angle'), { target: { value: '30' } })
     await apply()
     expect(frame('datum:RP3').normal.y).toBeCloseTo(-0.5, 8)
     expect(frame('datum:RP3').normal.z).toBeCloseTo(Math.sqrt(3) / 2, 8)
-    record(`${format}-ANGLE`, { verdict: 'WORKS', message: 'XY tilted 30 degrees', detail: { check: 'normal y=-sin30,z=cos30', measured: frame('datum:RP3') } })
+    await record(`${format}-ANGLE`, { verdict: 'WORKS', message: 'XY tilted 30 degrees', detail: { check: 'normal y=-sin30,z=cos30', measured: frame('datum:RP3') } })
   }, 180_000)
 
   it(`${format}-FORM-MIRROR: mirror duplicate across X=0 and Finish`, async () => {
@@ -982,14 +1016,14 @@ for (const format of ['STEP', 'STL'] as const) {
     const notice = text('form-notice')
     const outcome = await finishForm(s, 16500)
     await captureWrong(`${format}-FORM-MIRROR`, outcome, format === 'STEP' ? 'IMP1' : hooks().dag.featureOrder().find((id) => hooks().dag.getNode(id)?.kind === 'import')!)
-    record(`${format}-FORM-MIRROR`, { ...outcome, detail: { ...outcome.detail, notice, check: 'mirror spans -60..60 in X, double rib volume = 33000 mm3' } })
+    await record(`${format}-FORM-MIRROR`, { ...outcome, detail: { ...outcome.detail, notice, check: 'mirror spans -60..60 in X, double rib volume = 33000 mm3' } })
   }, 180_000)
 
   it(`${format}-NO-SOLID-PATTERN-SPLIT: inspect available imported-body routes`, async () => {
     if (format === 'STEP') await openStep(part('rib_part.step')); else await openPrismaticStl()
     const ids = [...document.querySelectorAll('button[data-testid]')].map((b) => b.getAttribute('data-testid'))
     expect(ids.filter((id) => /workbench-(pattern|mirror|split|scale|rotate)/.test(id ?? ''))).toEqual([])
-    for (const tool of ['PATTERN', 'SPLIT']) record(`${format}-${tool}`, { verdict: 'REFUSES', message: `No solid-body ${tool.toLowerCase()} tool on the Model rail. Sketch tools require sketch entities.`, detail: { route: 'Model rail', offered: false } })
+    for (const tool of ['PATTERN', 'SPLIT']) await record(`${format}-${tool}`, { verdict: 'REFUSES', message: `No solid-body ${tool.toLowerCase()} tool on the Model rail. Sketch tools require sketch entities.`, detail: { route: 'Model rail', offered: false } })
   }, 180_000)
 }
 
@@ -1027,7 +1061,7 @@ for (const format of ['STEP', 'STL'] as const) {
       if (axis) { expect(Math.abs(axis.dir.x)).toBeCloseTo(1, 6); expect(axis.origin.y).toBeCloseTo(0, 4); expect(axis.origin.z).toBeCloseTo(5, 4) }
       if (point) { expect(point.x).toBeCloseTo(0, 4); expect(point.y).toBeCloseTo(0, 4); expect(point.z).toBeCloseTo(5, 4) }
       expect(frame !== undefined || axis !== undefined || point !== undefined).toBe(true)
-      record(`${format}-CONSTRUCT-${tool}`, { verdict: 'WORKS', message: picked, detail: { check: 'hand coordinates: base top z=5; edge along X at y=0,z=5; corner (0,0,5)', payload } })
+      await record(`${format}-CONSTRUCT-${tool}`, { verdict: 'WORKS', message: picked, detail: { check: 'hand coordinates: base top z=5; edge along X at y=0,z=5; corner (0,0,5)', payload } })
     }, 180_000)
   }
 }
@@ -1049,7 +1083,7 @@ for (const op of ['fuse', 'cut', 'intersect']) {
     fireEvent.click(screen.getByTestId('dialog-shell-apply'))
     const outcome = await judgeApplied(before, s.volume, total - s.volume)
     await captureWrong(`STEP-BOOLEAN-different-${op}`, outcome, 'IMP1')
-    record(`STEP-BOOLEAN-different-${op}`, { ...outcome, detail: { ...outcome.detail, overlap, expectedTotal: total } })
+    await record(`STEP-BOOLEAN-different-${op}`, { ...outcome, detail: { ...outcome.detail, overlap, expectedTotal: total } })
   }, 180_000)
 }
 
@@ -1074,20 +1108,20 @@ for (const format of ['STEP', 'STL'] as const) {
       const mesh = resolveEditedStlMesh(stl, undefined).mesh
       const exportedVolume = meshVolume(mesh.positions, mesh.indices)
       expect(exportedVolume).toBeCloseTo(16500, 1)
-      record(`${format}-EXPORT-STL`, { verdict: 'WORKS', message: 'exported imported rib', detail: { expectedDelta: 0, check: 'signed tetrahedral volume of exported STL = 16500 mm3', exportedVolume, bytes: stl.byteLength } })
+      await record(`${format}-EXPORT-STL`, { verdict: 'WORKS', message: 'exported imported rib', detail: { expectedDelta: 0, check: 'signed tetrahedral volume of exported STL = 16500 mm3', exportedVolume, bytes: stl.byteLength } })
       fireEvent.click(screen.getByTestId('workbench-debug-export'))
       await waitFor(() => expect(blobs.length).toBe(3), { timeout: 30_000 })
       const debug = new TextDecoder().decode(await read(blobs[2]))
       const snapshot = JSON.parse(debug)
       expect(JSON.parse(snapshot.dag).nodes.some((n: { kind: string }) => n.kind === (format === 'STEP' ? 'import' : 'meshImport'))).toBe(true)
-      record(`${format}-DEBUG`, { verdict: 'WORKS', message: 'debug scene includes the imported source', detail: { check: 'download emitted valid JSON retaining import or meshImport source node', keys: Object.keys(JSON.parse(debug)) } })
+      await record(`${format}-DEBUG`, { verdict: 'WORKS', message: 'debug scene includes the imported source', detail: { check: 'download emitted valid JSON retaining import or meshImport source node', keys: Object.keys(JSON.parse(debug)) } })
       const oldIds = new Set(hooks().dag.featureOrder())
       fireEvent.change(screen.getByTestId('workbench-import-step-input'), { target: { files: [new File([step], 'roundtrip.step')] } })
       await waitFor(() => expect(hooks().dag.featureOrder().some((id) => !oldIds.has(id) && hooks().getBodyHandle(id) !== undefined)).toBe(true), { timeout: 30_000 })
       const id = hooks().dag.featureOrder().find((id) => !oldIds.has(id))!
       const volume = await volumeOf(id)
       expect(volume).toBeCloseTo(16500, 3)
-      record(`${format}-EXPORT-STEP`, { verdict: 'WORKS', message: 'exported STEP reimported through the Model picker', detail: { expectedDelta: 0, check: 'roundtrip volume = 60*40*5+2*50*3*15', volume, bytes: step.byteLength, sourceVolume: s.volume } })
+      await record(`${format}-EXPORT-STEP`, { verdict: 'WORKS', message: 'exported STEP reimported through the Model picker', detail: { expectedDelta: 0, check: 'roundtrip volume = 60*40*5+2*50*3*15', volume, bytes: step.byteLength, sourceVolume: s.volume } })
     } finally {
       click.mockRestore(); URL.createObjectURL = savedCreate; URL.revokeObjectURL = savedRevoke
     }

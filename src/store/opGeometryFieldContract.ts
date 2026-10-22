@@ -80,7 +80,7 @@ import type { OperationType } from '../types'
 import type {
   ContourParams, PocketParams, DrillParams, ThreadMillParams,
   ChamferParams, EngraveParams, ACParams, FaceParams,
-  BoreParams, VCarveParams,
+  BoreParams, VCarveParams, PatternParams,
 } from '../lib/cam/types'
 import type { Parallel3dParams } from '../cam3d/integration/parallel3dOperation'
 import type { Adaptive3dParams } from '../cam3d/integration/adaptive3dOperation'
@@ -116,6 +116,7 @@ export type OpPayloadByType = {
   thread_mill: ThreadMillParams
   engrave: EngraveParams
   chamfer: ChamferParams
+  pattern: PatternParams
   // 2.5D - unimplemented, canonical contract (see file header).
   bore: BoreParams
   vcarve: VCarveParams
@@ -153,6 +154,7 @@ export type _INT17AR5_PayloadShapeContract = [
   AssertTrue<HasGeometryId<ChamferParams>>,
   AssertTrue<HasGeometryId<BoreParams>>,
   AssertTrue<HasGeometryId<VCarveParams>>,
+  AssertTrue<HasGeometryId<PatternParams>>,
   AssertFalse<HasGeometryId<Parallel3dParams>>,
   AssertFalse<HasGeometryId<Adaptive3dParams>>,
   AssertFalse<HasGeometryId<WaterlineParams>>,
@@ -212,6 +214,7 @@ export const OP_GEOMETRY_FIELD_MAP = {
   engrave: { kind: 'params', fields: ['geometryId'] },
   vcarve: { kind: 'params', fields: ['geometryId'] },
   chamfer: { kind: 'params', fields: ['geometryId'] },
+  pattern: { kind: 'params', fields: ['geometryId'] },
   // 3D - entry id in the shared Operation.geometrySelections field, never in
   // params (parallel_3d / adaptive_3d prove this via
   // _INT17AR5_PayloadShapeContract's AssertFalse<HasGeometryId<...>> above).

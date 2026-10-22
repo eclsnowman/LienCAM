@@ -174,6 +174,13 @@ const CENSUS: Record<string, string> = {
   'components/modals/ModelEntryModal.tsx': "REFUSES-BY-SHAPE: lists imported parts for 'Edit as model' only through isWrappableGeometryRow (format 'step' or 'stl', not a nest seed copy); a modeled entry is format 'model', so it is never listed and never reaches wrapImportedGeometryAsModelItem. Model Items themselves come from project.modelItems, not from geometry rows. Read-only.",
   // 33879cedf3 (WO-2748, smart-dimension preview arrows match the committed dimension).
   'components/viewport/camOverlaysPort.ts': "REFUSES-BY-SHAPE: projectDimensionPreview passes project.geometry to resolveSketchEditorOffset, which looks the owning row up by sketch layer id (layers2d) -- the same read as ReferenceImage2d.tsx above; a modeled entry carries no layers2d, so it never matches. Display-only, never mutates a row.",
+  // WO-2976 RE-PIN: two readers added after the WO-2784 repin, each classified by reading its
+  // project.geometry read.
+  // 2f2b402dfa (WO-2789, offer starting empty in the project picker).
+  'store/operationStockInputs.ts': "ALLOWED-PASSTHROUGH: WO-2953 (landed 10-20) reads project.geometry only to build the stock-input cache key (operationStockInputs.ts:78, JSON.stringify with bulk arrays by identity); it never interprets an entry, so a modeled entry only changes the key.",
+  'components/modals/DemoExamplePickerModal.tsx':"ALLOWED-PASSTHROUGH: reads only project.geometry.length === 0 (with the other collections) to decide whether 'start empty' is offered; a modeled entry only counts as content, and no row is read, selected or mutated.",
+  // c2a01299e0 (WO-2803, reopen STL Push/Pull edits).
+  'components/model3d/workbench/useStlToolSession.ts': "REFUSES-BY-SHAPE: looks the open STL part up by geoId only to read its meshEdits journal (and compare it before Apply); meshEdits exist only on STL rows and the bytes come from loadCachedSTL, so a modeled entry has no journal and the reopen/apply path returns before touching it. Read-only here; the write goes through the store's addMeshEdit, which refuses any row whose format is not 'stl'.",
 }
 
 /** Recursively collect production .ts/.tsx files (tests excluded). */

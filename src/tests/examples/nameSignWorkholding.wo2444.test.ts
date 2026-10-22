@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -57,7 +58,14 @@ describe('WO-2444 production-built taped and tabbed name sign', () => {
     expect(stock).toEqual(oldStock)
     const carve = p.setups[0].operations[0], oldCarve = baseline.setups[0].operations[0]
     expect(stableParams(p, carve)).toEqual(stableParams(baseline, oldCarve))
-    expect(carve.toolpathMoves).toEqual(oldCarve.toolpathMoves)
+    // WO-3059 re-pin: WO-2926 (fce97d15e6, 10-17) recomputed the stale shipped
+    // V-carve on the current engine (integrated-refresh.log: 12036 moves,
+    // camgen-v4), so its moves are no longer the WO-2377 original's 11608. The
+    // authored carve above still equals the original; the moves are pinned byte
+    // for byte to the refreshed shipped result.
+    expect(carve.toolpathMoves).toHaveLength(12036)
+    expect(createHash('sha256').update(JSON.stringify(carve.toolpathMoves)).digest('hex'))
+      .toBe('45bff6e13bdce1ebdced2c1138f4bc6b8e84c5bbb364ca2ec96288eeec81fd08')
     const contour = p.setups[0].operations[1], oldContour = baseline.setups[0].operations[1]
     const { tabShape, ...params } = stableParams(p, contour)
     expect(params).toEqual(stableParams(baseline, oldContour))

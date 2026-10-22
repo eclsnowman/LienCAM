@@ -1872,6 +1872,21 @@ input[type="checkbox"]:disabled,
   transition: all 0.12s;
 }
 
+/* WO-2330 / WO-1960: reclaim 3px of inset per side so the three CAM
+   columns each gain 2px. English Control Spline and Perpendicular retain
+   their one-line names at the default panel width without shrinking text.
+   Compact mode and the Model/Form rail keep their own grid spacing. */
+.sketch-toolbox:not(.is-compact) .sketch-tool-grid {
+  padding-inline: 0.3125rem;
+}
+
+/* WO-2330: only CAM's measured overlong names use icon/tooltip fallback.
+   Opacity retains the name for assistive technology and preserves the line's
+   footprint. Model/Form rails and explicit compact-mode styles are untouched. */
+.sketch-toolbox .sketch-tool-btn[data-icon-label] > span {
+  opacity: 0;
+}
+
 /* BK-122(4)+BK-117(3), routed here as ONE combined edit (SKC-17): a disabled
    button must not take hover styling (:not(:disabled) guard), and this rule
    drops the legacy aliases for the real tokens they point to. */
@@ -7829,6 +7844,29 @@ input[type="checkbox"]:disabled,
   transition: bottom 0.15s;
   pointer-events: all;
 }
+/* WO-2947: the final-only diagnostic shares the legend surface and chip.
+   Keep its measured stack below the axis/legend and above playback. */
+.tp-legend-wrap.deviation-legend {
+  bottom: calc(4px + var(--sim-panel-h, 0px) + var(--sketch-prompt-h, 0px)) !important;
+  z-index: 20;
+  max-height: calc(100% - 140px - var(--sim-panel-h, 0px) - var(--sketch-prompt-h, 0px));
+  overflow-y: auto;
+  & > .tp-legend {
+    position: static;
+    box-sizing: border-box;
+    width: 302px;
+    margin-bottom: 6px;
+    display: grid;
+    gap: 8px;
+    color: var(--text-primary);
+  }
+  & input[type="number"] { width: 70px; }
+  & [aria-label="Deviation legend"] {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+}
 .tp-legend-chip {
   display: flex;
   align-items: center;
@@ -13730,6 +13768,15 @@ input.control-dro-machine:disabled {
    the nav and transport controls at their existing positions and sizes. */
 .control-page .control-next-action[data-operator-stop="true"] {
   white-space: normal;
+}
+
+/* WO-2885: the flex row cannot ellipsize its own text, so the sentence sits
+   in a box that can. A stop sentence (above) still wraps: it inherits. */
+.control-page .control-next-action-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: inherit;
 }
 
 .control-page .control-next-action[data-state="hold"],

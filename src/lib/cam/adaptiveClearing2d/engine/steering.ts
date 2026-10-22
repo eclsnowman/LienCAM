@@ -11,6 +11,8 @@
 // short history whose average seeds the next step's first guess (momentum) -- this is
 // what makes the path's curvature vary gradually instead of jittering.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import type { Pt, Loops } from './clipperEngine'
 import type { ToolGeometry } from './toolGeometry'
 import { rotate, normalize, add, scale } from './geom'
@@ -76,15 +78,15 @@ export interface Stepper {
 // A frontal bite cuts both flanks; polygon faceting also perturbs a symmetric
 // split. Treat 40/60 through 60/40 as mixed engagement (the WO-1227 diagnostic
 // deadband), and reject only a clearly dominant cut on the opposite flank.
-const MILLING_SIDE_DEADBAND = 0.2
+const MILLING_SIDE_DEADBAND = AP.steering.millingSideDeadband
 
 export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): Stepper {
-  const maxDeflection = opts.maxDeflection ?? Math.PI / 4
-  const maxIterations = opts.maxIterations ?? 12
-  const maxErrorRel = opts.maxErrorRel ?? 0.05
+  const maxDeflection = opts.maxDeflection ?? Math.PI / AP.steering.maxDeflectionDivisor
+  const maxIterations = opts.maxIterations ?? AP.steering.maxIterations
+  const maxErrorRel = opts.maxErrorRel ?? AP.steering.maxErrorRel
   const maxErrorAbs = opts.maxErrorAbs ?? 0
-  const historyLen = opts.historyLen ?? 10
-  const loadSetpoint = opts.loadSetpoint ?? 0.95
+  const historyLen = opts.historyLen ?? AP.steering.historyLen
+  const loadSetpoint = opts.loadSetpoint ?? AP.steering.loadSetpoint
 
   const interp: Interpolator = createInterpolator(maxDeflection)
   let history: number[] = []

@@ -19,3 +19,8 @@ src/tests/evidence/**/*.json text eol=lf
 tools/tests/fixtures/** text eol=lf
 # A CRLF checkout of a shebang .mjs fails vitest import on Windows (creditsCoverage.wo2334, 10-09)
 *.mjs text eol=lf
+# WO-2934 immutable project fixtures: hashes bind LF bytes on every platform.
+src/tests/fixtures/WO-2934/knob-handwheel-legacy.camproject text eol=lf
+src/tests/fixtures/WO-2934/relief-medallion-legacy.camproject text eol=lf
+# WO-2935: the owner-selected Full Suite is hash-bound (fc4a94b9...); LF bytes on every platform.
+"Example Projects/Full Suite.camproject" text eol=lf

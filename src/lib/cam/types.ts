@@ -1,5 +1,6 @@
 import type { HeightParams, PassParams, LinkingParams, Tool, ToolHolder, ToolpathMove, FeedrateOverride } from '../../types'
 import type { NestPart, NestStyle, Spacing, SolverMode, Placement } from './nesting/types'
+import type { PatternMachineLimits } from './pattern2d/types'
 
 export type { ToolpathMove }
 
@@ -653,6 +654,12 @@ export interface ChamferParams {
    *  'inner' offsets inward (inside profile / inside of a pocket wall).
    *  Falls back to 'outer' for any loop not in this map. */
   loopSides: Record<string, 'outer' | 'inner'>
+  /** WO-3021: a loop listed here is cut only over these arc-length intervals
+   *  [start, end] (mm along the loop's own point order from points[0]; end may
+   *  pass the loop's length and wrap), each as an open pass. A chamfer modeled
+   *  along part of a loop machines that part, never the loop's other edges.
+   *  Absent (every older op): every selected loop is cut all the way round. */
+  loopExtents?: Record<string, Array<[number, number]>>
   direction: 'climb' | 'conventional'
   /** Z depth of the chamfer cut below the reference face (mm). Equal to zDrop when tipOffset = 0. */
   chamferWidth: number
@@ -873,7 +880,7 @@ export type FaceBoundarySource = 'stock' | 'geometry' | 'rest'
 
 /** Fill pattern. 'linear' / 'zigzag' / 'one_way' = straight parallel passes;
  *  'offset' = concentric contour-parallel rings (closed loops + stepover links). */
-export type FacePattern = 'linear' | 'zigzag' | 'one_way' | 'offset'
+export type FacePattern = 'linear' | 'zigzag' | 'one_way' | 'offset' | 'spiral'
 
 /** How far the tool may cross the region boundary. 'outside' overruns fully
  *  (default for facing — ADR 0015 §2); 'center' stops the tool centre at the
@@ -1065,6 +1072,44 @@ export interface EngraveWorkerPayload extends HolderClearanceInputs {
   feedrateOverride?: FeedrateOverride
 }
 
+// ── Pattern (WO-3001, WO-2962 PLAN Phase B) ─────────────────────────────────
+//
+// A scripted decorative pattern: the operation carries a data-only PatternSpec
+// (src/lib/cam/pattern2d/types.ts) and the toolpath worker hands it to
+// buildPatternToolpath. Tool, heights, feeds and spindle come from the
+// operation exactly as for Face/Engrave. The region is optional: geometryId ''
+// means no region (the spec's anchor must then be 'wcs-origin' or a point).
+
+export type { PatternSpec, PatternWorkerPayload, PatternMachineLimits } from './pattern2d/types'
+
+export interface PatternParams {
+  /** Region source, as for every 2.5D family. '' = no region. */
+  geometryId: string
+  /** Closed loops of that geometry forming the region (even-odd); empty = every
+   *  closed loop of the source. Open loops are never a region. */
+  loopIds: string[]
+  /** The pattern itself, stored verbatim and validated by parsePatternSpec at
+   *  compute (a spec it cannot read is refused there, by name). */
+  spec: unknown
+}
+
+export interface PatternOperationWorkerPayload extends HolderClearanceInputs {
+  opId: string
+  setupId: string
+  params: PatternParams
+  heights: HeightParams
+  passes: PassParams
+  linking: LinkingParams
+  tool: Tool
+  loops: LoopData[]
+  wcsOrigin: { x: number; y: number; z: number }
+  feedrateOverride?: FeedrateOverride
+  /** The spindle speed the post will command, for the C7 note. */
+  spindleRpm?: number
+  /** Machine bounds the pattern is reported against (C6, C7). */
+  machine?: PatternMachineLimits
+}
+
 // ── V-Carve (WO-1174) ────────────────────────────────────────────────────────
 //
 // Variable-depth carving along the medial axis of closed outlines with a V-bit
@@ -1165,6 +1210,7 @@ export type WorkerRequestMsg =
   | { type: 'COMPUTE_ENGRAVE';             payload: EngraveWorkerPayload  }
   | { type: 'COMPUTE_VCARVE';              payload: VCarveWorkerPayload   }
   | { type: 'COMPUTE_ADAPTIVE_CLEARING';   payload: ACWorkerPayload       }
+  | { type: 'COMPUTE_PATTERN';             payload: PatternOperationWorkerPayload }
   | { type: 'COMPUTE_NEST';                payload: NestWorkerPayload     }
 
 export type WorkerResponseMsg =

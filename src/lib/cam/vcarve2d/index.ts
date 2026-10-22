@@ -31,8 +31,8 @@ import { rapidEntryAt, retractFrom } from '../moves'
 import { assertToolFluteReach } from '../toolFluteReach'
 import { toolHalfAngleRad } from '../geometry'
 import { buildPocketToolpath } from '../pocket2d'
-import { medialAxis, type AxisNode, type AxisPath, type Region } from './medialAxis'
-import { buildRegions, insetRegion, regionLoops, regionPerimeter, regionContains, treeToRegions } from './regions'
+import { medialAxis, type AxisNode, type AxisPath, type Pt, type Region } from './medialAxis'
+import { buildRegions, insetRegion, regionBounds, regionLoops, regionPerimeter, regionContains, treeToRegions } from './regions'
 import { differenceTree, offsetLoops, offsetTree, treeToOrientedLoops, type Loops } from './clipper'
 
 export { ensureVCarveClipperReady, vcarveClipperReady } from './clipper'
@@ -161,29 +161,349 @@ function trimShallower(run: Ridge3[], minDepth: number): Ridge3[][] {
   return out
 }
 
-/** Greedy nearest-end ordering of polylines, allowing reversal. */
-function orderRuns<T extends { x: number; y: number }>(runs: T[][]): T[][] {
-  if (runs.length <= 1) return runs
-  const remaining = runs.map(r => r)
-  const out: T[][] = []
-  let cur = remaining.shift()!
-  out.push(cur)
-  while (remaining.length) {
-    const end = cur[cur.length - 1]
-    let bi = 0, bd = Infinity, rev = false
-    for (let i = 0; i < remaining.length; i++) {
-      const r = remaining[i]
-      const a = r[0], b = r[r.length - 1]
-      const da = (a.x - end.x) ** 2 + (a.y - end.y) ** 2
-      const db = (b.x - end.x) ** 2 + (b.y - end.y) ** 2
-      if (da < bd) { bd = da; bi = i; rev = false }
-      if (db < bd) { bd = db; bi = i; rev = true }
+// Ridge runs that meet at a medial-axis junction share the junction node, so
+// their ends coincide exactly (same point, same depth); this tolerance only
+// absorbs float noise.
+const JOIN_EPS = 1e-6
+
+/** Join ridge runs into as few continuous cuts as possible. A run that starts
+ *  where the cut in hand ends (a medial-axis junction: same point, same depth)
+ *  is cut straight on with the tool down: the tool never leaves the groove.
+ *  Only when no run continues from the tip does the tool lift; it then goes to
+ *  the nearest free end, branch tips (odd remaining degree) first, so a
+ *  letter's strokes are cut tip to tip instead of junction-out in pieces.
+ *  Runs may be reversed. */
+function chainRuns(runs: Ridge3[][], from?: Pt): Ridge3[][] {
+  const key = (p: Ridge3) => `${Math.round(p.x / JOIN_EPS)},${Math.round(p.y / JOIN_EPS)}`
+  const same = (a: Ridge3, b: Ridge3) =>
+    Math.abs(a.x - b.x) <= JOIN_EPS && Math.abs(a.y - b.y) <= JOIN_EPS && Math.abs(a.d - b.d) <= JOIN_EPS
+  const ends = new Map<string, number[]>()
+  runs.forEach((run, i) => {
+    for (const p of [run[0], run[run.length - 1]]) {
+      const k = key(p)
+      const list = ends.get(k)
+      if (list) list.push(i)
+      else ends.set(k, [i])
     }
-    const next = remaining.splice(bi, 1)[0]
-    cur = rev ? [...next].reverse() : next
-    out.push(cur)
+  })
+  const used = runs.map(() => false)
+  // Free run ends left at a point (a closed run counts twice, as it should).
+  const degree = (p: Ridge3) => (ends.get(key(p)) ?? []).filter(i => !used[i]).length
+  const chains: Ridge3[][] = []
+  let pos = from
+  let left = runs.length
+  while (left > 0) {
+    let bi = -1, brev = false, bd = Infinity, bodd = false
+    for (let i = 0; i < runs.length; i++) {
+      if (used[i]) continue
+      const run = runs[i]
+      for (const rev of [false, true]) {
+        const p = rev ? run[run.length - 1] : run[0]
+        const odd = degree(p) % 2 === 1
+        const d = pos ? (p.x - pos.x) ** 2 + (p.y - pos.y) ** 2 : 0
+        if ((odd && !bodd) || (odd === bodd && d < bd)) { bi = i; brev = rev; bd = d; bodd = odd }
+      }
+    }
+    used[bi] = true
+    left--
+    const chain = brev ? [...runs[bi]].reverse() : [...runs[bi]]
+    // Walk on while a run continues from the tip, preferring one that does
+    // not end in a dead end so the walk runs through junctions.
+    for (;;) {
+      const tip = chain[chain.length - 1]
+      let next = -1, nextRev = false, nextDead = true
+      for (const i of ends.get(key(tip)) ?? []) {
+        if (used[i]) continue
+        const run = runs[i]
+        const rev = !same(run[0], tip)
+        if (rev && !same(run[run.length - 1], tip)) continue
+        const far = rev ? run[0] : run[run.length - 1]
+        const dead = degree(far) <= (same(far, tip) ? 2 : 1)
+        if (next < 0 || (nextDead && !dead)) { next = i; nextRev = rev; nextDead = dead }
+      }
+      if (next < 0) break
+      used[next] = true
+      left--
+      const run = nextRev ? [...runs[next]].reverse() : runs[next]
+      for (let k = 1; k < run.length; k++) chain.push(run[k])
+    }
+    chains.push(chain)
+    pos = chain[chain.length - 1]
+  }
+  return chains
+}
+
+function polylineLength(pts: readonly Pt[]): number {
+  let length = 0
+  for (let i = 1; i < pts.length; i++) length += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+  return length
+}
+
+/** Fold the ridge runs that touch a wall loop into that loop as out-and-back
+ *  excursions, so a corner's ridge (the V that runs from the flat floor's
+ *  corner up to the letter's sharp corner) is cut on the way round the wall
+ *  instead of as its own plunge with a lift either side.
+ *
+ *  A run qualifies when one of its points at this level's depth `c` lies
+ *  within `reach` of the loop (the wall at depth c sits exactly where the
+ *  inscribed radius gives depth c, so the ridge crosses the wall there). The
+ *  tool leaves the wall at the nearest loop point Q, cuts to that ridge point
+ *  S, out to each end of the run and back to S along the groove it has just
+ *  cut, then returns to Q. Every point of the excursion is a point the old
+ *  separate ridge pass cut at the same depth, so the carved result does not
+ *  change; the return legs only re-trace the groove. A run whose return legs
+ *  are longer than `maxReturn` keeps its own pass.
+ *
+ *  Returns the loop as one closed path from loop[0] back to loop[0], with
+ *  depth `c` on the wall points; marks the folded runs in `used`. */
+function foldRunsIntoWall(
+  loop: readonly Pt[], c: number, runs: readonly Ridge3[][], used: boolean[], reach: number, maxReturn: number,
+  legInside: (q: Pt, s: Pt) => boolean,
+): Ridge3[] {
+  const n = loop.length
+  const inserts: { seg: number; t: number; path: Ridge3[] }[] = []
+  for (let ri = 0; ri < runs.length; ri++) {
+    if (used[ri]) continue
+    const run = runs[ri]
+    let best = { dist: Infinity, s: -1, seg: -1, t: 0, q: { x: 0, y: 0 } }
+    for (let s = 0; s < run.length; s++) {
+      const p = run[s]
+      if (Math.abs(p.d - c) > JOIN_EPS) continue
+      for (let i = 0; i < n; i++) {
+        const a = loop[i], b = loop[(i + 1) % n]
+        const dx = b.x - a.x, dy = b.y - a.y
+        const l2 = dx * dx + dy * dy
+        let t = l2 > 0 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2 : 0
+        t = t < 0 ? 0 : t > 1 ? 1 : t
+        const q = { x: a.x + dx * t, y: a.y + dy * t }
+        const dist = Math.hypot(p.x - q.x, p.y - q.y)
+        if (dist < best.dist) best = { dist, s, seg: i, t, q }
+      }
+    }
+    // The leg from the wall to the ridge must stay on this level's floor: a
+    // ridge in a neighbouring floor (or across a counter) closer than
+    // `reach` belongs to another wall.
+    if (best.s < 0 || best.dist > reach || !legInside(best.q, run[best.s])) continue
+    const toStart = run.slice(0, best.s + 1).reverse()
+    const toEnd = run.slice(best.s)
+    if (polylineLength(toStart) + polylineLength(toEnd) > maxReturn) continue
+    const q: Ridge3 = { x: best.q.x, y: best.q.y, d: c }
+    const path: Ridge3[] = [q]
+    for (const leg of [toStart, toEnd]) {
+      if (leg.length < 2) continue
+      // Out along the leg from S and back to S.
+      for (const p of leg) path.push(p)
+      for (let k = leg.length - 2; k >= 0; k--) path.push(leg[k])
+    }
+    if (path.length === 1) path.push(run[best.s])
+    path.push(q)
+    inserts.push({ seg: best.seg, t: best.t, path })
+    used[ri] = true
+  }
+  inserts.sort((a, b) => a.seg - b.seg || a.t - b.t)
+  const out: Ridge3[] = [{ x: loop[0].x, y: loop[0].y, d: c }]
+  let k = 0
+  for (let i = 0; i < n; i++) {
+    while (k < inserts.length && inserts[k].seg === i) for (const p of inserts[k++].path) out.push(p)
+    const b = loop[(i + 1) % n]
+    out.push({ x: b.x, y: b.y, d: c })
   }
   return out
+}
+
+/** A closed loop restarted at its vertex nearest `pos`, so the link into it
+ *  is as short as it can be (where a closed loop starts changes nothing it
+ *  cuts). */
+function startNearest(loop: Pt[], pos: Pt | undefined): Pt[] {
+  if (!pos) return loop
+  let bi = 0, bd = Infinity
+  for (let i = 0; i < loop.length; i++) {
+    const d = (loop[i].x - pos.x) ** 2 + (loop[i].y - pos.y) ** 2
+    if (d < bd) { bd = d; bi = i }
+  }
+  return bi === 0 ? loop : [...loop.slice(bi), ...loop.slice(0, bi)]
+}
+
+/** Does the straight segment a-b lie inside the regions (sampled every
+ *  `step` mm)? A sample within `edgeTol` of a region's boundary counts as
+ *  inside: a floor's own edge is where its rings and core tips end. */
+function segmentInside(regions: readonly Region[], a: Pt, b: Pt, step: number, edgeTol = 0): boolean {
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  const steps = Math.max(2, Math.ceil(len / step))
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+    let inside = false
+    for (const r of regions) if (regionContains(r, p) || (edgeTol > 0 && nearBoundary(r, p, edgeTol))) { inside = true; break }
+    if (!inside) return false
+  }
+  return true
+}
+
+/** Sample spacing for a stay-down link test: fine enough that a link cannot
+ *  step over a sliver of standing material between two floors. */
+function linkSampleStep(stepover: number, tol: number): number {
+  return Math.min(stepover, 0.5, Math.max(4 * tol, 0.05))
+}
+
+function nearBoundary(region: Region, p: Pt, eps: number): boolean {
+  for (const loop of regionLoops(region)) {
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const l2 = dx * dx + dy * dy
+      let t = l2 > 0 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2 : 0
+      t = t < 0 ? 0 : t > 1 ? 1 : t
+      if (Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y) <= eps) return true
+    }
+  }
+  return false
+}
+
+/** Carry the tool to `p`, ready to plunge from Feed Height. The operation's
+ *  first entry comes down through Clearance; every later link between its
+ *  cuts rises only to Retract (the plane for moving between the cuts of one
+ *  operation), crosses there and drops to Feed Height. The builder makes the
+ *  final exit to Clearance. */
+function hopTo(moves: ToolpathMove[], p: Pt, feedZ: number, retractZ: number, clearanceZ: number): void {
+  const last = moves[moves.length - 1]
+  if (!last) {
+    rapidEntryAt(moves, p, feedZ, retractZ, clearanceZ)
+    return
+  }
+  if (last.z < retractZ) moves.push({ type: 'rapid', x: last.x, y: last.y, z: retractZ, role: 'rapid' })
+  moves.push({ type: 'rapid', x: p.x, y: p.y, z: Math.max(retractZ, last.z), role: 'rapid' })
+  moves.push({ type: 'rapid', x: p.x, y: p.y, z: feedZ, role: 'rapid' })
+}
+
+/** Carry the tool from where it stopped to `p` and plunge to `pz`.
+ *
+ *  Inside a letter the tool has already carved a groove around itself, so it
+ *  need not climb to Retract: no material can stand higher, at a point, than
+ *  the lowest cone surface any earlier cut of this letter left there (the
+ *  letter's cuts, indexed in `cuts`). The tool lifts to just
+ *  above that bound along the whole straight link (liftedLinkZ), feeds
+ *  across and plunges. The tip and its cone stay clear of every material
+ *  column, so the link cuts nothing and the carve is the one a hop leaves.
+ *  When the link would have to rise to Material Start (it crosses uncut
+ *  stock) the tool hops at Retract instead. */
+function linkTo(
+  moves: ToolpathMove[], cuts: CutIndex, p: Pt, pz: number, topZ: number, geom: VBitGeometry,
+  feedZ: number, retractZ: number, clearanceZ: number, feedRate: number, plungeRate: number,
+): void {
+  const last = moves[moves.length - 1]
+  // A long link is quicker as a rapid hop than at feed, so only short ones ride.
+  const short = last && Math.hypot(p.x - last.x, p.y - last.y) <= 4 * cuts.cell
+  const lift = short && last.type === 'feed' ? liftedLinkZ(moves, cuts, last, p, geom, topZ, Math.min(topZ, retractZ)) : Infinity
+  const across = Math.max(lift, last ? last.z : -Infinity, pz)
+  if (across < topZ && across < retractZ) {
+    if (across > last.z) moves.push({ type: 'feed', x: last.x, y: last.y, z: across, feed: feedRate, role: 'stepover' })
+    moves.push({ type: 'feed', x: p.x, y: p.y, z: across, feed: feedRate, role: 'stepover' })
+  } else {
+    hopTo(moves, p, feedZ, retractZ, clearanceZ)
+  }
+  moves.push({ type: 'feed', x: p.x, y: p.y, z: pz, feed: plungeRate, role: 'plunge' })
+}
+
+const LIFT_MARGIN = 0.05
+
+/** Carry the tool to a point and plunge it to a height there. */
+type Link = (p: Pt, pz: number) => void
+
+/** The feed moves of one letter, binned on a grid one bit reach wide, so a
+ *  link looks only at the cuts that can reach it. `upTo` is how far into the
+ *  move list the bins are filled; each bin holds indices k of moves whose
+ *  segment from k - 1 crosses it. */
+interface CutIndex { upTo: number; cell: number; bins: Map<number, number[]> }
+
+function cutIndex(from: number, geom: VBitGeometry): CutIndex {
+  return { upTo: from + 1, cell: Math.max(geom.tipRadius + geom.physicalMaxDepth * geom.tanHalf, 0.1), bins: new Map() }
+}
+
+// Bins are keyed by one number; a sign spans far fewer than a million bins.
+const binKey = (i: number, j: number) => i * 1_000_003 + j
+
+function indexCuts(moves: readonly ToolpathMove[], index: CutIndex): void {
+  const { cell, bins } = index
+  for (let k = Math.max(1, index.upTo); k < moves.length; k++) {
+    const c = moves[k], q = moves[k - 1]
+    if (c.type !== 'feed') continue
+    const i0 = Math.floor(Math.min(q.x, c.x) / cell), i1 = Math.floor(Math.max(q.x, c.x) / cell)
+    const j0 = Math.floor(Math.min(q.y, c.y) / cell), j1 = Math.floor(Math.max(q.y, c.y) / cell)
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const key = binKey(i, j)
+      const bin = bins.get(key)
+      if (bin) bin.push(k)
+      else bins.set(key, [k])
+    }
+  }
+  index.upTo = Math.max(index.upTo, moves.length)
+}
+
+/** The lowest height at which the tool can travel straight from `a` to `b`
+ *  without touching material, given only the cuts made so far (the letter's
+ *  moves, binned in `index`), plus `LIFT_MARGIN`.
+ *
+ *  A cut whose tip passed at height zc, d away from a point p of the link,
+ *  leaves no material higher than zc + (|q - c| - tipRadius) / tanHalf at any
+ *  column q. The link's tip at p, at height L, comes down to L + (|q - p| -
+ *  tipRadius) / tanHalf over q. With |q - c| <= d + |q - p|, the link clears
+ *  every column once L >= zc + d / tanHalf, the tip flat included; so the
+ *  link rides at the highest, along it, of the lowest such bound over the
+ *  cuts. The bound rises at most 1 / tanHalf per mm along the link, and the
+ *  samples are close enough that it rises less than half the margin between
+ *  them. A cut lowers nothing beyond the reach of the bit's cone, so a cut
+ *  bounds only what the link's cone (out to Material Start, `topZ`) can
+ *  reach from within it. Stops early, returning Infinity, once the link
+ *  would have to rise to `ceiling`. */
+function liftedLinkZ(
+  cuts: readonly ToolpathMove[], index: CutIndex, a: Pt, b: Pt, geom: VBitGeometry, topZ: number, ceiling: number,
+): number {
+  indexCuts(cuts, index)
+  const reach = geom.tipRadius + geom.physicalMaxDepth * geom.tanHalf
+  const cell = index.cell
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  const steps = Math.max(1, Math.ceil(len / Math.min(0.02, LIFT_MARGIN * geom.tanHalf)))
+  let worst = -Infinity
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t
+    let bound = Infinity
+    // The bins within reach of this point (a bin is at least reach wide).
+    const i0 = Math.floor((x - reach) / cell), i1 = Math.floor((x + reach) / cell)
+    const j0 = Math.floor((y - reach) / cell), j1 = Math.floor((y + reach) / cell)
+    for (let bi = i0; bi <= i1; bi++) for (let bj = j0; bj <= j1; bj++) for (const k of index.bins.get(binKey(bi, bj)) ?? []) {
+      const c = cuts[k]
+      const q = cuts[k - 1]
+      const dx = c.x - q.x, dy = c.y - q.y
+      const l2 = dx * dx + dy * dy
+      let u = l2 > 0 ? ((x - q.x) * dx + (y - q.y) * dy) / l2 : 0
+      u = u < 0 ? 0 : u > 1 ? 1 : u
+      const d = Math.hypot(q.x + dx * u - x, q.y + dy * u - y)
+      const zc = Math.max(q.z, c.z)
+      if (d + geom.tipRadius + (topZ - zc) * geom.tanHalf > reach) continue
+      const h = zc + d / geom.tanHalf
+      if (h < bound) bound = h
+    }
+    if (bound > worst) worst = bound
+    if (worst + LIFT_MARGIN >= ceiling) return Infinity
+  }
+  return worst + LIFT_MARGIN
+}
+
+/** The region (letter) nearest the tool, so the carve walks along the sign
+ *  instead of jumping across it. */
+function nearestRegion(regions: readonly Region[], pos: Pt | undefined): number {
+  if (!pos) return 0
+  let bi = 0, bd = Infinity
+  for (let i = 0; i < regions.length; i++) {
+    const b = regionBounds(regions[i])
+    const dx = Math.max(b.minX - pos.x, 0, pos.x - b.maxX)
+    const dy = Math.max(b.minY - pos.y, 0, pos.y - b.maxY)
+    const d = dx * dx + dy * dy
+    if (d < bd) { bd = d; bi = i }
+  }
+  return bi
 }
 
 /** Start a closed run at its shallowest point so the plunge is minimal. */
@@ -242,53 +562,18 @@ export function buildVCarveToolpath(
 
   const total = regions.length || 1
   let anyCut = false
-  regions.forEach((region, ri) => {
+  const pending = [...regions]
+  for (let ri = 0; pending.length; ri++) {
+    const region = pending.splice(nearestRegion(pending, moves[moves.length - 1]), 1)[0]
+    const cuts = cutIndex(moves.length, geom)
+    const link: Link = (p, pz) => linkTo(moves, cuts, p, pz, topZ, geom, feedZ, retractZ, clearanceZ, feedRate, plungeRate)
     const phase = total > 1 ? `V-carve region ${ri + 1}/${total}` : 'V-carve'
     onProgress?.(ri / total, phase)
 
     // Flat floors: where the region is wider than the bit reaches at maxDepth.
     const flats = insetRegion(region, rFlat, tol)
 
-    // 1 and 2. Floor clearing and the wall pass, one depth level at a time so a
-    // deep flat depth never starts with a full-depth plunge. At level c the
-    // final wall sits tipRadius + c * tan(half) inside the outline; the bit
-    // centred on that inset with its tip at depth c has its edge exactly on
-    // the wall, and everything inside it is floor to clear at that depth.
-    if (flats.length) {
-      const stepover = params.flatClearing.stepoverMm > 0 ? params.flatClearing.stepoverMm : Math.max(geom.tipRadius * 2, 0.5)
-      for (const c of clampLevels) {
-        const z = topZ - c
-        const rLevel = geom.tipRadius + c * geom.tanHalf
-        const levelFlats = c >= maxDepth - 1e-9 ? flats : insetRegion(region, rLevel, tol)
-        if (params.flatClearing.mode !== 'none') {
-          let floorLoops: Loops = levelFlats.flatMap(regionLoops)
-          if (params.flatClearing.mode === 'tool') {
-            const re = (params.flatClearing.clearingToolDiameter ?? 0) / 2
-            if (re > 0) {
-              // What the end mill can reach: erode then dilate by its radius.
-              const reach = offsetLoops(offsetLoops(floorLoops, -re, tol), re, tol)
-              floorLoops = treeToOrientedLoops(differenceTree(floorLoops, reach))
-            }
-          }
-          if (floorLoops.length) {
-            anyCut = emitFloorRings(moves, floorLoops, stepover, tol, z, feedZ, retractZ, clearanceZ, feedRate, plungeRate) || anyCut
-          }
-        }
-        for (const flat of levelFlats) {
-          for (const loop of regionLoops(flat)) {
-            if (loop.length < 3) continue
-            rapidEntryAt(moves, loop[0], feedZ, retractZ, clearanceZ)
-            moves.push({ type: 'feed', x: loop[0].x, y: loop[0].y, z, feed: plungeRate, role: 'plunge' })
-            for (let i = 1; i < loop.length; i++) moves.push({ type: 'feed', x: loop[i].x, y: loop[i].y, z, feed: feedRate, role: 'cut' })
-            moves.push({ type: 'feed', x: loop[0].x, y: loop[0].y, z, feed: feedRate, role: 'cut' })
-            retractFrom(moves, retractZ, clearanceZ)
-            anyCut = true
-          }
-        }
-      }
-    }
-
-    // 3. Ridge passes along the medial axis.
+    // Ridge runs along the medial axis.
     const spacing = sampleSpacing(region, tol)
     const paths = medialAxis(region, { spacing })
     const runs: Ridge3[][] = []
@@ -311,42 +596,96 @@ export function buildVCarveToolpath(
         else runs.push(run)
       }
     }
-    if (!runs.length && !closedRuns.length) return
 
+    // One depth level at a time, so a deep flat depth never starts with a
+    // full-depth plunge: the floor, then the wall with the ridges that meet
+    // it folded in, then whatever ridge is left, chained through junctions.
+    // At level c the final wall sits tipRadius + c * tan(half) inside the
+    // outline; the bit centred on that inset with its tip at depth c has its
+    // edge exactly on the wall, and everything inside it is floor to clear at
+    // that depth.
+    const stepover = params.flatClearing.stepoverMm > 0 ? params.flatClearing.stepoverMm : Math.max(geom.tipRadius * 2, 0.5)
     for (let li = 0; li < clampLevels.length; li++) {
-      const clamp = clampLevels[li]
+      const c = clampLevels[li]
+      const z = topZ - c
       const minDepth = li === 0 ? 0 : clampLevels[li - 1]
       const passRuns: Ridge3[][] = []
       for (const run of runs) {
-        for (const piece of trimShallower(run, minDepth)) passRuns.push(piece.map(p => ({ ...p, d: Math.min(p.d, clamp) })))
+        for (const piece of trimShallower(run, minDepth)) passRuns.push(piece.map(p => ({ ...p, d: Math.min(p.d, c) })))
       }
       for (const run of closedRuns) {
-        const clamped = run.map(p => ({ ...p, d: Math.min(p.d, clamp) }))
+        const clamped = run.map(p => ({ ...p, d: Math.min(p.d, c) }))
         if (minDepth > 0 && run.some(p => p.d <= minDepth)) {
           const pieces = trimShallower([...run, run[0]], minDepth)
-          for (const piece of pieces) passRuns.push(piece.map(p => ({ ...p, d: Math.min(p.d, clamp) })))
+          for (const piece of pieces) passRuns.push(piece.map(p => ({ ...p, d: Math.min(p.d, c) })))
         } else {
           const rotated = rotateToShallowest(clamped)
           passRuns.push([...rotated, rotated[0]])
         }
       }
-      for (const run of orderRuns(passRuns)) {
-        if (run.length < 2) continue
+      const cutRuns = passRuns.filter(run => {
+        if (run.length < 2) return false
         // A zero-length run (two junction nodes at one point) cuts nothing.
-        let length = 0
-        for (let i = 1; i < run.length; i++) length += Math.hypot(run[i].x - run[i - 1].x, run[i].y - run[i - 1].y)
-        if (length < 1e-6 && run.every(p => Math.abs(p.d - run[0].d) < 1e-9)) continue
-        emitRidge(moves, run, topZ, feedZ, retractZ, clearanceZ, feedRate, plungeRate)
+        return !(polylineLength(run) < 1e-6 && run.every(p => Math.abs(p.d - run[0].d) < 1e-9))
+      })
+      const folded = cutRuns.map(() => false)
+
+      if (flats.length) {
+        const levelFlats = c >= maxDepth - 1e-9 ? flats : insetRegion(region, geom.tipRadius + c * geom.tanHalf, tol)
+        // The V-bit has just cleared this level's floor, so the tool may
+        // stay down where the floor's last ring meets the wall.
+        const floorCleared = params.flatClearing.mode === 'vbit'
+        if (params.flatClearing.mode !== 'none') {
+          let floorLoops: Loops = levelFlats.flatMap(regionLoops)
+          if (params.flatClearing.mode === 'tool') {
+            const re = (params.flatClearing.clearingToolDiameter ?? 0) / 2
+            if (re > 0) {
+              // What the end mill can reach: erode then dilate by its radius.
+              const reach = offsetLoops(offsetLoops(floorLoops, -re, tol), re, tol)
+              floorLoops = treeToOrientedLoops(differenceTree(floorLoops, reach))
+            }
+          }
+          if (floorLoops.length) {
+            anyCut = emitFloorRings(moves, floorLoops, stepover, tol, z, feedRate, link) || anyCut
+          }
+        }
+        for (const flat of levelFlats) {
+          for (const wall of regionLoops(flat)) {
+            if (wall.length < 3) continue
+            const loop = startNearest(wall, moves[moves.length - 1])
+            const path = foldRunsIntoWall(loop, c, cutRuns, folded, Math.max(2 * spacing, 4 * tol), 2 * Math.max(0, retractZ - z),
+              (q, p) => segmentInside(levelFlats, q, p, linkSampleStep(stepover, tol), tol))
+            const start = path[0]
+            const last = moves[moves.length - 1]
+            // The floor's outermost ring is this wall loop, so when the floor
+            // ended where the wall starts the tool stays down. Any longer
+            // link at depth would cut floor scallops the carve has never cut.
+            const onFloor = floorCleared && last && last.type === 'feed' && Math.abs(last.z - z) < 1e-9 &&
+              Math.hypot(last.x - start.x, last.y - start.y) <= tol
+            if (onFloor) {
+              moves.push({ type: 'feed', x: start.x, y: start.y, z, feed: feedRate, role: 'stepover' })
+            } else {
+              link(start, z)
+            }
+            for (let i = 1; i < path.length; i++) moves.push({ type: 'feed', x: path[i].x, y: path[i].y, z: topZ - path[i].d, feed: feedRate, role: 'cut' })
+            anyCut = true
+          }
+        }
+      }
+
+      for (const chain of chainRuns(cutRuns.filter((_, i) => !folded[i]), moves[moves.length - 1])) {
+        emitRidge(moves, chain, topZ, feedRate, link)
         anyCut = true
       }
     }
-  })
+  }
 
   if (!anyCut) {
     throw new Error(
       `V-carve: tool "${tool.name}" cannot enter the selected outlines anywhere - every part of the drawing is narrower than its ${(geom.tipRadius * 2).toFixed(2)} mm tip flat. Choose a sharper bit or a larger design.`,
     )
   }
+  retractFrom(moves, retractZ, clearanceZ)
   onProgress?.(1)
   return moves
 }
@@ -360,18 +699,13 @@ function sampleSpacing(region: Region, tol: number): number {
   return Math.max(byTol, byBudget)
 }
 
-function emitRidge(
-  moves: ToolpathMove[], run: Ridge3[], topZ: number,
-  feedZ: number, retractZ: number, clearanceZ: number, feedRate: number, plungeRate: number,
-): void {
+function emitRidge(moves: ToolpathMove[], run: Ridge3[], topZ: number, feedRate: number, link: Link): void {
   const start = run[0]
-  rapidEntryAt(moves, start, feedZ, retractZ, clearanceZ)
-  moves.push({ type: 'feed', x: start.x, y: start.y, z: topZ - start.d, feed: plungeRate, role: 'plunge' })
+  link(start, topZ - start.d)
   for (let i = 1; i < run.length; i++) {
     const p = run[i]
     moves.push({ type: 'feed', x: p.x, y: p.y, z: topZ - p.d, feed: feedRate, role: 'cut' })
   }
-  retractFrom(moves, retractZ, clearanceZ)
 }
 
 /** Concentric inside-out ring fill of floor polygons at one depth, plus one
@@ -380,8 +714,7 @@ function emitRidge(
  *  boundary itself (the wall pass repeats it as a finish). Every point of the
  *  floor ends up within half a stepover of a cut. */
 function emitFloorRings(
-  moves: ToolpathMove[], floor: Loops, stepover: number, tol: number, z: number,
-  feedZ: number, retractZ: number, clearanceZ: number, feedRate: number, plungeRate: number,
+  moves: ToolpathMove[], floor: Loops, stepover: number, tol: number, z: number, feedRate: number, link: Link,
 ): boolean {
   // Rings from the boundary inward until the offset vanishes.
   const rings: Region[][] = []
@@ -395,59 +728,84 @@ function emitFloorRings(
 
   // A stay-down link between two loops is only allowed when the straight
   // line between them lies inside the floor itself: crossing a standing
-  // island (a letter in a carved field) at depth would gouge it.
+  // island (a letter in a carved field) at depth would gouge it. The rings,
+  // the core and every stay-down link are exactly the ones the carve has
+  // always had (a stay-down link also cuts, so changing which loops are
+  // joined at depth would change the carved floor); only the links that
+  // leave the floor ride over the carved groove (linkTo) instead of rising
+  // to Clearance.
   const floorRegions = rings[0]
-  const linkStaysOnFloor = (a: { x: number; y: number }, b: { x: number; y: number }): boolean => {
-    const len = Math.hypot(b.x - a.x, b.y - a.y)
-    const steps = Math.max(2, Math.ceil(len / Math.min(stepover, 0.5)))
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps
-      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
-      let inside = false
-      for (const r of floorRegions) if (regionContains(r, p)) { inside = true; break }
-      if (!inside) return false
-    }
-    return true
-  }
-  let cut = false
-  const enter = (p: { x: number; y: number }) => {
-    const last = moves[moves.length - 1]
-    const atDepth = last && last.type === 'feed' && Math.abs(last.z - z) < 1e-9 && linkStaysOnFloor(last, p)
-    if (!atDepth) {
-      if (last && last.type === 'feed') retractFrom(moves, retractZ, clearanceZ)
-      rapidEntryAt(moves, p, feedZ, retractZ, clearanceZ)
-      moves.push({ type: 'feed', x: p.x, y: p.y, z, feed: plungeRate, role: 'plunge' })
-    } else {
-      moves.push({ type: 'feed', x: p.x, y: p.y, z, feed: feedRate, role: 'stepover' })
-    }
-  }
-
-  // Core pass: the medial axis of the innermost ring's interior.
+  const linkStaysOnFloor = (a: { x: number; y: number }, b: { x: number; y: number }): boolean =>
+    segmentInside(floorRegions, a, b, Math.min(stepover, 0.5))
+  // The cuts in the carve's own order: the core pass (the medial axis of the
+  // innermost ring's interior), then the rings inside out, each ring cutting
+  // on its outer side only. Each cut belongs to the ring region it came from.
+  const pieces: { pts: Pt[]; node: Region }[] = []
   for (const core of rings[rings.length - 1]) {
     const spacing = Math.max(Math.max(0.05, Math.min(stepover / 4, 0.5)), regionPerimeter(core) / 60_000)
     for (const path of medialAxis(core, { spacing })) {
       const pts = path.closed && path.points.length > 1 ? [...path.points, path.points[0]] : path.points
-      if (pts.length === 0) continue
-      enter(pts[0])
-      for (let i = 1; i < pts.length; i++) moves.push({ type: 'feed', x: pts[i].x, y: pts[i].y, z, feed: feedRate, role: 'cut' })
-      cut = true
+      if (pts.length) pieces.push({ pts, node: core })
     }
   }
-
-  // Inside-out rings: each ring cuts on its outer side only.
   for (let k = rings.length - 1; k >= 0; k--) {
     for (const region of rings[k]) {
       for (const loop of regionLoops(region)) {
-        if (loop.length < 3) continue
-        enter(loop[0])
-        for (let i = 1; i < loop.length; i++) moves.push({ type: 'feed', x: loop[i].x, y: loop[i].y, z, feed: feedRate, role: 'cut' })
-        moves.push({ type: 'feed', x: loop[0].x, y: loop[0].y, z, feed: feedRate, role: 'cut' })
-        cut = true
+        if (loop.length >= 3) pieces.push({ pts: [...loop, loop[0]], node: region })
       }
     }
   }
-  if (cut) retractFrom(moves, retractZ, clearanceZ)
-  return cut
+  if (!pieces.length) return false
+
+  // A run is the cuts joined by stay-down links: each link goes on to the
+  // next cut in that order at depth, so it also cuts, and the runs are kept
+  // exactly as they are. Only where the carve lifts between runs does the
+  // order change: a ring region's runs follow everything inside it, and the
+  // regions inside it are finished one at a time, nearest first, so where a
+  // floor narrows into two lobes the tool does not shuttle between the lobes
+  // ring by ring.
+  const runs = new Map<Region, Pt[][][]>()
+  let prev: Pt[] | undefined
+  let lastRun: Pt[][] = []
+  for (const piece of pieces) {
+    const own = runs.get(piece.node) ?? []
+    runs.set(piece.node, own)
+    const run = prev && linkStaysOnFloor(prev[prev.length - 1], piece.pts[0]) ? lastRun : undefined
+    if (run) run.push(piece.pts)
+    else own.push(lastRun = [piece.pts])
+    prev = piece.pts
+  }
+  const children = new Map<Region, Region[]>()
+  for (let k = 1; k < rings.length; k++) {
+    for (const r of rings[k]) {
+      const parent = rings[k - 1].find(f => regionContains(f, r.outer[0])) ?? rings[k - 1][nearestRegion(rings[k - 1], r.outer[0])]
+      children.set(parent, [...(children.get(parent) ?? []), r])
+    }
+  }
+  const emit = (node: Region) => {
+    const inner = [...(children.get(node) ?? [])]
+    while (inner.length) emit(inner.splice(nearestRegion(inner, moves[moves.length - 1]), 1)[0])
+    // The region's own runs (its core's branches, its outline and its
+    // holes) nearest first too.
+    const own = [...(runs.get(node) ?? [])]
+    while (own.length) {
+      const at = moves[moves.length - 1]
+      let bi = 0, bd = Infinity
+      own.forEach((run, i) => {
+        const d = at ? Math.hypot(run[0][0].x - at.x, run[0][0].y - at.y) : 0
+        if (d < bd) { bd = d; bi = i }
+      })
+      const run = own.splice(bi, 1)[0]
+      run.forEach((pts, i) => {
+        if (i === 0) link(pts[0], z)
+        else moves.push({ type: 'feed', x: pts[0].x, y: pts[0].y, z, feed: feedRate, role: 'stepover' })
+        for (let j = 1; j < pts.length; j++) moves.push({ type: 'feed', x: pts[j].x, y: pts[j].y, z, feed: feedRate, role: 'cut' })
+      })
+    }
+  }
+  const roots = [...floorRegions]
+  while (roots.length) emit(roots.splice(nearestRegion(roots, moves[moves.length - 1]), 1)[0])
+  return true
 }
 
 // ---------------------------------------------------------------------------

@@ -66,7 +66,7 @@ import {
   type SpindleRotation,
 } from '../rough/millingDirection';
 import { smoothAdaptiveIr } from '../rough/smoothPath';
-import { planWallCleanup } from '../rough/wallCleanup';
+import { planWallCleanup, simplifyClosedRing } from '../rough/wallCleanup';
 import { orderAdaptiveComponents } from '../rough/orderComponents';
 import {
   scheduleAdaptiveDepthBranches,
@@ -804,6 +804,19 @@ export function adaptiveRoughCompletionError(
 }
 
 /**
+ * WO-3027 switch (WO-3019 item 6, Mission Control card B). OFF: the wall cleanup
+ * rings are the cell-edge trace of the wall-contact field, a 0.06 mm X/Y
+ * staircase on a round wall. ON: each ring's crossings are located on the model
+ * with the same probe the field was built with (modelPartSection, as the
+ * terrace section does), then simplified within a tenth of the tolerance, so a
+ * round wall is finished as a smooth ring of fewer, longer moves. Default OFF
+ * until the operator approves the before/after; turning it on is this one line.
+ */
+export const ADAPTIVE_WALL_FINISH_POLICY: { smoothWallRings: boolean } = {
+  smoothWallRings: false,
+};
+
+/**
  * Per-Z-level 3D adaptive rougher. Returns one deterministic ToolpathIR program;
  * throws (AbortError) rather than returning a partial IR if cancelled (ADR-0003).
  */
@@ -825,6 +838,8 @@ interface AdaptiveRoughOpts {
    * with or without a pool.
    */
   plannerPool?: AdaptivePlannerPool;
+  /** WO-3027: overrides ADAPTIVE_WALL_FINISH_POLICY.smoothWallRings for this call. */
+  smoothWallRings?: boolean;
 }
 
 interface InternalAdaptiveRoughOpts extends AdaptiveRoughOpts {
@@ -1183,12 +1198,13 @@ export async function adaptiveRough(
     Math.max(tolerance, cutter.diameter / 192),
   );
   reportProgress(0.18, 'Building wall-contact field', 0);
+  const wallContactProbe: CutterSpec = {
+    ...cutter,
+    diameter: cutter.diameter + wallContactFrame.cell * Math.SQRT2 + tolerance,
+  };
   const wallContactPart = singleWallPass ? undefined : await buildPartHeightField(kernel, input.mesh, wallContactFrame, {
     zSeed: stockBounds.minZ - 1,
-    probe: {
-      ...cutter,
-      diameter: cutter.diameter + wallContactFrame.cell * Math.SQRT2 + tolerance,
-    },
+    probe: wallContactProbe,
     ...(signal !== undefined ? { signal } : {}),
     onProgress: (fraction) => reportProgress(
       0.18 + 0.08 * fraction,
@@ -1326,7 +1342,40 @@ export async function adaptiveRough(
     }
     return best;
   };
-  const contactContoursAt = (z: number, verticalOnly: boolean): Ring[] => {
+  const smoothWallRings = opts?.smoothWallRings ?? ADAPTIVE_WALL_FINISH_POLICY.smoothWallRings;
+  let wallRingsFromModel = 0;
+  let wallRingsTraced = 0;
+  // WO-3027: the traced rings' crossings located on the model with the field's
+  // own probe, so each ring loses the cell staircase. Undefined keeps the traced
+  // rings: a level whose located topology differs from the trace, or that did
+  // not converge.
+  const modelLocatedWallRings = async (
+    z: number,
+    traced: readonly Ring[],
+    keep: (ring: Ring) => boolean,
+  ): Promise<Ring[] | undefined> => {
+    let located: Ring[];
+    try {
+      located = await modelPartSection(kernel, input.mesh, wallContactPart!, wallContactProbe, z,
+        Math.max(tolerance * 0.05, 1e-4), signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      if (error instanceof Error && /did not converge/.test(error.message)) return undefined;
+      throw error;
+    }
+    // The field's probe is wider than the cutter by the cell diagonal plus the
+    // tolerance; the diagonal only covered sampling the wall on cells. With the
+    // crossings located on the model it is not needed, so give it back: the
+    // ring keeps the tolerance / 2 margin, the traced staircase's own closest
+    // approach. Eroding a dilation can only keep it at or beyond that margin.
+    located = offset(located.filter(keep), -wallContactFrame.cell * Math.SQRT2 / 2, { joinType: 'round' })
+      .filter(keep);
+    const signs = (rings: readonly Ring[]): string =>
+      rings.map(ring => (area(ring) > 0 ? '+' : '-')).sort().join('');
+    if (located.length !== traced.length || signs(located) !== signs(traced)) return undefined;
+    return located.map(ring => simplifyClosedRing(ring, Math.max(tolerance * 0.1, 1e-4)));
+  };
+  const contactContoursAt = async (z: number, verticalOnly: boolean): Promise<Ring[]> => {
     // The adaptive planner now owns this band at its final offset. A second
     // independent model-contact lap would duplicate that cutting responsibility.
     if (!wallContactPart) return [];
@@ -1368,12 +1417,21 @@ export async function adaptiveRough(
     }
     contours = kept;
     if (contours.length === 0) return [];
+    if (smoothWallRings) {
+      const located = await modelLocatedWallRings(z, contours, (ring) => !touchesFrameEdge(ring));
+      if (located) {
+        contours = located;
+        wallRingsFromModel += located.length;
+      } else {
+        wallRingsTraced += contours.length;
+      }
+    }
     if (radialStockToLeave > 0) {
       contours = offset(contours, radialStockToLeave, { joinType: 'round' });
     }
     return contours;
   };
-  const wallContoursAt = (z: number): Ring[] => contactContoursAt(z, true);
+  const wallContoursAt = (z: number): Promise<Ring[]> => contactContoursAt(z, true);
   const terraceContoursAt = async (z: number): Promise<Ring[]> => {
     if (input.boundary !== undefined && input.boundary.length > 0) return [];
     const exactPartSection = !hasPocketOuterWall && partSectionNeedsModelLocation(retainedSafetyPart, z)
@@ -1757,7 +1815,7 @@ export async function adaptiveRough(
       }
     }
 
-    for (const contour of wallContoursAt(z)) {
+    for (const contour of await wallContoursAt(z)) {
       let owner = 0;
       let bestDistance = Infinity;
       for (let pi = 0; pi < componentPlans.length; pi++) {
@@ -2490,6 +2548,7 @@ export async function adaptiveRough(
         cellSize,
         floorZ,
         levelCount: levels.length,
+        ...(smoothWallRings ? { wallRingsFromModel, wallRingsTraced } : {}),
         ...(input.intermediateStepdown === true
           ? {
               intermediateStepdown: true,

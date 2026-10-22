@@ -198,6 +198,32 @@ for (const key of [
   'components/model3d/dialogs/ShellDialog.tsx:ShellDialog > span.fillet-command-status.fillet-command-status--error#2',
   'components/model3d/dialogs/ShellDialog.tsx:ShellDialog > span.fillet-command-status.fillet-command-status--error#3',
 ]) EXTRA_SURFACE_DISPOSITIONS[key] = { verdict: 'COHESIVE', reason: SHELL_REFUSAL_LINE }
+// WO-3056: surfaces that landed with the drawing editor (WO-2994 / WO-3006) and the deviation
+// panel (WO-2947) after the WO-2882 count sync. Each adjudicated from the authoring site and its CSS rule.
+EXTRA_SURFACE_DISPOSITIONS['components/model3d/drawing/DrawingEditor.tsx:DrawingSheetEditor > button.is-active'] = {
+  verdict: 'COHESIVE',
+  reason: 'Drawing editor tool button (Select, dimension and balloon tools); className is is-active or undefined, so the static walk marks it indeterminate. The look is .drawing-editor-tools button and button.is-active (drawing.css:258/270): --bg-input, --border-light, --text-primary, --hit-target-min, --font-size-sm, and --bg-active / --text-accent when active. In flow in the tool row, no position, no raw hex.',
+}
+EXTRA_SURFACE_DISPOSITIONS['components/model3d/drawing/DrawingEditor.tsx:DrawingSheetEditor > span.drawing-dim-chip.is-.updating'] = {
+  verdict: 'COHESIVE',
+  reason: 'Dimension list state chip (current / updating / lost); the is-<state> suffix is a template literal, so the walk marks it indeterminate. The look is .drawing-dim-chip and .drawing-dim-chip:not(.is-current) (drawing.css:399/404): --text-secondary, and --accent-orange while not current. In-flow span, no position, no raw hex.',
+}
+EXTRA_SURFACE_DISPOSITIONS['components/model3d/drawing/DrawingEditor.tsx:DimensionPanel > div.drawing-panel-status.is-.updating'] = {
+  verdict: 'COHESIVE',
+  reason: 'Dimension side-panel status line; is-<state> is a template literal, so the walk marks it indeterminate. The look is .drawing-panel-status and :not(.is-current) (drawing.css:377/381): --text-secondary, then --text-primary on a color-mix of --accent-orange into --bg-panel while not current. In flow, no position, no raw hex.',
+}
+EXTRA_SURFACE_DISPOSITIONS['components/model3d/drawing/DrawingEditor.tsx:SheetView > g.is-selected'] = {
+  verdict: 'RESTYLE-NEEDED',
+  reason: 'Drawing view group on the sheet (svg g), class is-selected or undefined. Drifts from the standard: the selected detail border is stroked with raw hex #1060d0 (drawing.css:508, g.is-selected > .drawing-detail-border) where an accent token belongs. Functional and scoped to the sheet. BOOKED, not edited (WO-3056 is census-only, no product change).',
+}
+EXTRA_SURFACE_DISPOSITIONS['components/simulation/DeviationPanel.tsx:DeviationPanel > section.deviation-legend.tp-legend-wrap'] = {
+  verdict: 'COHESIVE',
+  reason: 'Final-part deviation panel host: reuses the already-COHESIVE .tp-legend-wrap legend host (app.css:7840) with data-ui78-sanctioned; .tp-legend-wrap.deviation-legend (app.css:7849) only re-places it in the bottom-right stack (bottom, max-height, overflow, grid layout). The component style tag only offsets the axis legend and toolpath legend bottoms by --deviation-panel-h. No colour of its own, no raw hex.',
+}
+EXTRA_SURFACE_DISPOSITIONS['components/simulation/DeviationPanel.tsx:DeviationPanel > div.tp-legend'] = {
+  verdict: 'RESTYLE-NEEDED',
+  reason: 'Deviation panel body: the shared .tp-legend surface (app.css:7897: --surface-viewport-legend, --overlay-white-3, --font-size-sm; made static and --text-primary under .deviation-legend). Drifts from the standard: its five legend swatches take an inline background from DEVIATION_COLORS (lib/viewport/deviationOverlay.ts:5), raw hex shared with the 3D deviation mesh, instead of tokens.css names. BOOKED, not edited (WO-3056 is census-only, no product change).',
+}
 const SURFACE_DISPOSITIONS = { ...COMMITTED_SURFACE_DISPOSITIONS, ...EXTRA_SURFACE_DISPOSITIONS }
 const JOG_PLATE_UNRENDERED = "WO-2063 Probing screen v2 mounts the shared JogPanel in the probing tab; this positioned class is part of the Jog panel's own wedge cluster (JogPanel.tsx), absolute within that cluster in the right column - out of the viewport domain by design, same as control-jog-wedge, so no censused surface claims it."
 const UNRENDERED_CLASSES: Record<string, string> = {
@@ -487,8 +513,8 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
         // 73 -> 74 (WO-1586): Seat in vise's re-hosted command strip, COHESIVE
         // (same sanctioned sketch-confirm-overlay family as Fillet/Chamfer/Shell).
         // WO-2784 RE-PIN 80 -> 83: WO-2748 preview connector svg, WO-2616 pattern-editor scrim + form.
-        COHESIVE: 87, // WO-2882: +3 WO-2865 Shell refusal lines. // WO-2838: +1 WO-2804 MoveHoleEntry. // WO-2651 adds the line menu and its shared transparent dismissal scrim. // 77 -> 78 WO-2431: intended-stock eye button (class-based scan of the folded-strip rule). // WO-2305 independent reference-image editor (+1); 75 -> 77 WO-2458: intended-stock line + badge.
-        'RESTYLE-NEEDED': 12, // 11 -> 12 WO-2458: ReferenceImagePlacement corner handle (booked).
+        COHESIVE: 91, // WO-3056: +3 drawing editor surfaces, +1 deviation panel host. // WO-2882: +3 WO-2865 Shell refusal lines. // WO-2838: +1 WO-2804 MoveHoleEntry. // WO-2651 adds the line menu and its shared transparent dismissal scrim. // 77 -> 78 WO-2431: intended-stock eye button (class-based scan of the folded-strip rule). // WO-2305 independent reference-image editor (+1); 75 -> 77 WO-2458: intended-stock line + badge.
+        'RESTYLE-NEEDED': 14, // 12 -> 14 WO-3056: drawing view selected border (raw hex), deviation legend swatches (raw hex), both booked. // 11 -> 12 WO-2458: ReferenceImagePlacement corner handle (booked).
         // 4 -> 11 (WO-1088 census catch-up): WO-1062 added seven in-flow
         // feed-summary layout wrappers that paint no floating surface.
         STRUCTURAL: 12, // 11 -> 12 WO-2458: ReferenceImagePlacement portal wrapper.
@@ -614,8 +640,10 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
       // (WO-2616, COHESIVE); the Help and project-picker backdrops were re-keyed, not added. Each above.
       // WO-2838: WO-2804 adds the MoveHoleEntry authoring site (STEP/STL share it).
       // WO-2882 RE-PIN 152 -> 155: WO-2865's three Shell refusal lines, COHESIVE above.
-      expect(domain.length, 'overlay census derives 155 in-viewport surfaces').toBe(155)
-      expect(Object.keys(SURFACE_DISPOSITIONS).length, 'one disposition per in-viewport surface, exactly').toBe(155)
+      // WO-3056 RE-PIN 155 -> 161: four drawing editor surfaces (WO-2994/WO-3006) and the two deviation
+      // panel surfaces (WO-2947), each dispositioned above.
+      expect(domain.length, 'overlay census derives 161 in-viewport surfaces').toBe(161)
+      expect(Object.keys(SURFACE_DISPOSITIONS).length, 'one disposition per in-viewport surface, exactly').toBe(161)
       // MERGE-SEAM NOTE (main 52ec79e9): 117 -> 119. Both new surfaces are the
       // UI-73 "restore floating tabs" portal-target divs in App.tsx (line 93,
       // FloatingModeTabs's own fallback; line 208, CamApp's Part-workspace

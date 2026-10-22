@@ -189,6 +189,11 @@ function comment(text: string, config: PostConfig): string {
   return config.capabilities.comment === 'semicolon' ? `; ${safe}` : `( ${safe} )`
 }
 
+/** WO-2870: the one line an operation with nothing left to cut posts. */
+export function nothingToCutLine(name: string, config: PostConfig): string {
+  return comment(`${name}: nothing left to cut`, config)
+}
+
 // --- operator stop helpers (WO-2437) -----------------------------------------
 
 /** The stop's message as the post writes it: LinuxCNC's `(MSG,...)` when the
@@ -497,6 +502,17 @@ function emitSetupSection(
     actionsBefore.set(key, [...(actionsBefore.get(key) ?? []), action])
   }
   const stoppedBefore = new Set<string>()
+  // WO-2870: operations with nothing left to cut post one line each, no
+  // motion, before the operation they precede (null = after the last). The
+  // line belongs to no operation's span.
+  const nothingToCutBefore = new Map<string | null, string[]>()
+  for (const entry of input.setup.nothingToCut ?? []) {
+    const key = entry.beforeOpId !== null && emittedOpIds.has(entry.beforeOpId) ? entry.beforeOpId : null
+    nothingToCutBefore.set(key, [...(nothingToCutBefore.get(key) ?? []), entry.name])
+  }
+  const emitNothingToCut = (names: string[] | undefined) => {
+    for (const name of names ?? []) push(nothingToCutLine(name, config))
+  }
   // Retract, stop the spindle (and accessories), park, say the message, halt.
   // The program then carries on as after a pause: the next operation restarts
   // the spindle and lifts Z alone before any XY travel, since the park leaves
@@ -608,6 +624,7 @@ function emitSetupSection(
     // Its lines belong to neither operation's span.
     if (!stoppedBefore.has(section.op.op.id)) {
       stoppedBefore.add(section.op.op.id)
+      emitNothingToCut(nothingToCutBefore.get(section.op.op.id))
       const pending = actionsBefore.get(section.op.op.id)
       if (pending) emitMachineActions(pending)
     }
@@ -857,6 +874,7 @@ function emitSetupSection(
     return { lines, safeWorkZ, diagnostics, operationSpans, coolantWasOn, accessories: activeAccessories, lastToolNumber: prevToolNumber, spindle: activeSpindle, spindleStopped: false, endWorkZ: toolWorkZ }
   }
 
+  emitNothingToCut(nothingToCutBefore.get(null))
   // WO-2437: a stop placed after the setup's last operation.
   const trailingActions = actionsBefore.get(null)
   if (trailingActions) emitMachineActions(trailingActions)

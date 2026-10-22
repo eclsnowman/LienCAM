@@ -1,7 +1,10 @@
 import { textFor } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Bug } from 'lucide-react'
+import { failureFromError, recordBoundaryError } from '../../lib/diagnostics'
+import { openReportForFailure } from '../modals/ReportProblemModal'
+const shellText = textFor('app-shell-settings-menus')
 
 interface Props {
   children: ReactNode
@@ -52,6 +55,12 @@ export class ViewportErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('[LienCAM] Viewport view failed to render; keeping the app alive:', error, info)
+    recordBoundaryError(error)
+  }
+
+  // WO-2911: report this error before (or instead of) retrying; Retry is not needed first.
+  handleReport = () => {
+    void openReportForFailure(failureFromError(this.state.error, 'view-error-screen'))
   }
 
   componentDidUpdate(prevProps: Props) {
@@ -143,6 +152,22 @@ export class ViewportErrorBoundary extends Component<Props, State> {
             fontWeight: 600,
           }}
         >{tx('ViewportErrorBoundary.Retry_this_view')}</button>
+        <button
+          onClick={this.handleReport}
+          data-testid="viewport-error-boundary-report"
+          style={{
+            padding: '6px 16px',
+            background: 'transparent',
+            color: 'var(--text-primary, #e0e0e0)',
+            border: '1px solid var(--border-subtle, #333)',
+            borderRadius: '6px',
+            fontSize: '12px',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        ><Bug size={12} aria-hidden="true" />{shellText('ReportProblemModal.reportThisProblem')}</button>
       </div>
     )
   }

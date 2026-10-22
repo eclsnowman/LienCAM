@@ -61,7 +61,11 @@ describe('WO-1155 transport control parity', () => {
 
     expect((screen.getByTestId('control-cyclestart') as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId('control-step-forward') as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByTestId('control-next-action').textContent).toContain('entirely off the table on X')
+    // WO-2885 (the operator, 10-16: "Redundancy of what's in the terminal and at the top of the
+    // screen"): CYCLE START's own refusal is not repeated in the top row. Greyed CYCLE START
+    // carries it on hover, and a press writes it to the console.
+    expect(screen.queryByTestId('control-next-action')).toBeNull()
+    expect(screen.getByTestId('control-cyclestart').getAttribute('data-tooltip')).toContain('lies entirely off the table')
     expect(screen.queryByTestId('control-program-fit')).toBeNull()
   })
 

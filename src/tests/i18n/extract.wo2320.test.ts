@@ -4,9 +4,14 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createElement as h, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { typedMock } from '../support/typedMock'
 
+// WO-2977: the console fixture event is at epoch 0 and the golden was recorded in US Central time
+// (06:00:00 PM). Pin the zone so a UTC Linux host renders the same clock text.
+const hostTimeZone = process.env.TZ
+process.env.TZ = 'America/Chicago'
+afterAll(() => { if (hostTimeZone === undefined) delete process.env.TZ; else process.env.TZ = hostTimeZone })
 const memory = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   get length() { return memory.size }, clear: () => memory.clear(),

@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -19,6 +18,7 @@ import { createElement, type ComponentType } from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BridgeProcessStatus } from '../../lib/machine/bridgeHost'
+import { electronMainRequire } from '../support/electronMainRequire'
 
 const WINDOWS_TEMP_RM_OPTIONS = {
   recursive: true,
@@ -170,7 +170,8 @@ function loadMain(fixture: ReturnType<typeof createFixture>): MainHarness {
     resourcesPath: fixture.resources,
   }
   const moduleValue = { exports: {} as MainApi }
-  const realRequire = createRequire(import.meta.url)
+  // WO-3059: main.cjs's sibling requires (./agentChannel.cjs) resolve against electron/.
+  const realRequire = electronMainRequire
   vm.runInNewContext(readFileSync(path.resolve('electron/main.cjs'), 'utf8'), {
     AbortSignal, Buffer, Date, Promise, Response, URL,
     __dirname: path.resolve('electron'),

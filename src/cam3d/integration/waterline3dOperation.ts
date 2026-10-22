@@ -24,6 +24,11 @@
 // Determinism (D-006): the returned moves are byte-identical for identical
 // inputs; `computeTimeMs` is diagnostic only.
 
+import type { WaterlineParams } from '../../kernel/parameterTypes';
+export type { WaterlineParams } from '../../kernel/parameterTypes';
+export { DEFAULT_WATERLINE_PARAMS } from '../../kernel/parameterDefaults';
+export { readWaterlineParams, defaultWaterlineStepdownFor } from '../../kernel/schema';
+
 import type { CutterSpec, PartMesh } from '../kernel/types';
 import type { PathBuildHeights } from '../pathbuild';
 import type { Ring } from '../geom2d';
@@ -43,89 +48,6 @@ import {
 } from './parallel3dOperation';
 
 /** The parameters a waterline_3d op carries in `op.params`. The dialog reads/writes exactly these. */
-export interface WaterlineParams {
-  /** Maximum stepdown between levels, mm (> 0); the last step may be shorter. */
-  stepdown: number;
-  /** Max chordal deviation, mm (> 0). Drives the slicer sampling (kernel/oclWaterline.ts). */
-  tolerance: number;
-  /** Radial allowance on the walls, mm (>= 0). A ball cutter's is a true surface offset. */
-  stockToLeave: number;
-  /** Steep areas only: 0 = whole part; else drop runs shallower than this angle from horizontal. */
-  minSlopeDeg: number;
-  /** Add a level at every horizontal face. */
-  flatAreaDetection: boolean;
-  /** Level-first ("order by depth") or region-first ("order by islands"). */
-  order: 'level' | 'region';
-  direction: 'climb' | 'conventional';
-  /** Optional maximum finish depth below model top, mm (Smart Height bounded variant). */
-  finishDepth?: number;
-  /** Clip passes to the stock footprint (true) or leave the part silhouette (false). */
-  useStockBoundary: boolean;
-  /** Stock-edge overrun in mm; undefined = auto tool radius, 0 = legacy containment. */
-  stockEdgeOvershoot?: number;
-}
-
-export const DEFAULT_WATERLINE_PARAMS: WaterlineParams = {
-  stepdown: 1,
-  tolerance: 0.05,
-  stockToLeave: 0,
-  minSlopeDeg: 0,
-  flatAreaDetection: true,
-  // Region by region: each wall, boss or bore is
-  // finished to its bottom with stay-down links before the next one starts.
-  // Level by level hops between regions at every level and retracts on each
-  // hop - measured on Operator's five-bore plate as a retract per bore per level
-  // (WO-1176 in-app capture), the "too many retracts" complaint every forum
-  // has about waterlines. Both stay available; this is the one that starts.
-  order: 'region',
-  direction: 'climb',
-  finishDepth: undefined,
-  useStockBoundary: false,
-  stockEdgeOvershoot: undefined,
-};
-
-/**
- * The stepdown a fresh operation starts with for a given tool: 10% of the
- * diameter, never under 0.2 mm (the research: finishing stepovers of 8-12%
- * of diameter are the shared guidance; a waterline stepdown is set the same).
- */
-export function defaultWaterlineStepdownFor(toolDiameter: number): number {
-  if (!(toolDiameter > 0) || !Number.isFinite(toolDiameter)) return DEFAULT_WATERLINE_PARAMS.stepdown;
-  return Math.max(0.2, Math.round(toolDiameter * 0.1 * 100) / 100);
-}
-
-/**
- * Read a WaterlineParams out of an untyped `op.params` record, filling any
- * missing/invalid field from the defaults (fail-soft on shape, like the
- * parallel and adaptive readers).
- */
-export function readWaterlineParams(params: Record<string, unknown>): WaterlineParams {
-  const num = (v: unknown, fallback: number, mustBePositive: boolean): number => {
-    if (typeof v === 'number' && Number.isFinite(v) && (!mustBePositive || v > 0)) return v;
-    return fallback;
-  };
-  const optionalPositive = (v: unknown): number | undefined =>
-    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
-  const slope = num(params.minSlopeDeg, DEFAULT_WATERLINE_PARAMS.minSlopeDeg, false);
-  return {
-    stepdown: num(params.stepdown, DEFAULT_WATERLINE_PARAMS.stepdown, true),
-    tolerance: num(params.tolerance, DEFAULT_WATERLINE_PARAMS.tolerance, true),
-    stockToLeave: Math.max(0, num(params.stockToLeave, DEFAULT_WATERLINE_PARAMS.stockToLeave, false)),
-    minSlopeDeg: slope >= 0 && slope < 90 ? slope : DEFAULT_WATERLINE_PARAMS.minSlopeDeg,
-    flatAreaDetection: typeof params.flatAreaDetection === 'boolean'
-      ? params.flatAreaDetection : DEFAULT_WATERLINE_PARAMS.flatAreaDetection,
-    order: params.order === 'level' ? 'level' : 'region',
-    direction: params.direction === 'conventional' ? 'conventional' : 'climb',
-    finishDepth: optionalPositive(params.finishDepth),
-    useStockBoundary: typeof params.useStockBoundary === 'boolean'
-      ? params.useStockBoundary : DEFAULT_WATERLINE_PARAMS.useStockBoundary,
-    stockEdgeOvershoot:
-      typeof params.stockEdgeOvershoot === 'number' &&
-      Number.isFinite(params.stockEdgeOvershoot) && params.stockEdgeOvershoot >= 0
-        ? params.stockEdgeOvershoot
-        : undefined,
-  };
-}
 
 export { WATERLINE_MAX_FOOTPRINT_SAMPLING_RATIO };
 

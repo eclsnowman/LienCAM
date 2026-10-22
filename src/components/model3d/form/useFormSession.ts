@@ -16,7 +16,7 @@ import type { CommandHistory, FeatureDag } from '../../../doc'
 import { useFormStore } from '../../../form/formStore'
 import { FormOverlay } from '../../../form/formOverlay'
 import { isFormFeaturePayload, makeFormFeaturePayload } from '../../../form/formBody'
-import { formFromBody, type BodyMesh } from '../../../form/fromMesh'
+import { formFromBody, FORM_FROM_BODY_WORKER, type BodyMesh, type FormFromBodyResult } from '../../../form/fromMesh'
 import { validateCage } from '../../../form/halfEdge'
 import { defaultPipeRadius, joinPaths, pathLength, pipeCage, straightPath, tightestBend, type PlaneFrame, type SketchPath } from '../../../form/pipe'
 import { longestEdgeChain } from '../../../form/edgePath'
@@ -95,6 +95,31 @@ export interface FormSession {
 /** Test/evidence hook, same convention as window.__camStore. */
 declare global {
   interface Window { __formStore?: typeof useFormStore; __formOverlay?: FormOverlay | null; __formInteraction?: FormInteraction | null }
+}
+
+/**
+ * WO-3022: From body in a worker, so a large body (13 s on PortalHandle.step) never holds the page. The mesh
+ * is copied, never transferred (an STL body's buffers stay its own). Where there is no Worker (tests) or the
+ * worker cannot start, it runs here as before.
+ */
+function formFromBodyOffPage(mesh: BodyMesh): Promise<FormFromBodyResult> {
+  if (typeof Worker === 'undefined') return Promise.resolve(formFromBody(mesh))
+  return new Promise((resolve, reject) => {
+    let worker: Worker
+    try {
+      worker = new Worker(new URL('../../../form/fromMesh.ts', import.meta.url), { type: 'module', name: FORM_FROM_BODY_WORKER })
+    } catch {
+      resolve(formFromBody(mesh))
+      return
+    }
+    worker.onmessage = (e: MessageEvent<FormFromBodyResult>) => { worker.terminate(); resolve(e.data) }
+    worker.onerror = (e) => {
+      e.preventDefault()
+      worker.terminate()
+      try { resolve(formFromBody(mesh)) } catch (err) { reject(err) }
+    }
+    worker.postMessage({ position: mesh.position, index: mesh.index, triFace: mesh.triFace })
+  })
 }
 
 export function useFormSession(deps: FormSessionDeps): FormSession {
@@ -249,9 +274,11 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
 
   const startFromBody = useCallback(async () => {
     const source = await depsRef.current.selectedBodyMesh?.()
+    if (!source) { useFormStore.getState().setNotice(workbenchText('useFormSession.selectABodyInTheModelTreeFirstThen')); return }
+    const r = await formFromBodyOffPage(source.mesh)
+    // WO-3022: the conversion runs off the page now, and form mode may have been left while it ran
+    if (!useFormStore.getState().active) return
     const st = useFormStore.getState()
-    if (!source) { st.setNotice(workbenchText('useFormSession.selectABodyInTheModelTreeFirstThen')); return }
-    const r = formFromBody(source.mesh)
     // WO-2865: applyCage's own refusal names a cage face index ("face 2106
     // repeats a point") with no next step. Check first and say it in shop words;
     // the index stays in the debug log for whoever traces the conversion.

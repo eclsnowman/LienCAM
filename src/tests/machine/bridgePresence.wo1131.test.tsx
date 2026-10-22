@@ -18,6 +18,9 @@ vi.mock('../../lib/machine/bridgeHost', () =>
     bridgeHostCapability: () => host.capability,
     bridgeProcessStatus: host.status,
     restartBridge: host.restart,
+    // WO-2847: the Control page's status poll delivers host-carried console
+    // lines; this suite's statuses carry none.
+    takeBridgeConsoleLines: () => [],
   }))
 
 const memory = new Map<string, string>()
@@ -156,7 +159,8 @@ describe('WO-1131 bridge presence model', () => {
     render(<ControlTransportBar sections="nav" selectedConnectionKind="bridge" />)
 
     fireEvent.click(screen.getByTestId('control-bridge-reconnect'))
-    await waitFor(() => expect(host.restart).toHaveBeenCalledWith(8325, undefined))
+    // WO-2845: Reconnect is an operator press (the second Connect after a changed-DLL line).
+    await waitFor(() => expect(host.restart).toHaveBeenCalledWith(8325, undefined, { operatorPress: true }))
     expect(useMachineControl.getState().consoleLines.at(-1)?.text)
       .toBe('Bridge recovery complete. The machine is connected.')
     expect(useMachineControl.getState().consoleLines.map((line) => line.text).join('\n'))

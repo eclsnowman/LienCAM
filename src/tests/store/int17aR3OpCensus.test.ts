@@ -246,7 +246,7 @@ function makeOp(type: OperationType, entryId: string): Operation {
     // the NON_LIVE_HEIGHT_POLICY_TYPES block below, which asserts the V2
     // authority refusal directly instead.
     ...(operationHeightPolicy(type).support === 'live'
-      ? { smartHeight: smartHeightAuthorityFixture(type, { setupId: 'setup-1', geometryIds: [entryId] }) }
+      ? { smartHeight: smartHeightAuthorityFixture(type, { setupId: 'setup-1', geometryIds: [entryId], stockId: DERIVED_STOCK_ID }) }
       : {}),
   } as unknown as Operation
 }

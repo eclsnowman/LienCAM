@@ -567,7 +567,18 @@ export function wantsToolReachTrim(inputs: ToolReachInputs): boolean {
     (inputs.workholding?.length ?? 0) > 0
 }
 
-export interface ToolReachGateInput extends HolderClearanceGateInput, ToolReachInputs {}
+/**
+ * WO-3048. Whether a trimmed path keeps the visits the trim left with nothing to
+ * cut. Read only when the trim stopped something. The caller decides (the 3D
+ * adaptive route passes WO-3028's ADAPTIVE_ENTRY_POLICY.entriesAtMaterial):
+ * src/lib/cam sits below src/cam3d and does not read its switches. Absent or
+ * false: the trimmed moves are returned exactly as the trim made them.
+ */
+export interface EmptyVisitOption {
+  readonly dropEmptyVisits?: boolean
+}
+
+export interface ToolReachGateInput extends HolderClearanceGateInput, ToolReachInputs, EmptyVisitOption {}
 
 /**
  * WO-1683: the fact a reach-trimmed operation carries on itself (its tree row
@@ -707,6 +718,56 @@ function stoppedShortSummary(
   )
 }
 
+// WO-3048: a move this close to the path's top counts as at the top (f32 heights).
+const VISIT_TOP_EPS_MM = 1e-6
+
+const isNonCuttingTraverse = (move: ToolpathMove): boolean => move.type === 'rapid' || move.role === 'rapid'
+
+/**
+ * WO-3048. Drop every visit a trimmed path makes that cuts nothing. A visit is
+ * the stretch from a move at the path's top (the clearance the trim's own
+ * links travel at) down and back up to the top. It is empty when every move in
+ * it is a rapid or a straight feed descent (same X Y, going down) - the trim
+ * keeping a level's retract, rapid over and descent after it stopped every cut
+ * below the reach floor (form-cylinder adaptive_3d: 16 clearance -> plunge ->
+ * retract visits at the end). An empty visit goes whole, and so do the rapids
+ * at the top that only flew over to it, so its neighbours join with one straight
+ * traverse at the top, the same link the trim makes between any two stops. A visit is
+ * dropped only when the move after it is a rapid at the top (or there is none),
+ * so no cutting move ever starts from a different place. Returns the input
+ * array itself when nothing is dropped.
+ */
+export function dropEmptyReachVisits(moves: readonly ToolpathMove[]): { moves: readonly ToolpathMove[]; dropped: number } {
+  let top = Number.NEGATIVE_INFINITY
+  for (const move of moves) if (Number.isFinite(move.z) && move.z > top) top = move.z
+  if (!Number.isFinite(top)) return { moves, dropped: 0 }
+  const atTop = (move: ToolpathMove): boolean => move.z >= top - VISIT_TOP_EPS_MM
+  const cutsNothing = (move: ToolpathMove, previous: ToolpathMove): boolean => isNonCuttingTraverse(move) ||
+    (move.type === 'feed' && move.x === previous.x && move.y === previous.y && move.z < previous.z)
+  const out: ToolpathMove[] = []
+  let dropped = 0
+  let index = 0
+  while (index < moves.length) {
+    const move = moves[index]
+    out.push(move)
+    if (!atTop(move)) { index++; continue }
+    let back = index + 1
+    while (back < moves.length && !atTop(moves[back])) back++
+    const after = moves[back + 1]
+    let empty = back > index + 1 && back < moves.length &&
+      (after === undefined || (isNonCuttingTraverse(after) && atTop(after)))
+    for (let k = index + 1; empty && k <= back; k++) empty = cutsNothing(moves[k], moves[k - 1])
+    if (!empty) { index++; continue }
+    dropped++
+    // The rapids at the top that only flew over to this visit go too, so the
+    // path leaves the last place it was at the top in one straight traverse.
+    while (out.length >= 2 && isNonCuttingTraverse(out[out.length - 1]) && atTop(out[out.length - 1]) &&
+      atTop(out[out.length - 2])) out.pop()
+    index = back + 1
+  }
+  return dropped > 0 ? { moves: out, dropped } : { moves, dropped: 0 }
+}
+
 /**
  * WO-1565. Trim a computed toolpath to what the tool assembly reaches: the
  * cutting head may work under an overhang, the neck, shank and holder never come
@@ -775,7 +836,11 @@ export function trimToolpathToToolReach(input: ToolReachGateInput): ToolReachGat
     moves, tool, holder, part, stock, workholding, allowanceMm, plungeRate: input.plungeRate,
   })
   for (const warning of result.warnings) caveats.push(`${operation}: ${asClause(warning)}`)
-  const shortfall = reachShortfallOf(moves, result.moves, result.stops)
+  // WO-3048: what the trim left with nothing to cut goes, when the caller asks.
+  const trimmedMoves = input.dropEmptyVisits === true && result.stops.length > 0
+    ? dropEmptyReachVisits(result.moves).moves
+    : result.moves
+  const shortfall = reachShortfallOf(moves, trimmedMoves, result.stops)
   // WO-1571: every operation in the app now takes this path, so a caveat is said
   // on the app console only beside the stop it qualifies. A path nothing stopped
   // leaves the console quiet and hands its caveats to the developer console.
@@ -785,7 +850,7 @@ export function trimToolpathToToolReach(input: ToolReachGateInput): ToolReachGat
     : []
   if (stopSummary.length > 0) notices.push(...caveats, ...stopSummary)
   return {
-    moves: result.moves,
+    moves: trimmedMoves,
     notices,
     stops: result.stops,
     allowanceMm,
@@ -800,7 +865,7 @@ export function trimToolpathToToolReach(input: ToolReachGateInput): ToolReachGat
  * minX..maxZ, in the part's display-local frame the moves live in).
  */
 export function trimToolpathToToolReachFor3d(
-  input: HolderClearanceGate3dInput & ToolReachInputs,
+  input: HolderClearanceGate3dInput & ToolReachInputs & EmptyVisitOption,
 ): ToolReachGateResult {
   const { stockBounds, ...rest } = input
   return trimToolpathToToolReach({

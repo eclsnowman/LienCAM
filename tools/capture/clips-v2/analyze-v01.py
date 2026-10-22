@@ -7,7 +7,9 @@ import numpy as np
 from PIL import Image
 from analyze import inspect, run, ROOT
 
-OUT = ROOT / 'src/tests/evidence/WO-2571'
+# The shipped V01 is the frozen re-capture. Keep WO-2571's approved take
+# intact; its receipts describe different bytes and remain historical evidence.
+OUT = ROOT / 'src/tests/evidence/WO-2631/freeze/v01'
 VIDEO = ROOT / 'docs/media/clips-v2/V01.mp4'
 
 

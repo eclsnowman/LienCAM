@@ -184,6 +184,11 @@
     },
     {
       "action": "include",
+      "path": "tools/lib/is-main.mjs",
+      "reason": "Shared main-script check imported by the exported release, capture and example tools; without it public CI and the release workflows crash on import."
+    },
+    {
+      "action": "include",
       "path": "tools/release/site-releases.mjs",
       "reason": "Fill the site Download page from the newest published release when Pages deploys."
     },
@@ -1804,6 +1809,41 @@
     },
     {
       "action": "include",
+      "path": "pendant/uc100net/",
+      "reason": "WO-2895: Publish the clean-room native AXBB-E driver, licence, provenance and differential tests required by the bridge ProjectReference."
+    },
+    {
+      "action": "exclude",
+      "path": "pendant/uc100net/publish/",
+      "reason": "WO-2895: Build native runtime bundles in CI; do not export generated binaries."
+    },
+    {
+      "action": "exclude",
+      "path": "pendant/uc100net/work/",
+      "reason": "WO-2895: Keep extracted oracle data and local runtime records private."
+    },
+    {
+      "action": "exclude",
+      "path": "pendant/uc100net/src/Uc100Net/bin/",
+      "reason": "WO-2895: Exclude generated native driver binaries."
+    },
+    {
+      "action": "exclude",
+      "path": "pendant/uc100net/src/Uc100Net/obj/",
+      "reason": "WO-2895: Exclude generated native driver build state."
+    },
+    {
+      "action": "exclude",
+      "path": "pendant/uc100net/src/Uc100Net.Tests/bin/",
+      "reason": "WO-2895: Exclude generated differential-test binaries."
+    },
+    {
+      "action": "exclude",
+      "path": "pendant/uc100net/src/Uc100Net.Tests/obj/",
+      "reason": "WO-2895: Exclude generated differential-test build state."
+    },
+    {
+      "action": "include",
       "path": "docs/machine/profiles/",
       "reason": "Publish the starter machine profiles and tool library used by the application."
     },
@@ -1851,6 +1891,21 @@
       "action": "include",
       "path": "docs/design/",
       "reason": "Publish maintained product and interaction design documents."
+    },
+    {
+      "action": "exclude",
+      "path": "docs/design/MC-GITHUB-TRIAGE.md",
+      "reason": "Internal planning document for an owner/mission-control work order; it quotes owner chat and is not a maintained product design."
+    },
+    {
+      "action": "exclude",
+      "path": "docs/design/WO-2961-roadmap-oracle.md",
+      "reason": "Internal planning document for an owner/mission-control work order; it quotes owner chat and is not a maintained product design."
+    },
+    {
+      "action": "exclude",
+      "path": "docs/design/WO-2951-modeling-mcp.md",
+      "reason": "Internal planning document for an owner/mission-control work order; it quotes owner chat and is not a maintained product design."
     },
     {
       "action": "include",
@@ -2284,6 +2339,26 @@
     },
     {
       "action": "exclude",
+      "path": "src/tests/adaptive-clearing/engine/steeringWobble.wo3029.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/adaptive-clearing/engine/steeringWobble.wo3029.test.ts imports ../../evidence/WO-3029/wobbleAttribute.mjs -> src/tests/evidence/WO-3029/wobbleAttribute.mjs"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/components/deviationPanel.wo2947.test.tsx",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/components/deviationPanel.wo2947.test.tsx imports ../evidence/WO-2947/liveFixture -> src/tests/evidence/WO-2947/liveFixture"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/components/deviationPanel.wo3005.test.tsx",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/components/deviationPanel.wo3005.test.tsx imports ../evidence/WO-2947/liveFixture -> src/tests/evidence/WO-2947/liveFixture"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/components/deviationPanelWaiting.wo3049.test.tsx",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/components/deviationPanelWaiting.wo3049.test.tsx imports ../evidence/WO-2947/liveFixture -> src/tests/evidence/WO-2947/liveFixture; src/tests/components/deviationPanelWaiting.wo3049.test.tsx imports ../evidence/WO-2947/liveWorker -> src/tests/evidence/WO-2947/liveWorker"
+    },
+    {
+      "action": "exclude",
       "path": "src/tests/fit/fit-sweep.mjs",
       "reason": "WO-2629: incomplete exported import closure: src/tests/fit/fit-sweep.mjs imports ../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs"
     },
@@ -2294,8 +2369,88 @@
     },
     {
       "action": "exclude",
+      "path": "src/tests/form/fromBodyPortalHandle.wo3051.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/form/fromBodyPortalHandle.wo3051.test.ts imports ../evidence/WO-3045/fixtures -> src/tests/evidence/WO-3045/fixtures"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/form/remeshNearestSelf.wo3045.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/form/remeshNearestSelf.wo3045.test.ts imports ../evidence/WO-3045/fixtures -> src/tests/evidence/WO-3045/fixtures"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/i18n/germanLayout.wo2330.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/i18n/germanLayout.wo2330.test.ts imports ../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs; src/tests/i18n/germanLayout.wo2330.test.ts imports ../evidence/WO-2330/layout.mjs -> src/tests/evidence/WO-2330/layout.mjs"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/i18n/germanResponsiveLayout.wo2330.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/i18n/germanResponsiveLayout.wo2330.test.ts imports ../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs; src/tests/i18n/germanResponsiveLayout.wo2330.test.ts imports ../evidence/WO-2330/layout.mjs -> src/tests/evidence/WO-2330/layout.mjs"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/i18n/runtimeFreshness.wo2943.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/i18n/runtimeFreshness.wo2943.test.ts imports ../../../tools/i18n-freshness.mjs -> tools/i18n-freshness.mjs"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/import/occtModelReaderSpeed.wo3047.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/import/occtModelReaderSpeed.wo3047.test.ts imports ../evidence/WO-3047/fingerprint -> src/tests/evidence/WO-3047/fingerprint"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/kernel/estimators.wo3034.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/kernel/estimators.wo3034.test.ts imports ../evidence/WO-2148/ranProgram -> src/tests/evidence/WO-2148/ranProgram"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/kernel/feedsParity.wo3033.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/kernel/feedsParity.wo3033.test.ts imports ../../../docs/machine/profiles/LienCNCV2.machine.json -> docs/machine/profiles/LienCNCV2.machine.json"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/kernel/materialRemoved.wo3017.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/kernel/materialRemoved.wo3017.test.ts imports ../evidence/WO-3017/removed-benchmark-rule -> src/tests/evidence/WO-3017/removed-benchmark-rule"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/lib/finalStockView.wo2947.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/lib/finalStockView.wo2947.test.ts imports ../evidence/WO-2947/fixtures -> src/tests/evidence/WO-2947/fixtures; src/tests/lib/finalStockView.wo2947.test.ts imports ../evidence/WO-2947/liveFixture -> src/tests/evidence/WO-2947/liveFixture; src/tests/lib/finalStockView.wo2947.test.ts imports ../evidence/WO-2947/liveWorker -> src/tests/evidence/WO-2947/liveWorker"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/controlStatusRowFits.wo2885.test.tsx",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/machine/controlStatusRowFits.wo2885.test.tsx imports ./support/operatorMachineAsTestData -> src/tests/machine/support/operatorMachineAsTestData"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/cycleCompleteOnlyAfterARun.wo2840.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/machine/cycleCompleteOnlyAfterARun.wo2840.test.ts imports ./support/operatorMachineAsTestData -> src/tests/machine/support/operatorMachineAsTestData"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/model3d/drawingProduction.wo2750.test.tsx",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/model3d/drawingProduction.wo2750.test.tsx imports ../evidence/WO-2750/F2/readers -> src/tests/evidence/WO-2750/F2/readers"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/release/releaseReceipts.wo2887.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/release/releaseReceipts.wo2887.test.ts imports ../../../tools/release/proof-readiness.mjs -> tools/release/proof-readiness.mjs"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/simulation/deviationComparison.wo2947.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/simulation/deviationComparison.wo2947.test.ts imports ../evidence/WO-2947/fixtures -> src/tests/evidence/WO-2947/fixtures"
+    },
+    {
+      "action": "exclude",
       "path": "src/tests/ui/evidence/WO-1126/shoot.mjs",
       "reason": "WO-2629: incomplete exported import closure: src/tests/ui/evidence/WO-1126/shoot.mjs imports ../../../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs"
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/viewport/deviationOverlay.wo2947.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/viewport/deviationOverlay.wo2947.test.ts imports ../evidence/WO-2947/fixtures -> src/tests/evidence/WO-2947/fixtures"
     }
   ],
   "publicTests": {
@@ -2568,6 +2723,46 @@
       }
     ],
     "ruleExceptions": [
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/README.md",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/src/Uc100Net.Tests/OracleDifferentialTests.cs",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/src/Uc100Net.Tests/ParsingTests.cs",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/tools/fake_board.py",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/tools/run-bridge-fake.py",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/tools/run-link-loss.py",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "personal:rfc1918-ip",
+        "path": "pendant/uc100net/tools/run-oracle.sh",
+        "reason": "WO-2895: Fixed AXBB-E factory protocol endpoints (board/host pair) in isolated fake-board setup or synthetic protocol fixtures, not operator LAN addresses."
+      },
+      {
+        "rule": "binary-type",
+        "path": "pendant/uc100net/fixtures/oracle-2190.tar.gz",
+        "reason": "WO-2895: Compressed JSONL protocol observations and call markers used by clean-room differential tests; scanned at import with no vendor binaries, source or firmware."
+      },
       {
         "rule": "personal:eric",
         "path": "src/tests/i18n/support/guardAllowList.ts",
@@ -3682,6 +3877,16 @@
         "rule": "commercial:mastercam",
         "path": "src/tests/release/releasePreviewInventory.wo2513.test.ts",
         "reason": "Synthetic forbidden-content input verifies that the public preview flags commercial comparisons; it is detection test data, not a product comparison."
+      },
+      {
+        "rule": "personal:c-users-path",
+        "path": "src/tests/diagnostics/reportAtFailure.wo2911.test.ts",
+        "reason": "Synthetic redaction fixture uses a made-up user directory to verify that diagnostic reports redact private paths; it is not a real local user path."
+      },
+      {
+        "rule": "personal:c-users-path",
+        "path": "src/tests/diagnostics/reportAtFailureUi.wo2911.test.tsx",
+        "reason": "Synthetic redaction fixture uses a made-up user directory to verify that diagnostic reports redact private paths; it is not a real local user path."
       },
       {
         "rule": "personal:c-users-path",

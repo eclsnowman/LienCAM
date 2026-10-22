@@ -1,3 +1,4 @@
+import { setupAuthoringDecision, type SetupAuthoringFacts } from '../../kernel/authoring'
 import { readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 const words = textFor('setup-stock-tools-machine-post')
@@ -283,8 +284,6 @@ export function SetupModal() {
   const words = useText('setup-stock-tools-machine-post')
   const activeModal    = useCamStore((s) => s.activeModal)
   const closeModal     = useCamStore((s) => s.closeModal)
-  const addSetup       = useCamStore((s) => s.addSetup)
-  const updateSetup    = useCamStore((s) => s.updateSetup)
   const addConsoleEvent = useCamStore((s) => s.addConsoleEvent)
   const editingSetupId = useCamStore((s) => s.editingSetupId)
   const project        = useCamStore((s) => s.project)
@@ -468,16 +467,20 @@ export function SetupModal() {
     ? { opacity: 0.55, cursor: 'not-allowed', background: 'transparent' }
     : undefined
 
-  // Same-stock setups may intentionally share an offset, while different
-  // physical owners and legacy unbound setups reserve their slots. A circular
-  // feature origin is model-driven but still belongs to a physical stock, so it
-  // participates in the same collision rule.
+  // Same-stock setups may intentionally share an offset. A slot held by a
+  // different physical owner or a legacy unbound setup stays selectable
+  // (WO-2983, operator ruling 10-20: "share G54, separate files only"): successive loads
+  // on one machine each post their own file, and only a combined program
+  // refuses the shared slot. A circular feature origin is model-driven but
+  // still belongs to a physical stock, so it participates in the same rule.
   const editingSetupId_ = isEditMode ? editingSetupId : undefined
   const offsetStockId = originMode === 'corner' || originMode === 'bore'
     ? selectedStockId ?? undefined
     : undefined
   const usedOffsets = usedFixtureOffsetsForStock(project, offsetStockId, editingSetupId_ ?? undefined)
-  const allOffsetsUsed = !isEditMode && G_OFFSETS.every((n) => usedOffsets.has(n))
+  const sharedOffsetOwner = usedOffsets.has(fixture)
+    ? conflictingWorkOffsetClaim(project, fixture, offsetStockId, editingSetupId_ ?? undefined)
+    : undefined
 
   // Stock bounds for the corner pick = the RENDERED stock box, always (both auto
   // and fixed). The rendered stock is the source of truth the user sees: for auto
@@ -1123,24 +1126,15 @@ export function SetupModal() {
     })
   }
 
-  const canSave = projectedSetupHeights.heights != null
-    && fixtureStackError == null
-    && !allOffsetsUsed
-    && !(mustPickStock && (originMode === 'corner' || originMode === 'bore'))
-    // WO-294: a setup must never end up with an origin nobody chose - Bore
-    // mode selected but no successful pick yet blocks Save exactly like the
-    // stock force-choice gate above.
-    && !(originMode === 'bore' && !boreBinding)
-    // A named second side that the flip refuses is not creatable at all: a
-    // setup must not be saved claiming a relationship the app just denied.
-    && secondSide?.ok !== false
-    // WO-288: a committed flip is a stock-corner setup by construction -
-    // applySecondSide puts the form there and the origin-mode tabs are held
-    // while it holds. This is the same refusal stated at the SAVE gate rather
-    // than at the controls, so no path (a keyboard Create, a future control,
-    // a state restore) can write flipOf onto a setup that binds no stock and
-    // therefore cannot be shown to be the same block of material.
-    && !(secondSide?.ok === true && originMode !== 'corner')
+  const setupAuthoringFacts: SetupAuthoringFacts = {
+    heightsResolved: projectedSetupHeights.heights != null,
+    fixtureStackError,
+    mustPickStock,
+    originMode,
+    boreBound: !!boreBinding,
+    secondSide: secondSide?.ok === false ? 'refused' : secondSide?.ok === true ? 'resolved' : 'none',
+  }
+  const canSave = setupAuthoringDecision(setupAuthoringFacts)
 
   const handleSave = () => {
     if (!projectedSetupHeights.heights) return
@@ -1268,7 +1262,7 @@ export function SetupModal() {
       const invalidatedOperationCount = existing?.operations.filter((op) =>
         op.status === 'ready' || (op.toolpathMoves?.length ?? 0) > 0,
       ).length ?? 0
-      updateSetup(editingSetupId, {
+      const result = useCamStore.getState().executeCamCommands([{ kind: 'setup.update', setupId: editingSetupId, patch: {
         name: name.trim() || existing?.name || words("SetupModal.setup_2"),
         wcs: savedWcs,
         fixtureStack: fixtureStack.map((item) => ({ ...item })),
@@ -1316,7 +1310,8 @@ export function SetupModal() {
               }
             : op
         }),
-      })
+      } }], { kind: 'setup', facts: setupAuthoringFacts })
+      if (!result.ok) return
       if (existing && (wcsChanged || setupDefaultsChanged) && invalidatedOperationCount > 0) {
         const reason = fixtureWasEdited
           ? words("SetupModal.work_offset_changed_from_g_to_g", { value1: fixtureForSetup(project, existing), value2: fixture })
@@ -1352,7 +1347,8 @@ export function SetupModal() {
         operations: [],
         notes: '',
       }
-      addSetup(setup)
+      const result = useCamStore.getState().executeCamCommands([{ kind: 'setup.add', setup }], { kind: 'setup', facts: setupAuthoringFacts })
+      if (!result.ok) return
     }
     getVp()?.exitWCSGizmoMode?.()
     getVp()?.exitStockCornerPickMode?.()
@@ -1796,7 +1792,7 @@ export function SetupModal() {
                           )
                         : undefined
                       return (
-                        <option key={n} value={n} disabled={inUse}>
+                        <option key={n} value={n}>
                           {inUse
                             ? words("SetupModal.g_in_use", { value1: n, value2: owner ? words("SetupModal.offsetOwner", { kind: words(`SetupModal.ownerKinds.${owner.kind}`), name: owner.name }) : '' })
                             : `G${n}`}
@@ -1805,8 +1801,10 @@ export function SetupModal() {
                     })}
                   </select>
                 </div>
-                {allOffsetsUsed && (
-                  <div className="wcs-no-stock">{words("SetupModal.all_work_offsets_g54_g59_are_owned")}</div>
+                {usedOffsets.has(fixture) && !secondSideLocked && (
+                  <div className="wcs-no-stock" data-testid="setup-shared-work-offset-note">
+                    {words("SetupModal.shared_work_offset_note", { value1: fixture, value2: sharedOffsetOwner ? words("SetupModal.offsetOwner", { kind: words(`SetupModal.ownerKinds.${sharedOffsetOwner.kind}`), name: sharedOffsetOwner.name }) : '' })}
+                  </div>
                 )}
 
             {/* Origin mode tabs.

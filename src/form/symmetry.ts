@@ -10,9 +10,17 @@
 // images are set from it, and seam points are held on the plane or axis.
 // Selections are widened to their images before a topology command runs, so an
 // extrude, crease or edge loop on one copy happens on all.
+//
+// Symmetry turned on after the form was edited without it (WO-2955): turning
+// it on changes nothing. The cage remembers where its points were before
+// those edits (cage.symmetryReference) and pairs them there, so a point moved
+// off its partner keeps it; a later move then mirrors only that move, and the
+// earlier difference stays (propagateSymmetry). A pair the reference cannot
+// vouch for - none, two candidates, not mutual - is never guessed: the point
+// pairs by where it is now, as before, or moves alone.
 
 import type { Cage, Vec3 } from './cage'
-import { cageBounds, edgeKey, parseEdgeKey } from './cage'
+import { cageBounds, edgeKey, parseEdgeKey, symmetryReferenceOf } from './cage'
 import type { CageSelection } from './topology'
 import { principalAxes } from './shapeTools'
 
@@ -68,15 +76,25 @@ function transforms(mode: SymmetryMode, at: number, normal: Vec3 | null): Array<
   })
 }
 
+/** the cage's bounding-box diagonal (matching tolerances scale with it) */
+function cageSize(cage: Cage): number {
+  const { min, max } = cageBounds(cage)
+  return Math.max(1e-9, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]))
+}
+
 function onSeam(normal: Vec3 | null, at: number, p: Vec3, tol: number): boolean {
   return normal !== null ? Math.abs(side(normal, at, p)) <= tol : Math.hypot(p[0], p[1]) <= tol
 }
 
 /** Match points to their images (tolerance relative to the cage size). A mirror's plane is n . p = at: n its axis, or `normal` for a placed plane ('p'). */
 export function findPairs(cage: Cage, mode: SymmetryMode, at = 0, normal?: Vec3 | null): SymmetryPairs {
+  return matchImages(cage, mode, at, normal, false)
+}
+
+/** findPairs; `unique`: an image with two or more points within reach is no match (-1), not the nearest. */
+function matchImages(cage: Cage, mode: SymmetryMode, at: number, normal: Vec3 | null | undefined, unique: boolean): SymmetryPairs {
   const u = mirrorNormal(mode, normal)
-  const { min, max } = cageBounds(cage)
-  const size = Math.max(1e-9, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]))
+  const size = cageSize(cage)
   const tol = size * 1e-6
   const n = cage.positions.length
   const seam = new Uint8Array(n)
@@ -100,15 +118,16 @@ export function findPairs(cage: Cage, mode: SymmetryMode, at = 0, normal?: Vec3 
       const m = T(cage.positions[i])
       const [cx, cy, cz] = cellOf(m)
       // the nearest point within reach; ties to the highest index, as the direct search did
-      let best = -1, bestD = reach
+      let best = -1, bestD = reach, within = 0
       for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
         for (const h of buckets.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []) {
           if (h === i) continue
           const d = Math.hypot(cage.positions[h][0] - m[0], cage.positions[h][1] - m[1], cage.positions[h][2] - m[2])
+          if (d <= reach) within++
           if (d < bestD || (d === bestD && h > best)) { bestD = d; best = h }
         }
       }
-      image[i] = best
+      image[i] = unique && within > 1 ? -1 : best
     }
     return image
   })
@@ -200,6 +219,113 @@ export function symmetrize(cage: Cage, pairs: SymmetryPairs, moved: readonly num
     } else { positions[i][0] = 0; positions[i][1] = 0 }
   }
   return { ...cage, positions }
+}
+
+/**
+ * The pairs edits use (WO-2955): with a valid symmetry reference, points pair
+ * by where they were there - by index, so a point moved while symmetry was off
+ * keeps its partner. Only a reference image that is the one point within
+ * reach and maps back to the same point counts. A point the reference pairs
+ * with nothing pairs by where it is now (findPairs), with points the
+ * reference left unpaired too.
+ */
+export function resolvePairs(cage: Cage, mode: SymmetryMode, at = 0, normal?: Vec3 | null): SymmetryPairs {
+  const reference = symmetryReferenceOf(cage)
+  if (reference === null) return findPairs(cage, mode, at, normal)
+  const then = matchImages({ ...cage, positions: reference.positions }, mode, at, normal, true)
+  // a point on the plane (axis) there but moved off it since is its own image no more: it pairs as any other
+  const tol = cageSize(cage) * 1e-5
+  const seamThen = then.seam.map((v, i) => (v && onSeam(then.normal, at, cage.positions[i], tol) ? 1 : 0))
+  // transform t turns (t + 1) steps of the n (a mirror: itself); k - 1 - t turns back
+  const k = then.images.length
+  const mutual = then.images.map((im, t) => im.map((j, i) => (j < 0 || (j === i ? !seamThen[i] : then.images[k - 1 - t][j] !== i) ? -1 : j)))
+  const bound = seamThen.map((v, i) => (v || mutual.some((im) => im[i] >= 0) ? 1 : 0))
+  // the reference pairs every point: no point needs pairing by where it is now
+  if (bound.every((v) => v === 1)) return { mode, at, normal: then.normal, images: mutual, partner: mutual[0], seam: seamThen }
+  const now = findPairs(cage, mode, at, normal)
+  const images = mutual.map((im, t) => im.map((j, i) => {
+    if (bound[i]) return j
+    const was = now.images[t][i]
+    return was >= 0 && (was === i || !bound[was]) ? was : -1
+  }))
+  const seam = now.seam.map((v, i) => (bound[i] ? seamThen[i] : v))
+  return { mode, at, normal: then.normal, images, partner: images[0], seam }
+}
+
+/** How far an image may be from its point's image and still be that image exactly (mm): far below the match reach. */
+export function exactness(cage: Cage): number {
+  return cageSize(cage) * 1e-9
+}
+
+const offPlane = (normal: Vec3 | null, at: number, p: Vec3) => (normal !== null ? Math.abs(side(normal, at, p)) : Math.hypot(p[0], p[1]))
+
+/**
+ * symmetrize for an edit that took the cage from `before` to `after`, keeping
+ * what was already there (WO-2955). The winner of each group is chosen as
+ * symmetrize chooses it. An image that sat exactly on the winner's image is
+ * set from the winner (a symmetric form edits as it always has); one that did
+ * not - an offset made while symmetry was off - keeps that offset and takes
+ * the winner's NEW move, mirrored or turned: B + R(A' - A). A moved seam point
+ * on the plane or axis is held there; one off it keeps its offset and moves
+ * only along the plane (along the axis). Nothing else changes.
+ */
+export function propagateSymmetry(before: Cage, after: Cage, pairs: SymmetryPairs, moved: readonly number[], primary: readonly number[] = moved): Cage {
+  const T = transforms(pairs.mode, pairs.at, pairs.normal)
+  const u = pairs.normal
+  const exact = exactness(before)
+  const was = before.positions
+  const positions = after.positions.map((p) => [p[0], p[1], p[2]] as Vec3)
+  const movedSet = new Set(moved)
+  const primarySet = new Set(primary)
+  const done = new Set<number>()
+  for (const p of moved) {
+    if (done.has(p) || pairs.seam[p]) continue
+    const group = [p, ...pairs.images.map((im) => im[p])].filter((j) => j >= 0)
+    for (const j of group) done.add(j)
+    let candidates = group.filter((j) => movedSet.has(j))
+    const picked = candidates.filter((j) => primarySet.has(j))
+    if (picked.length > 0) candidates = picked
+    const winner = u !== null
+      ? (candidates.find((j) => side(u, pairs.at, after.positions[j]) >= 0) ?? candidates[0])
+      : Math.min(...candidates)
+    const w0 = was[winner], w1 = positions[winner]
+    T.forEach((turn, t) => {
+      const j = pairs.images[t][winner]
+      if (j < 0 || j === winner) return
+      const image = turn(w0)
+      if (Math.hypot(was[j][0] - image[0], was[j][1] - image[1], was[j][2] - image[2]) <= exact) { positions[j] = turn(w1); return }
+      // the transform's linear part, applied to the winner's move
+      const o = turn([0, 0, 0]), m = turn([w1[0] - w0[0], w1[1] - w0[1], w1[2] - w0[2]])
+      positions[j] = [was[j][0] + m[0] - o[0], was[j][1] + m[1] - o[1], was[j][2] + m[2] - o[2]]
+    })
+  }
+  for (let i = 0; i < positions.length; i++) {
+    if (!pairs.seam[i]) continue
+    const p = positions[i], q = was[i]
+    if (p[0] === q[0] && p[1] === q[1] && p[2] === q[2]) continue
+    if (offPlane(u, pairs.at, q) <= exact) {
+      if (u !== null) { const d = side(u, pairs.at, p); positions[i] = [p[0] - d * u[0], p[1] - d * u[1], p[2] - d * u[2]] } else positions[i] = [0, 0, p[2]]
+      continue
+    }
+    const d: Vec3 = [p[0] - q[0], p[1] - q[1], p[2] - q[2]]
+    const k = u !== null ? u[0] * d[0] + u[1] * d[1] + u[2] * d[2] : 0
+    const along: Vec3 = u !== null ? [d[0] - k * u[0], d[1] - k * u[1], d[2] - k * u[2]] : [0, 0, d[2]]
+    positions[i] = [q[0] + along[0], q[1] + along[1], q[2] + along[2]]
+  }
+  return { ...after, positions }
+}
+
+/** How many points are paired but not exactly symmetric with their images (an offset an edit with symmetry off left). */
+export function offsetCount(cage: Cage, pairs: SymmetryPairs): number {
+  const T = transforms(pairs.mode, pairs.at, pairs.normal)
+  const exact = exactness(cage)
+  const P = cage.positions
+  let n = 0
+  for (let i = 0; i < P.length; i++) {
+    if (pairs.seam[i]) { if (offPlane(pairs.normal, pairs.at, P[i]) > exact) n++; continue }
+    if (T.some((turn, t) => { const j = pairs.images[t][i]; if (j < 0) return false; const m = turn(P[i]); return Math.hypot(P[j][0] - m[0], P[j][1] - m[1], P[j][2] - m[2]) > exact })) n++
+  }
+  return n
 }
 
 /** The selection plus its images (points by image, edges by their ends' images, faces by their corners' images). */

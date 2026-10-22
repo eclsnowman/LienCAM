@@ -100,6 +100,7 @@ export const OP_GEOMETRY_REFERENCE_SOURCE: Record<OperationType, OpGeometryRefer
   engrave: 'params.geometryId',
   vcarve: 'params.geometryId',
   chamfer: 'params.geometryId',
+  pattern: 'params.geometryId',
   // 3D - entry id in geometrySelections[0]; these run through the cam3d worker
   // and never touch params.geometryId. This row IS the R2 bypass, written down.
   parallel_3d: 'geometrySelections',

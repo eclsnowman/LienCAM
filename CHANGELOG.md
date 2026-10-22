@@ -4,13 +4,91 @@ All notable changes to LienCAM are recorded here. The layout follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 LienCAM is in alpha. Expect rough edges, and expect project files from one alpha to
-need re-saving in the next; nothing is promised to keep working before 1.0. Release drafts are identified below.
+need re-saving in the next; nothing is promised to keep working before 1.0. Unreleased versions are marked below.
 
 ## [Unreleased]
 
-## [0.36.0-alpha.2] - unreleased
+## [0.37.0-alpha.3] - 2026-10-22
 
-Draft as of 437cc647452320887df0ef433afa6a15eb2ee7c0; the list will be updated before the release freeze.
+The third public alpha: cutting and toolpath quality, measured on a 56-job machining benchmark
+that covers all 16 operation types.
+
+Release notes: `docs/release/notes-0.37.0-alpha.3.md`.
+
+### Added
+
+- 2D and 3D adaptive were rebuilt for the new machining kernel: every tuning number comes from one recorded policy, and the kernel plans the same moves as before (26 adaptive jobs, posted G-code byte-identical).
+- Final Part Deviation in Simulation compares the simulated finished part with the model and colors leftover material and gouges; it names the operation it is waiting for, Compare again shows a check stamp, and it works with stock simulation on or off.
+- Simulation can show a short toolpath trail around the moving cutter, with adjustable lead and trail lengths.
+- Dimensioned drawings of modeled parts, imported STEP parts and STL meshes: standard views with hidden lines dashed, detail view, balloons, linear/angle/radius/diameter dimensions with tolerances, editable title block and general tolerance table, saved with the project, with Export PDF and Export DXF.
+- A broken drawing dimension can be relinked end by end with a Was/New comparison, and Undo puts it back.
+- Chamfer from model: pick a modeled chamfer (or all on a part) and the Chamfer operation takes the edge path, width and depth from the model; a bevel on one edge cuts only that edge, and freshly modeled bodies work through Section at Z.
+- Face has an Inward spiral pattern for decorative flat finishing.
+- Two setups on one machine can share G54 and post as separate files; a Combined post with a shared offset is still refused, and the setup dialog accepts an occupied offset with a plain note.
+- Project notes in Properties, and each setup's notes read-only on Control.
+- German, Spanish and French interface languages, labelled machine-translated, with a sourced CNC glossary and English fallback; G-code, posted files and controller messages stay English.
+- A problem report can start at the failure, prefilled with the error and the steps, with an optional screenshot and what is needed to reproduce it.
+- Experimental local MCP server for modeling commands in the desktop app, off by default, loopback-only and token-guarded, with an on-screen indicator; no CAM or machine commands.
+- On UCCNC, the bridge logs controller versions and board type on every Open and checks a shipped compatibility record: a known-bad combination is refused before Open, an untested one gives one console line.
+- On x86-64 Linux, Connect starts the UCCNC bridge under Wine by default in its own prefix (not yet proven on a real board); a native Linux bridge is included, opt-in with LIENCAM_BRIDGE_NATIVE=1.
+
+### Changed
+
+- 3D adaptive plans 2-8x faster with an identical toolpath (knob 493 s -> 62 s, Form cylinder 291 s -> 92 s; whole benchmark 1,668 s -> 664 s).
+- Rapids end before the fed lead-in, and over an already cleared floor the tool hops at a low safe height; a link becomes a rapid or hop only where its clearance is proven, otherwise it stays at feed.
+- 3D adaptive entries start at the material under the tool instead of the stock top, on by default: air time 32% -> 16% on the test box and 32% -> 17% on the sphere, cycle time about 18% shorter.
+- 3D adaptive arc joins are tangent to their neighbours, on by default: kinks on the sphere 538 -> 10; posted programs get larger.
+- Adaptive steers away from walls more smoothly: stock-edge direction flips 15.2% -> 7.1%, reversals 69 -> 33 on the test parts.
+- V-carve links its cuts with far fewer repositions (example 78 -> 18 and 169 -> 40), with the carved surface within 0.0004 mm of before.
+- Operations that depend on remaining stock read it from one shared source built from the enabled operations before them.
+- The Model page shading on a large STEP part runs in the background: longest freeze 18.9 s -> 0.4 s, shading identical.
+- CAM Import geometry reads STEP names without a second full read (large part: names 7.2 s -> 1.7 s, import 36.6 s -> 30.5 s; tray part 1.55 s -> 0.40 s).
+- A Model recalculation reuses an unchanged imported STEP instead of reading it again.
+- The STEP reader skips its repair step on shapes that are already valid (large part 7.2 s -> 2.5 s, tray part 2.8 s -> 0.5 s), model unchanged.
+- Form > From body runs in the background; its remesh on a large part dropped from 14.4 s to 7.8 s, and on a complex STEP part of about 49,000 faces it builds a cage you can shape (about 30-45 s on a big part) instead of refusing.
+- When the UCCNC controller DLL changes for a board, Connect waits for a second press after naming both versions and how to go back; with several UCCNC installs and none chosen, the install recorded for the board is used instead of the newest.
+- A firmware update started by the controller on Connect is waited out with one console line at start and one at the end; a failed update is never retried by itself.
+- A refused Load says its full sentence once, in the console; the Control top row no longer runs off or repeats it, and the line under Load reads "Load refused - see the console."
+- Edit macros lists the G30 P1-P4 park buttons with your own macros, in the Macros panel order.
+- The Post dialog reopens on the post and operation ticks you left.
+- Imported inch tools are rounded on import (12.699999999999998 mm -> 12.7 mm).
+- The Full Suite example's notes are written for the operator.
+
+### Fixed
+
+- Adaptive rapids no longer pass through standing stock: a 2D move to the next level or region rises straight up before crossing (rapids into stock on the benchmark pocket 5 -> 0), and a 3D rapid that dipped into uncut stock was removed.
+- An adaptive region that cannot cut says why in one line, and an adaptive operation with no moves ends in error instead of Ready.
+- A 3D adaptive rest pass whose tool has nothing left to cut says so plainly instead of blaming the stock box.
+- 2D and 3D adaptive quality restored after a steering fault: straighter cuts at walls, no stray lifts at inside corners.
+- Two 3D adaptive roughing cases that could stop with an internal error now generate.
+- A second REGEN ALL in a row no longer crashes the page.
+- The Properties panel no longer shows a false "Cannot resolve ... no longer exists" height refusal on operations whose geometry is a modeled body.
+- 3D Rough generates on the Form cylinder and torus starters with default settings by entering from outside the part within the stock.
+- A 3D finish with lifted rapids stays current after compute and after reopen, so it is not recomputed on every open.
+- An operation with nothing left to cut posts one comment line and no motion; an export of only empty operations writes only those comment lines.
+- The shipped example programs (soft jaws, knob, medallion) match what the app posts again, and every shipped example opens with its toolpaths ready.
+- Form > From body no longer crashes the page on a large STEP part; Form symmetry turned on after edits never changes the cage.
+- After a Feed Hold, Stop no longer leaves the controller at 0% feed with moves accepted but none run (simulator/desk proven).
+- Feed Hold no longer prints a false soft-limit line; a Stop/Reset that ends a held move is named.
+- "Cycle complete" appears only after a file actually ran; after a refused Load is fixed the status reads "Ready. CYCLE START runs the program from line 1."
+- The phone pendant reconnects after you leave the page and come back, and a held continuous jog is released when the page hides.
+
+### Known limitations
+
+- Control through UCCNC (UC100 / AXBB-E) is proven on one Windows machine; the Linux route under Wine is not yet proven on a real board.
+- The native Linux bridge is opt-in (LIENCAM_BRIDGE_NATIVE=1) until it is proven on a real board; Linux uses Wine by default.
+- Before you connect LienCAM to your controller, open UCCNC once and let it connect. Do the same after every UCCNC update. If UCCNC shows 'Firmware update in progress', let it finish.
+- LinuxCNC is proven on the LinuxCNC 2.9.4 simulator only; GRBL and grblHAL are not hardware-verified.
+- Recent machine fixes may have been proven only on a simulator.
+- A bridge restart loses the machine position; re-home afterwards.
+- CAM Import geometry on a very large STEP part can still take up to about 30 s.
+- German, Spanish and French are machine translations; some screens may still show English or crowd their labels.
+- The MCP server is experimental, desktop-only and covers modeling commands only.
+- The Windows installer is unsigned, so SmartScreen shows a warning on first run.
+- The Linux and macOS builds are unsigned and untested; the macOS build is for Apple Silicon only.
+- Project files from one alpha may need re-saving in the next; nothing is promised to keep working before 1.0.
+
+## [0.36.0-alpha.2] - 2026-10-16
 
 Release notes: `docs/release/notes-0.36.0-alpha.2.md`.
 
@@ -261,5 +339,6 @@ machines, your test reports are exactly what we need - and once people have conf
 this note comes off.
 
 [Unreleased]: https://github.com/eclsnowman/LienCAM/compare/v0.36.0-alpha.1...HEAD
+[0.37.0-alpha.3]: https://github.com/eclsnowman/LienCAM/releases/tag/v0.37.0-alpha.3
 [0.36.0-alpha.2]: https://github.com/eclsnowman/LienCAM/releases/tag/v0.36.0-alpha.2
 [0.36.0-alpha.1]: https://github.com/eclsnowman/LienCAM/releases/tag/v0.36.0-alpha.1

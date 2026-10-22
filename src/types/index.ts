@@ -3565,6 +3565,7 @@ export type OperationType =
   | 'engrave'
   | 'vcarve'
   | 'chamfer'
+  | 'pattern'
   // 3D
   | 'parallel_3d'
   | 'waterline_3d'
@@ -3711,6 +3712,10 @@ export interface LinkingParams {
   leadOutRadius: number
   retractType: 'full' | 'partial' | 'minimum'
   transitionType: 'safe_height' | 'direct' | 'avoid_stock'
+  /** WO-2835: how far (mm) the tool lifts over a cleared floor on a travel between two
+   *  cuts, to avoid witness marks (operator ruling 2026-10-15: "0.2 to 0.5mm in most instances").
+   *  Absent is moves/ DEFAULT_FLOOR_HOP_MM (0.3); 0 keeps the operation's old travel. */
+  floorHopMm?: number
 }
 
 export interface AdaptiveRoughRegionBounds {

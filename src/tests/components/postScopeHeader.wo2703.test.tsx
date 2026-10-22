@@ -95,11 +95,11 @@ describe('WO-2703 Post export scope', () => {
     act(() => useCamStore.getState().closeModal())
     act(() => useCamStore.getState().updateOperation('setup-55', 'op-55', { progress: 0.5 }))
     act(() => useCamStore.getState().openModal('post-process'))
-    fireEvent.click(screen.getByRole('button', { name: 'Expand operations' }))
+    // WO-2898 retains both the chosen scope and its expanded rows on reopen.
     expect((document.querySelectorAll('.scope-setup-cb')[0] as HTMLInputElement).checked).toBe(true)
-    expect((document.querySelectorAll('.scope-setup-cb')[1] as HTMLInputElement).checked).toBe(false)
-    expect((screen.getByRole('checkbox', { name: 'Cut G54' }) as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByRole('checkbox', { name: 'Cut G55' }) as HTMLInputElement).checked).toBe(false)
+    expect((document.querySelectorAll('.scope-setup-cb')[1] as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: 'Cut G54' }) as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByRole('checkbox', { name: 'Cut G55' }) as HTMLInputElement).checked).toBe(true)
 
     // A selectable-tree change retains the existing all-setup reseed behavior.
     act(() => useCamStore.getState().updateOperation('setup-54', 'op-54', { enabled: false }))

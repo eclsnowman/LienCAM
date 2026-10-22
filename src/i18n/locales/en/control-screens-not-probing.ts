@@ -376,6 +376,7 @@ const controlScreens = {
     "text007": "OK"
   },
   "MacroEditor": {
+    "parkDisplayNote": "Park button name, color and visibility. The move below uses the machine reference position and safe Z settings.",
     "drivesOutput": "Drives output",
     "outputNone": "none",
     "hiddenNote": "(off: does not run)",
@@ -776,7 +777,9 @@ const controlScreens = {
     "text132": " | next: {{value1}} @ line {{value2}}",
     "text133": "no program",
     "text134": "Operations in this program",
-    "text135": "lines {{value1}}-{{value2}}"
+    "text135": "lines {{value1}}-{{value2}}",
+    "loadRefusedShort": "Load refused - see the console.",
+    "setupNotes": "Setup notes ({{value1}}):"
   },
   "ProgramPreview": {
     "text001": "Top view",

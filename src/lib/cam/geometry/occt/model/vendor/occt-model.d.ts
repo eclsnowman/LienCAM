@@ -1560,6 +1560,15 @@ export declare class ShapeFix_Root extends Standard_Transient {
   delete(): void;
 }
 
+export declare class BRepCheck_Analyzer {
+  constructor(S: TopoDS_Shape, GeomControls: Standard_Boolean, theIsParallel: Standard_Boolean)
+  Init(S: TopoDS_Shape, GeomControls: Standard_Boolean, theIsParallel: Standard_Boolean): void;
+  IsValid_1(S: TopoDS_Shape): Standard_Boolean;
+  IsValid_2(): Standard_Boolean;
+  Result(theSubS: TopoDS_Shape): Handle_BRepCheck_Result;
+  delete(): void;
+}
+
 export declare class ShapeFix_Shape extends ShapeFix_Root {
   Init(shape: TopoDS_Shape): void;
   Perform(theProgress: Message_ProgressRange): Standard_Boolean;
@@ -2094,6 +2103,7 @@ export type OpenCascadeInstance = {FS: typeof FS} & {
   Handle_Poly_Triangulation_3: typeof Handle_Poly_Triangulation_3;
   Handle_Poly_Triangulation_4: typeof Handle_Poly_Triangulation_4;
   ShapeFix_Root: typeof ShapeFix_Root;
+  BRepCheck_Analyzer: typeof BRepCheck_Analyzer;
   ShapeFix_Shape: typeof ShapeFix_Shape;
   ShapeFix_Shape_1: typeof ShapeFix_Shape_1;
   ShapeFix_Shape_2: typeof ShapeFix_Shape_2;

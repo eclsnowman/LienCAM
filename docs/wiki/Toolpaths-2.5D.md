@@ -13,6 +13,7 @@
 - [2D chamfer](#chamfer-op)
 - [Engraving](#engrave)
 - [V-carving](#vcarve)
+- [Pattern](#pattern-op)
 - [2D facing](#face-op)
 - [Adaptive clearing](#adaptive-clearing)
 - [Adaptive linking and stay-down](#adaptive-linking)
@@ -275,7 +276,25 @@ V-Carve has no Linking tab. It refuses by name when the tool has no usable tip a
 
 ![Toolpath tab with example 05 name sign open: V-carve 1 selected, its path drawn over the sign lettering, and Properties showing type vcarve, status ready, tool 6 mm 60 deg V-bit](images/vcarve/result.webp)
 
+V-carve finishes nearby cuts of each letter together and follows connected corner grooves without retracting for each branch. Short links over already carved space lift only as far as needed and run at feed; links across uncut space or farther away rise to Retract. Clearance is used for the first entry and final exit. This reduces repositioning without changing the carved shape.
+
 See also: [Engraving](Toolpaths-2.5D#engrave), [2D chamfer](Toolpaths-2.5D#chamfer-op), [What an operation cuts](Toolpaths-2.5D#operation-sources).
+
+<a id="pattern-op"></a>
+
+## Pattern
+
+Pattern cuts a decorative pattern, such as a rose spiral, a wave raster or a line moire, at a shallow depth below the stock top.
+
+1. A Pattern operation comes in with a project that already holds one. It is not in the New Operation list yet, and Edit operation has no pattern editor: opening one there says so, and the operation still computes and posts as it was saved.
+2. The pattern itself is a list of curves (a preset rose spiral, sine raster, epitrochoid or line moire, or curves written as formulas), with copies, turns and mirrors, and a depth.
+3. The region is optional. It is made from the closed loops of the geometry the operation uses; an open loop never bounds it. A pattern placed at the region centre, or trimmed to the region, needs a region and refuses without one.
+4. On the Heights tab, Top Height starts at the stock top and Bottom Height is the pattern depth below it. A Bottom Height you set wins over the depth written in the pattern.
+5. Use a ball, bull nose, flat or pointed cutter. Each curve is cut at feed at that depth; between curves the tool rises to Retract, moves across and plunges again.
+
+It refuses only what it cannot do: a pattern it cannot read (the message names the field), a depth the flutes cannot reach, or a missing region. Anything else it makes, and the Console says what it did: how many points and passes, how much path was trimmed at the region edge, where neighbouring grooves overlap, and a feed or spindle speed beyond what the machine states (the controller caps it).
+
+See also: [Engraving](Toolpaths-2.5D#engrave), [V-carving](Toolpaths-2.5D#vcarve), [What an operation cuts](Toolpaths-2.5D#operation-sources).
 
 <a id="face-op"></a>
 
@@ -463,6 +482,8 @@ Exporting goes three ways: the Export button in the footer saves the selected to
 After an import, a line below the buttons says how it went (for example "Imported 5 tools into library "Shop endmills"") and the bottom console keeps the full message. A record the app cannot read is skipped and named in the console with the reason; the rest of the file still imports. A file that yields no tools at all leaves no empty library behind.
 
 ![The tool list scoped to a freshly imported library with the inline import readout](images/tools-import-export/import-flow.webp)
+
+Inch-based Fusion tool libraries are converted to millimeters and their dimensions rounded to 0.0001 mm on import. A nonzero value too small to survive rounding is kept. Libraries imported earlier keep their stored values; import the original file again to get the rounded dimensions in a new library. Metric libraries and manual edits keep their values.
 
 See also: [The tool library](Toolpaths-2.5D#tool-library).
 

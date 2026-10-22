@@ -1,4 +1,4 @@
-; LienCAM 0.36.0-alpha.2 - 02 Toe clamps - linuxcnc
+; LienCAM 0.37.0-alpha.3 - 02 Toe clamps - linuxcnc
 G90 G94 G17 G21 G64
 ; Setup 1
 G54

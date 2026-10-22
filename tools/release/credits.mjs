@@ -21,6 +21,7 @@
 // Writes only when the content changed, keeping the file's existing line
 // endings, so a second run changes nothing.
 
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -338,6 +339,6 @@ function main(args) {
   return 0
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2))
 }

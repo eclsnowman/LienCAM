@@ -16,12 +16,15 @@ import { textFor, useText } from '../../i18n'
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { create } from 'zustand'
-import { Bug, ExternalLink, FileDown, RefreshCw, X } from 'lucide-react'
+import { Bug, Camera, ExternalLink, FileDown, RefreshCw, Trash2, X } from 'lucide-react'
 import {
-  CATEGORY_IDS, DEFAULT_CHOICES, LIMITS, REPORT_FILENAME, buildReport, clearDiagnosticHistory, diagnosticHistory,
-  freezeReportSources, issueFormUrl, openIssueForm, optionalSourceAvailable, prefillFields, readOptionalSource,
-  type Attachment, type BuiltReport, type CategoryId, type PrefillFieldId, type ReportChoices, type ReportSources,
+  CATEGORY_IDS, DEFAULT_CHOICES, FAILURE_CHOICES, LIMITS, REPORT_FILENAME, buildReport, captureApp, clearDiagnosticHistory,
+  diagnosticHistory, freezeReportSources, issueFormUrl, openIssueForm, optionalSourceAvailable, prefillFields,
+  readConsoleTail, readCurrentProject, readOptionalSource, suggestedSteps,
+  type AppCapture, type Attachment, type BuiltReport, type CategoryId, type FailureContext, type PrefillFieldId,
+  type PrivateKind, type ReportChoices, type ReportSources,
 } from '../../lib/diagnostics'
+import { useCamStore } from '../../store'
 import { saveFile } from '../../lib/saveFile'
 import { useUiPrefs } from '../../store/uiPrefs'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
@@ -31,14 +34,74 @@ const shellText = textFor('app-shell-settings-menus')
 const t = (key: string, values?: Record<string, unknown>): string =>
   String(shellText(`ReportProblemModal.${key}` as Parameters<typeof shellText>[0], values as never))
 
-export const useReportProblem = create<{ open: boolean }>(() => ({ open: false }))
-export function openReportProblem() { useReportProblem.setState({ open: true }) }
-function closeReportProblem() { useReportProblem.setState({ open: false }) }
+// WO-2911: a report can start AT a failure. `failure` is frozen when the
+// operator clicks "Report this problem"; `capture` is the app picture taken
+// then, with the project object it was taken over (to show a stale picture).
+// `request` restarts the dialog for every new report, so nothing carries over.
+// `asked` numbers every report the operator asks for, taken at the click, so a
+// failure's picture that finishes after a newer ask is dropped, never shown.
+// `clearGeneration` is the history Clear the failure and picture belong to: a
+// Clear (here or in another tab) ends them, so nothing the operator removed comes back.
+interface ReportRequest {
+  open: boolean
+  request: number
+  asked: number
+  clearGeneration: number
+  failure: FailureContext | null
+  capture: AppCapture | null
+  captureProject: unknown
+  captureNote: string | null
+}
+export const useReportProblem = create<ReportRequest>(() => ({
+  open: false, request: 0, asked: 0, clearGeneration: 0, failure: null, capture: null, captureProject: null, captureNote: null,
+}))
+export function openReportProblem() {
+  useReportProblem.setState((s) => ({
+    open: true, request: s.request + 1, asked: s.asked + 1, failure: null, capture: null, captureProject: null, captureNote: null,
+  }))
+}
+function closeReportProblem() {
+  useReportProblem.setState({ open: false, failure: null, capture: null, captureProject: null, captureNote: null })
+}
+
+/** The project object a picture was taken over; null when the store itself is unreadable. */
+function liveProject(): unknown {
+  try { return useCamStore.getState().project } catch { return null }
+}
+
+/**
+ * WO-2911: "Report this problem" at a console line or error screen. The failure
+ * is already frozen by the caller; the app picture is taken BEFORE the dialog
+ * opens (no prompt: the desktop window, else the 3D view), then the dialog
+ * opens prefilled. Nothing is saved, sent, selected or applied here.
+ */
+export async function openReportForFailure(failure: FailureContext): Promise<void> {
+  const project = liveProject()
+  const mine = useReportProblem.getState().asked + 1
+  // The Clear this failure was reported under: a Clear while the picture is taken ends it.
+  const generation = diagnosticHistory().clearGeneration
+  useReportProblem.setState({ asked: mine })
+  const result = await captureApp(false)
+  // A newer report was asked for while this picture was taken: that one wins.
+  if (useReportProblem.getState().asked !== mine) return
+  useReportProblem.setState((s) => ({
+    open: true, request: s.request + 1, clearGeneration: generation, failure,
+    capture: result.ok ? result.capture : null,
+    captureProject: result.ok ? project : null,
+    captureNote: result.ok ? null : t('captureFailed', { detail: result.reason }),
+  }))
+}
+
+const CAPTURE_KIND_KEY: Record<AppCapture['kind'], string> = {
+  'app-window': 'captureKindAppWindow', 'browser-tab': 'captureKindBrowserTab', 'view-only': 'captureKindViewOnly',
+}
+const PRIVATE_KIND_KEY: Record<PrivateKind, string> = { path: 'privateKindPath', ip: 'privateKindIp', email: 'privateKindEmail' }
 
 const CATEGORY_KEY: Record<CategoryId, string> = {
   appVersions: 'AppVersions', basicEnvironment: 'BasicEnvironment', eventHistory: 'EventHistory',
   machineState: 'MachineState', operationSettings: 'OperationSettings', preciseEnvironment: 'PreciseEnvironment',
   originalProject: 'OriginalProject', originalProgram: 'OriginalProgram', appImage: 'AppImage',
+  reproduction: 'Reproduction', consoleTail: 'ConsoleTail', currentProject: 'CurrentProject',
 }
 
 type AttachmentSlot = 'project' | 'program' | 'image'
@@ -69,27 +132,56 @@ export function ReportProblemModal() {
   const open = useReportProblem((s) => s.open)
   const h = diagnosticHistory()
   const clearGeneration = useSyncExternalStore((listener) => h.subscribe(listener), () => h.clearGeneration)
+  const request = useReportProblem((s) => s.request)
   if (!open) return null
   // A Clear (here or broadcast from another tab) ends the pending report: the
   // dialog starts again with no file, choice or frozen copy from before it.
-  return <ReportProblemDialog key={clearGeneration} />
+  // So does every new report request (Help, or a failure's Report action).
+  return <ReportProblemDialog key={`${clearGeneration}:${request}`} clearGeneration={clearGeneration} />
 }
 
 const NO_ATTACHMENTS: Record<AttachmentSlot, Attachment | null> = { project: null, program: null, image: null }
 
-function ReportProblemDialog() {
+function capturedAttachment(capture: AppCapture | null): Attachment | null {
+  return capture ? { bytes: capture.bytes, kind: 'png' } : null
+}
+
+function ReportProblemDialog({ clearGeneration }: { clearGeneration: number }) {
+  // After a Clear the dialog starts as Help does: no failure, no picture, empty choices.
+  const current = useReportProblem((s) => s.clearGeneration === clearGeneration)
+  const failure = useReportProblem((s) => (current ? s.failure : null))
+  const capture = useReportProblem((s) => (current ? s.capture : null))
+  const captureProject = useReportProblem((s) => (current ? s.captureProject : null))
+  const captureNote = useReportProblem((s) => (current ? s.captureNote : null))
   const history = diagnosticHistory()
   const summaries = useHistorySummaries()
   const recording = useUiPrefs((s) => s.diagnosticHistoryRecording)
   const setRecording = useUiPrefs((s) => s.setDiagnosticHistoryRecording)
   const dialogFocusRef = useDialogFocus<HTMLDivElement>()
 
-  const [incidentId, setIncidentId] = useState(() => history.defaultIncidentSessionId())
-  const [attachments, setAttachments] = useState<Record<AttachmentSlot, Attachment | null>>(NO_ATTACHMENTS)
+  // A failure happened in this session: that is the incident being reported.
+  const [incidentId, setIncidentId] = useState(() => (failure ? history.currentSessionId : history.defaultIncidentSessionId()))
+  const [attachments, setAttachments] = useState<Record<AttachmentSlot, Attachment | null>>(
+    () => ({ ...NO_ATTACHMENTS, image: capturedAttachment(capture) }))
+  const [description, setDescription] = useState(() => ({
+    expected: '',
+    actual: failure ? t('actualFromFailure', { text: failure.errorText }) : '',
+    steps: suggestedSteps(failure),
+  }))
+  const [hidePrivate, setHidePrivate] = useState(false)
+  const [capturing, setCapturing] = useState(false)
+  const [currentProject, setCurrentProject] = useState<{ attachment: Attachment | null; reading: boolean }>({ attachment: null, reading: false })
   const [attachmentNote, setAttachmentNote] = useState<Partial<Record<AttachmentSlot, string>>>({})
   const [readCount, setReadCount] = useState(0)
+  // When the details were read (dialog open, or Read details again): a picture's age is against this.
+  const [readAt, setReadAt] = useState(() => Date.now())
   const [excluded, setExcluded] = useState<Set<number>>(new Set())
-  const [choices, setChoices] = useState<ReportChoices>(DEFAULT_CHOICES)
+  const startChoices = (): ReportChoices => ({
+    ...DEFAULT_CHOICES, reproduction: true, ...(failure ? FAILURE_CHOICES : {}),
+    // Settings start ticked only when the failure names an operation; the picture only when one was taken.
+    operationSettings: failure?.operation?.settings != null, appImage: capture !== null,
+  })
+  const [choices, setChoices] = useState<ReportChoices>(startChoices)
   const [report, setReport] = useState<BuiltReport | null>(null)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [prefillOpen, setPrefillOpen] = useState(false)
@@ -114,17 +206,49 @@ function ReportProblemDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [choices.preciseEnvironment, readCount],
   )
+  // A failure's own operation, frozen at the click; otherwise the selected one, read on tick.
   const settings = useMemo(
-    () => (choices.operationSettings ? readOptionalSource('operationSettings') : null),
+    () => (!choices.operationSettings ? null
+      : failure?.operation ? failure.operation.settings : readOptionalSource('operationSettings')),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [choices.operationSettings, readCount],
   )
+  const consoleTail = useMemo(
+    () => (choices.consoleTail ? readConsoleTail() : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [choices.consoleTail, readCount],
+  )
+  // The open project is assembled only once ticked (it can take a moment), and dropped when unticked.
+  useEffect(() => {
+    if (!choices.currentProject) { setCurrentProject({ attachment: null, reading: false }); return }
+    let cancelled = false
+    setCurrentProject({ attachment: null, reading: true })
+    void readCurrentProject().then((attachment) => { if (!cancelled) setCurrentProject({ attachment, reading: false }) })
+    return () => { cancelled = true }
+  }, [choices.currentProject, readCount])
+  const captureInfo = useMemo(() => {
+    if (!capture || attachments.image?.bytes !== capture.bytes) return null
+    return {
+      kind: capture.kind, width: capture.width, height: capture.height,
+      ageSeconds: Math.max(0, Math.round((readAt - capture.takenAt) / 1000)),
+      projectChangedAfter: captureProject !== null && liveProject() !== captureProject,
+    }
+  }, [capture, captureProject, attachments.image, readAt])
   const sources: ReportSources = useMemo(
-    () => ({ ...frozen, preciseEnvironment: precise, operationSettings: settings }),
-    [frozen, precise, settings],
+    () => ({
+      ...frozen, preciseEnvironment: precise, operationSettings: settings, consoleTail,
+      currentProject: currentProject.attachment,
+      image: frozen.image && captureInfo ? { ...frozen.image, capture: captureInfo } : frozen.image,
+      reproduction: { failure, ...description },
+    }),
+    [frozen, precise, settings, consoleTail, currentProject.attachment, captureInfo, failure, description],
   )
   const optionalAvailable = useMemo(
-    () => ({ preciseEnvironment: optionalSourceAvailable('preciseEnvironment'), operationSettings: optionalSourceAvailable('operationSettings') }),
+    () => ({
+      preciseEnvironment: optionalSourceAvailable('preciseEnvironment'),
+      operationSettings: failure?.operation?.settings != null || optionalSourceAvailable('operationSettings'),
+      consoleTail: useCamStore.getState().consoleEvents.length > 0,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [readCount],
   )
@@ -144,10 +268,15 @@ function ReportProblemDialog() {
     setReport(null)
     setSaveMessage(null)
     setPrefillOpen(false)
-    void buildReport(choices, sources, excluded).then((built) => {
+    void buildReport(choices, sources, excluded, { hidePrivate }).then((built) => {
       if (id === buildId.current) setReport(built)
+    }, (error: unknown) => {
+      // Never a preview that says "building" forever: say why it stopped.
+      if (id === buildId.current) setSaveMessage(t('buildFailed', { detail: error instanceof Error ? error.message : String(error) }))
     })
-  }, [choices, sources, excluded])
+    // A build still running when the dialog closes is dropped, not applied to a gone dialog.
+    return () => { buildId.current += 1 }
+  }, [choices, sources, excluded, hidePrivate])
 
   // Escape closes this dialog only.
   useEffect(() => {
@@ -175,6 +304,9 @@ function ReportProblemDialog() {
       case 'eventHistory': return sources.incident !== null
       case 'machineState': return sources.machineState !== null
       case 'operationSettings': return optionalAvailable.operationSettings
+      case 'reproduction': return true
+      case 'consoleTail': return optionalAvailable.consoleTail
+      case 'currentProject': return !(choices.currentProject && !currentProject.reading && currentProject.attachment === null)
       default: return false
     }
   }
@@ -183,13 +315,18 @@ function ReportProblemDialog() {
   // back to its default and chosen files are dropped; a file still being read
   // when the incident changes is discarded too.
   const consentEpoch = useRef(0)
+  // Closing or clearing ends this dialog: a picture still being taken for it is no longer wanted.
+  useEffect(() => () => { consentEpoch.current += 1 }, [])
   const selectIncident = (id: string) => {
     consentEpoch.current += 1
+    // WO-2911: the failure and its picture belong to this session's incident only.
+    useReportProblem.setState({ failure: null, capture: null, captureProject: null, captureNote: null })
+    setDescription({ expected: '', actual: '', steps: '' })
     setIncidentId(id)
     setAttachments(NO_ATTACHMENTS)
     setAttachmentNote({})
     setExcluded(new Set())
-    setChoices(DEFAULT_CHOICES)
+    setChoices({ ...DEFAULT_CHOICES, reproduction: true })
     setInitialised(false)
     setPrefillDropped(new Set())
   }
@@ -212,9 +349,40 @@ function ReportProblemDialog() {
       const kind = slot === 'image' ? (file.type === 'image/jpeg' ? 'jpg' : 'png') : undefined
       setAttachments((a) => ({ ...a, [slot]: { bytes, kind } }))
       setAttachmentNote((n) => ({ ...n, [slot]: t('fileChosen', { size: formatBytes(bytes.length) }) }))
+      // The picture row is offered unticked too (WO-2911); choosing an image means include it.
+      if (slot === 'image') setChoices((c) => ({ ...c, appImage: true }))
     } catch {
       setAttachmentNote((n) => ({ ...n, [slot]: t('fileUnreadable') }))
     }
+  }
+
+  // "Capture the app": hide this dialog, take the picture (the browser may ask
+  // to share the tab), show the dialog again with the picture in the preview.
+  const captureNow = async () => {
+    const epoch = consentEpoch.current
+    setCapturing(true)
+    const project = liveProject()
+    try {
+      const result = await captureApp(true, () => epoch === consentEpoch.current)
+      if (epoch !== consentEpoch.current) return
+      if (result.ok) {
+        useReportProblem.setState({ capture: result.capture, captureProject: project, captureNote: null })
+        setAttachments((a) => ({ ...a, image: capturedAttachment(result.capture) }))
+        // Fell back to a smaller picture: say why the whole app was not taken.
+        setAttachmentNote((n) => ({ ...n, image: result.skipped ? t('captureFellBack', { detail: result.skipped }) : undefined }))
+        setChoices((c) => ({ ...c, appImage: true }))
+      } else {
+        setAttachmentNote((n) => ({ ...n, image: t('captureFailed', { detail: result.reason }) }))
+      }
+    } finally {
+      setCapturing(false)
+    }
+  }
+  const removeImage = () => {
+    useReportProblem.setState({ capture: null, captureProject: null, captureNote: null })
+    setAttachments((a) => ({ ...a, image: null }))
+    setAttachmentNote((n) => ({ ...n, image: undefined }))
+    setChoices((c) => ({ ...c, appImage: false }))
   }
 
   const save = async () => {
@@ -238,6 +406,7 @@ function ReportProblemDialog() {
 
   return (
     <div className="modal-backdrop report-problem-backdrop" data-testid="report-problem-backdrop" data-ui78-sanctioned=""
+      style={capturing ? { visibility: 'hidden' } : undefined}
       onMouseDown={(event) => { if (event.target === event.currentTarget) closeReportProblem() }}>
       <div className="modal-container report-problem-modal" data-testid="report-problem" role="dialog" aria-modal="true"
         aria-labelledby="report-problem-title" ref={dialogFocusRef}>
@@ -256,6 +425,35 @@ function ReportProblemDialog() {
             <p>{t('introUpload')}</p>
           </div>
 
+          {failure && (
+            <section className="report-problem-section report-problem-failure" data-testid="report-problem-failure" aria-labelledby="report-problem-failure-title">
+              <h3 id="report-problem-failure-title">{t('failureHeading')}</h3>
+              <p className="report-problem-note">{t('failureShownBy', { source: failure.source })}</p>
+              {failure.operation && (
+                <p className="report-problem-note">{t('failureOperation', { name: failure.operation.name, family: failure.operation.family, setup: failure.operation.setupName ?? '?' })}</p>
+              )}
+              <pre className="report-problem-text" data-testid="report-problem-failure-text">{failure.errorText}</pre>
+            </section>
+          )}
+
+          <section className="report-problem-section" aria-labelledby="report-problem-describe">
+            <h3 id="report-problem-describe">{t('describeHeading')}</h3>
+            <p className="report-problem-note">{t('describeNote')}</p>
+            {(['expected', 'actual', 'steps'] as const).map((field) => (
+              // Inline: ReportProblemModal.css is outside this order's grant.
+              <label key={field} className="report-problem-field" style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+                <span>{t(`${field}Label`)}</span>
+                <textarea data-testid={`report-problem-${field}`} rows={field === 'steps' ? 5 : 2} value={description[field]}
+                  style={{
+                    width: '100%', boxSizing: 'border-box', font: 'inherit', resize: 'vertical', padding: '6px 8px',
+                    background: 'var(--surface-canvas, #111)', color: 'var(--text-primary, #e0e0e0)',
+                    border: '1px solid var(--border-subtle, #333)', borderRadius: 4,
+                  }}
+                  onChange={(event) => setDescription((d) => ({ ...d, [field]: event.target.value }))} />
+              </label>
+            ))}
+          </section>
+
           <section className="report-problem-section" aria-labelledby="report-problem-incident">
             <h3 id="report-problem-incident">{t('incident')}</h3>
             <div className="report-problem-row">
@@ -270,7 +468,7 @@ function ReportProblemDialog() {
                 ))}
               </select>
               <button type="button" className="modal-btn modal-btn-ghost" data-testid="report-problem-read-again"
-                data-tooltip={t('readAgainTip')} onClick={() => { setReadCount((n) => n + 1); setExcluded(new Set()) }}>
+                data-tooltip={t('readAgainTip')} onClick={() => { setReadCount((n) => n + 1); setReadAt(Date.now()); setExcluded(new Set()) }}>
                 <RefreshCw size={13} /> {t('readAgain')}
               </button>
             </div>
@@ -296,12 +494,37 @@ function ReportProblemDialog() {
                       </span>
                     </label>
                     <p>{t(`cat${CATEGORY_KEY[id]}Text`)}</p>
-                    {slot && choices[id] && (
+                    {id === 'appImage' && captureInfo && (
+                      <p className="report-problem-note" data-testid="report-problem-capture-kind">
+                        {t(CAPTURE_KIND_KEY[captureInfo.kind])} {t('captureAge', { seconds: captureInfo.ageSeconds })}
+                      </p>
+                    )}
+                    {id === 'appImage' && captureInfo?.projectChangedAfter && (
+                      <p className="report-problem-problem" data-testid="report-problem-capture-stale">{t('captureStale')}</p>
+                    )}
+                    {id === 'appImage' && !attachments.image && captureNote && <p className="report-problem-note">{captureNote}</p>}
+                    {id === 'currentProject' && choices.currentProject && (currentProject.reading || !currentProject.attachment) && (
+                      <p className="report-problem-note" data-testid="report-problem-current-project-note">
+                        {currentProject.reading ? t('projectReading') : t('projectUnavailable')}
+                      </p>
+                    )}
+                    {slot && (choices[id] || slot === 'image') && (
                       <div className="report-problem-row">
                         <button type="button" className="modal-btn modal-btn-ghost" data-testid={`report-problem-choose-${slot}`}
                           onClick={() => fileInputs.current[slot]?.click()}>
                           {t(slot === 'image' ? 'chooseImage' : 'chooseFile')}
                         </button>
+                        {slot === 'image' && (
+                          <button type="button" className="modal-btn modal-btn-ghost" data-testid="report-problem-capture"
+                            data-tooltip={t('captureAppTip')} disabled={capturing} onClick={() => void captureNow()}>
+                            <Camera size={13} /> {capturing ? t('captureTaking') : t('captureApp')}
+                          </button>
+                        )}
+                        {slot === 'image' && attachments.image && (
+                          <button type="button" className="modal-btn modal-btn-ghost" data-testid="report-problem-remove-image" onClick={removeImage}>
+                            <Trash2 size={13} /> {t('removeImage')}
+                          </button>
+                        )}
                         {attachmentNote[slot] && <span className="report-problem-note">{attachmentNote[slot]}</span>}
                         <input type="file" hidden accept={ACCEPT[slot]} data-testid={`report-problem-file-${slot}`}
                           ref={(node) => { fileInputs.current[slot] = node }}
@@ -319,13 +542,33 @@ function ReportProblemDialog() {
             {!report ? <p className="report-problem-note">{t('previewBuilding')}</p> : (
               <>
                 {report.problems.map((p) => <p key={p} className="report-problem-problem" role="alert">{p}</p>)}
+                <div className="report-problem-disclosure" data-testid="report-problem-private">
+                  <p>{report.privateText.length ? t('privateHeading', { count: report.privateText.length }) : t('privateNone')}</p>
+                  {report.privateText.length > 0 && (
+                    <>
+                      <ul className="report-problem-private-list">
+                        {report.privateText.map((m, i) => (
+                          <li key={`${m.file}:${i}`}>
+                            <code>{t(m.hidden ? 'privateItemHidden' : 'privateItem', { kind: t(PRIVATE_KIND_KEY[m.kind]), file: m.file, text: m.text })}</code>
+                          </li>
+                        ))}
+                      </ul>
+                      <label className="report-problem-row">
+                        <input type="checkbox" checked={hidePrivate} data-testid="report-problem-hide-private"
+                          onChange={(event) => setHidePrivate(event.target.checked)} />
+                        <span>{t('privateHide')}</span>
+                      </label>
+                      <p className="report-problem-note">{t('privateKeepNote')}</p>
+                    </>
+                  )}
+                </div>
                 {report.files.map((f) => (
                   <details key={f.name} className="report-problem-file" data-testid={`report-problem-file-preview-${f.name}`} open={f.category === 'appImage'}>
                     <summary>
                       <span className="report-problem-file-name">{t('previewFile', { name: f.name, size: formatBytes(f.size) })}</span>
                       <span className="report-problem-hash">{t('previewHash', { hash: f.sha256.slice(0, 16) })}</span>
                     </summary>
-                    {f.category === 'originalProject' && (
+                    {(f.category === 'originalProject' || f.category === 'currentProject') && (
                       <div className="report-problem-disclosure">
                         <p>{t('projectDisclosure1')}</p>
                         <p>{t('projectDisclosure2')}</p>
@@ -336,7 +579,7 @@ function ReportProblemDialog() {
                     {f.category === 'originalProgram' && <p className="report-problem-disclosure">{t('programDisclosure')}</p>}
                     {f.category === 'appImage' && (
                       <>
-                        <p className="report-problem-disclosure">{t('imageDisclosure')}</p>
+                        <p className="report-problem-disclosure">{t(captureInfo ? 'capturedImageDisclosure' : 'imageDisclosure')}</p>
                         {imageUrl && <img className="report-problem-image" src={imageUrl} alt={t('imageAlt')} />}
                       </>
                     )}
@@ -373,6 +616,11 @@ function ReportProblemDialog() {
           {prefillOpen && report && (
             <section className="report-problem-section report-problem-prefill" data-testid="report-problem-prefill" aria-labelledby="report-problem-prefill-title">
               <h3 id="report-problem-prefill-title">{t('prefillHeading')}</h3>
+              {report.files.some((f) => f.category === 'appImage') && (
+                <p className="report-problem-note" data-testid="report-problem-prefill-image">
+                  {t('prefillImageNote', { name: report.files.find((f) => f.category === 'appImage')!.name })}
+                </p>
+              )}
               {offered.length === 0 ? <p>{t('prefillNone')}</p> : (
                 <ul className="report-problem-categories">
                   {offered.map((f) => (

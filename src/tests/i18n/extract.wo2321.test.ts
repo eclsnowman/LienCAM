@@ -50,7 +50,8 @@ it('renders operation types and every wizard tab, nesting, properties, simulatio
   let view = render(h(NewOperationModal))
   act(() => { useCamStore.getState().openModal('new-operation') })
   const types = Array.from(view.container.querySelectorAll('.op-type-name')).map(el => el.textContent!)
-  expect(types.length).toBe(17)
+  // WO-2977: Run macro joined the operation types after this golden (operation:run-macro); 17 -> 18.
+  expect(types.length).toBe(18)
   for (const type of types) {
     fireEvent.click(Array.from(view.container.querySelectorAll('button')).find(el => el.textContent?.trim() === 'Type & Name')!)
     fireEvent.click(Array.from(view.container.querySelectorAll('.op-type-card')).find(el => el.textContent?.trim() === type)!)

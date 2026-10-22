@@ -1,0 +1,5 @@
+**/bin/
+**/obj/
+work/
+**/__pycache__/
+publish/

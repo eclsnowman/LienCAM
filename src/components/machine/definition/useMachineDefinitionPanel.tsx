@@ -267,7 +267,8 @@ function controlUsesBridge(): boolean {
     : controllerSurface(controlMachine(useCamStore.getState())).defaultConnectionKind === 'bridge'
 }
 
-export async function ensureBridgeForControl(): Promise<boolean> {
+/** `press`: the operator's Connect, never the automatic start when Control opens. */
+export async function ensureBridgeForControl(press = false): Promise<boolean> {
   // A UCCNC profile can run on the in-app simulator without its bridge.
   if (!controlUsesBridge()) return true
   if (automaticBridgeStart !== null) return automaticBridgeStart
@@ -285,7 +286,10 @@ export async function ensureBridgeForControl(): Promise<boolean> {
     if (status === null) return true
     const state = bridgePanelState(status)
     if (state.kind === 'healthy') return true
-    if (state.kind === 'failing') {
+    // WO-2845 (ADR-0058 D4): the bridge stopped at the changed-DLL line, which
+    // says "Press Connect again". This press is that second Connect.
+    const changedDllPress = press && state.kind === 'failing' && status.lastExit?.code === 12
+    if (state.kind === 'failing' && !changedDllPress) {
       useCamStore.getState().addConsoleEvent({
         severity: 'error', source: 'machine',
         message: controlText('useMachineDefinitionPanel.text003', { value1: String(state.reason) }),
@@ -299,12 +303,13 @@ export async function ensureBridgeForControl(): Promise<boolean> {
       })
       return false
     }
-    if (state.kind !== 'not-running') return true
+    if (state.kind !== 'not-running' && !changedDllPress) return true
     let result
     try {
       result = await startBridge(
         bridgePort,
         useUiPrefs.getState().machineLinks[controlMachine(useCamStore.getState()).id],
+        { operatorPress: press },
       )
     } catch {
       useCamStore.getState().addConsoleEvent({
@@ -360,7 +365,7 @@ if (typeof document !== 'undefined') {
         if (bridgeHostCapability() === 'hosted') return
         event.preventDefault()
         event.stopPropagation()
-        void ensureBridgeForControl().then((ready) => {
+        void ensureBridgeForControl(true).then((ready) => {
           if (!ready || !(connect instanceof HTMLButtonElement) || connect.disabled) return
           bridgeConnectPassThrough = connect
           connect.click()
@@ -1058,8 +1063,8 @@ export function useMachineDefinitionPanel({
       }
 
       const result = action === 'start'
-        ? await startBridge(bridgePort, localLink)
-        : await restartBridge(bridgePort, localLink)
+        ? await startBridge(bridgePort, localLink, { operatorPress: true })   // WO-2845
+        : await restartBridge(bridgePort, localLink, { operatorPress: true })
       if (result.ok) {
         addConsoleEvent({
           severity: 'success', source: 'machine',

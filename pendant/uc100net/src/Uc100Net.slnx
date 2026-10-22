@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Uc100Net.Tests/Uc100Net.Tests.csproj" />
+  <Project Path="Uc100Net/Uc100Net.csproj" />
+</Solution>

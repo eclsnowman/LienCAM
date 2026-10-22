@@ -586,6 +586,13 @@ interface UiPrefsState {
   diagnosticHistoryRecording: boolean
   setDiagnosticHistoryRecording: (on: boolean) => void
 
+  /** WO-3010: let MCP clients (an AI assistant on this computer) edit the open
+   *  model through LienCAM's MCP server. Desktop app only; default OFF. Saved
+   *  here so the choice survives a restart; the server itself lives in Electron
+   *  main and is started or stopped from this value (installMcpServerSwitch). */
+  mcpServerEnabled: boolean
+  setMcpServerEnabled: (on: boolean) => void
+
   /** WO-1904: set the DXF drawing-origin preference (a boolean has exactly two
    *  answers - a non-boolean write is a caller bug and writes nothing). */
   setDxfKeepOrigin: (keep: boolean) => void
@@ -827,6 +834,8 @@ export const useUiPrefs = create<UiPrefsState>()(
       setProjectOpenDirectly: (direct) => set({ projectOpenDirectly: direct === true }),
       diagnosticHistoryRecording: true,
       setDiagnosticHistoryRecording: (on) => set({ diagnosticHistoryRecording: on === true }),
+      mcpServerEnabled: false,
+      setMcpServerEnabled: (on) => set({ mcpServerEnabled: on === true }),
       language: SOURCE_LANGUAGE,
 
       setPanelWidth: (side, width) =>
@@ -1209,6 +1218,8 @@ export const useUiPrefs = create<UiPrefsState>()(
           projectOpenDirectly: p.projectOpenDirectly === true,
           // WO-2759: absent or tampered keeps the disclosed default (on).
           diagnosticHistoryRecording: p.diagnosticHistoryRecording !== false,
+          // WO-3010: only a stored true turns the MCP server on; absent or tampered stays off.
+          mcpServerEnabled: p.mcpServerEnabled === true,
           // WO-2319: absent, or a language whose catalog is gone, shows English.
           language: isAvailableLanguage(p.language) ? p.language : SOURCE_LANGUAGE,
           // WO-137: a non-number, out-of-range, or absent persisted value
@@ -1304,6 +1315,43 @@ export async function supplyMachineBridgeSettingsOnBoot(): Promise<void> {
 }
 
 void supplyMachineBridgeSettingsOnBoot()
+
+/** WO-3010: the Electron MCP server's state, as main reports it. */
+export interface McpServerState {
+  running: boolean
+  port: number | null
+  clientName: string | null
+}
+
+export interface McpServerHost {
+  getState: () => Promise<McpServerState | null>
+  setEnabled: (enabled: boolean) => Promise<McpServerState | null>
+  onState: (callback: (state: McpServerState) => void) => () => void
+}
+
+export function mcpServerHost(): McpServerHost | undefined {
+  const host = (globalThis as typeof globalThis & { liencamHost?: { mcp?: McpServerHost } }).liencamHost?.mcp
+  return host !== undefined && typeof host.setEnabled === 'function' ? host : undefined
+}
+
+let mcpServerSwitchInstalled = false
+
+/**
+ * WO-3010: hand the saved switch to Electron main at boot and on every change,
+ * so the server runs exactly while the switch is on. A plain browser has no
+ * `liencamHost.mcp` and nothing happens.
+ */
+export function installMcpServerSwitch(): void {
+  const host = mcpServerHost()
+  if (host === undefined || mcpServerSwitchInstalled) return
+  mcpServerSwitchInstalled = true
+  const apply = (on: boolean) => { void host.setEnabled(on).catch(() => undefined) }
+  // Boot: a saved OFF still says so, which also stops a server left on by a reload.
+  apply(useUiPrefs.getState().mcpServerEnabled)
+  useUiPrefs.subscribe((state) => state.mcpServerEnabled, apply)
+}
+
+installMcpServerSwitch()
 
 /** Resolve the active machine's bridge port at the connection boundary. Only
  * absence selects the old default; a configured invalid value is an error. */

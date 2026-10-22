@@ -10,6 +10,7 @@ import {
 export type PersistedUserDataStorage =
   | 'durable-state'
   | 'local-storage'
+  | 'session-storage'
   | 'legacy-drain'
   | 'project-payload-key'
   | 'runtime-scene-marker'
@@ -94,6 +95,28 @@ export const PERSISTED_USER_DATA_REGISTRY = {
     storage: 'local-storage',
     backup: { kind: 'local-record', collectionId: 'ui-customization', count: 'value' },
   },
+  aiModelChoice: {
+    // WO-2979: the operator's AI model pick per project and harness. It stays on
+    // this computer (not in the .camproject, not in a backup): a pick only means
+    // something with this computer's harness, and a shared project must not carry
+    // the sender's paid model.
+    key: 'liencam-ai-model-choice',
+    holds: 'The AI model the operator picked, per project and AI harness, on this computer.',
+    storage: 'local-storage',
+    backup: false,
+  },
+  bridgeConsoleSaid: {
+    key: 'liencam.bridgeConsoleSaid',
+    holds: 'Host-carried console event ids already shown in this window, retained across reload.',
+    storage: 'session-storage',
+    backup: false,
+  },
+  firmwareConsoleSaid: {
+    key: 'liencam.firmwareConsoleSaid',
+    holds: 'Accepted firmware console event ids in this window, retained across reload.',
+    storage: 'session-storage',
+    backup: false,
+  },
   userPosts: {
     key: 'liencam.userPosts',
     holds: 'User-saved and imported post-processor profiles.',
@@ -156,6 +179,10 @@ type LocalStorageRegistryId = {
       ? K
       : never
 }[PersistedRegistryId]
+type SessionStorageRegistryId = {
+  [K in PersistedRegistryId]:
+    typeof PERSISTED_USER_DATA_REGISTRY[K]['storage'] extends 'session-storage' ? K : never
+}[PersistedRegistryId]
 type ZustandRegistryId = 'activeProject' | 'uiPreferences' | 'machineActions' | 'machineToolTable' | 'probeRoutines'
 
 export interface BackedUpLocalStorageRecord {
@@ -213,6 +240,19 @@ export function removeRegisteredLocalData(registryId: LocalStorageRegistryId): v
   browserLocalStorage()?.removeItem(registeredLocalKey(registryId))
 }
 
+/** WO-2901: receipt lifetime is per window, never a local-storage backup. */
+export function readRegisteredSessionData(registryId: SessionStorageRegistryId): string | null {
+  return typeof window === 'undefined'
+    ? null
+    : window.sessionStorage.getItem(PERSISTED_USER_DATA_REGISTRY[registryId].key)
+}
+
+export function writeRegisteredSessionData(registryId: SessionStorageRegistryId, value: string): void {
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.setItem(PERSISTED_USER_DATA_REGISTRY[registryId].key, value)
+  }
+}
+
 function jsonRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -263,7 +303,8 @@ export function writeRegisteredToolPalettePreference(key: string, value: unknown
 function isRegisteredBrowserKey(key: string): boolean {
   return Object.values(PERSISTED_USER_DATA_REGISTRY).some((entry) => {
     const definition: PersistedUserDataKeyDefinition = entry
-    if (definition.storage === 'project-payload-key' || definition.storage === 'runtime-scene-marker') {
+    if (definition.storage === 'project-payload-key' || definition.storage === 'runtime-scene-marker'
+      || definition.storage === 'session-storage') {
       return false
     }
     return definition.keyKind === 'prefix'

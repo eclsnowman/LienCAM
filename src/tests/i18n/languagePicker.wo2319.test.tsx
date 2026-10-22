@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // WO-2319: Settings > Language through the real Settings dialog - it lists
-// only languages with a catalog (English only today), and the choice is the
+// only languages with a catalog, and the choice is the
 // one stored in the UI preferences record, so it survives a reload.
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
@@ -18,6 +18,7 @@ const memStorage: Storage = {
 }
 Object.defineProperty(globalThis, 'localStorage', { value: memStorage, configurable: true })
 
+const { AVAILABLE_LANGUAGES, languageName } = await import('../../i18n/catalogs')
 const { SettingsModal } = await import('../../components/modals/SettingsModal')
 const { useCamStore } = await import('../../store')
 const { useUiPrefs, UI_PREFS_STORAGE_KEY } = await import('../../store/uiPrefs')
@@ -42,16 +43,36 @@ describe('WO-2319: Settings > Language', () => {
     expect(screen.getByTestId('settings-language').textContent).toContain('English')
   })
 
-  it('lists only the languages that have a catalog - English alone', () => {
+  it('lists every discovered catalog language, with English first', () => {
     openSettings()
     act(() => { fireEvent.click(screen.getByTestId('settings-language')) })
     const options = within(screen.getByRole('listbox')).getAllByRole('option')
-    expect(options.map((option) => option.textContent)).toEqual(['English'])
+    expect(options.map((option) => option.textContent)).toEqual(AVAILABLE_LANGUAGES.map(languageName))
     expect(screen.getByTestId('settings-language-option-en')).toBe(options[0])
   })
 
+  it('discloses machine translation only for available translated catalogs', () => {
+    openSettings()
+    const notes = {
+      de: 'Maschinell übersetzt - Korrekturen willkommen: Hilfe > Problem melden.',
+      es: 'Traducción automática - Correcciones bienvenidas: Ayuda > Informar de un problema.',
+      fr: 'Traduction automatique - Corrections bienvenues : Aide > Signaler un problème.',
+    }
+    expect(screen.queryByTestId('settings-language-note-en')).toBeNull()
+    for (const [code, note] of Object.entries(notes)) {
+      const node = screen.queryByTestId(`settings-language-note-${code}`)
+      if (AVAILABLE_LANGUAGES.includes(code)) {
+        expect(node?.textContent, code).toBe(`${languageName(code)}: ${note}`)
+        expect(node?.getAttribute('lang'), code).toBe(code)
+      } else {
+        expect(node, `${code} has no catalog yet`).toBeNull()
+      }
+    }
+  })
+
   it('stores the choice in the UI preferences record, and refuses a language with no catalog', () => {
-    act(() => { useUiPrefs.getState().setLanguage('de') })
+    expect(AVAILABLE_LANGUAGES).not.toContain('xx-unavailable')
+    act(() => { useUiPrefs.getState().setLanguage('xx-unavailable') })
     expect(useUiPrefs.getState().language).toBe('en')
     openSettings()
     act(() => { fireEvent.click(screen.getByTestId('settings-language')) })

@@ -1170,10 +1170,11 @@ async function boardDistributionPhase() {
   const log = join(build, 'liencam-bridge.log')
 
   check('canonical desk executable exists', existsSync(exe), exe)
-  check('only the sourced UC100 table is distributed',
+  // WO-2844: the compatibility record ships beside the one sourced pin table.
+  check('only the sourced UC100 table and the compatibility record are distributed',
     existsSync(boards)
       && JSON.stringify(readdirSync(boards).filter((name) => name.endsWith('.json')).sort())
-        === JSON.stringify(['uc100.json']),
+        === JSON.stringify(['compat.json', 'uc100.json']),
     existsSync(boards) ? JSON.stringify(readdirSync(boards).sort()) : boards)
   if (!existsSync(exe) || !existsSync(boards)) return
 

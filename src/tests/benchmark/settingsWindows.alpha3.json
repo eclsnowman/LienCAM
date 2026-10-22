@@ -1,0 +1,290 @@
+{
+  "ruleset": {
+    "id": "alpha3-settings-starting-references",
+    "version": "0.1.0",
+    "accessed": "2026-10-17"
+  },
+  "notes": [
+    "Test-only starting references; no product defaults. All recipes await local confirmation.",
+    "No generic wood window. Missing machine/tool/material applicability remains n/a.",
+    "Published chart feed per tooth is not a calibrated effective-chip rubbing floor.",
+    "No share-alike cards or unsourced calculator values copied."
+  ],
+  "rules": [
+    {
+      "id": "AL-PERIPHERAL-LIGHT-AXIAL",
+      "applies_to": {
+        "material": "aluminum",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          0,
+          1000
+        ],
+        "strategy": "light-axial"
+      },
+      "outputs": {
+        "ae_frac_D": [
+          0.3,
+          0.5
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://www.harveyperformance.com/in-the-loupe/depth-of-cut/",
+          "supports": "Generic peripheral milling geometry; light/deep style boundary at ap/D=1 is inferred, not a machine-calibrated recipe. Diameter bounds only enumerate harness scope."
+        }
+      ],
+      "evaluation": {
+        "tier": "B",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "AL-PERIPHERAL-DEEP-AXIAL",
+      "applies_to": {
+        "material": "aluminum",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          0,
+          1000
+        ],
+        "strategy": "deep-axial"
+      },
+      "outputs": {
+        "ae_frac_D": [
+          0.07,
+          0.3
+        ],
+        "ap_frac_D": [
+          0,
+          2
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://www.harveyperformance.com/in-the-loupe/depth-of-cut/",
+          "supports": "Generic peripheral milling geometry; light/deep style boundary at ap/D=1 is inferred, not a machine-calibrated recipe. Diameter bounds only enumerate harness scope."
+        }
+      ],
+      "evaluation": {
+        "tier": "B",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "MILL-ONE-6061",
+      "applies_to": {
+        "material": "6061",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          3.175,
+          3.175
+        ],
+        "strategy": "published-test",
+        "flutes": [
+          2
+        ],
+        "tool_family": "mill-one-published-1-8-two-flute",
+        "machine": "sienci-mill-one"
+      },
+      "outputs": {
+        "hex_mm": [
+          0.025,
+          0.025
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://resources.sienci.com/view/mo-feeds-and-speeds/",
+          "supports": "Published machine-specific 1/8 inch two-flute recipe fz as candidate hex reference only; not a calibrated rubbing floor."
+        }
+      ],
+      "evaluation": {
+        "tier": "C",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "MILL-ONE-MAPLE",
+      "applies_to": {
+        "material": "maple",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          3.175,
+          3.175
+        ],
+        "strategy": "published-test",
+        "flutes": [
+          2
+        ],
+        "tool_family": "mill-one-published-1-8-two-flute",
+        "machine": "sienci-mill-one"
+      },
+      "outputs": {
+        "hex_mm": [
+          0.02,
+          0.02
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://resources.sienci.com/view/mo-feeds-and-speeds/",
+          "supports": "Published machine-specific 1/8 inch two-flute recipe fz as candidate hex reference only; not a calibrated rubbing floor."
+        }
+      ],
+      "evaluation": {
+        "tier": "C",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "MILL-ONE-HDPE",
+      "applies_to": {
+        "material": "HDPE",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          3.175,
+          3.175
+        ],
+        "strategy": "published-test",
+        "flutes": [
+          2
+        ],
+        "tool_family": "mill-one-published-1-8-two-flute",
+        "machine": "sienci-mill-one"
+      },
+      "outputs": {
+        "hex_mm": [
+          0.0275,
+          0.0275
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://resources.sienci.com/view/mo-feeds-and-speeds/",
+          "supports": "Published machine-specific 1/8 inch two-flute recipe fz as candidate hex reference only; not a calibrated rubbing floor."
+        }
+      ],
+      "evaluation": {
+        "tier": "C",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "POM-PLASTICS-REF",
+      "applies_to": {
+        "material": "acetal",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          6.35,
+          6.35
+        ],
+        "strategy": "peripheral",
+        "tool_family": "published-hard-plastic-router-bit"
+      },
+      "outputs": {
+        "hex_mm": [
+          0.076,
+          0.076
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://medesign.seas.upenn.edu/index.php/Guides/FeedsAndSpeeds",
+          "supports": "Separate starting reference. Mapping acetal to plastics/hard plastic and chart fz to a hex reference is inferred; neither is an established acetal floor."
+        }
+      ],
+      "evaluation": {
+        "tier": "B",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "POM-HARD-PLASTIC-REF",
+      "applies_to": {
+        "material": "acetal",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          6.35,
+          6.35
+        ],
+        "strategy": "peripheral",
+        "tool_family": "published-hard-plastic-router-bit"
+      },
+      "outputs": {
+        "hex_mm": [
+          0.13,
+          0.2
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://www.freudtools.com/public/assets/freud/downloadables/freudtools-router-bit-feed-and-speed-for-cnc-20170822.pdf",
+          "supports": "Separate starting reference. Mapping acetal to plastics/hard plastic and chart fz to a hex reference is inferred; neither is an established acetal floor."
+        }
+      ],
+      "evaluation": {
+        "tier": "B",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    },
+    {
+      "id": "AL6061-CARBIDE-VC",
+      "applies_to": {
+        "material": "6061",
+        "tool_type": "flat_end_mill",
+        "diameter_mm": [
+          0,
+          1000
+        ],
+        "strategy": "peripheral",
+        "flutes": [
+          2,
+          3
+        ],
+        "tool_family": "wrought-aluminium-carbide",
+        "coating": "none"
+      },
+      "outputs": {
+        "vc_m_min": [
+          244,
+          457
+        ]
+      },
+      "adjust": {},
+      "source": [
+        {
+          "url": "https://www.harveyperformance.com/in-the-loupe/aluminum-machining-guide/",
+          "supports": "Wrought aluminium carbide surface speed; harness diameter enumeration is not a tool-series recipe."
+        }
+      ],
+      "evaluation": {
+        "tier": "B",
+        "applicability": "evaluated starting reference; machine confirmation owed"
+      },
+      "confidence": "EXT-starting-window",
+      "confirmedGood": false
+    }
+  ]
+}

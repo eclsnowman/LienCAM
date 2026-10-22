@@ -27,5 +27,31 @@ contextBridge.exposeInMainWorld('liencamHost', Object.freeze({
   removeRecentProject: (path) => ipcRenderer.invoke('liencam:remove-recent-project', path),
   openProjectLink: (url) => ipcRenderer.invoke('liencam:open-project-link', url),
   openIssueForm: (url) => ipcRenderer.invoke('liencam:open-issue-form', url),
+  // WO-2911: a picture of this window for Report this problem; no arguments.
+  captureApp: () => ipcRenderer.invoke('liencam:capture-app'),
+  // WO-2995: the agent request channel. Main sends a request, the page runs it on
+  // the model registry and answers by id. Only these two functions cross; the
+  // renderer never sees the IPC event object.
+  agent: Object.freeze({
+    onRequest: (callback) => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = (_event, request) => callback(request)
+      ipcRenderer.on('liencam:agent-request', listener)
+      return () => ipcRenderer.removeListener('liencam:agent-request', listener)
+    },
+    respond: (id, result) => ipcRenderer.invoke('liencam:agent-response', id, result),
+  }),
+  // WO-3010: the MCP server switch (Settings) and its state for the toolbar
+  // indicator: { running, port, clientName }. The token never crosses.
+  mcp: Object.freeze({
+    getState: () => ipcRenderer.invoke('liencam:mcp-state'),
+    setEnabled: (enabled) => ipcRenderer.invoke('liencam:mcp-set-enabled', enabled === true),
+    onState: (callback) => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = (_event, state) => callback(state)
+      ipcRenderer.on('liencam:mcp-state-changed', listener)
+      return () => ipcRenderer.removeListener('liencam:mcp-state-changed', listener)
+    },
+  }),
 }))
 

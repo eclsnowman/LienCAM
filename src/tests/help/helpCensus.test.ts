@@ -186,7 +186,8 @@ function harvestParamFields(file: string[], interfaceName: string): string[] {
  * NOT covered" section for the count and the reasoning.
  */
 const OPERATION_PARAM_SOURCES: Record<string, { file: string[]; interfaceName: string }> = {
-  scallop_3d: { file: ['cam3d', 'integration', 'scallop3dOperation.ts'], interfaceName: 'Scallop3dParams' },
+  // WO-2977: the interface moved to src/kernel/parameterTypes.ts (scallop3dOperation.ts now only re-exports it).
+  scallop_3d: { file: ['kernel', 'parameterTypes.ts'], interfaceName: 'Scallop3dParams' },
 }
 
 async function coveredContextKeys(): Promise<Set<string>> {

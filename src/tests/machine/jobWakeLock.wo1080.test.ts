@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { electronMainRequire } from '../support/electronMainRequire'
 import nodePath from 'node:path'
 import nodeProcess from 'node:process'
 import vm from 'node:vm'
@@ -320,7 +321,7 @@ describe('Electron wake lock ownership', () => {
       },
       protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
     }
-    const realRequire = createRequire(import.meta.url)
+    const realRequire = electronMainRequire
     const code = readFileSync(nodePath.resolve('electron/main.cjs'), 'utf8')
     vm.runInNewContext(code, {
       AbortSignal,

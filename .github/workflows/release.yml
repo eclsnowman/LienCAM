@@ -20,6 +20,10 @@ env:
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
 jobs:
+  # Build-only artifacts; the draft still needs owner review and route-B T3.
+  native-bridge:
+    uses: ./.github/workflows/native-linux-bridge.yml
+
   windows:
     runs-on: windows-latest
     steps:
@@ -49,6 +53,7 @@ jobs:
           compression-level: 0
 
   linux:
+    needs: [native-bridge]
     # Linux builds are untested and unsigned.
     runs-on: ubuntu-latest
     steps:
@@ -67,6 +72,30 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
       - name: Build renderer
         run: npm run build
+      - name: Download native x64 bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: native-bridge-linux-x64
+          path: native-bridge-artifact
+      - name: Stage native x64 runtime
+        run: |
+          mkdir -p pendant/uc100net/publish/linux-x64
+          tar -xzf native-bridge-artifact/liencam-bridge-linux-x64.tar.gz -C pendant/uc100net/publish/linux-x64
+          test -x pendant/uc100net/publish/linux-x64/liencam-bridge
+          test -s pendant/uc100net/publish/linux-x64/libcoreclr.so
+      # Route A uses the reviewed Windows-built exe, without redistributing
+      # the proprietary wrapper or vendor DLLs. The release owner supplies a
+      # pinned HTTPS artifact and its SHA-256 in repository variables.
+      - name: Stage reviewed Wine bridge executable
+        env:
+          WINE_BRIDGE_URL: ${{ vars.LIENCAM_WINE_BRIDGE_URL }}
+          WINE_BRIDGE_SHA256: ${{ vars.LIENCAM_WINE_BRIDGE_SHA256 }}
+        run: |
+          test -n "$WINE_BRIDGE_URL"
+          [[ "$WINE_BRIDGE_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]
+          mkdir -p pendant/uccnc-bridge/bin
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 120 "$WINE_BRIDGE_URL" -o pendant/uccnc-bridge/bin/liencam-bridge.exe
+          printf '%s  %s\n' "$WINE_BRIDGE_SHA256" pendant/uccnc-bridge/bin/liencam-bridge.exe | sha256sum --check --strict
       - name: Package untested unsigned Linux AppImage and archive
         run: npx electron-builder --linux AppImage tar.gz --x64 --publish never
       - name: Save Linux installers
@@ -109,7 +138,7 @@ jobs:
           compression-level: 0
 
   release:
-    needs: [windows, linux, macos]
+    needs: [windows, linux, macos, native-bridge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -128,12 +157,27 @@ jobs:
           pattern: installers-*
           path: release-assets
           merge-multiple: true
+      - name: Collect both standalone native bridge downloads
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: native-bridge-*
+          path: release-assets
+          merge-multiple: true
       - name: Include the LinuxCNC gateway as its own download
         run: cp pendant/linuxcnc-gateway/gateway.py release-assets/gateway.py
       - name: Write and verify checksums and Download data
         run: |
           node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all
           node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all --verify
+      # The existing releases.json schema describes installers and gateway.py.
+      # Keep native bridge hashes in a separate attached checksum manifest.
+      - name: Verify native bridge download checksums
+        run: |
+          cd release-assets
+          test -s liencam-bridge-linux-x64.tar.gz
+          test -s liencam-bridge-linux-arm64.tar.gz
+          sha256sum liencam-bridge-linux-x64.tar.gz liencam-bridge-linux-arm64.tar.gz > native-bridge-SHA256SUMS.txt
+          sha256sum --check --strict native-bridge-SHA256SUMS.txt
       - name: Create draft pre-release for owner review
         env:
           GH_TOKEN: ${{ github.token }}
@@ -144,6 +188,8 @@ jobs:
           Linux and macOS builds are untested and unsigned.
           Review the installers before publishing this draft.
           Copy gateway.py to your LinuxCNC PC; it is a separate release download.
-          SHA256SUMS.txt and releases.json describe the attached files.
+          SHA256SUMS.txt and releases.json describe installers and gateway.py.
+          Native AXBB-E bridge archives for linux-x64 and linux-arm64 have their own native-bridge-SHA256SUMS.txt.
+          Route B needs the motors-disabled-first real-board T3 before this draft is published.
           NOTES
           gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --prerelease --title "LienCAM $RELEASE_TAG" --notes-file release-notes.txt

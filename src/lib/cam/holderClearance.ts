@@ -2204,8 +2204,23 @@ export function trimToolpathToAssemblyReach({
     while (last + 1 < positions.length && blockers[last + 1] === null) last++
     const start = index === 0 ? positions[0] : refine(positions[index], positions[index - 1])
     const end = last === positions.length - 1 ? positions[last] : refine(positions[last], positions[last + 1])
-    runs.push({ first: index, last, start, end, points: [start, ...positions.slice(index, last + 1), end] })
+    const run = { first: index, last, start, end, points: [start, ...positions.slice(index, last + 1), end] }
     index = last
+    // WO-3023: a stretch never stops part-way down a RAPID. A rapid descent was proven
+    // through air by the operation that planned it, against the material its own later
+    // cuts had already removed; when the trim stops before those cuts, the rest of that
+    // proof is gone, and the truncated rapid would drive the cutter into what they no
+    // longer remove (form-cylinder adaptive_3d: 12 G0s 1.08 mm into stock). The stretch
+    // ends where the descent began instead; a stretch that is nothing but that descent
+    // cuts nothing and is left out.
+    const seg = end.seg
+    if (seg > 0 && sampled[seg].type === 'rapid' && descends(seg) && end.t < 1) {
+      if (start.seg === seg) continue
+      const top = pointAt(seg - 1, 1)
+      runs.push({ ...run, end: top, points: [...run.points.filter((p) => p.seg < seg), top] })
+      continue
+    }
+    runs.push(run)
   }
 
   const canComeDown = (p: PathPosition) => blockerAt(p.x, p.y, p.z, linkZ, true) === null

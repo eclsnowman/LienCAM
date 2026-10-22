@@ -61,6 +61,7 @@ import {
   autosaveDataKey,
   createDocumentArchive,
   loadDocumentArchive,
+  replaceArchiveDrawings,
   readAutosaveSnapshot,
   removeAutosaveSnapshot,
   writeAutosaveSnapshot,
@@ -76,7 +77,15 @@ import { isGenesisNodeId } from './genesis'
 import { ElementMap, type DeltaSnapshots } from './element-map'
 import { applyFeatureDelta } from './replay'
 import type { ElementMapDelta } from '../geom/geom-service'
-import type { FeatureDag } from './dag'
+import { FeatureDag } from './dag'
+import {
+  drawingRecordsEmpty,
+  readDrawingRecords,
+  writeDrawingRecords,
+  type DrawingRecords,
+} from '../lib/drawing/document'
+import type { JsonValue } from './persist'
+import type { ModelSession } from './modelSession'
 
 /** The one hardcoded key every pre-Stage-C1 caller implicitly owns. Not a
  *  real Model Item id (no such registry exists yet -- that is the v12
@@ -93,6 +102,33 @@ const liveCollectors = new Map<string, DocumentCollector>()
 /** The bytes of the document the CURRENT project was loaded with, kept verbatim
  *  so an unmounted workbench's save re-emits them without a lossy re-encode. */
 const passThroughArchives = new Map<string, Uint8Array>()
+/**
+ * WO-2987 (WO-2750 Slice B): each Model Item's technical drawings, as the raw
+ * `{ documents }` JSON the archive carries. The mounted workbench's collector
+ * (SolidsWorkbenchPage buildDocumentSaveInput) knows nothing about drawings, so
+ * the holder owns them: every route that loads, replaces or drops an item's
+ * archive sets or clears this entry beside it, and every route that builds an
+ * archive from a live collector folds it back in (`withHeldDrawings`). That is
+ * what keeps a mounted save, an unmount stash and an autosave from dropping a
+ * drawing the workbench never saw -- including a drawing from a newer build
+ * that this one can only carry, not read. Keyed by modelItemId like the maps
+ * above, so two items with the same local drawing ids stay apart. Empty
+ * entries are never stored (no entry == no drawings).
+ */
+const heldDrawings = new Map<string, JsonValue>()
+
+function holdDrawings(modelItemId: string, drawings: JsonValue): void {
+  if (drawingRecordsEmpty(readDrawingRecords(drawings))) heldDrawings.delete(modelItemId)
+  else heldDrawings.set(modelItemId, drawings)
+}
+
+/** The live collector's input with the item's held drawings folded in. A document the workbench calls empty (genesis only) is NOT empty while it holds a drawing: the drawing outlives its body (plan section 3, "Deleting the source body retains the drawing"). A collector that supplies its own `drawings` wins. */
+function withHeldDrawings(input: DocumentSaveInput | null, modelItemId: string): DocumentSaveInput | null {
+  const held = heldDrawings.get(modelItemId)
+  if (held === undefined) return input
+  if (input === null) return { dag: new FeatureDag(), elementMapDeltas: [], drawings: held }
+  return input.drawings === undefined ? { ...input, drawings: held } : input
+}
 /**
  * A restored document awaiting a COMMITTED mount.
  *
@@ -341,7 +377,7 @@ export function registerLiveDocument(
     // legacy" -- see this function's own doc comment above.
     if (!embedded) return
     try {
-      const input = collect()
+      const input = withHeldDrawings(collect(), modelItemId)
       if (input === null) {
         // No-op guard (INT-17C Stage C2: React StrictMode dev double-mount
         // crash fix). Nothing to clear when nothing is held: a repeat
@@ -396,6 +432,36 @@ function archivesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true
 }
 
+// ---------------------------------------------------------------------------
+// WO-2978 (WO-2951 Order A): the live ModelSession per model item.
+//
+// The mounted workbench builds one ModelSession (modelSession.ts) from the
+// document it was seeded with and registers it here, beside its collector, so
+// anything that needs the live model -- the page today, the modeling command
+// registry next (WO-2951 Order B) -- reaches the SAME dag/history/scheduler
+// by model item id, without a component handle. Same identity-guarded shape
+// as registerLiveDocument: an unregister only removes its own session, so
+// React StrictMode's mount -> cleanup -> mount (or a remount racing an old
+// cleanup) never drops the session that is actually live. Unregistering does
+// nothing else -- the collector's cleanup above owns stashing the document.
+// ---------------------------------------------------------------------------
+const liveSessions = new Map<string, ModelSession>()
+
+/** Makes `session` the live session for its model item; returns the
+ *  unregister (a no-op once another session has replaced it). */
+export function registerModelSession(session: ModelSession): () => void {
+  liveSessions.set(session.modelItemId, session)
+  return () => {
+    if (liveSessions.get(session.modelItemId) === session) liveSessions.delete(session.modelItemId)
+  }
+}
+
+/** The live session for `modelItemId`, or undefined when no workbench mount
+ *  holds that item's document right now. */
+export function getModelSession(modelItemId: string = LEGACY_MODEL_ITEM_ID): ModelSession | undefined {
+  return liveSessions.get(modelItemId)
+}
+
 /** Is a workbench currently holding the live document? (Test/report seam.) */
 export function hasLiveDocument(modelItemId: string = LEGACY_MODEL_ITEM_ID): boolean {
   return liveCollectors.has(modelItemId)
@@ -419,6 +485,7 @@ export function stashLoadedDocument(
   const loaded = loadDocumentArchive(bytes)
   pendingSeeds.set(modelItemId, makePendingSeedLease(loaded))
   passThroughArchives.set(modelItemId, new Uint8Array(bytes))
+  holdDrawings(modelItemId, loaded.drawings)
   bumpGeneration(modelItemId)
   return loaded
 }
@@ -432,6 +499,7 @@ export function stashLoadedDocument(
 export function clearLoadedDocument(modelItemId: string = LEGACY_MODEL_ITEM_ID): void {
   pendingSeeds.delete(modelItemId)
   passThroughArchives.delete(modelItemId)
+  heldDrawings.delete(modelItemId)
   bumpGeneration(modelItemId)
 }
 
@@ -456,12 +524,14 @@ export function replaceLoadedDocumentArchives(
     ...liveCollectors.keys(),
     ...passThroughArchives.keys(),
     ...pendingSeeds.keys(),
+    ...heldDrawings.keys(),
     ...controllers.keys(),
     ...archives.keys(),
   ])
   liveCollectors.clear()
   passThroughArchives.clear()
   pendingSeeds.clear()
+  heldDrawings.clear()
   for (const modelItemId of [...controllers.keys()]) {
     disposeDocumentAutosave(modelItemId)
   }
@@ -471,6 +541,7 @@ export function replaceLoadedDocumentArchives(
       makePendingSeedLease(decoded.get(modelItemId)!),
     )
     passThroughArchives.set(modelItemId, new Uint8Array(bytes))
+    holdDrawings(modelItemId, decoded.get(modelItemId)!.drawings)
   }
   // Install the owning project after the holder maps exist but before any
   // generation listener can remount a workbench against them.
@@ -537,11 +608,43 @@ export function takePendingDocumentSeed(modelItemId: string = LEGACY_MODEL_ITEM_
 export function collectDocumentArchive(modelItemId: string = LEGACY_MODEL_ITEM_ID): Uint8Array | undefined {
   const liveCollector = liveCollectors.get(modelItemId)
   if (liveCollector !== undefined) {
-    const input = liveCollector()
+    const input = withHeldDrawings(liveCollector(), modelItemId)
     if (input === null) return undefined
     return createDocumentArchive(input)
   }
-  return passThroughArchives.get(modelItemId)
+  const passThrough = passThroughArchives.get(modelItemId)
+  if (passThrough === undefined && heldDrawings.has(modelItemId)) {
+    // A drawing with no model archive behind it (the item's body is gone, or the
+    // workbench never held one): the drawing is still the item's content.
+    return createDocumentArchive(withHeldDrawings(null, modelItemId)!)
+  }
+  return passThrough
+}
+
+/**
+ * WO-2987: the item's drawings, readable ones typed and anything this build
+ * cannot read kept in `preserved`. Empty when it has none.
+ */
+export function getDrawingRecords(modelItemId: string = LEGACY_MODEL_ITEM_ID): DrawingRecords {
+  return readDrawingRecords(heldDrawings.get(modelItemId))
+}
+
+/**
+ * WO-2987: replace the item's drawings (the editor's write seam; Slice C wires
+ * the caller). Part of the item's archive from the next save, autosave or
+ * unmount stash on, and marks the item dirty like any model edit. Pass the
+ * `preserved` entries from `getDrawingRecords` back unchanged.
+ */
+export function setDrawingRecords(records: DrawingRecords, modelItemId: string = LEGACY_MODEL_ITEM_ID): void {
+  const raw = writeDrawingRecords(records)
+  holdDrawings(modelItemId, raw)
+  // No workbench holds this item: its save re-emits the pass-through bytes, so
+  // bring those up to date now (only the drawings entry changes).
+  const passThrough = passThroughArchives.get(modelItemId)
+  if (!liveCollectors.has(modelItemId) && passThrough !== undefined) {
+    passThroughArchives.set(modelItemId, replaceArchiveDrawings(passThrough, heldDrawings.get(modelItemId)))
+  }
+  markDocumentDirty(modelItemId)
 }
 
 // ---------------------------------------------------------------------------
@@ -1075,8 +1178,10 @@ export function acceptDocumentAutosaveRecovery(
  *  ability to hear the NEXT load. */
 export function resetDocumentHolder(): void {
   liveCollectors.clear()
+  liveSessions.clear()
   passThroughArchives.clear()
   pendingSeeds.clear()
+  heldDrawings.clear()
   documentStorage = null
   for (const modelItemId of [...controllers.keys()]) disposeDocumentAutosave(modelItemId)
   const knownIds = new Set<string>([...generations.keys(), ...generationListeners.keys(), LEGACY_MODEL_ITEM_ID])
@@ -1111,8 +1216,10 @@ export function resetDocumentHolder(): void {
  *  subscribed and are removed only by its own unsubscribe. */
 export function disposeModelItem(modelItemId: string): void {
   liveCollectors.delete(modelItemId)
+  liveSessions.delete(modelItemId)
   passThroughArchives.delete(modelItemId)
   pendingSeeds.delete(modelItemId)
+  heldDrawings.delete(modelItemId)
   disposeDocumentAutosave(modelItemId)
   bumpGeneration(modelItemId)
 }

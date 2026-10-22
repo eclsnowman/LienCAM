@@ -643,3 +643,93 @@ describe('WO-1217 completeness invariant: an absent metric fails LOUDLY', () => 
     )
   })
 })
+
+// WO-2902 alpha3 additions are isolated from the legacy landing metrics.
+import { collectAlpha3, COLLECTOR_KEYS, alpha3HardVerdicts, postedArcShare, wallLeadShare } from './metrics.alpha3'
+import { control, move as alphaMove } from './alpha3CollectorControls'
+import { ALPHA3_METRIC_SPECS, METRIC_SPECS, assertAlpha3RowComplete } from './metricRegistry'
+import { alpha3Chains } from './registry'
+import { planChain, scoreChain } from './chainRunner'
+import { readFileSync } from 'node:fs'
+
+describe('WO-2902 collector completeness and arithmetic', () => {
+  it('registers every collector only in the alpha3 tier and rejects missing cells', () => {
+    const result = control([alphaMove(2, 5, 0), alphaMove(20, 5, -1)])
+    expect(Object.keys(result.metrics).sort()).toEqual([...COLLECTOR_KEYS].sort())
+    for (const key of COLLECTOR_KEYS) {
+      expect(ALPHA3_METRIC_SPECS[key], key).toBeDefined()
+      expect(METRIC_SPECS[key], key).toBeUndefined()
+      expect(specFor(key).band).toBeDefined()
+    }
+    const complete = { ...Object.fromEntries(REQUIRED_ROW_METRICS.map(k => [k, 0])),
+      ...Object.fromEntries(Object.keys(ALPHA3_METRIC_SPECS).map(k => [k, notApplicable('control')])) }
+    expect(() => assertAlpha3RowComplete('unit', complete)).not.toThrow()
+    delete complete['M-SAFE-2']
+    expect(() => assertAlpha3RowComplete('unit', complete)).toThrow(/M-SAFE-2 absent/)
+  })
+  it('measures slot-feed policy on every supported op and includes zero engagement windows', () => {
+    const path = [alphaMove(2, 5, -1, { type: 'rapid', role: 'rapid' }), alphaMove(38, 5, -1)]
+    const slot = control(path, { slotFeed: 500 })
+    expect(slot.metrics['M-LOAD-5']).toBeGreaterThan(30)
+    expect(control(path.map(m => ({ ...m, feed: 500 })), { slotFeed: 500 }).metrics['M-LOAD-5']).toBe(0)
+    expect(control([...path, alphaMove(2, 5, -1)], { slotFeed: 500 }).metrics['M-LOAD-4']).toBeGreaterThan(slot.metrics['M-LOAD-4'] as number)
+  })
+  it('uses independently supplied wall, corner and rest observations, never guessed settings', () => {
+    const r = control([], { wallRadialDepthsMm: [0.06, 0.08], cornerWindows: [{ engagement: 0.8, passMedian: 0.2 }], restAccounting: { regions: 4, reportedAndJustified: 3 } })
+    expect(r.metrics['M-GEOM-4']).toBe(0.04)
+    expect(r.metrics['M-LOAD-7']).toBe(4)
+    expect(r.metrics['M-PART-5']).toBe(0.75)
+    expect(control([]).metrics['M-PART-5']).toMatchObject({ value: null })
+  })
+  it('measures actual wall engagement and tangent roll-in/out rather than programmed finish allowance', () => {
+    const wall = [alphaMove(2, 5, -1, { type: 'rapid', role: 'rapid' }), alphaMove(38, 5, -1, { role: 'finish' })]
+    expect(control(wall).metrics['M-GEOM-4']).toBeGreaterThan(0.95)
+    expect(wallLeadShare(wall)).toBe(0)
+    const rolled = [alphaMove(4, 4, 1, { type: 'rapid', role: 'rapid' }),
+      alphaMove(5, 5, 1, { type: 'arc_ccw', role: 'lead_in', cx: 5, cy: 4 }), alphaMove(2, 5, 1, { role: 'finish' }),
+      alphaMove(1, 4, 1, { type: 'arc_ccw', role: 'lead_out', cx: 2, cy: 4 })]
+    expect(wallLeadShare(rolled)).toBe(1)
+    expect(wallLeadShare(rolled.map((m, i) => i === 3 ? { ...m, type: 'feed' } : m))).toBe(0)
+  })
+  it('counts inherited modal arcs and lines and ignores comments and non-motion coordinates', () => {
+    expect(postedArcShare(['G0 X0 Y0', 'G1 X1', 'X2', 'G2 X3 I1 J0', 'X4 I1 J0',
+      '(G2 X10)', 'G10 L2 X30', 'G4 P100'])).toBe(0.4)
+  })
+  it('posts real row moves in all five dialects and measures the emitted bytes', () => {
+    const path = [alphaMove(5, 5, 2, { type: 'rapid', role: 'rapid' }), alphaMove(15, 5, 2, { type: 'arc_ccw', cx: 10, cy: 5 })]
+    const r = control(path)
+    expect(Object.keys(r.observations.program)).toHaveLength(5)
+    for (const [dialect, observation] of Object.entries(r.observations.program)) {
+      expect(observation.bytes).toBeGreaterThan(50)
+      expect(r.metrics[`M-PROG-4.${dialect}.bytesPerMm`]).toBeCloseTo(observation.bytes / (5 * Math.PI), 6)
+      expect(r.metrics[`M-PROG-4.${dialect}.arcShare`]).toBeGreaterThan(0)
+    }
+  })
+  it('records hard failures without changing production status or creating a landing gate', () => {
+    expect(alpha3HardVerdicts({ 'M-SAFE-2': 1, 'M-ENTRY-1': 1, 'M-PART-4': 0 })).toMatchObject({ 'M-SAFE-2': 'FAIL', 'M-ENTRY-1': 'FAIL', 'M-PART-4': 'FAIL', 'M-SAFE-4': 'n/a' })
+    const r = collectAlpha3({ planned: { stepId: 'refusal', setupId: 'unit', planMs: 0, moves: [], status: 'error' }, tool: toolByControl(), opType: 'pocket_2d', unavailable: 'production refusal control' })
+    expect(Object.values(r.metrics).every(v => typeof v !== 'number' && v.reason.includes('production refusal control'))).toBe(true)
+  })
+  it('fills collectors on a production route without mutating planned moves', async () => {
+    const chain = alpha3Chains().find(c => c.steps.some(s => s.type === 'engrave'))!
+    const plan = await planChain(chain), before = JSON.stringify(plan)
+    const result = await scoreChain(chain, plan)
+    expect(JSON.stringify(plan)).toBe(before)
+    for (const row of result.rows) { assertAlpha3RowComplete(row.key, row.metrics); expect(row.hardVerdicts).toBeDefined() }
+  }, 180000)
+  it('commits a complete 16-family baseline and a two-replay determinism record', () => {
+    const baseline = JSON.parse(readFileSync('src/tests/benchmark/baseline.alpha3.json', 'utf8'))
+    const record = JSON.parse(readFileSync('src/tests/evidence/WO-2902/determinism.json', 'utf8'))
+    expect(record).toMatchObject({ rows: 220, families: 16, runs: 2, identicalNonTiming: true })
+    for (const row of baseline.rows) for (const key of COLLECTOR_KEYS) {
+      const cell = row.metrics[key]
+      expect(cell, `${row.key}/${key}`).toBeDefined()
+      if (cell.value === null) expect(cell.reason.length).toBeGreaterThan(0)
+      else expect(Number.isFinite(cell.value)).toBe(true)
+    }
+  })
+})
+function toolByControl() {
+  return { id: 'unit', name: 'unit', type: 'flat_end_mill' as const, diameter: 2, fluteLength: 4,
+    shankDiameter: 2, overallLength: 20, numberOfFlutes: 2, material: 'carbide' as const, coating: 'none' as const, notes: '', feedsAndSpeeds: {} }
+}

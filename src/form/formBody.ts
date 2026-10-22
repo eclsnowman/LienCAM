@@ -14,6 +14,7 @@
 
 import type { SymmetryMode } from './symmetry'
 import type { Cage, Vec3 } from './cage'
+import { cloneCage } from './cage'
 import { validateCage } from './halfEdge'
 import { DEFAULT_CHORD_TOLERANCE_MM, tessellateForm, type FormTessellation } from './finish'
 import { formStep } from './exactStep'
@@ -52,7 +53,8 @@ export function makeFormFeaturePayload(name: string, cage: Cage, tolerance = DEF
   return {
     opType: 'form',
     name,
-    cage: { positions: cage.positions.map((p) => [p[0], p[1], p[2]]), faces: cage.faces.map((f) => f.slice()), creases: cage.creases.slice(), ...(cage.weights !== undefined ? { weights: { ...cage.weights } } : {}) },
+    // the cage's symmetry reference rides with it (WO-2955), so Edit pairs as the session did; a stale one is dropped
+    cage: cloneCage(cage),
     tolerance,
     ...(symmetry !== null ? { symmetry } : {}),
     ...(symmetry !== null && symmetryAt !== 0 ? { symmetryAt } : {}),

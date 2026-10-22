@@ -329,11 +329,19 @@ describe('WO-2272 operations stay current after they compute', () => {
     expect(statusById()).toEqual(ALL_READY)
     const before = Object.fromEntries(operations().map((o) => [o.id, o.generationFingerprint]))
 
+    // WO-2953: Face reads the shared remaining-stock state before it turns
+    // 'computing', so watch every store change during the run instead of
+    // sampling the status synchronously after the call.
+    const seen: string[][] = []
+    const off = useCamStore.subscribe(() => {
+      if (operations().find((o) => o.id === 'face')!.status === 'computing') seen.push(operations().slice(1).map((o) => o.status))
+    })
     const run = useCamStore.getState().computeOperationToolpath(SETUP_ID, 'face')
-    // While the Face computes, the operations after it keep their results.
-    expect(operations().find((o) => o.id === 'face')!.status).toBe('computing')
-    expect(operations().slice(1).map((o) => o.status)).toEqual(['ready', 'ready', 'ready', 'ready', 'ready'])
     await run
+    off()
+    // While the Face computes, the operations after it keep their results.
+    expect(seen.length).toBeGreaterThan(0)
+    for (const statuses of seen) expect(statuses).toEqual(['ready', 'ready', 'ready', 'ready', 'ready'])
 
     expect(statusById()).toEqual(ALL_READY)
     expect(Object.fromEntries(operations().map((o) => [o.id, o.generationFingerprint]))).toEqual(before)

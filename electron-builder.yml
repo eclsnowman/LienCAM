@@ -8,7 +8,10 @@ directories:
 files:
   - dist/**/*
   - electron/main.cjs
+  - electron/agentChannel.cjs
   - electron/preload.cjs
+  # WO-3010: the MCP server and the stdio shim an MCP client launches.
+  - electron/mcp/**/*
   - package.json
   # WO-2334: the app runs from the bundled dist/ and loads nothing from
   # node_modules, so leave out native LGPL binaries it never uses: OpenCAMLib's
@@ -36,12 +39,20 @@ extraResources:
       - "!uccnc-bridge/bin/**/*"
       - "!uccnc-bridge/**/*.exe"
       - "!uccnc-bridge/**/*.dll"
+      - "!uccnc-bridge/obj/**/*"
+      - "!uc100net/**/*"
+      - "!uccnc-bridge/native/**/*"
   # WO-2407: preserve the checkout-relative theme path used by the phone server.
   # Copy the canonical tokens; do not maintain a separate pendant theme.
   - from: src/theme/tokens.css
     to: src/theme/tokens.css
 
 asar: true
+# WO-3010: the shim runs under ELECTRON_RUN_AS_NODE=1, launched by the MCP client
+# with a path on disk, so it must sit outside the archive
+# (resources/app.asar.unpacked/electron/mcp/liencam-mcp.cjs).
+asarUnpack:
+  - electron/mcp/liencam-mcp.cjs
 npmRebuild: false
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
@@ -70,6 +81,16 @@ mac:
   category: public.app-category.productivity
 
 linux:
+  # WO-2894 route A: stage the unchanged Windows-built executable before the
+  # Linux package build. Never ship UC100.dll/FTD2XX.dll or a machine config.
+  # Global pendant filters still exclude binaries for Windows and macOS.
+  extraResources:
+    - from: pendant/uccnc-bridge/bin/liencam-bridge.exe
+      to: pendant/uccnc-bridge/bin/liencam-bridge.exe
+    # Stage the complete self-contained bundle for this package's CPU before
+    # packaging. Route B release still requires the real-board T3.
+    - from: pendant/uc100net/publish/linux-${arch}
+      to: pendant/uccnc-bridge/native/linux-${arch}
   icon: build/icons/png
   target:
     - AppImage

@@ -38,6 +38,7 @@ import {
 } from './store/uiPrefs'
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
 import { registerSketchDevSeed } from './lib/sketch/demoSeed'
+import { installAgentBridge } from './lib/agent/rendererBridge'
 import { Sketch3dLabPage } from './components/sketch3dlab'
 import { MeshLabPage } from './components/meshlab'
 import { ThemedTooltip } from './components/ui/ThemedTooltip'
@@ -285,6 +286,10 @@ function CamApp({ partWorkspaceEnabled }: { partWorkspaceEnabled: boolean }) {
     cssWidth: window.innerWidth,
     dpr: window.devicePixelRatio || 1,
   }))
+
+  // WO-2995: the agent request channel, in every Electron build (demoSeed is DEV-only).
+  // A plain browser has no liencamHost.agent, so nothing is installed there.
+  useEffect(() => installAgentBridge(), [])
 
   useEffect(() => {
     const syncDisplayMetrics = () => setDisplayMetrics({

@@ -55,6 +55,16 @@ export interface DocumentSaveInput {
    * pre-UI-8 archive opens exactly as before.
    */
   folders?: TreeFolderSnapshot
+  /**
+   * WO-2987 (WO-2750 Slice B): this Model Item's technical drawings, as the JSON
+   * `{ documents: [...] }` that src/lib/drawing/document.ts writes. An EXPLICIT
+   * caller-supplied top-level document field like `folders` above: no
+   * schemaVersion bump, never derived from `dag`. The key is written only when
+   * there is at least one drawing, so an archive without drawings is
+   * byte-identical to one saved before this field existed. Drawings are opaque
+   * here; document.ts decides what is readable and what is kept verbatim.
+   */
+  drawings?: JsonValue
 }
 
 export interface LoadedDocument {
@@ -67,6 +77,8 @@ export interface LoadedDocument {
   bodyCaches: LoadedBodyCache[]
   migrationsApplied: number[]
   folders: TreeFolderStore
+  /** WO-2987: the raw `{ documents }` the archive carried; `{ documents: [] }` when it had none. */
+  drawings: JsonObject
 }
 
 interface FileEntry {
@@ -103,6 +115,9 @@ export function createDocumentArchive(input: DocumentSaveInput): Uint8Array {
     rollback: canonicalize((input.rollback ?? { featureOrder: [], marker: { kind: 'end' } }) as unknown as JsonValue) as JsonValue,
     folders: canonicalize((input.folders ?? { folders: [], membership: {} }) as unknown as JsonValue) as JsonValue,
   }
+
+  const drawings = drawingsToStore(input.drawings)
+  if (drawings !== undefined) document.drawings = drawings
 
   entries.push({ path: DOCUMENT_PATH, role: 'document', bytes: strToU8(stableStringify(document)) })
   if (input.thumbnailPng) entries.push({ path: THUMBNAIL_PATH, role: 'thumbnail', bytes: cloneBytes(input.thumbnailPng) })
@@ -146,7 +161,34 @@ export function loadDocumentArchive(bytes: ArrayBuffer | Uint8Array): LoadedDocu
     bodyCaches,
     migrationsApplied: migrated.appliedMigrations,
     folders,
+    drawings: parseDrawings(document.drawings),
   }
+}
+
+/**
+ * WO-2987: the same archive with its drawings replaced (or removed when there
+ * are none), every other entry byte-for-byte as it was. This is how the holder
+ * keeps an unmounted item's pass-through bytes current when a drawing changes
+ * without a decode/re-encode of the model it never opened.
+ */
+export function replaceArchiveDrawings(bytes: ArrayBuffer | Uint8Array, drawings: JsonValue | undefined): Uint8Array {
+  const archive = unzipSync(cloneBytes(bytes))
+  const document = asJsonObject(readJsonEntry(archive, DOCUMENT_PATH), 'document')
+  const stored = drawingsToStore(drawings)
+  if (stored === undefined) delete document.drawings
+  else document.drawings = stored
+  const documentBytes = strToU8(stableStringify(document))
+  const manifest = asJsonObject(readJsonEntry(archive, MANIFEST_PATH), 'manifest')
+  if (Array.isArray(manifest.files)) {
+    manifest.files = manifest.files.map((f) =>
+      f !== null && typeof f === 'object' && !Array.isArray(f) && f.path === DOCUMENT_PATH ? { ...f, bytes: documentBytes.byteLength } : f,
+    )
+  }
+  archive[DOCUMENT_PATH] = documentBytes
+  archive[MANIFEST_PATH] = strToU8(stableStringify(manifest))
+  const zippable: Zippable = {}
+  for (const path of Object.keys(archive).sort((a, b) => a.localeCompare(b))) zippable[path] = [archive[path], ZIP_OPTIONS]
+  return zipSync(zippable, ZIP_OPTIONS)
 }
 
 export function normalizeElementMapDelta(delta: ElementMapDelta): ElementMapDelta {
@@ -235,6 +277,19 @@ function parseFolderState(value: unknown): Partial<TreeFolderSnapshot> | undefin
       ? (obj.membership as Record<string, string>)
       : undefined
   return { folders, membership }
+}
+
+/** WO-2987: the `drawings` field to store, or undefined when there are no drawings (the key is then left out). */
+function drawingsToStore(value: JsonValue | undefined): JsonValue | undefined {
+  const parsed = parseDrawings(value === undefined ? undefined : canonicalize(value))
+  return (parsed.documents as JsonValue[]).length === 0 ? undefined : parsed
+}
+
+/** WO-2987: tolerant parse of `document.drawings` -- absent (every pre-drawing archive) or not shaped `{ documents: [] }` reads as no drawings. Entries are kept verbatim; src/lib/drawing/document.ts classifies them. */
+function parseDrawings(value: unknown): JsonObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return { documents: [] }
+  const documents = (value as Record<string, unknown>).documents
+  return { documents: Array.isArray(documents) ? (canonicalize(documents) as JsonValue[]) : [] }
 }
 
 function parseBodyCaches(value: unknown, archive: Record<string, Uint8Array>): LoadedBodyCache[] {

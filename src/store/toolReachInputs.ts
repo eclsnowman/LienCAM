@@ -105,6 +105,8 @@ export interface ToolReachInPartFrameInput {
   readonly noEarlierOperations?: boolean
   /** WO-1683: the setup's WCS label (e.g. 'G54'), so a stop can name its frame. */
   readonly wcsLabel?: string
+  /** WO-3048: drop the visits the trim leaves with nothing to cut (adaptive_3d passes its switch). */
+  readonly dropEmptyVisits?: boolean
 }
 
 export function trimToToolReachInPartFrame(input: ToolReachInPartFrameInput): {
@@ -133,6 +135,7 @@ export function trimToToolReachInPartFrame(input: ToolReachInPartFrameInput): {
     clearanceAllowanceMm: clearanceAllowanceMmOf(input.params),
     ...(input.workholding.length > 0 ? { workholding: input.workholding } : {}),
     ...(input.wcsLabel !== undefined ? { wcsLabel: input.wcsLabel } : {}),
+    ...(input.dropEmptyVisits ? { dropEmptyVisits: true } : {}),
   })
   return {
     moves: [...reach.moves],

@@ -366,8 +366,13 @@ describe('WO-2754 absent replay predecessor dependency', () => {
     { name: 'publishes an unchanged completion with predecessor dependency', changeWhilePending: false },
     { name: 'rejects a delayed completion after predecessor authored inputs change', changeWhilePending: true },
   ])('$name', { timeout: 15_000 }, async ({ changeWhilePending }) => {
+    // The shipped example is fixture data here, read (never written). Its
+    // content is regenerated with the examples (WO-2975, 1935f923b0), so these
+    // transport controls prove the file is unchanged by the run rather than
+    // pinning one regeneration; the on-demand receipt run above keeps the
+    // WO-2515 pin its receipts describe.
     const originalText = readFileSync(source, 'utf8')
-    expect(sourceSha256(originalText)).toBe(expectedSourceSha256)
+    const originalSha256 = sourceSha256(originalText)
     const fixture = JSON.parse(originalText)
     const savedSetup = fixture.setups[0]
     const thread = savedSetup.operations.find((op: { type: string }) => op.type === 'thread_mill')!
@@ -473,7 +478,7 @@ describe('WO-2754 absent replay predecessor dependency', () => {
       } finally {
         host.Worker = realWorker
         host.window!.__cncViewport = oldViewport
-        expect(sourceSha256(readFileSync(source, 'utf8'))).toBe(expectedSourceSha256)
+        expect(sourceSha256(readFileSync(source, 'utf8'))).toBe(originalSha256)
       }
     }
   })

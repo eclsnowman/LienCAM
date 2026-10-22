@@ -256,3 +256,151 @@ export function deserializeStockState(serialized: string): StockState {
   )
   return stateFromField(field, bounds, requestedResolutionMm, value.warnings as string[])
 }
+
+/** WO-2953: separate from the legacy CENTER samples above. Every value here
+ * encloses the material over an ENTIRE cell. Never cast a StockState to this
+ * capability. Z-up, upward-open removal only; not a mesh/undercut certificate. */
+export interface ConservativeStockColumns {
+  readonly representation: 'full-cell-upper-envelope-v1'
+  readonly bounds: Readonly<Box3>
+  readonly resolutionMm: number
+  readonly requestedResolutionMm: number
+  readonly nx: number
+  readonly ny: number
+  readonly warnings: readonly string[]
+  readonly topZ: readonly number[]
+  readonly roundingAllowanceMm: number
+}
+
+function numericalAllowance(values: readonly number[]): number {
+  return 128 * Number.EPSILON * Math.max(1, ...values.map(Math.abs))
+}
+
+function frozenColumns(state: ConservativeStockColumns): ConservativeStockColumns {
+  return Object.freeze({ ...state, bounds: Object.freeze(copyBounds(state.bounds)),
+    warnings: Object.freeze([...state.warnings]), topZ: Object.freeze([...state.topZ]) })
+}
+
+export function createConservativeStockColumns(
+  bounds: Readonly<Box3>, resolutionMm: number, maxColumns = DEFAULT_CELL_BUDGET,
+): ConservativeStockColumns {
+  assertBox(bounds, 'ConservativeStock.bounds')
+  // Reuse budget policy, NEVER its Float32 material samples (which can round
+  // downward). Correct its center-grid epsilon at a whole-cell boundary.
+  let grid = ZDexelField.fromBox(bounds, resolutionMm, maxColumns)
+  let nx = Math.max(1, Math.ceil((bounds.maxX - bounds.minX) / grid.cell))
+  let ny = Math.max(1, Math.ceil((bounds.maxY - bounds.minY) / grid.cell))
+  if (nx * ny > maxColumns) {
+    grid = ZDexelField.fromBox(bounds, grid.cell * 1.02, maxColumns)
+    nx = Math.max(1, Math.ceil((bounds.maxX - bounds.minX) / grid.cell))
+    ny = Math.max(1, Math.ceil((bounds.maxY - bounds.minY) / grid.cell))
+  }
+  const allowance = numericalAllowance(Object.values(bounds))
+  if (grid.cell <= allowance * 8 || nx * ny > maxColumns) {
+    throw new Error('Conservative stock resolution cannot be bounded numerically.')
+  }
+  const warnings = grid.cell > resolutionMm
+    ? [`Cell budget (${maxColumns}) forced coarsening to ${grid.cell} mm.`] : []
+  return frozenColumns({ representation: 'full-cell-upper-envelope-v1', bounds,
+    resolutionMm: grid.cell, requestedResolutionMm: resolutionMm, nx, ny, warnings,
+    roundingAllowanceMm: allowance, topZ: Array(nx * ny).fill(bounds.maxZ) })
+}
+
+function requireConservativeCut(cut: StockCut): void {
+  const { move, cutter } = cut
+  if (Object.values(move).some(v => !Number.isFinite(v)) ||
+      !['x0', 'y0', 'z0', 'x1', 'y1', 'z1'].every(k => Number.isFinite(move[k as keyof LinearMove])) ||
+      !['flat', 'ball'].includes(cutter.kind) || !Number.isFinite(cutter.diameter) || cutter.diameter <= 0) {
+    throw new Error('Conservative stock requires finite linear moves and flat/ball cutters.')
+  }
+  if (move.z0 !== move.z1 && (move.x0 !== move.x1 || move.y0 !== move.y1)) {
+    throw new Error('Conservative stock does not support ramps; supply a proven envelope backend.')
+  }
+}
+
+/** Full-cell proof: distance to a segment is convex, so its maximum over a
+ * rectangle is attained at a corner. The whole rectangle must be inside the
+ * capsule. For a ball use the highest profile on that rectangle. Numerical
+ * slack shrinks removal and raises its envelope. No center-only clearance. */
+export function applyConservativeStockOperation(
+  state: ConservativeStockColumns, cuts: readonly StockCut[],
+): ConservativeStockColumns {
+  const tops = [...state.topZ]
+  let roundingAllowanceMm = state.roundingAllowanceMm
+  for (const cut of cuts) {
+    requireConservativeCut(cut)
+    const { move: m, cutter } = cut
+    const radius = cutter.diameter / 2
+    const eps = numericalAllowance([...Object.values(m), radius, ...Object.values(state.bounds)])
+    if (state.resolutionMm <= eps * 8 || radius <= eps * 8) {
+      throw new Error('Conservative sweep precision cannot be bounded numerically.')
+    }
+    roundingAllowanceMm = Math.max(roundingAllowanceMm, eps)
+    const dx = m.x1 - m.x0, dy = m.y1 - m.y0
+    const length2 = dx * dx + dy * dy
+    if (!Number.isFinite(length2) || !Number.isFinite(radius * radius)) {
+      throw new Error('Conservative sweep arithmetic cannot be bounded numerically.')
+    }
+    const distance = (x: number, y: number) => {
+      const t = length2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - m.x0) * dx + (y - m.y0) * dy) / length2))
+      return Math.hypot(x - m.x0 - t * dx, y - m.y0 - t * dy)
+    }
+    for (let j = 0; j < state.ny; j++) {
+      const y0 = state.bounds.minY + j * state.resolutionMm
+      const y1 = Math.min(state.bounds.maxY, y0 + state.resolutionMm)
+      if (y1 < Math.min(m.y0, m.y1) - radius || y0 > Math.max(m.y0, m.y1) + radius) continue
+      for (let i = 0; i < state.nx; i++) {
+        const x0 = state.bounds.minX + i * state.resolutionMm
+        const x1 = Math.min(state.bounds.maxX, x0 + state.resolutionMm)
+        const farthest = Math.max(distance(x0, y0), distance(x1, y0), distance(x0, y1), distance(x1, y1)) + eps
+        if (farthest >= radius) continue
+        const height = cutter.kind === 'ball' ? radius - Math.sqrt(radius * radius - farthest * farthest) : 0
+        const envelope = Math.max(state.bounds.minZ, Math.min(m.z0, m.z1) + height + eps)
+        if (!Number.isFinite(envelope)) throw new Error('Conservative sweep envelope must be finite.')
+        const index = j * state.nx + i
+        tops[index] = Math.min(tops[index], envelope)
+      }
+    }
+  }
+  return frozenColumns({ ...state, roundingAllowanceMm, topZ: tops })
+}
+
+/** Positive-volume box overlap; conservatively includes touching XY cells.
+ * Highest queries return undefined outside stock and exact initial top for a
+ * zero-height stock. Queries never use the legacy sampled traverse routine. */
+export function highestConservativeStockOver(
+  state: ConservativeStockColumns, region: Readonly<Box3>,
+): number | undefined {
+  assertBox(region, 'ConservativeStock.query')
+  if (region.maxX < state.bounds.minX || region.minX > state.bounds.maxX ||
+      region.maxY < state.bounds.minY || region.minY > state.bounds.maxY) return undefined
+  const c = state.resolutionMm
+  const i0 = Math.max(0, Math.ceil((region.minX - state.bounds.minX) / c) - 1)
+  const i1 = Math.min(state.nx - 1, Math.floor((region.maxX - state.bounds.minX) / c))
+  const j0 = Math.max(0, Math.ceil((region.minY - state.bounds.minY) / c) - 1)
+  const j1 = Math.min(state.ny - 1, Math.floor((region.maxY - state.bounds.minY) / c))
+  let top = state.bounds.minZ
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) top = Math.max(top, state.topZ[j * state.nx + i])
+  return top
+}
+
+export function isConservativeStockRegionEmpty(state: ConservativeStockColumns, region: StockRegion): boolean {
+  if (region.kind === 'swept-cutter') {
+    requireConservativeCut(region)
+    const { move: m, cutter } = region
+    const r = cutter.diameter / 2 + state.roundingAllowanceMm
+    // Enclose the whole cutter, including its flank. False non-clear is allowed;
+    // no claim of tight swept-clearance fidelity is made by this representation.
+    return isConservativeStockRegionEmpty(state, { kind: 'box', bounds: {
+      minX: Math.min(m.x0, m.x1) - r, maxX: Math.max(m.x0, m.x1) + r,
+      minY: Math.min(m.y0, m.y1) - r, maxY: Math.max(m.y0, m.y1) + r,
+      minZ: Math.min(m.z0, m.z1) - state.roundingAllowanceMm,
+      maxZ: Math.max(state.bounds.maxZ, m.z0, m.z1) + r,
+    } })
+  }
+  const b = region.bounds
+  assertBox(b, 'ConservativeStock.query')
+  if (b.minX === b.maxX || b.minY === b.maxY || b.minZ === b.maxZ || b.maxZ <= state.bounds.minZ) return true
+  const top = highestConservativeStockOver(state, b)
+  return top === undefined || top <= state.bounds.minZ || top <= b.minZ
+}

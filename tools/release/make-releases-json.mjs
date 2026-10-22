@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { lstat, readdir, readFile, writeFile } from 'node:fs/promises'
@@ -78,7 +79,7 @@ export async function makeReleasesJson({ directory, tag, verify = false, require
   return result
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try {
     const [directory, ...args] = process.argv.slice(2)
     const tagIndex = args.indexOf('--tag')

@@ -1097,6 +1097,10 @@ export interface ConsoleEntry {
   dir: 'tx' | 'rx'
   text: string
   severity: 'info' | 'command' | 'warn' | 'error'
+  /** WO-2847: the console acknowledges an identified firmware line only after
+   * accepting it. A stale session or a discarded Connect buffer never does. */
+  firmwareUpdateId?: string
+  onAccepted?: () => void
 }
 
 /** Why a job stopped, when it stopped badly. */

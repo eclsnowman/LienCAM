@@ -15,7 +15,7 @@
 // the proof we want.
 import { describe, expectTypeOf, it } from 'vitest'
 import type { OperationType } from '../../types'
-import { OPERATION_MANIFEST } from '../../lib/cam/operationManifest'
+import { OPERATION_MANIFEST } from '../../kernel/registry'
 import type { LiveSmartHeightOperationType } from '../../lib/cam/newOperationHeightDefaults'
 import { useNewOperationModalState } from '../../components/modals/useNewOperationModalState'
 import type { QueuedCam3dOperationType } from '../../store'

@@ -12,6 +12,14 @@ const STATUS_SOCKET_TIMEOUT_MS = 250
 const MAX_LOG_LINES = 50
 const MAX_REQUEST_BYTES = 16_384
 const LOOPBACK_ORIGIN = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/
+// WO-2845 (ADR-0058 D4): Machine.cs DllPin. The bridge said in one line that the
+// UC100.dll changed and exited 12 without opening the board. The browser's
+// Connect/Start/Restart sends the flag as a request (bridgeHost.ts); it reaches
+// the bridge only on the launch right after that exit, as electron/main.cjs does.
+const DLL_CHANGED_EXIT_CODE = 12
+const CONNECT_WITH_CHANGED_DLL = '--connect-with-changed-dll'
+const DLL_CHANGED_PREFIX = '[bridge] UC100.DLL CHANGED'
+const STDIO_FLUSH_MS = 1_000
 
 function readOption(name, fallback) {
   const at = process.argv.indexOf(`--${name}`)
@@ -48,11 +56,14 @@ export function createBridgeSupervisor({
   let requestedStop = false
   let lastExit = null
   let failureReason = null
+  let dllChangedLine = null
   const lastLogs = []
 
   const appendLog = (source, chunk) => {
     for (const text of String(chunk).split(/\r?\n/)) {
       if (!text) continue
+      // WO-2845: the bridge's own line is the reason a browser shows for exit 12.
+      if (source === 'stdout' && text.startsWith(DLL_CHANGED_PREFIX)) dllChangedLine = text
       lastLogs.push(`${source}: ${text}`)
       if (lastLogs.length > MAX_LOG_LINES) lastLogs.shift()
     }
@@ -131,10 +142,18 @@ export function createBridgeSupervisor({
       if (await socketListening()) return { ok: true, pid: child.pid, port }
       return { ok: false, reason: 'no-socket', pid: child.pid, port }
     }
+    // WO-2845: an operator's press asks with the flag; only the launch right
+    // after a changed-DLL exit carries it to the bridge.
+    const pressed = requestedArgs?.includes(CONNECT_WITH_CHANGED_DLL) ?? false
+    const accept = pressed && lastExit?.code === DLL_CHANGED_EXIT_CODE
+    const launchArgs = [
+      ...(requestedArgs ?? bridgeArgs).filter((arg) => arg !== CONNECT_WITH_CHANGED_DLL),
+      ...(accept ? [CONNECT_WITH_CHANGED_DLL] : []),
+    ]
     requestedStop = false
     failureReason = null
+    dllChangedLine = null
     starting = true
-    const launchArgs = requestedArgs ?? bridgeArgs
     const startedChild = spawn(executable, [...launchArgs, '--port', String(port)], {
       cwd: dirname(executable),
       windowsHide: true,
@@ -154,12 +173,23 @@ export function createBridgeSupervisor({
       }
       if (child === startedChild) child = null
     })
+    // WO-2845: stdout can still be arriving when 'exit' fires; the changed-DLL
+    // line becomes the exit's reason once it is all in.
+    const flushed = new Promise((resolveFlush) => startedChild.once('close', resolveFlush))
+    const settleDllChanged = () => {
+      if (lastExit?.code !== DLL_CHANGED_EXIT_CODE || dllChangedLine === null || requestedStop) return
+      failureReason = dllChangedLine
+      lastExit = { ...lastExit, error: dllChangedLine }
+    }
+    void flushed.then(settleDllChanged)
     const listening = await waitForStart(startedChild)
     starting = false
     if (listening && child === startedChild) {
       return { ok: true, pid: startedChild.pid, port }
     }
     if (startedChild.exitCode !== null || child !== startedChild) {
+      await Promise.race([flushed, new Promise((resolveWait) => setTimeout(resolveWait, STDIO_FLUSH_MS))])
+      settleDllChanged()
       return { ok: false, reason: 'exited', lastExit }
     }
     failureReason = `Bridge process is running but is not answering on port ${port}.`

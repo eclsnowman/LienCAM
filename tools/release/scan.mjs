@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { isMain } from '../lib/is-main.mjs';
 import { extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -217,7 +218,7 @@ export function printScanReport(report, log = console.log) {
 }
 
 function isMainModule() {
-  return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  return isMain(import.meta.url)
 }
 
 if (isMainModule()) {

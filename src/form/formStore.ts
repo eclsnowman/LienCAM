@@ -5,8 +5,8 @@
 
 import { create } from 'zustand'
 import { Matrix4, Vector3 } from 'three'
-import type { Cage } from './cage'
-import { cageBounds, cloneCage, edgeKey, parseEdgeKey } from './cage'
+import type { Cage, SymmetryReference } from './cage'
+import { cageBounds, cloneCage, edgeKey, parseEdgeKey, sameFaces, symmetryReferenceOf } from './cage'
 import { validateCage } from './halfEdge'
 import { emptyHistory, pushHistory, redoCage, undoCage, type FormHistory } from './history'
 import { STARTER_DEFAULTS, starterCage, type StarterKind, type StarterOptions } from './starters'
@@ -17,7 +17,7 @@ import { edgeChains, flattenPoints, makeUniform, principalAxes, pullOntoMesh, pu
 import { closestPointIndex, type MeshLike } from './closestPoint'
 import { bridgeFaceSets, bridgeOpenings, faceSets, openLoops } from './bridgeLoops'
 import { mirrorDuplicate } from './mirrorDuplicate'
-import { circularCount, findPairs, mirrorNormal, mirrorPlaneFrom, mirrorSelection, symmetrize, unpairedCount, type SymmetryMode, type SymmetryPairs } from './symmetry'
+import { circularCount, exactness, mirrorNormal, mirrorPlaneFrom, mirrorSelection, offsetCount, propagateSymmetry, resolvePairs, unpairedCount, type SymmetryMode, type SymmetryPairs } from './symmetry'
 import type { Vec3 } from './cage'
 import type { CagePick } from './pick'
 import { addClickedFace, type FaceClick, type WorkPlane } from './faceByClicks'
@@ -313,7 +313,30 @@ export interface FormState {
 let flashTimer: ReturnType<typeof setTimeout> | null = null
 
 /** The live gizmo move: not state anyone renders, so kept outside the store. */
-let moveSession: { points: number[]; primary: number[]; from: Vec3[]; weights: number[]; pairs: SymmetryPairs | null } | null = null
+let moveSession: {
+  points: number[]; primary: number[]; from: Vec3[]; weights: number[]; pairs: SymmetryPairs | null
+  /** WO-2955: the cage when the move began, its own symmetry reference (null: none), and the one its
+   *  frames get - its own, else where the points were at the start (null: none). `whole`: every point
+   *  moves in full, so a move that turns out rigid takes the form's own reference along (within `exact`) */
+  start: Cage; own: Vec3[] | null; reference: Vec3[] | null; whole: boolean; exact: number
+} | null = null
+
+/** WO-2955: the symmetry reference a cage edited from `before` into `next` keeps - its own or before's while
+ *  the faces are the same; none yet: where the points were before the edit (when any moved). New topology retires it. */
+function referenceAfter(before: Cage, next: Cage): SymmetryReference | null {
+  if (before.positions.length !== next.positions.length || !sameFaces(before.faces, next.faces)) return null
+  const kept = symmetryReferenceOf(next) ?? symmetryReferenceOf(before)
+  if (kept !== null) return kept
+  const moved = before.positions.some((p, i) => p[0] !== next.positions[i][0] || p[1] !== next.positions[i][1] || p[2] !== next.positions[i][2])
+  return moved ? { positions: before.positions, faces: before.faces } : null
+}
+
+/** `cage` with exactly this symmetry reference (null: none). */
+function withReference(cage: Cage, reference: SymmetryReference | null): Cage {
+  const plain: Cage = { ...cage }
+  delete plain.symmetryReference
+  return reference !== null ? { ...plain, symmetryReference: reference } : plain
+}
 
 function describeSelection(s: CageSelection): string {
   const part = (n: number, one: string) => (n > 0 ? [`${n} ${one}${n === 1 ? '' : 's'}`] : [])
@@ -323,7 +346,7 @@ function describeSelection(s: CageSelection): string {
 
 /** The selection a command acts on: mirrored when symmetry is on. */
 function effectiveSelection(s: Pick<FormState, 'cage' | 'selection' | 'symmetry' | 'symmetryAt' | 'symmetryNormal'>): CageSelection {
-  return s.symmetry === null ? s.selection : mirrorSelection(s.cage, findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), s.selection)
+  return s.symmetry === null ? s.selection : mirrorSelection(s.cage, resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), s.selection)
 }
 
 /** plain words for a mirror plane */
@@ -335,8 +358,9 @@ function planeWords(mode: SymmetryMode, at: number, normal: Vec3 | null): string
 
 /** the state for a symmetry on at the given plane, with its notice (seam points, points without an image) */
 function symmetryOn(cage: Cage, mode: SymmetryMode, at: number, normal: Vec3 | null, extra = '', requestedCopies?: number): Partial<FormState> {
-  const pairs = findPairs(cage, mode, at, normal)
+  const pairs = resolvePairs(cage, mode, at, normal)
   const lone = unpairedCount(pairs)
+  const offset = offsetCount(cage, pairs)
   const seam = pairs.seam.reduce((n, v) => n + v, 0)
   const n = circularCount(mode)
   const what = n !== null
@@ -348,7 +372,9 @@ function symmetryOn(cage: Cage, mode: SymmetryMode, at: number, normal: Vec3 | n
     symmetryNormal: mode === 'p' ? pairs.normal : null,
     ...(n !== null ? { circularCopies: n } : {}),
     notice: what + (n !== null && requestedCopies !== undefined && requestedCopies !== n ? `; ${requestedCopies} copies do not fit this ${cage.positions.length}-point cage` : '')
-      + (lone > 0 ? `; ${lone} point${lone === 1 ? ' has' : 's have'} no ${n !== null ? 'copies' : 'mirror partner'} and move${lone === 1 ? 's' : ''} alone` : ''),
+      + (lone > 0 ? `; ${lone} point${lone === 1 ? ' has' : 's have'} no ${n !== null ? 'copies' : 'mirror partner'} and move${lone === 1 ? 's' : ''} alone` : '')
+      // WO-2955: an offset made with symmetry off is kept, never mirrored away
+      + (offset > 0 ? `; ${offset} point${offset === 1 ? ' keeps its' : 's keep their'} earlier offset from ${n !== null ? 'their copies' : 'the mirror'}: a move now ${n !== null ? 'copies' : 'mirrors'} only the new move` : ''),
   }
 }
 
@@ -432,7 +458,7 @@ if (first === undefined) return null
   let pairOnRing = false
   const targets: Array<{ key: string; from: number }> = [{ key: first, from: lower }]
   if (s.symmetry !== null) {
-    const pairs = findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal)
+    const pairs = resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal)
     for (const img of pairs.images) {
       const [ia, ib, io] = [img[a], img[b], img[lower]]
       if (ia < 0 || ib < 0 || io < 0) continue
@@ -575,7 +601,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
   toggleCircular: () => {
     const s = get()
     if (s.symmetry !== null && circularCount(s.symmetry) !== null) { get().setSymmetry(null); return }
-    const fits = (n: number) => unpairedCount(findPairs(s.cage, `c${n}`)) === 0
+    const fits = (n: number) => unpairedCount(resolvePairs(s.cage, `c${n}`)) === 0
     let n = s.circularCopies
     if (!fits(n)) for (let k = 24; k >= 2; k--) if (fits(k)) { n = k; break }
     set(symmetryOn(s.cage, `c${n}`, 0, null, '', s.circularCopies))
@@ -601,7 +627,8 @@ export const useFormStore = create<FormState>()((set, get) => ({
     }
     const s = get()
     set({
-      cage: cloneCage(next),
+      // a new form (a starter, From body ...) starts with no reference: its points are where they pair
+      cage: cloneCage(withReference(next, opts.startFrom ? null : referenceAfter(s.cage, next))),
       history: opts.record ? pushHistory(s.history, s.cage) : s.history,
       editVersion: opts.record && !opts.startFrom ? s.editVersion + 1 : s.editVersion,
       topologyVersion: opts.topology ? s.topologyVersion + 1 : s.topologyVersion,
@@ -704,21 +731,36 @@ export const useFormStore = create<FormState>()((set, get) => ({
     // soft modification (not for an extrude: its new faces move rigidly)
     const soft = extrude ? new Map<number, number>() : softWeights(cage, points, get().softRadius)
     const moving = [...points, ...soft.keys()]
+    const own = symmetryReferenceOf(cage)?.positions.map((p) => [...p] as Vec3) ?? null
     moveSession = {
       points: moving,
       // after an extrude the operator's faces ride on new points: those are the primary side
       primary: extrude ? points.filter((p) => primary.includes(p)) : primary,
       from: moving.map((p) => [...cage.positions[p]] as Vec3),
       weights: [...points.map(() => 1), ...soft.values()],
-      pairs: s.symmetry === null ? null : findPairs(cage, s.symmetry, s.symmetryAt, s.symmetryNormal),
+      pairs: s.symmetry === null ? null : resolvePairs(cage, s.symmetry, s.symmetryAt, s.symmetryNormal),
+      start: cage,
+      own,
+      // an extrude's new points start on top of the old ones: that is no shape to pair by
+      reference: own ?? (extrude ? null : cage.positions.map((p) => [...p] as Vec3)),
+      whole: soft.size === 0 && new Set(points).size === cage.positions.length,
+      exact: exactness(cage),
     }
   },
   moveBy: (matrix) => {
     const m = moveSession
     if (!m) return
     let next = transformPoints(get().cage, m.from, m.points, matrix, m.weights)
-    if (m.pairs) next = symmetrize(next, m.pairs, m.points, m.primary)
-    get().dragCage(next)
+    if (m.pairs) next = propagateSymmetry(m.start, next, m.pairs, m.points, m.primary)
+    let reference = m.reference
+    if (m.whole) {
+      // the whole form moved rigidly (a mirror on or not): where it pairs moves with it; none yet: it pairs where it is
+      const all = m.start.positions.map((_, i) => i)
+      const rigid = transformPoints(m.start, m.start.positions, all, matrix).positions
+      const P = next.positions
+      if (rigid.every((q, i) => Math.hypot(q[0] - P[i][0], q[1] - P[i][1], q[2] - P[i][2]) <= m.exact)) reference = m.own && transformPoints(m.start, m.own, all, matrix).positions
+    }
+    get().dragCage(withReference(next, reference === null ? null : { positions: reference, faces: m.start.faces }))
   },
   insertLoop: () => {
     const s = get()
@@ -950,7 +992,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
     if (typeof target === 'string') { set({ notice: target }); return }
     const r = flattenPoints(s.cage, points, target?.plane)
     if (r === null) { set({ notice: 'Select three or more points (or a face, or edges) to flatten' }); return }
-    const next = s.symmetry === null ? r.cage : symmetrize(r.cage, findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
+    const next = s.symmetry === null ? r.cage : propagateSymmetry(s.cage, r.cage, resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
     if (get().applyCage(next, { topology: false, record: true, notice: `Flattened ${points.length} point${points.length === 1 ? '' : 's'} onto ${target?.words ?? 'their plane'} (the farthest was ${r.before.toFixed(2)} mm off it)` })) get().flashResult({ points: movedPoints(s.cage, next).points })
   },
   straightenSelection: () => {
@@ -970,7 +1012,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
       return
     }
     const moved = [...new Set([...selectionPoints(s.cage, { points: s.selection.points, edges: s.selection.edges, faces: [] })])]
-    const next = s.symmetry === null ? r.cage : symmetrize(r.cage, findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), moved)
+    const next = s.symmetry === null ? r.cage : propagateSymmetry(s.cage, r.cage, resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), moved)
     const skipped = r.loops > 0 ? `; ${r.loops} closed loop${r.loops === 1 ? '' : 's'} left as ${r.loops === 1 ? 'it was' : 'they were'} (Flatten makes a loop planar)` : ''
     if (get().applyCage(next, { topology: false, record: true, notice: `Straightened ${r.lines} line${r.lines === 1 ? '' : 's'}, ${r.moved} point${r.moved === 1 ? '' : 's'} moved (the farthest was ${r.before.toFixed(2)} mm off)${skipped}` })) get().flashResult({ points: movedPoints(s.cage, next).points })
   },
@@ -980,7 +1022,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
     const points = picked.length > 0 ? picked : s.cage.positions.map((_, i) => i)
     const r = pullOntoMesh(s.cage, points, closestPointIndex(mesh))
     if (r === null) return
-    const next = s.symmetry === null ? r.cage : symmetrize(r.cage, findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
+    const next = s.symmetry === null ? r.cage : propagateSymmetry(s.cage, r.cage, resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
     const where = picked.length > 0 ? `the ${points.length} selected point${points.length === 1 ? '' : 's'}` : `all ${points.length} points`
     if (get().applyCage(next, { topology: false, record: true, notice: `Pulled the surface at ${where} onto ${name}: within ${r.after.toFixed(2)} mm of its display mesh (it was up to ${r.before.toFixed(2)} mm off)` })) get().flashResult({ points: movedPoints(s.cage, next).points })
   },
@@ -990,7 +1032,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
     const points = picked.length > 0 ? picked : s.cage.positions.map((_, i) => i)
     const r = pullToLimit(s.cage, points)
     if (r === null) return
-    const next = s.symmetry === null ? r.cage : symmetrize(r.cage, findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
+    const next = s.symmetry === null ? r.cage : propagateSymmetry(s.cage, r.cage, resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
     const where = picked.length > 0 ? `the ${points.length} selected point${points.length === 1 ? '' : 's'}` : `all ${points.length} points`
     if (get().applyCage(next, { topology: false, record: true, notice: `Pulled the surface through ${where} (it was up to ${r.before.toFixed(2)} mm off them)` })) get().flashResult({ points: movedPoints(s.cage, next).points })
   },
@@ -1001,7 +1043,7 @@ export const useFormStore = create<FormState>()((set, get) => ({
     const where = picked.length > 0 ? 'selected' : 'form\'s'
     const r = makeUniform(s.cage, points)
     if (r === null) { set({ notice: `Nothing to even out: the ${where} points are all on the open border or on creases, which stay put` }); return }
-    const next = s.symmetry === null ? r.cage : symmetrize(r.cage, findPairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
+    const next = s.symmetry === null ? r.cage : propagateSymmetry(s.cage, r.cage, resolvePairs(s.cage, s.symmetry, s.symmetryAt, s.symmetryNormal), points)
     // decided on distance, not on how many points were free to move: an even form moves none of them
     const moved = movedPoints(s.cage, next)
     if (moved.points.length === 0) { set({ notice: 'Uniform: already even - nothing moved' }); return }

@@ -1,3 +1,7 @@
+import type { Pencil3dParams } from '../../kernel/parameterTypes';
+export type { Pencil3dParams } from '../../kernel/parameterTypes';
+export { DEFAULT_PENCIL3D_PARAMS } from '../../kernel/parameterDefaults';
+export { readPencil3dParams } from '../../kernel/schema';
 import type { CutterSpec, PartMesh } from '../kernel/types';
 import type { PathBuildHeights } from '../pathbuild';
 import type { Ring } from '../geom2d';
@@ -11,33 +15,6 @@ import {
   resolveFaceScopedBoundary,
   type ResolvedParallel3dHeights,
 } from './parallel3dOperation';
-
-export interface Pencil3dParams {
-  tolerance: number;
-  stockToLeave: number;
-  useStockBoundary: boolean;
-  finishDepth?: number;
-  direction: 'climb' | 'conventional';
-}
-
-export const DEFAULT_PENCIL3D_PARAMS: Pencil3dParams = {
-  tolerance: 0.05, stockToLeave: 0, useStockBoundary: false,
-  finishDepth: undefined, direction: 'climb',
-};
-
-export function readPencil3dParams(params: Record<string, unknown>): Pencil3dParams {
-  const positive = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-  const nonNegative = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
-  return {
-    tolerance: positive(params.tolerance, DEFAULT_PENCIL3D_PARAMS.tolerance),
-    stockToLeave: nonNegative(params.stockToLeave, DEFAULT_PENCIL3D_PARAMS.stockToLeave),
-    useStockBoundary: typeof params.useStockBoundary === 'boolean' ? params.useStockBoundary : false,
-    finishDepth: positive(params.finishDepth, 0) || undefined,
-    direction: params.direction === 'conventional' ? 'conventional' : 'climb',
-  };
-}
 
 export interface ComputePencil3dArgs {
   partMesh: PartMesh; tool: Tool;

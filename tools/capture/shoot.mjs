@@ -5,6 +5,7 @@
 // proves this checkout's behavior. There is deliberately no default port or
 // skippable provenance mode.
 
+import { isMain } from '../lib/is-main.mjs';
 import { rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -84,8 +85,7 @@ async function main() {
   await shoot({ port, provenance, outDir: process.argv[4] })
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : ''
-if (import.meta.url === invokedPath) {
+if (isMain(import.meta.url)) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.stack : error)
     process.exitCode = 1

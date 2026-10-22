@@ -1,3 +1,4 @@
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -549,7 +550,7 @@ export async function buildKnobHandwheel({ verifyOnly = false, simulationOnly = 
   })
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   // Default to the current kit baseline. The historical Form rebuild is kept
   // explicit so routine regeneration cannot discard later kit corrections.
   if (process.argv.includes('--rebuild-model')) {

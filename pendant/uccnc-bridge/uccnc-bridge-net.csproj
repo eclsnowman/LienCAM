@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>liencam-bridge</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);UC100NET</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Bridge.cs;Machine.cs;Json.cs;Vfd.cs;GlobalUsings.cs" />
+    <ProjectReference Include="../uc100net/src/Uc100Net/Uc100Net.csproj" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <Content Include="boards/*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

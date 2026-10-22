@@ -80,6 +80,9 @@ const controllerFormatMentions = [
 const importFormatMentions = [
   { file: 'src/components/modals/ToolLibraryModal.tsx', names: ['Fusion'],
     source: '    // Arrays and Fusion archives remain library imports, even with one member.' },
+  // Help text for the inch-based tool-library import: Fusion names a supported import format only.
+  { file: 'src/help/topics/tools-holders/index.ts', names: ['Fusion'],
+    source: "        text: 'Inch-based Fusion tool libraries are converted to millimeters and their dimensions rounded to 0.0001 mm on import. A nonzero value too small to survive rounding is kept. Libraries imported earlier keep their stored values; import the original file again to get the rounded dimensions in a new library. Metric libraries and manual edits keep their values.'," },
 ]
 
 describe('WO-2353 non-test public source naming', () => {

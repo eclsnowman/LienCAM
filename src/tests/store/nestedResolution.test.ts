@@ -535,7 +535,7 @@ describe('Phase 2 routing: each op type resolves its plane from the OWNING stock
     expect(dispatched().payload.heights.topHeight).toBeCloseTo(7, 9)
   })
 
-  it('face: top resolves from the owning stock (heightReference stock_top -> +7)', () => {
+  it('face: top resolves from the owning stock (heightReference stock_top -> +7)', async () => {
     // boundarySource 'geometry' avoids the viewport-stock-bounds branch (no
     // viewport in the test harness) and routes through resolveOpRefZ.
     installScene(makeOp('face', {
@@ -543,7 +543,10 @@ describe('Phase 2 routing: each op type resolves its plane from the OWNING stock
       pattern: 'linear', stepover: 1.6, direction: 'climb',
       heightReference: 'stock_top', planeOffset: 0,
     }, makeHeights({ topHeight: 0, topHeightMode: 'absolute' })))
-    useCamStore.getState().computeOperationToolpath('setup-1', 'op-1')
+    // WO-2953: Face reads the shared remaining-stock state before it
+    // dispatches, so the worker request arrives a tick after the call.
+    void useCamStore.getState().computeOperationToolpath('setup-1', 'op-1')
+    await vi.waitFor(() => expect(MockWorker.instances.length).toBe(1))
     expect(dispatched().payload.heights.topHeight).toBeCloseTo(7, 9)
   })
 

@@ -10,6 +10,19 @@ const pendingBridgeRequests = new Map();
 let bridgeSocket = null;
 let bridgeRequestSequence = 0;
 let feedbackTimer = null;
+// WO-2886: a phone suspends a page it is not showing and its socket dies with
+// it. The page reconnects by itself - at once when it is shown again, with a
+// short backoff while it stays visible - and offers a refresh only after
+// several attempts in a row have failed.
+const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 5000];
+const REFRESH_OFFER_AFTER_FAILURES = 3;
+const RESUME_SILENCE_MS = 3000;
+let bridgeGeneration = 0;
+let bridgeLastMessageAt = 0;
+let bridgeFailures = 0;
+let bridgeLostReason = '';
+let reconnectTimer = null;
+let resumeCheckTimer = null;
 
 let status = {
   state: 'Idle', mpos: [0, 0, 0], wpos: [0, 0, 0], wco: [0, 0, 0],
@@ -111,13 +124,14 @@ function bridgeApi(path, body) {
     return Promise.resolve({ ok: false, error: 'The desktop pendant bridge is offline.' });
   }
   const requestId = `phone-${Date.now().toString(36)}-${(++bridgeRequestSequence).toString(36)}`;
+  const socket = bridgeSocket;
   return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
       pendingBridgeRequests.delete(requestId);
       resolve({ ok: false, error: 'The desktop did not answer the remote command.' });
     }, path === 'probe/start' ? 300000 : 10000);
-    pendingBridgeRequests.set(requestId, { resolve, timeout });
-    bridgeSocket.send(JSON.stringify({ type: 'command', requestId, command }));
+    pendingBridgeRequests.set(requestId, { resolve, timeout, socket });
+    socket.send(JSON.stringify({ type: 'command', requestId, command }));
   });
 }
 
@@ -202,14 +216,48 @@ function initTransport() {
 }
 
 function initBridge() {
-  bridgeSocket = new WebSocket(bridgeUrl);
-  bridgeSocket.addEventListener('open', () => {
-    bridgeSocket.send(JSON.stringify({ type: 'hello', role: 'pendant', pairingToken }));
+  $('#btn-refresh').addEventListener('click', () => window.location.reload());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkBridgeOnResume();
   });
-  bridgeSocket.addEventListener('message', (event) => {
+  window.addEventListener('pageshow', (event) => { if (event.persisted) checkBridgeOnResume(); });
+  window.addEventListener('online', checkBridgeOnResume);
+  connectBridge();
+}
+
+function connectBridge() {
+  window.clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  const generation = ++bridgeGeneration;
+  const previous = bridgeSocket;
+  bridgeSocket = null;
+  if (previous) settleRequestsOn(previous, 'Pendant bridge disconnected.');
+  if (previous && previous.readyState <= WebSocket.OPEN) {
+    try { previous.close(1000, 'Pendant reconnecting'); } catch { /* already gone */ }
+  }
+  let socket;
+  try {
+    socket = new WebSocket(bridgeUrl);
+  } catch {
+    bridgeLost('Could not connect to the pendant bridge.');
+    return;
+  }
+  bridgeSocket = socket;
+  const current = () => generation === bridgeGeneration;
+  socket.addEventListener('open', () => {
+    if (!current()) return;
+    socket.send(JSON.stringify({ type: 'hello', role: 'pendant', pairingToken }));
+  });
+  socket.addEventListener('message', (event) => {
+    if (!current()) return;
+    bridgeLastMessageAt = Date.now();
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
-    if (message.type === 'status' && message.data) {
+    if (message.type === 'hello-ack') {
+      bridgeFailures = 0;
+      bridgeLostReason = '';
+      paintLinkLine();
+    } else if (message.type === 'status' && message.data) {
       if (message.data.theme && message.data.theme !== theme) applyTheme(message.data.theme);
       status = message.data;
       paint();
@@ -223,13 +271,96 @@ function initBridge() {
         pending.resolve(message);
       }
     } else if (message.type === 'error') {
-      paintBridgeError(message.error || 'Pendant pairing was refused.');
+      bridgeLostReason = message.error || 'Pendant pairing was refused.';
+      paintBridgeError(bridgeLostReason);
     } else if (message.type === 'bridge-status' && message.connected === false) {
       paintBridgeError('LienCAM desktop disabled remote control.');
     }
   });
-  bridgeSocket.addEventListener('close', () => paintBridgeError('Pendant bridge disconnected.'));
-  bridgeSocket.addEventListener('error', () => paintBridgeError('Could not connect to the pendant bridge.'));
+  socket.addEventListener('error', () => {
+    if (current() && !bridgeLostReason) bridgeLostReason = 'Could not connect to the pendant bridge.';
+  });
+  socket.addEventListener('close', () => {
+    if (!current()) {
+      settleRequestsOn(socket, 'Pendant bridge disconnected.');
+      return;
+    }
+    bridgeLost(bridgeLostReason || 'Pendant bridge disconnected.');
+  });
+}
+
+// A link being replaced can no longer answer: every command still waiting on
+// it is answered now, once, whichever link is current by then. Nothing is
+// sent again on the new link - the operator presses again to repeat it.
+function settleRequestsOn(socket, message) {
+  for (const [requestId, pending] of pendingBridgeRequests) {
+    if (pending.socket !== socket) continue;
+    window.clearTimeout(pending.timeout);
+    pendingBridgeRequests.delete(requestId);
+    pending.resolve({ ok: false, error: message });
+  }
+}
+
+// The link is gone: nothing held keeps running, every waiting command is
+// answered, and a new link is tried - now if the page is showing, otherwise
+// the moment it is shown again.
+function bridgeLost(reason) {
+  bridgeSocket = null;
+  releaseHeldJog(false);
+  paintBridgeError(reason);
+  bridgeFailures += 1;
+  bridgeLostReason = '';
+  paintLinkLine(reason);
+  if (document.visibilityState !== 'hidden') scheduleReconnect();
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer !== null) return;
+  const delay = RECONNECT_DELAYS_MS[Math.min(Math.max(bridgeFailures - 1, 0), RECONNECT_DELAYS_MS.length - 1)];
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    connectBridge();
+  }, delay);
+}
+
+// Shown again (or back online): a dead link reconnects at once. An open one
+// that has carried nothing since the page came back - the desktop sends
+// status many times a second - is treated as dead too, unless a command is
+// still waiting on it.
+function checkBridgeOnResume() {
+  if (document.visibilityState === 'hidden') return;
+  const state = bridgeSocket?.readyState;
+  if (state === WebSocket.CONNECTING) return;
+  if (state !== WebSocket.OPEN) {
+    connectBridge();
+    return;
+  }
+  const resumedAt = Date.now();
+  window.clearTimeout(resumeCheckTimer);
+  resumeCheckTimer = window.setTimeout(() => {
+    resumeCheckTimer = null;
+    if (document.visibilityState === 'hidden' || bridgeSocket?.readyState !== WebSocket.OPEN) return;
+    if (bridgeLastMessageAt >= resumedAt || pendingBridgeRequests.size > 0) return;
+    const silent = bridgeSocket;
+    bridgeGeneration += 1;
+    try { silent.close(1000, 'Pendant link silent'); } catch { /* already gone */ }
+    bridgeLost('LienCAM stopped answering this phone.');
+  }, RESUME_SILENCE_MS);
+}
+
+function paintLinkLine(reason = '') {
+  const line = $('#link-line');
+  if (!line) return;
+  if (!reason) {
+    line.hidden = true;
+    return;
+  }
+  const offerRefresh = bridgeFailures >= REFRESH_OFFER_AFTER_FAILURES;
+  $('#link-text').textContent = offerRefresh
+    ? `${reason} Still trying to reconnect - or refresh this page.`
+    : `${reason} Reconnecting...`;
+  $('#btn-refresh').hidden = !offerRefresh;
+  line.hidden = false;
 }
 
 function paintBridgeError(message) {
@@ -388,18 +519,19 @@ function initJog() {
 
     const stop = (e) => {
       e.preventDefault();
-      if (holdTimer !== null && holdButton === btn) {
-        clearInterval(holdTimer);
-        holdTimer = null;
-        holdButton = null;
-        api('jog/cancel');
-      }
+      if (holdButton === btn) releaseHeldJog(true);
     };
 
     btn.addEventListener('pointerdown', start);
     btn.addEventListener('pointerup', stop);
     btn.addEventListener('pointerleave', stop);
     btn.addEventListener('pointercancel', stop);
+  });
+
+  // WO-2886: a page the phone is not showing cannot be held. Release the jog
+  // as a lifted finger would, so a reconnect never revives a keep-alive.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') releaseHeldJog(true);
   });
 
   $('#btn-safez').addEventListener('click', () => bridgeMode
@@ -415,6 +547,14 @@ function initJog() {
 
   $('#btn-hold').addEventListener('click', () => api('command', { command: '!' }));
   $('#btn-reset').addEventListener('click', () => api('command', { command: '0x18' }));
+}
+
+function releaseHeldJog(sendCancel) {
+  if (holdTimer === null) return;
+  clearInterval(holdTimer);
+  holdTimer = null;
+  holdButton = null;
+  if (sendCancel) api('jog/cancel');
 }
 
 function initMacros() {

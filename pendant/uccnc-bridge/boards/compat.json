@@ -1,0 +1,16 @@
+{
+  "format": "liencam-compat",
+  "schemaVersion": 1,
+  "rows": [
+    {
+      "status": "proven",
+      "deviceType": 19,
+      "fw": 1005,
+      "hw": 1,
+      "dllVersion": 2190,
+      "dllSha256": "fa715370f660411397c09c408b5c9dab30dbd202fa1ba6731643c8d4cde039ca",
+      "uccncVersion": "1.2115",
+      "evidence": "AXBB-E on the operator's controller PC: 49 hello lines 'AXBB fw 1005 / hw 1 / dll 2190' in 27 session captures 2026-09-10 to 2026-10-04; UC100.dll 2.1.9.0 from C:\\UCCNC12115\\API\\DLL, sha256 read 2026-10-16 (ALPHA2-BOARD) and 2026-10-20 (WO-2844)"
+    }
+  ]
+}

@@ -10,7 +10,10 @@ const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' 
 const isAncestor = (older: string, newer: string) => {
   try { execFileSync('git', ['merge-base', '--is-ancestor', older, newer], { stdio: 'ignore' }); return true } catch { return false }
 }
-const lastTouch = (path: string) => git('log', '-1', '--format=%H', '--', path)
+// Commits that touched a shipped example only to re-stamp it (toolpath moves byte-identical, so no picture of it changes).
+// WO-2975 1935f923b0: gear pair re-saved under camgen-v4 stamps, compute times and thumbnail only.
+const STAMP_ONLY = new Set(['1935f923b0f6dd05c99e3129cfa2a4b4c9ec7c0f'])
+const lastTouch = (path: string) => git('log', '--format=%H', '--', path).split('\n').find(sha => sha && !STAMP_ONLY.has(sha)) ?? ''
 const wo2504 = git('log', '-1', '--format=%H', '--grep=WO-2504 Hide Pull to body')
 
 const shots = [

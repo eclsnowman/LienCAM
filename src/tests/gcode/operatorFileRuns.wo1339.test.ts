@@ -233,7 +233,9 @@ interface FileCapacityReading {
 const EXPECTED = {
   'fusion-liencnc-v2-sample.nc': {
     moves: 110_615,
-    stages: 5,
+    // WO-2976 repin: 2fe053181c (WO-2478) gives the M9 after the M2001 macro
+    // its own command-only stage, so coolant is commanded off explicitly.
+    stages: 6,
     parts: 4,
     refusal: null,
     longest: { count: 104_422, firstLine: 4_908, lastLine: 109_329, stageFirstLine: 20 },

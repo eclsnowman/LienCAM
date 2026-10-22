@@ -1,12 +1,12 @@
 import { textFor, useText } from '../../i18n'
-import { useRef, useEffect, useSyncExternalStore } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react'
 import {
   FilePlus, FolderOpen, Save, Download,
-  Settings, Undo2, Redo2, CircleHelp, Info, LoaderCircle,
+  Settings, Undo2, Redo2, CircleHelp, Info, LoaderCircle, Bot,
 } from 'lucide-react'
 import { askBeforeReplacingProject, useCamStore } from '../../store'
 import { openExportWindow } from '../../lib/exportCenter'
-import { useUiPrefs } from '../../store/uiPrefs'
+import { mcpServerHost, type McpServerState, useUiPrefs } from '../../store/uiPrefs'
 import { useProjectPicker } from '../../lib/projectOpen/picker'
 import { browseProject } from '../../lib/projectOpen/actions'
 import { GIT_COMMIT } from '../../version'
@@ -20,6 +20,98 @@ import { MachineStatusChip } from './MachineStatusChip'
 
 const shellText = textFor('app-shell-settings-menus')
 
+/** WO-3010: the MCP server's state as Electron main reports it; null in a browser. */
+function useMcpServerState(): McpServerState | null {
+  const [state, setState] = useState<McpServerState | null>(null)
+  useEffect(() => {
+    const host = mcpServerHost()
+    if (host === undefined) return undefined
+    let active = true
+    void host.getState().then((s) => { if (active && s) setState(s) }).catch(() => undefined)
+    const off = host.onState((s) => setState(s))
+    return () => { active = false; off() }
+  }, [])
+  return state
+}
+
+/** Free width (px) the header's two flexible sections have left, ignoring the indicator. */
+function headerFreeWidth(header: HTMLElement): number {
+  let free = 0
+  for (const section of header.querySelectorAll<HTMLElement>(':scope > .toolbar-section')) {
+    const items = [...section.children].filter((child) => (child as HTMLElement).dataset.mcpCompact === undefined && getComputedStyle(child).position !== 'absolute')
+    if (items.length === 0) continue
+    const box = section.getBoundingClientRect()
+    free += section.classList.contains('toolbar-section-right')
+      ? items[0].getBoundingClientRect().left - box.left
+      : box.right - items[items.length - 1].getBoundingClientRect().right
+  }
+  return free
+}
+
+/** Shows that MCP clients can edit the model, and which client last connected.
+ *  The header has no slack at some supported widths (1440 px keeps every label
+ *  with ~1 px to spare), so where the full "MCP: <client>" does not fit it shrinks
+ *  to a badge on the About button's corner that takes no width; the client's
+ *  name stays in its tooltip and accessible name. */
+function McpServerIndicator() {
+  const state = useMcpServerState()
+  const ref = useRef<HTMLDivElement>(null)
+  const fullWidth = useRef(0)
+  const [compact, setCompact] = useState(false)
+  const running = state !== null && state.running
+  const clientName = state?.clientName ?? null
+  const text = clientName === null
+    ? shellText('TopToolbar.mcpOn')
+    : shellText('TopToolbar.mcpConnected', { client: clientName })
+  useLayoutEffect(() => {
+    const el = ref.current
+    const header = el?.closest('header')
+    if (!running || !el || !header) return undefined
+    const check = () => {
+      if (!compact) {
+        fullWidth.current = el.getBoundingClientRect().width + 2
+        if (header.scrollWidth > header.clientWidth) setCompact(true)
+      } else if (fullWidth.current > 0 && headerFreeWidth(header) >= fullWidth.current) {
+        setCompact(false)
+      }
+    }
+    check()
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check)
+    resize?.observe(header)
+    return () => resize?.disconnect()
+  }, [running, compact, text])
+  if (!running) return null
+  const common = {
+    role: 'status',
+    'data-testid': 'toolbar-mcp-indicator',
+    'data-client': clientName ?? '',
+    'data-compact': compact ? 'true' : 'false',
+    'data-tooltip': `${text}. ${shellText('TopToolbar.mcpTooltip')}`,
+    'aria-label': text,
+    title: text,
+  }
+  if (compact) {
+    // Zero width in the row (the -2px cancels the section's gap); the badge sits on About's corner.
+    return (
+      <div ref={ref} data-mcp-compact="" style={{ position: 'relative', width: 0, height: 28, marginLeft: -2, flexShrink: 0 }}>
+        <div {...common} style={{ position: 'absolute', right: 2, top: 1, display: 'inline-flex', padding: 1, borderRadius: 4, background: 'var(--bg-panel)', color: 'var(--accent)', lineHeight: 0 }}>
+          <Bot size={11} aria-hidden="true" />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div
+      ref={ref}
+      {...common}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 6px', fontSize: 11, color: 'var(--text-secondary)', flexShrink: 0 }}
+    >
+      <Bot size={13} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--accent)' }} />
+      <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
+    </div>
+  )
+}
+
 interface Props {
   /** WO-047: the mode tabs live in this header now, so the Model-tab flag
    *  (read once from the URL by App.tsx, D3 default-ON) threads through here
@@ -30,6 +122,31 @@ interface Props {
 
 export function TopToolbar({ showPartTab = false, onAbout }: Props) {
   useText('app-shell-settings-menus')
+  const headerRef = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const header = headerRef.current!
+    // WO-2330: viewport breakpoints alone cannot predict translated text or
+    // font metrics. Reuse the icon/tooltip command treatment only as needed.
+    // Reset first so widening or a shorter status/language restores labels.
+    const fit = () => {
+      delete header.dataset.fit
+      if (header.scrollWidth <= header.clientWidth) return
+      header.dataset.fit = 'utilities'
+      if (header.scrollWidth > header.clientWidth) header.dataset.fit = 'commands'
+    }
+    fit()
+    // Component tests and embedded hosts may not expose these browser APIs.
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit)
+    resize?.observe(header)
+    const content = new MutationObserver(fit)
+    content.observe(header, { subtree: true, childList: true, characterData: true })
+    document.fonts?.addEventListener('loadingdone', fit)
+    return () => {
+      resize?.disconnect()
+      content.disconnect()
+      document.fonts?.removeEventListener('loadingdone', fit)
+    }
+  }, [])
   const newProject  = useCamStore((s) => s.newProject)
   const saveProject = useCamStore((s) => s.saveProjectToFile)
   const loadProject = useCamStore((s) => s.loadProjectFromFile)
@@ -186,7 +303,7 @@ export function TopToolbar({ showPartTab = false, onAbout }: Props) {
   // Tools and Post Process left the right side — both are tabs in the central
   // strip now.
   return (
-    <header className="top-toolbar" aria-busy={projectOpen !== null}>
+    <header ref={headerRef} className="top-toolbar" aria-busy={projectOpen !== null}>
       <div className="toolbar-section toolbar-section-left">
       {/* Brand — the name alone. WO-290 (Operator, MC note 2026-08-12): a generic
           processor glyph from the icon set used to sit here in a blue tile.
@@ -317,6 +434,7 @@ export function TopToolbar({ showPartTab = false, onAbout }: Props) {
         </button>
       </div>
 
+      <McpServerIndicator />
       <MachineStatusChip />
       </div>
 

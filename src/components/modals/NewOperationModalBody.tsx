@@ -1,3 +1,5 @@
+import type { CamCommand } from '../../kernel/camCommands'
+import { operationAuthoringDecision, type OperationAuthoringFacts } from '../../kernel/authoring'
 import { geometryDisplayName, pickedFaceDisplayName, readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
@@ -42,7 +44,14 @@ import type {
   EngraveStyle,
   ModelReference, ModelReferenceRole, PocketParams, ThreadMillParams,
 } from '../../lib/cam/types'
-import { holeBottomWorldZ, isTiltedOffZ, ModelOriginComputeError, OwningStockError, ReferencePlaneError, resolveGeometryZToFrames, resolveModelBottomZ, resolveTopZ } from '../../store/dispatchGeo'
+import { holeBottomWorldZ, isTiltedOffZ, ModelOriginComputeError, OwningStockError, ReferencePlaneError, resolveGeometryZToFrames, resolveGeometryZToFramesModelAwareSafe, resolveModelBottomZ, resolveTopZ, transformLoopPoints } from '../../store/dispatchGeo'
+import {
+  chamferAngleNote, chamferParamsFromPass, chamferPassesFromModel, chamferStretchOf, modeledChamferRecordOf, modeledChamfersOnPart,
+  modeledPassDatum as modeledPassDatumIn, type ChamferFrames, type ChamferFromModelPass, type ChamferSourceGeometry,
+  type ModeledChamferLoaders, type ModeledChamferLoop, type ModeledChamfersOnPart,
+} from '../../lib/cam/chamferFromModel'
+import { loadCachedSTL } from '../../lib/stlCache'
+import { loadCachedStep } from '../../lib/stepCache'
 import type { FeedrateOverride, HeightParams, HeightPlaneName, HeightReference, ImportedGeometry, Loop2D, MachineActionKind, NestRecord, Operation, PassParams, Setup } from '../../types'
 import { MACHINE_ACTION_TYPES, callableMachineMacros, machineActionLabel } from '../../types'
 import { RefPlaneSelect } from '../ui/RefPlaneSelect'
@@ -225,6 +234,11 @@ const HEIGHT_ROW_HELD_OPTION = '__height_row__'
 
 /** WO-1599: a geometry-bound Pocket / Adaptive Clearing end reference, named in
  * the Bottom Height row's vocabulary. Both directions of one state. */
+/** WO-3021: the chord a STEP part's chamfer faces are tessellated at, mm. */
+const MODELED_CHAMFER_STEP_CHORD_MM = 0.005
+/** The store's frame resolvers chamferFromModel places a part's chamfers by. */
+const CHAMFER_FRAMES: ChamferFrames = { transformLoopPoints, resolveGeometryZToFramesModelAwareSafe, resolveTopZ }
+
 const PLANAR_BOTTOM_ROW_REFERENCE: Partial<Record<ChamferHeightReference, HeightReference>> = {
   stock_top: 'stock_top',
   stock_bottom: 'stock_bottom',
@@ -623,7 +637,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   useText('cam-operations-new-operation')
   const [runMacroId, setRunMacroId] = useState('')
   const {
-    closeModal, project, toolLibrary, toolLibraries, addOperation, updateOperation, editingOpPayload, computeToolpath,
+    closeModal, project, toolLibrary, toolLibraries, editingOpPayload, computeToolpath,
     deriveBrepLayer, displayUnits, savedReviewCameraRef, tab, setTab, opType, setOpType,
     machineActionKind, setMachineActionKind,
     opName, setOpName, toolId, setToolId, heights, setHeights, customEndCondition, setCustomEndCondition,
@@ -2361,8 +2375,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   const [chamferRepairConfirmed, setChamferRepairConfirmed] = useState(false)
   const chamferHeightAuthority: 'smart_v2' | 'repair_required' =
     !heightRepairRequired || chamferRepairConfirmed ? 'smart_v2' : 'repair_required'
-  const chamferHeightAuthorityForDraft = (): Operation['smartHeight'] => {
-    const derived = deriveChamferEdgeBindings(chamferSourceGeometries, effectiveChamferLoopIds)
+  // WO-3021: a modeled-chamfer sibling pass passes its own params and loops.
+  const chamferHeightAuthorityForDraft = (
+    params: typeof chamfer = chamfer,
+    loopIds: readonly string[] = effectiveChamferLoopIds,
+  ): Operation['smartHeight'] => {
+    const derived = deriveChamferEdgeBindings(chamferSourceGeometries, [...loopIds])
     if (!derived.ok) throw new Error(derived.refusals.map(refusal => refusal.message).join(' '))
     return {
       kind: 'smart_v2',
@@ -2370,12 +2388,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         setupId: setup.id,
         safetyIntent: operationSafetyIntent,
         datumReference: intentReferenceForUiReference(
-          chamfer.heightReference ?? 'geometry_face',
+          params.heightReference ?? 'geometry_face',
           'top',
         ) as Exclude<HeightReference, HeightPlaneName>,
-        datumOffsetMm: chamfer.planeOffset ?? 0,
-        chamferWidthMm: chamfer.chamferWidth,
-        tipOffsetMm: chamfer.tipOffset,
+        datumOffsetMm: params.planeOffset ?? 0,
+        chamferWidthMm: params.chamferWidth,
+        tipOffsetMm: params.tipOffset,
         features: derived.bindings.map(binding => ({
           loopId: binding.loopId,
           feature: { ...binding.feature },
@@ -2390,8 +2408,217 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       : (() => { throw new Error(SMART_HEIGHT_V2_REPAIR_MESSAGE) })()
   const chamferParamsForSave = (): typeof chamfer =>
     chamferHeightAuthority === 'smart_v2'
-      ? { ...chamfer, loopIds: [...effectiveChamferLoopIds] }
-      : chamfer
+      ? withoutStaleModeledChamfer({ ...chamfer, loopIds: [...effectiveChamferLoopIds] })
+      : withoutStaleModeledChamfer(chamfer)
+
+  // WO-3021: chamfers the part already has. The scan reads the part's own mesh
+  // (STL bytes, a modeled body's tessellation, or the STEP tessellation the 3D
+  // operations cut) and lists each proved chamfer as a pass over the part's
+  // own loops, with the modeled depth and top-edge height.
+  // A picked native edge chain does not hide it: filling from the model
+  // replaces the chain with the chamfer's own loops (WO-3021 audit finding 2).
+  const modeledChamferGeo = isChamfer && geoId && geoId !== '__all__'
+    ? project.geometry.find(g => g.id === geoId)
+    : undefined
+  const modeledChamferReadable = !!modeledChamferGeo &&
+    ((modeledChamferGeo.type === 'mesh' && modeledChamferGeo.format === 'stl') ||
+      modeledChamferGeo.format === 'model' || modeledChamferGeo.format === 'step')
+  const modeledChamferLoaders = (): ModeledChamferLoaders => ({
+    loadStl: loadCachedSTL,
+    loadStep: loadCachedStep,
+    readStepChamfers: async (bytes) => {
+      // The model kernel, in its own worker for this one reading.
+      const { createGeomService } = await import('../../geom')
+      const kernel = createGeomService()
+      try {
+        await kernel.init()
+        const [body] = (await kernel.importStep(bytes, 'CHAMFER')).bodies
+        if (!body) return { tessellation: { position: [], index: [], triFace: [], faceIds: [] }, verdicts: [] }
+        const verdicts = await kernel.recognizeFeatures(body.handle)
+        const tess = await kernel.tessellate(body.handle, { deflection: MODELED_CHAMFER_STEP_CHORD_MM, angularDeflection: 0.1 })
+        return { tessellation: { position: tess.position, index: tess.index, triFace: tess.triFace, faceIds: tess.faceIds }, verdicts }
+      } finally {
+        await kernel.terminate().catch(() => undefined)
+      }
+    },
+    placements: project.modelItemPlacements ?? [],
+    frames: CHAMFER_FRAMES,
+  })
+  const [modeledChamferScan, setModeledChamferScan] = useState<
+    { geoId: string; state: 'loading' } |
+    { geoId: string; state: 'ready'; result: ModeledChamfersOnPart | null } |
+    { geoId: string; state: 'error'; message: string } | null>(null)
+  useEffect(() => {
+    if (!modeledChamferReadable || !modeledChamferGeo) {
+      const idle = window.setTimeout(() => setModeledChamferScan(null), 0)
+      return () => window.clearTimeout(idle)
+    }
+    let current = true
+    const geoForScan = modeledChamferGeo
+    const handle = window.setTimeout(() => {
+      setModeledChamferScan({ geoId: geoForScan.id, state: 'loading' })
+      modeledChamfersOnPart(geoForScan, modeledChamferLoaders()).then(
+        result => { if (current) setModeledChamferScan({ geoId: geoForScan.id, state: 'ready', result }) },
+        (err: unknown) => {
+          if (current) setModeledChamferScan({ geoId: geoForScan.id, state: 'error', message: err instanceof Error ? err.message : String(err) })
+        },
+      )
+    }, 0)
+    return () => { current = false; window.clearTimeout(handle) }
+  // The loaders read the same project placements this list names.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeledChamferReadable, modeledChamferGeo, project.modelItemPlacements])
+  const modeledChamferResult = modeledChamferScan?.state === 'ready' && modeledChamferScan.geoId === geoId
+    ? modeledChamferScan.result
+    : null
+  /** The record the op carries, only while the op still has what it filled in
+   *  (same part, loops, width and datum); a hand edit of those retires it. */
+  const modeledChamferRecord = modeledChamferRecordOf(chamfer as unknown as Record<string, unknown>)
+  function withoutStaleModeledChamfer(params: typeof chamfer): typeof chamfer {
+    const carried = params as typeof params & { modeledChamfer?: unknown }
+    if (carried.modeledChamfer === undefined || modeledChamferRecordOf(params as unknown as Record<string, unknown>)) return params
+    const { modeledChamfer: _stale, ...rest } = carried
+    // A stretch stays with its loop while the loop is selected (it is the
+    // path the chamfer runs along); a loop taken out takes its stretch along.
+    const extents = rest.loopExtents
+    if (!extents) return rest
+    const kept = Object.fromEntries(Object.entries(extents).filter(([id]) => rest.loopIds.includes(id)))
+    const { loopExtents: _all, ...plain } = rest
+    return Object.keys(kept).length > 0 ? { ...plain, loopExtents: kept } : plain
+  }
+  // "All modeled chamfers" with more than one top height, depth or angle: this
+  // operation takes the first pass and Create adds the rest as their own
+  // Chamfer operations (one chamfer2d pass has one reference plane).
+  const [modeledChamferExtraPasses, setModeledChamferExtraPasses] = useState<{ geoId: string; passes: ChamferFromModelPass[] }>({ geoId: '', passes: [] })
+  const extraModeledPasses = modeledChamferExtraPasses.geoId === chamfer.geometryId ? modeledChamferExtraPasses.passes : []
+  const modeledPassDatum = (pass: ChamferFromModelPass) => modeledPassDatumIn(pass, {
+    setup, geometry: project.geometry, sceneStock: project.sceneStock,
+    stocks: project.stocks ?? [], placements: project.modelItemPlacements ?? [], frames: CHAMFER_FRAMES,
+  })
+  const applyModeledChamferPasses = (passes: readonly ChamferFromModelPass[]) => {
+    const [first, ...rest] = passes
+    if (!first) return
+    // The modeled chamfer's own loops replace a picked native edge chain.
+    if (modelEdgeChain) setModelEdgeChain(null)
+    const filled = chamferParamsFromPass(chamfer, first.record.geometryId, first, modeledPassDatum(first))
+    setChamfer(filled)
+    setModeledChamferExtraPasses({ geoId: first.record.geometryId, passes: rest })
+    setUserClearedLoops(false)
+    pushPickedLoopsToViewport(filled.loopIds)
+  }
+  // A freshly modeled body has no loops yet: its chamfers get theirs from the
+  // part's own Section at Z just under each lower edge (the same derived
+  // layer Section at Z lands), then fill as any other part's do.
+  const [modeledChamferDeriving, setModeledChamferDeriving] = useState<{ state: 'running' } | { state: 'error'; message: string } | null>(null)
+  const fillModeledChamfers = async (
+    result: ModeledChamfersOnPart,
+    pick?: { rows?: readonly ModeledChamferLoop[]; featureId?: string },
+  ) => {
+    const pending = pick?.featureId
+      ? result.pending.filter(p => p.featureId === pick.featureId)
+      : pick?.rows ? [] : result.pending
+    let scanned = result
+    if (pending.length > 0 && geoId) {
+      setModeledChamferDeriving({ state: 'running' })
+      try {
+        // A section already landed at that Z is not cut again.
+        const landedZ = new Set((project.geometry.find(g => g.id === geoId)?.layers2d ?? [])
+          .filter(layer => layer.derived && layer.projectionPlane).map(layer => layer.projectionPlane!.origin.z))
+        for (const z of [...new Set(pending.map(p => p.sectionZ))]) if (!landedZ.has(z)) await deriveBrepLayer(geoId, 'section', { z })
+        const fresh = useCamStore.getState().project.geometry.find(g => g.id === geoId)
+        const rescanned = fresh ? await modeledChamfersOnPart(fresh as ChamferSourceGeometry, modeledChamferLoaders()) : null
+        if (rescanned) {
+          scanned = rescanned
+          setModeledChamferScan({ geoId, state: 'ready', result: rescanned })
+        }
+        const stillPending = scanned.pending.filter(p => pending.some(q => q.featureId === p.featureId))
+        setModeledChamferDeriving(stillPending.length > 0
+          ? { state: 'error', message: tx('NewOperationModalBody.Modeled_chamfers_section_no_loop') }
+          : null)
+      } catch (err) {
+        setModeledChamferDeriving({ state: 'error', message: err instanceof Error ? err.message : String(err) })
+        return
+      }
+    }
+    const rows = pick?.featureId
+      ? scanned.loops.filter(row => row.featureIds.includes(pick.featureId!))
+      : pick?.rows ?? scanned.loops
+    if (rows.length === 0) return
+    applyModeledChamferPasses(chamferPassesFromModel(rows, geoId, scanned.source))
+  }
+  // "Pick modeled chamfer": a click on a part edge in the 3D view takes the
+  // modeled chamfer that runs along it (the same viewport loop pick the loop
+  // list uses); an edge with no modeled chamfer leaves the op as it was.
+  const [modeledChamferPicking, setModeledChamferPicking] = useState(false)
+  const [modeledChamferPickMissed, setModeledChamferPickMissed] = useState(false)
+  // A loop pick names a loop, not an edge: a loop carrying several separate
+  // modeled chamfers is left as it was, and its rows' own Pick chooses one.
+  const [modeledChamferPickSeveral, setModeledChamferPickSeveral] = useState(0)
+  const chamferRef = useRef(chamfer)
+  chamferRef.current = chamfer
+  const modeledChamferPickingRef = useRef(false)
+  modeledChamferPickingRef.current = modeledChamferPicking
+  // The loop list's own pick takes the viewport over; closing the dialog ends it.
+  useEffect(() => { if (isPickingLoops) setModeledChamferPicking(false) }, [isPickingLoops])
+  useEffect(() => () => { if (modeledChamferPickingRef.current) getVp()?.setLoopPickMode?.(null) }, [])
+  const stopModeledChamferPick = () => {
+    setModeledChamferPicking(false)
+    getVp()?.setLoopPickMode?.(null)
+    getVp()?.setPickedLoops?.(chamfer.loopIds)
+  }
+  const startModeledChamferPick = (result: ModeledChamfersOnPart) => {
+    if (isPickingLoops) stopLoopPicking()
+    setModeledChamferPicking(true)
+    setModeledChamferPickMissed(false)
+    setModeledChamferPickSeveral(0)
+    getVp()?.setPickedLoops?.(chamfer.loopIds)
+    getVp()?.setLoopPickMode?.((loopId) => {
+      const found = result.loops.filter(loop => loop.loopId === loopId)
+      if (found.length !== 1) {
+        setModeledChamferPickMissed(found.length === 0)
+        setModeledChamferPickSeveral(found.length > 1 ? found.length : 0)
+        getVp()?.setPickedLoops?.(chamferRef.current.loopIds)
+        return
+      }
+      setModeledChamferPicking(false)
+      setModeledChamferPickMissed(false)
+      setModeledChamferPickSeveral(0)
+      getVp()?.setLoopPickMode?.(null)
+      applyModeledChamferPasses(chamferPassesFromModel(found, geoId, result.source))
+    }, geoId && geoId !== '__all__' ? geoId : null)
+  }
+  const modeledChamferNote = modeledChamferRecord
+    ? chamferAngleNote(modeledChamferRecord, selectedTool?.angleFromAxisDeg)
+    : null
+  const chamferStretch = isChamfer ? chamferStretchOf(chamfer as unknown as Record<string, unknown>) : null
+  /** Create's extra operations, one per remaining pass. */
+  const addModeledChamferSiblings = (commands: CamCommand[], computeIds: string[]): boolean => {
+    if (!isChamfer || extraModeledPasses.length === 0 || !toolId) return false
+    const targetSetupId = editingOpPayload?.setupId ?? setup.id
+    const baseName = opName.trim() || tx('NewOperationModalBody.Census_Chamfer')
+    extraModeledPasses.forEach((pass, index) => {
+      const params = chamferParamsFromPass(chamfer, pass.record.geometryId, pass, modeledPassDatum(pass))
+      const id = crypto.randomUUID()
+      commands.push({ kind: 'operation.add', setupId: targetSetupId, operation: withRowHeightOverrides(withShankClearance({
+        id,
+        name: tx('NewOperationModalBody.Modeled_chamfer_pass_name', { p1: baseName, p2: index + 2 }),
+        type: 'chamfer',
+        enabled: true,
+        status: 'pending',
+        toolId,
+        geometrySelections: [...params.loopIds],
+        heights,
+        passes,
+        linking,
+        feedrateOverride,
+        params: params as unknown as Record<string, unknown>,
+        smartHeight: chamferHeightAuthorityForDraft(params, params.loopIds),
+      })) })
+      computeIds.push(id)
+    })
+    setModeledChamferExtraPasses({ geoId: '', passes: [] })
+    return true
+  }
   const [chamferHeightPreview, setChamferHeightPreview] =
     useState<LiveSmartHeightPreview>({ state: 'idle' })
   useEffect(() => {
@@ -2676,10 +2903,10 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   /** Keep the clearing sibling in step with the carve: create it, update it,
    *  or remove it when the operator stops using a separate tool. Refuses
    *  (ADR-0003) rather than saving a carve that expects a sibling nobody made. */
-  const syncVCarveClearingSibling = (carveOpId: string, effective: VCarveParams, carveName: string): void => {
+  const syncVCarveClearingSibling = (carveOpId: string, effective: VCarveParams, carveName: string, commands: CamCommand[], computeIds: string[]): void => {
     const existing = vcarveSiblingOf(carveOpId)
     if (effective.flatClearing.mode !== 'tool') {
-      if (existing) useCamStore.getState().removeOperation(setup.id, existing.id)
+      if (existing) commands.push({ kind: 'operation.remove', setupId: setup.id, operationId: existing.id })
       return
     }
     if (!vcarveClearingTool || !selectedTool) throw new Error(tx('NewOperationModalBody.Census_V_carve_choose_the_end_mill_that_clears_the'))
@@ -2706,15 +2933,15 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       smartHeight: vcarveHeightAuthorityForDraft({ kind: 'explicit', depthMm: clearDepth }),
     }
     if (existing) {
-      updateOperation(setup.id, existing.id, {
+      commands.push({ kind: 'operation.update', setupId: setup.id, operationId: existing.id, patch: {
         ...patch, status: 'pending', toolpathMoves: undefined, computeTimeMs: undefined, errorMessage: undefined,
-      })
-      computeToolpath(setup.id, existing.id)
+      } })
+      computeIds.push(existing.id)
       return
     }
     const clearingId = crypto.randomUUID()
-    addOperation(setup.id, { id: clearingId, type: 'vcarve', enabled: true, status: 'pending', ...patch })
-    computeToolpath(setup.id, clearingId)
+    commands.push({ kind: 'operation.add', setupId: setup.id, operation: { id: clearingId, type: 'vcarve', enabled: true, status: 'pending', ...patch } })
+    computeIds.push(clearingId)
   }
   /** The effective maximum depth the carve will use: the operator's flat depth
    *  or the selected bit's own limit. The clearing sibling gets it explicitly. */
@@ -3797,56 +4024,61 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   // absent/cleared loop selection is moot and must not block Create (BUG-463).
   // WO-1924: a bound edge chain is the same superseding source for Pocket and
   // Adaptive Clearing.
-  const loopsExplicitlyEmpty = loopSelectorVisible && userClearedLoops && selectedLoopIds.length === 0 &&
-    !(isContour && contourModelReferences) &&
-    !(isPocket && pocketEdgeChainModelReferences) &&
-    !(isAdaptive && adaptiveEdgeChainModelReferences) &&
-    !(isEngrave && engraveModelReferences) &&
-    !(isVCarve && vcarveModelReferences) &&
-    !(isChamfer && chamferModelReferences)
-  const contourHasNoEligiblePaths =
-    isContour &&
-    !!(selectedGeo || isAllGeo) &&
-    !(selectedGeo?.type === 'model' && contourPathType === 'closed') &&
-    closedLoops.length === 0
-  const faceHeightValid = !heightRepairRequired &&
-    faceHeightChosen && faceHeightPreview.state === 'resolved'
-  const planarRoughHeightValid = (!isPocket && !isAdaptive) || (
-    (planarStockSmartActive || planarGeometrySmartActive) &&
-    planarRoughHeightPreview.state === 'resolved'
-  )
-  const contourHeightValid = !heightRepairRequired &&
-    contourHeightPreview.state === 'resolved'
-  const drillBoreHeightValid = (!isDrill && !isBore) ||
-    (!heightRepairRequired && drillBoreHeightPreview.state === 'resolved')
-  const threadMillHeightValid = !isThreadMill ||
-    (threadMillHeightAuthority !== 'repair_required' && threadMillHeightPreview.state === 'resolved')
-  const chamferHeightValid = !isChamfer ||
-    (chamferHeightAuthority !== 'repair_required' && chamferHeightPreview.state === 'resolved')
-  const engraveHeightValid = !isEngrave || (engraveHeightAuthority !== 'repair_required' &&
-    (engrave.useWidthForDepth || engraveDepthEntered) && engraveHeightPreview.state === 'resolved'
-  )
-  const vcarveClearingToolValid = !isVCarve || vcarve.flatClearing.mode !== 'tool' || !!vcarveClearingTool
-  const vcarveHeightValid = !isVCarve || (vcarveHeightAuthority !== 'repair_required' &&
-    vcarveHeightPreview.state === 'resolved' && vcarveClearingToolValid
-  )
+  const authoringFacts: OperationAuthoringFacts = {
+    type: opType,
+    contourPathType,
+    closedLoopCount: closedLoops.length,
+    selectedLoopCount: selectedLoopIds.length,
+    loopSelectorVisible,
+    userClearedLoops,
+    sourceSelected: !!(selectedGeo || isAllGeo),
+    sourceIsModel: selectedGeo?.type === 'model',
+    contourModelReferences: !!contourModelReferences,
+    pocketEdgeChainModelReferences: !!pocketEdgeChainModelReferences,
+    adaptiveEdgeChainModelReferences: !!adaptiveEdgeChainModelReferences,
+    engraveModelReferences: !!engraveModelReferences,
+    vcarveModelReferences: !!vcarveModelReferences,
+    chamferModelReferences: !!chamferModelReferences,
+    heightRepairRequired,
+    faceHeightChosen,
+    planarStockSmartActive,
+    planarGeometrySmartActive,
+    engraveUseWidthForDepth: engrave.useWidthForDepth,
+    engraveDepthEntered,
+    vcarveClearingToolPresent: !!vcarveClearingTool,
+    pencilCutterSupported,
+    parallelCutterSupported,
+    cutter3dSupported,
+    adaptive3dBandValid,
+    toolId,
+    parallelHeightPartIdEff,
+    waterline3dPartIdEff,
+    adaptive3dPartIdEff,
+    threadMillHeightAuthority,
+    chamferHeightAuthority,
+    engraveHeightAuthority,
+    vcarveHeightAuthority,
+    vcarveClearingMode: vcarve.flatClearing.mode,
+    faceHeightPreview,
+    planarRoughHeightPreview,
+    contourHeightPreview,
+    drillBoreHeightPreview,
+    threadMillHeightPreview,
+    chamferHeightPreview,
+    engraveHeightPreview,
+    vcarveHeightPreview,
+    parallel3dHeightPreview,
+    waterline3dHeightPreview,
+    adaptive3dHeightPreview,
+  }
+  const authoring = operationAuthoringDecision(authoringFacts, tx)
+  const { loopsExplicitlyEmpty, contourHasNoEligiblePaths, planarRoughHeightValid, contourHeightValid, drillBoreHeightValid, threadMillHeightValid, chamferHeightValid, engraveHeightValid, vcarveHeightValid } = authoring
+
   const callableMacros = callableMachineMacros(project.machine)
   const selectedRunMacro = callableMacros.find((macro) => macro.id === runMacroId)
-  const canCreate = machineActionKind !== null ? (machineActionKind !== 'run_macro' || selectedRunMacro !== undefined)
-    : isParallel3d || isSteepShallow3d || isScallop3d || isPencil3d
-    ? (!!toolId && (isPencil3d ? pencilCutterSupported : isParallel3d ? parallelCutterSupported : cutter3dSupported) && !!parallelHeightPartIdEff &&
-       !heightRepairRequired && parallel3dHeightPreview.state === 'resolved')
-    : isWaterline3d
-    ? (!!toolId && cutter3dSupported && !!waterline3dPartIdEff &&
-       !heightRepairRequired && waterline3dHeightPreview.state === 'resolved')
-    : isAdaptive3d
-    ? (!!toolId && cutter3dSupported && !!adaptive3dPartIdEff && adaptive3dBandValid &&
-       !heightRepairRequired && adaptive3dHeightPreview.state === 'resolved')
-    : isFace
-    ? (!!toolId && !loopsExplicitlyEmpty && faceHeightValid)
-    : (!!toolId && !loopsExplicitlyEmpty && !contourHasNoEligiblePaths &&
-       planarRoughHeightValid && (!isContour || contourHeightValid) && drillBoreHeightValid &&
-       threadMillHeightValid && chamferHeightValid && engraveHeightValid && vcarveHeightValid)
+  const canCreate = machineActionKind !== null
+    ? (machineActionKind !== 'run_macro' || selectedRunMacro !== undefined)
+    : authoring.canCreate
 
   const selectOperationType = (nextType: typeof opType) => {
     if (nextType !== opType) setUserClearedLoops(true)
@@ -3983,10 +4215,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       handleCreateMachineAction(machineActionKind)
       return
     }
+    const commands: CamCommand[] = []
+    const computeIds: string[] = []
     // WO-1544: a saved operation carries the same row overrides its preview used.
     const updateEditedOperation = (patch: Partial<Operation>) => {
       if (!editingOpPayload) return
-      updateOperation(editingOpPayload.setupId, editingOpPayload.opId, withRowHeightOverrides(withShankClearance(patch)))
+      commands.push({ kind: 'operation.update', setupId: editingOpPayload.setupId, operationId: editingOpPayload.opId, patch: withRowHeightOverrides(withShankClearance(patch)) })
     }
     if (editLoadError) return
     if (!toolId) return
@@ -4093,7 +4327,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         })
       } else if (isVCarve) {
         const effectiveVCarve = vcarveParamsForSave()
-        syncVCarveClearingSibling(editingOpPayload.opId, effectiveVCarve, opName.trim() || 'V-carve')
+        syncVCarveClearingSibling(editingOpPayload.opId, effectiveVCarve, opName.trim() || 'V-carve', commands, computeIds)
         updateEditedOperation({
           type: 'vcarve',
           name: opName.trim() || 'V-carve',
@@ -4335,7 +4569,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
           errorMessage:  undefined,
         })
       }
-      computeToolpath(editingOpPayload.setupId, editingOpPayload.opId)
+      computeIds.push(editingOpPayload.opId)
     } else {
       const opId = crypto.randomUUID()
       let op: Operation
@@ -4434,7 +4668,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         // Separate clearing tool: its own operation, listed before the carve
         // so it runs first. Self-sufficient - it carries the V-bit's angle and
         // tip and an explicit flat depth equal to the carve's effective limit.
-        syncVCarveClearingSibling(opId, effectiveVCarve, carveName)
+        syncVCarveClearingSibling(opId, effectiveVCarve, carveName, commands, computeIds)
         op = {
           id: opId,
           name: carveName,
@@ -4648,10 +4882,22 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         }
       }
 
-      addOperation(setup.id, withRowHeightOverrides(withShankClearance(op)))
-      computeToolpath(setup.id, opId)
+      commands.push({ kind: 'operation.add', setupId: setup.id, operation: withRowHeightOverrides(withShankClearance(op)) })
+      computeIds.push(opId)
     }
 
+    const modeledSiblings = addModeledChamferSiblings(commands, computeIds)
+    const result = useCamStore.getState().executeCamCommands(commands, { kind: 'operation', facts: authoringFacts, text: tx })
+    if (!result.ok) return
+    if (modeledSiblings) {
+      // WO-3021: the passes are one after another in the setup; each computes
+      // once the one before it has, so none is left out of date by the one
+      // above it finishing.
+      const computeSetupId = editingOpPayload?.setupId ?? setup.id
+      void computeIds.reduce<Promise<void>>((previous, id) => previous.then(() => computeToolpath(computeSetupId, id)), Promise.resolve())
+    } else {
+      for (const id of computeIds) computeToolpath(editingOpPayload?.setupId ?? setup.id, id)
+    }
     closeModal()
     resetState()
   }
@@ -7066,6 +7312,140 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                 </>
               )}
 
+              {/* WO-3021: chamfers the part already has - pick one, or all. */}
+              {isChamfer && modeledChamferReadable && (() => {
+                const mm = (v: number) => `${fmtDim(v, displayUnits)} ${unitLabel(displayUnits)}`
+                const fmtDegrees = (d: number) => String(Number(d.toFixed(1)))
+                const deg = (angleFromAxisDeg: number) => fmtDegrees(angleFromAxisDeg * 2)
+                const scan = modeledChamferScan?.geoId === geoId ? modeledChamferScan : null
+                const loopLabel = (loopId: string) => {
+                  const loop = closedLoops.find(l => l.id === loopId)
+                  return loop?.name?.trim() || (loop?.type === 'hole' ? tx('NewOperationModalBody.Hole_Island') : tx('NewOperationModalBody.Contour_2'))
+                }
+                return (
+                  <div data-testid="chamfer-from-model">
+                    <p className="op-section-label" style={{ marginTop: 14 }}>{tx('NewOperationModalBody.From_the_model')}</p>
+                    {(!scan || scan.state === 'loading') && (
+                      <div className="op-hint"><Loader2 size={12} className="spin" />{tx('NewOperationModalBody.Modeled_chamfers_reading')}</div>
+                    )}
+                    {scan?.state === 'error' && (
+                      <div className="op-hint op-hint-warn">{tx('NewOperationModalBody.Modeled_chamfers_read_failed', { p1: scan.message })}</div>
+                    )}
+                    {scan?.state === 'ready' && !modeledChamferResult && (
+                      <div className="op-hint">{tx('NewOperationModalBody.Modeled_chamfers_no_mesh')}</div>
+                    )}
+                    {modeledChamferResult && modeledChamferResult.passes.length === 0 && modeledChamferResult.pending.length === 0 && (
+                      <div className="op-hint">{tx('NewOperationModalBody.Modeled_chamfers_none')}</div>
+                    )}
+                    {modeledChamferResult && (modeledChamferResult.passes.length > 0 || modeledChamferResult.pending.length > 0) && (
+                      <>
+                        <button
+                          className="op-toggle-btn"
+                          data-testid="chamfer-from-model-all"
+                          disabled={modeledChamferDeriving?.state === 'running'}
+                          onClick={() => { void fillModeledChamfers(modeledChamferResult) }}
+                        >{tx('NewOperationModalBody.All_modeled_chamfers', { p1: modeledChamferResult.loops.length + modeledChamferResult.pending.length })}</button>
+                        <button
+                          className={`op-toggle-btn ${modeledChamferPicking ? 'op-toggle-active' : ''}`}
+                          style={{ marginLeft: 6 }}
+                          data-testid="chamfer-from-model-pick-view"
+                          onClick={() => modeledChamferPicking ? stopModeledChamferPick() : startModeledChamferPick(modeledChamferResult)}
+                        >{modeledChamferPicking ? tx('NewOperationModalBody.Pick_modeled_chamfer_stop') : tx('NewOperationModalBody.Pick_modeled_chamfer_in_view')}</button>
+                        {modeledChamferPicking && (
+                          <div className="op-hint" data-testid="chamfer-from-model-pick-hint">{tx('NewOperationModalBody.Modeled_chamfer_pick_hint')}</div>
+                        )}
+                        {modeledChamferPicking && modeledChamferPickMissed && (
+                          <div className="op-hint" data-testid="chamfer-from-model-pick-missed">{tx('NewOperationModalBody.Modeled_chamfer_pick_missed')}</div>
+                        )}
+                        {modeledChamferPicking && modeledChamferPickSeveral > 1 && (
+                          <div className="op-hint" data-testid="chamfer-from-model-pick-several">{tx('NewOperationModalBody.Modeled_chamfer_pick_several', { p1: modeledChamferPickSeveral })}</div>
+                        )}
+                        <div className="op-loop-list" data-testid="chamfer-from-model-list">
+                          {modeledChamferResult.loops.map(found => (
+                            <div key={found.rowId} className="op-loop-check" data-testid={`chamfer-from-model-row-${found.rowId}`}>
+                              <span className="op-loop-label">
+                                {loopLabel(found.loopId)}
+                                <span className="op-loop-source">{tx('NewOperationModalBody.Modeled_chamfer_row', {
+                                  p1: mm(found.depthMm), p2: mm(found.widthMm), p3: deg(found.angleFromAxisDeg), p4: mm(found.topZ),
+                                })}{found.extent ? tx('NewOperationModalBody.Modeled_chamfer_row_partial', {
+                                  p1: mm(found.coveredMm), p2: mm(found.loopLengthMm),
+                                }) : ''}</span>
+                              </span>
+                              <button
+                                className="op-toggle-btn"
+                                style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: 11 }}
+                                data-testid={`chamfer-from-model-pick-${found.rowId}`}
+                                onClick={() => { void fillModeledChamfers(modeledChamferResult, { rows: [found] }) }}
+                              >{tx('NewOperationModalBody.Pick_modeled_chamfer')}</button>
+                            </div>
+                          ))}
+                          {modeledChamferResult.pending.map(found => (
+                            <div key={found.featureId} className="op-loop-check" data-testid={`chamfer-from-model-pending-${found.featureId}`}>
+                              <span className="op-loop-label">
+                                {tx('NewOperationModalBody.Modeled_chamfer_pending_label')}
+                                <span className="op-loop-source">{tx('NewOperationModalBody.Modeled_chamfer_row', {
+                                  p1: mm(found.depthMm), p2: mm(found.widthMm), p3: deg(found.angleFromAxisDeg), p4: mm(found.topZ),
+                                })}</span>
+                              </span>
+                              <button
+                                className="op-toggle-btn"
+                                style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: 11 }}
+                                data-testid={`chamfer-from-model-pick-pending-${found.featureId}`}
+                                disabled={modeledChamferDeriving?.state === 'running'}
+                                onClick={() => { void fillModeledChamfers(modeledChamferResult, { featureId: found.featureId }) }}
+                              >{tx('NewOperationModalBody.Pick_modeled_chamfer')}</button>
+                            </div>
+                          ))}
+                        </div>
+                        {modeledChamferResult.pending.length > 0 && (
+                          <div className="op-hint" data-testid="chamfer-from-model-pending-hint">{tx('NewOperationModalBody.Modeled_chamfers_pending', { p1: modeledChamferResult.pending.length })}</div>
+                        )}
+                        {modeledChamferDeriving?.state === 'running' && (
+                          <div className="op-hint"><Loader2 size={12} className="spin" />{tx('NewOperationModalBody.Modeled_chamfers_deriving')}</div>
+                        )}
+                        {modeledChamferDeriving?.state === 'error' && (
+                          <div className="op-hint op-hint-warn" data-testid="chamfer-from-model-derive-failed">{tx('NewOperationModalBody.Modeled_chamfers_derive_failed', { p1: modeledChamferDeriving.message })}</div>
+                        )}
+                      </>
+                    )}
+                    {modeledChamferResult && modeledChamferResult.skipped.length > 0 && (
+                      <div className="op-hint">{tx('NewOperationModalBody.Modeled_chamfers_skipped', { p1: modeledChamferResult.skipped.length })}</div>
+                    )}
+                    {modeledChamferResult && modeledChamferResult.unmatched - modeledChamferResult.pending.length > 0 && (
+                      <div className="op-hint">{tx('NewOperationModalBody.Modeled_chamfers_unmatched', { p1: modeledChamferResult.unmatched - modeledChamferResult.pending.length })}</div>
+                    )}
+                    {modeledChamferRecord && (
+                      <div className="op-pass-summary" data-testid="chamfer-from-model-filled">
+                        <span>{tx('NewOperationModalBody.Modeled_chamfer_filled', {
+                          p1: mm(modeledChamferRecord.depthMm), p2: mm(modeledChamferRecord.topZ), p3: deg(modeledChamferRecord.angleFromAxisDeg),
+                        })}</span>
+                      </div>
+                    )}
+                    {chamferStretch && (
+                      <div className="op-pass-summary" data-testid="chamfer-from-model-stretch">
+                        <span>{tx('NewOperationModalBody.Modeled_chamfer_stretch', { p1: mm(chamferStretch.stretchMm), p2: chamferStretch.loops })}</span>
+                      </div>
+                    )}
+                    {extraModeledPasses.length > 0 && (
+                      <div className="op-pass-summary" data-testid="chamfer-from-model-extra">
+                        <span>{tx('NewOperationModalBody.Modeled_chamfer_extra_passes', {
+                          p1: extraModeledPasses.length,
+                          p2: extraModeledPasses.map(pass => tx('NewOperationModalBody.Modeled_chamfer_extra_pass', {
+                            p1: mm(pass.chamferWidth), p2: mm(pass.record.topZ), p3: pass.loopIds.length,
+                          })).join('; '),
+                        })}</span>
+                      </div>
+                    )}
+                    {modeledChamferNote && (
+                      <div className="op-hint op-hint-warn" data-testid="chamfer-angle-note">{tx('NewOperationModalBody.Modeled_chamfer_angle_note', {
+                        p1: fmtDegrees(modeledChamferNote.bitIncludedDeg), p2: fmtDegrees(modeledChamferNote.chamferIncludedDeg),
+                        p3: mm(modeledChamferNote.depthMm), p4: mm(modeledChamferNote.cutWidthMm), p5: mm(modeledChamferNote.modeledWidthMm),
+                      })}</div>
+                    )}
+                  </div>
+                )
+              })()}
+
               {/* Direction — shown for contour/pocket; drill and chamfer have their own controls */}
               {(geoId || isAllGeo) && !isDrill && !isBore && !isThreadMill && !isChamfer && !isFace && !isEngrave && !isVCarve && (
                 <>
@@ -7840,6 +8220,8 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       onClick={() => setFace(f => ({ ...f, pattern: 'one_way', direction: 'conventional' }))}>{tx('NewOperationModalBody.One_way_conv')}</button>
                     <button className={`op-toggle-btn ${face.pattern === 'offset' ? 'op-toggle-active' : ''}`}
                       onClick={() => setFace(f => ({ ...f, pattern: 'offset', direction: 'climb' }))}>{tx('NewOperationModalBody.Offset')}</button>
+                    <button data-tooltip={tx('NewOperationModalBody.Spiral_help')} aria-pressed={face.pattern === 'spiral'} className={`op-toggle-btn ${face.pattern === 'spiral' ? 'op-toggle-active' : ''}`}
+                      onClick={() => setFace(f => ({ ...f, pattern: 'spiral', direction: 'climb' }))}>{tx('NewOperationModalBody.Inward_spiral')}</button>
                   </div>
 
                   <NumberField label={tx('NewOperationModalBody.Stepover')} unit="mm" units={displayUnits}
@@ -7933,6 +8315,16 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       </div>
                     )
                   })()}
+
+                  {modeledChamferNote && (
+                    <div className="op-hint op-hint-warn" data-testid="chamfer-angle-note-passes">{tx('NewOperationModalBody.Modeled_chamfer_angle_note', {
+                      p1: String(Number(modeledChamferNote.bitIncludedDeg.toFixed(1))),
+                      p2: String(Number(modeledChamferNote.chamferIncludedDeg.toFixed(1))),
+                      p3: `${fmtDim(modeledChamferNote.depthMm, displayUnits)} ${unitLabel(displayUnits)}`,
+                      p4: `${fmtDim(modeledChamferNote.cutWidthMm, displayUnits)} ${unitLabel(displayUnits)}`,
+                      p5: `${fmtDim(modeledChamferNote.modeledWidthMm, displayUnits)} ${unitLabel(displayUnits)}`,
+                    })}</div>
+                  )}
 
                   {/* Advanced (clutter P6): seam overlap behind the standard
                       disclosure. Placement only. */}
@@ -10385,44 +10777,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
             onClick={handleCreate}
             disabled={!canCreate}
             data-tooltip={
-              loopsExplicitlyEmpty ? tx('NewOperationModalBody.No_loops_are_selected_to_machine_Pick_at_least')
-              : contourHasNoEligiblePaths ? tx('NewOperationModalBody.The_selected_source_has_no_to_machine', { p1: contourPathType === 'open' ? tx('NewOperationModalBody.open_paths') : tx('NewOperationModalBody.closed_profiles') })
-              : !toolId ? tx('NewOperationModalBody.Go_to_the_Tool_tab_and_select_a_tool')
-              : isFace && !faceHeightValid
-                ? heightRepairRequired || !faceHeightChosen || faceHeightPreview.state === 'error'
-                  ? tx('NewOperationModalBody.Choose_a_finished_face_in_Heights_Bottom_Height_Finished', { p1: faceHeightPreview.state === 'error' ? ` ${faceHeightPreview.message}` : '' })
-                  : tx('NewOperationModalBody.Wait_for_Face_Smart_Height_preflight_to_resolve')
-              : (isParallel3d || isSteepShallow3d || isScallop3d || isPencil3d) && !parallelHeightPartIdEff ? tx('NewOperationModalBody.Go_to_the_Geometry_tab_and_select_a_3D')
-              : isPencil3d && !pencilCutterSupported ? tx('NewOperationModalBody.Pencil_needs_a_ball_or_bull_nose_end_mill')
-              : isParallel3d && !parallelCutterSupported ? tx('NewOperationModalBody.Parallel_finish_needs_a_flat_ball_or_bull_nose')
-              : (isSteepShallow3d || isScallop3d) && !cutter3dSupported ? tx('NewOperationModalBody.3D_finish_needs_a_flat_ball_or_bull_nose')
-              : isAdaptive3d && !adaptive3dPartIdEff ? tx('NewOperationModalBody.Go_to_the_Geometry_tab_and_select_a_3D_2')
-              : isAdaptive3d && !cutter3dSupported ? tx('NewOperationModalBody.3D_rough_needs_a_flat_ball_or_bull_nose')
-              : isContour && contourHeightPreview.state === 'error' ? contourHeightPreview.message
-              : isContour && !heightRepairRequired && contourHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Contour_Smart_Height_preflight_to_resolve')
-              : (isDrill || isBore) && drillBoreHeightPreview.state === 'error'
-                ? drillBoreHeightPreview.message
-              : (isDrill || isBore) && !heightRepairRequired && drillBoreHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Smart_Height_preflight_to_resolve', { p1: isDrill ? tx('NewOperationModalBody.Drill') : tx('NewOperationModalBody.Bore') })
-              : isThreadMill && threadMillHeightPreview.state === 'error'
-                ? threadMillHeightPreview.message
-              : isThreadMill && threadMillHeightAuthority !== 'repair_required' && threadMillHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Thread_Mill_Smart_Height_preflight_to_resolve')
-              : isEngrave && engraveHeightPreview.state === 'error'
-                ? engraveHeightPreview.message
-              : isEngrave && engraveHeightAuthority !== 'repair_required' &&
-                  !engrave.useWidthForDepth && !engraveDepthEntered
-                ? tx('NewOperationModalBody.Enter_the_explicit_Engrave_depth_on_the_Heights_tab')
-              : isEngrave && engraveHeightAuthority !== 'repair_required' && engraveHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Engrave_Smart_Height_preflight_to_resolve')
-              : isVCarve && !vcarveClearingToolValid
-                ? tx('NewOperationModalBody.Choose_the_end_mill_that_clears_the_flat_floors')
-              : isVCarve && vcarveHeightPreview.state === 'error'
-                ? vcarveHeightPreview.message
-              : isVCarve && vcarveHeightAuthority !== 'repair_required' && vcarveHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_V_carve_Smart_Height_preflight_to_resolve')
-              : undefined
+              authoring.message
             }
           >
             {isEditMode ? tx('NewOperationModalBody.Save_Recompute') : tx('NewOperationModalBody.Create_Operation')}

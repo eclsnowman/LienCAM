@@ -208,6 +208,16 @@ namespace LienCAM
          *  inline, because a thread that waits on itself is a deadlock. */
         public static bool Run(Class cls, string what, Action job, int waitMs, out string refusal)
         {
+            return Run(cls, what, job, waitMs, null, out refusal);
+        }
+
+        /** WO-2847: as Run, but the wait never runs out while stillBusy() says
+         *  the job is waiting out something that must not be abandoned - a
+         *  controller firmware update. waitMs counts again from the moment it
+         *  stops saying so, so the rest of the job keeps its whole budget. */
+        public static bool Run(Class cls, string what, Action job, int waitMs, Func<bool> stillBusy,
+                               out string refusal)
+        {
             refusal = null;
             if (Thread.CurrentThread.ManagedThreadId == ownerId)
             {
@@ -216,7 +226,21 @@ namespace LienCAM
             }
             Job j = Enqueue(cls, what, job, true, out refusal);
             if (j == null) return false;
-            if (j.Done.WaitOne(waitMs)) return true;
+            if (stillBusy == null)
+            {
+                if (j.Done.WaitOne(waitMs)) return true;
+            }
+            else
+            {
+                int deadline = unchecked(Environment.TickCount + waitMs);
+                while (true)
+                {
+                    if (stillBusy()) deadline = unchecked(Environment.TickCount + waitMs);
+                    int remaining = unchecked(deadline - Environment.TickCount);
+                    if (remaining <= 0) break;
+                    if (j.Done.WaitOne(Math.Min(remaining, 1000))) return true;
+                }
+            }
             refusal = "the controller did not answer " + what + " within " + waitMs
                     + " ms - it is still queued on the board owner.";
             return false;
@@ -1076,6 +1100,9 @@ namespace LienCAM
                         + "definition LienCAM pushes, not from a bridge flag");
                 }
                 else if (args[i] == "--inject-fake-inverter") injectFakeInverter = true;
+                // WO-2845: electron/main.cjs adds it on the operator's Connect
+                // press after a WaitsForConnectExitCode exit, never on a respawn.
+                else if (args[i] == DllPin.ConnectArg) Machine.ConnectWithChangedDll = true;
                 else if (args[i] == "--home-backoff")
                 {
                     Log("--home-backoff was removed by WO-924: set each axis's backOff in the machine definition");
@@ -1125,6 +1152,8 @@ namespace LienCAM
                 Environment.Exit(2);
                 return;
             }
+            Machine.ResolvedUc100DllPath = uccnc.Uc100DllPath;   // WO-2845
+            Machine.UccncInstallRoot = uccnc.InstallRoot;
 
             // A machine control link must never be dialled across a network.
             // A non-loopback bind is a refusal at startup, not a warning
@@ -1144,8 +1173,12 @@ namespace LienCAM
             Log("configuration " + uccnc.ConfigPath + (uccnc.Configured ? " (loaded)" : " (not present; CLI/local DLL compatibility mode)"));
             Log("UCCNC install root " + DisplayPath(uccnc.InstallRoot));
             Log("profile " + DisplayPath(uccnc.ProfilePath));
+#if UC100NET
+            Log("controller transport Uc100Net (native AXBB-E; no vendor DLL)");
+#else
             Log("UC100 DLL " + DisplayPath(uccnc.Uc100DllPath));
             Log("FTD2XX DLL " + DisplayPath(uccnc.Ftd2xxDllPath));
+#endif
 
             // --board auto runs AFTER the paths are resolved and the controller
             // DLLs are copied beside the exe: DiscoverBoard calls into UC100.dll,
@@ -1295,8 +1328,30 @@ namespace LienCAM
             string openRefusal;
             if (!BoardOwner.Run(BoardOwner.Class.Normal, "opening the controller",
                                 delegate { opened = machine.Open(uccnc.Board, uccnc.ProfilePath); },
-                                300000, out openRefusal))
+                                300000,
+                                delegate { return ControllerFirmwareUpdateWait.Active; },
+                                out openRefusal))
             { Log("could not open the controller - " + openRefusal); return; }
+            // BEGIN WO-2847 STARTUP UPDATE EXIT
+            // WO-2847: an update that ended in an error has said so in one line,
+            // and the exit code tells electron/main.cjs not to respawn into
+            // another Open. Fix round 3: hosted, that line already went to the
+            // Control console through the host, so the last line printed (the
+            // lastExit.error a Connect or Restart failure quotes) only points at
+            // it. Not hosted, the outcome line stays the last one printed.
+            if (!opened && ControllerFirmwareUpdateWait.EndedWithError)
+            {
+                if (Machine.HostConsoleCarriesLines) Console.WriteLine(ControllerFirmwareUpdateWait.HostedExitLine);
+                Environment.Exit(ControllerFirmwareUpdateWait.EndedWithErrorExitCode);
+            }
+            // END WO-2847 STARTUP UPDATE EXIT
+            // WO-2845: the changed-DLL line is said; the operator's next Connect
+            // press opens. The exit code tells electron/main.cjs not to respawn.
+            if (!opened && machine.DllChangeWaitsForConnect)
+            {
+                if (Machine.HostConsoleCarriesLines) Console.WriteLine(DllPin.HostedExitLine);
+                Environment.Exit(DllPin.WaitsForConnectExitCode);
+            }
             if (!opened) { Log("could not open the controller - exiting"); return; }
 
             // ---- WO-1719: the spindle link comes from LienCAM, never from disk ---
@@ -1619,8 +1674,10 @@ namespace LienCAM
                     {
                         resolved.InstallRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(root.Trim()));
                         string profilesDir = Path.Combine(resolved.InstallRoot, "Profiles");
+#if !UC100NET
                         resolved.Uc100DllPath = ResolveUc100(resolved.InstallRoot);
                         resolved.Ftd2xxDllPath = ResolveFtd2xx(resolved.InstallRoot);
+#endif
                         if (Directory.Exists(profilesDir))
                         {
                             resolved.Profiles.AddRange(Directory.GetFiles(profilesDir, "*.pro"));
@@ -1696,7 +1753,9 @@ namespace LienCAM
                         catch { continue; } // invalid child path from optional discovery: skip only that candidate
                         if (seen.Contains(full.ToUpperInvariant())) continue;
                         if (!Directory.Exists(Path.Combine(full, "Profiles"))) continue;
+#if !UC100NET
                         if (!File.Exists(ResolveUc100(full))) continue;
+#endif
                         seen.Add(full.ToUpperInvariant());
                         roots.Add(full);
                     }
@@ -1780,6 +1839,11 @@ namespace LienCAM
             public bool PrepareControllerDlls(out string error)
             {
                 error = null;
+#if UC100NET
+                // Route B still imports the selected .pro, but never resolves,
+                // copies or loads vendor DLLs. Windows keeps its existing path.
+                return true;
+#else
                 if (InstallRoot == null) return true; // legacy: DLLs already beside the exe
                 if (!File.Exists(Uc100DllPath))
                 { error = "the resolved UC100 DLL does not exist: " + Uc100DllPath; return false; }
@@ -1801,6 +1865,7 @@ namespace LienCAM
                     error = "cannot prepare the controller DLLs beside the bridge exe: " + ex.Message;
                     return false;
                 }
+#endif
             }
 
             public Json.Obj Hello()
@@ -1849,6 +1914,13 @@ namespace LienCAM
                 })) return;
                 live = true;
                 Log("browser connected");
+                // BEGIN WO-2847 OPERATOR CONNECT
+                // A new session is the operator's Connect, from the desktop or
+                // the phone: the retry a failed firmware update's ENDED line
+                // asks for. It lets the next lost-board pass call Open again.
+                if (ControllerFirmwareUpdateWait.ClearForOperatorConnect())
+                    Log("this Connect is the retry the failed firmware update asked for - the next reopen calls Open again");
+                // END WO-2847 OPERATOR CONNECT
 
                 // RELEASE THE PREVIOUS SESSION'S SOCKET-LOSS FEED HOLD, before
                 // hello, before anything is offered to the browser. Every socket
@@ -1926,6 +1998,8 @@ namespace LienCAM
                 // one this session - which is a refusal for anybody who needs it,
                 // never a cue to go read the cache file behind the bridge.
                 hello.Set("definition", machine.ResolvedDefinition);
+                // WO-2844: proven / untested / cannot-run, and the versions it judged.
+                hello.Set("compat", machine.CompatJson());
                 Send(ws, "hello", hello);
 
                 // WO-1096: connect is a summary, not a dump. The detailed
@@ -1936,10 +2010,30 @@ namespace LienCAM
                 SendConsole(ws, "rx", "[bridge] session connected - board " + uccnc.Board
                     + (uccnc.Board <= 0 ? " (demo, nothing can move)" : " (REAL HARDWARE)"), "info");
                 SendConsole(ws, "rx", machine.ActiveDatumSummary(), "info");
+                // WO-2844 (ADR-0058 D2 + point 6): an untested combination is
+                // said ONCE per bridge process, at the first session after the
+                // Open that found it; later sessions read it from hello.compat.
+                string compatLine = machine.TakeCompatOperatorLine();
+                if (compatLine != null) SendConsole(ws, "rx", compatLine, "info");
                 Machine.ReportLine[] importReport = machine.OpenReport();
                 for (int i = 0; i < importReport.Length; i++)
                     if (importReport[i].Severity != "info")
                         SendConsoleFrame(ws, "rx", importReport[i].Text, importReport[i].Severity);
+                // BEGIN WO-2847 HELLO FIRMWARE UPDATE LINES
+                // Fix round 5 (Machine.ReportFirmwareUpdate): every record the
+                // bridge still holds is said here, and each new one is said to
+                // this session as it happens. A record stays held until this
+                // console accepts its id and acknowledges it; a session that dies first
+                // leaves it for the next hello. A hosted bridge holds none: the
+                // host carries its lines.
+                {
+                    WsFrames recordWs = ws;
+                    firmwareUpdateSessionWs = recordWs;
+                    foreach (Machine.FirmwareUpdateRecord held in machine.AttachFirmwareUpdateSession(
+                                 delegate(Machine.FirmwareUpdateRecord record) { SayFirmwareUpdateRecord(recordWs, record); }))
+                        SayFirmwareUpdateRecord(recordWs, held);
+                }
+                // END WO-2847 HELLO FIRMWARE UPDATE LINES
                 Machine.DriftLine[] connectDrift = machine.Drift;
                 for (int i = 0; i < connectDrift.Length; i++)
                     SendConsole(ws, "rx", Machine.DriftSummary(connectDrift[i]),
@@ -2034,6 +2128,10 @@ namespace LienCAM
                     // frames), but the wait is bounded and says so if it is not
                     // met.
                     machine.LiveConsole = null;   // WO-932/933: the socket is gone
+                    // BEGIN WO-2847 FIRMWARE UPDATE SESSION END
+                    firmwareUpdateSessionWs = null;
+                    machine.DetachFirmwareUpdateSession();   // unacknowledged records stay held
+                    // END WO-2847 FIRMWARE UPDATE SESSION END
                 Log("socket closed - feed hold and stop");
                     try
                     {
@@ -2212,6 +2310,31 @@ namespace LienCAM
             e.Set("severity", severity);
             Send(ws, "console", e);
         }
+
+        // BEGIN WO-2847 FIRMWARE UPDATE ACK
+        static WsFrames firmwareUpdateSessionWs;
+
+        /** The id travels WITH the line. Overflow may lose that frame, but
+         *  cannot manufacture a console receipt for a line it never accepted. */
+        static void SayFirmwareUpdateRecord(WsFrames ws, Machine.FirmwareUpdateRecord record)
+        {
+            var entry = new Json.Obj();
+            entry.Set("dir", "rx");
+            entry.Set("text", record.Text);
+            entry.Set("severity", record.Severity);
+            entry.Set("firmwareUpdateId", record.Id);
+            Send(ws, "console", entry);
+        }
+
+        static bool HandleFirmwareUpdateAck(WsFrames ws, object parsed)
+        {
+            if (Json.Str(parsed, "t") != "firmwareUpdateAck") return false;
+            string id = Json.Str(parsed, "id");
+            if (Object.ReferenceEquals(ws, firmwareUpdateSessionWs) && !String.IsNullOrEmpty(id))
+                machine.AcknowledgeFirmwareUpdate(id);
+            return true;
+        }
+        // END WO-2847 FIRMWARE UPDATE ACK
 
         // ---- contract v3 pushes (WO-423) -----------------------------------
         //
@@ -2629,7 +2752,9 @@ namespace LienCAM
                         string reopenRefusal;
                         if (!BoardOwner.Run(BoardOwner.Class.Long, "reopening the controller",
                                             delegate { machine.ReopenLostBoard(); },
-                                            300000, out reopenRefusal))
+                                            300000,
+                                            delegate { return ControllerFirmwareUpdateWait.Active; },
+                                            out reopenRefusal))
                             Log("the reopen could not be started - " + reopenRefusal);
                     }
 
@@ -2938,6 +3063,7 @@ namespace LienCAM
             }
 
             string t = Json.Str(parsed, "t");
+            if (HandleFirmwareUpdateAck(ws, parsed)) return;
             if (t != "call")
             {
                 SendConsole(ws, "rx", "the bridge only accepts 'call' frames, not '" + t + "'", "error");
@@ -4719,7 +4845,7 @@ namespace LienCAM
             // this thread must not be able to block on the socket any more than
             // it can block on the board.
             if (opcode == 0x9) { Enqueue(0xA, data); return true; }  // ping -> pong
-            if (opcode == 0xA) return true;                          // pong
+            if (opcode == 0xA) return true;                         // pong is not a console receipt
 
             // ---- FRAGMENTED MESSAGES (measured at the machine 2026-09-07) ----
             //

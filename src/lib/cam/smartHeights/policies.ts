@@ -167,6 +167,15 @@ export const OPERATION_HEIGHT_POLICIES = {
       edge_width_formula: variant({ materialStart: 'geometry_tool_formula', machiningEnd: 'edge_tool_formula', scope: 'selected_features', endpointCardinality: 'operation', requiredEvidence: ['selected_feature', 'selected_plane', 'tool_geometry', 'strategy_allowance', 'operation_scope'], missingEvidence: 'refuse', conformanceFixtures: ['chamfer:edge-width-formula'] }),
     },
   },
+  // WO-3001: a pattern starts at the current (or initial) stock top and ends
+  // the explicit depth below it the operation states; the pattern spec's own
+  // depth is measured down from the same Material Start.
+  pattern: {
+    operationType: 'pattern', support: 'live', safetyPlanes: ['clearance', 'retract', 'feed'],
+    variants: {
+      explicit_depth: variant({ materialStart: 'current_or_initial_material', machiningEnd: 'explicit_depth', scope: 'stock_footprint', endpointCardinality: 'operation', requiredEvidence: ['owning_stock', 'operation_scope'], missingEvidence: 'require_explicit_confirmation', conformanceFixtures: ['pattern:explicit-depth'] }),
+    },
+  },
   parallel_3d: {
     operationType: 'parallel_3d', support: 'live', safetyPlanes: ['clearance', 'retract', 'feed'],
     variants: {

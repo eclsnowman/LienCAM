@@ -23,7 +23,7 @@ import { offsetLoop } from './face2d/clipperOffset'
 import { resolveHeights } from './heights'
 import { resolveFeedrates } from './feedrates'
 import { assertPocketEntryAllowed } from './pocketEntryPolicy'
-import { helixDescent, helixFits, MIN_HELIX_RADIUS_MM, rampDescent } from './moves'
+import { helixDescent, helixFits, MIN_HELIX_RADIUS_MM, rampDescent, resolveFloorHopMm } from './moves'
 import { assertToolFluteReach, operatorLoopRef } from './toolFluteReach'
 import { directionForTool } from '../tool/cutHand'
 import { clearanceAllowanceMmOf, type ToolReachInputs } from './holderClearanceGate'
@@ -366,9 +366,26 @@ function cleanOffsetLoops(raw: Pt2[][], minArea: number, parentArea = Infinity):
 
 function classifyLoops(loops: LoopData[]): { outerBounds: LoopData[]; islandPool: LoopData[] } {
   const byType = loops.some(l => l.type === 'contour' || l.type === 'hole')
-  if (byType)
+  if (byType && loops.some(l => l.type === 'contour'))
     return { outerBounds: loops.filter(l => l.type === 'contour'),
              islandPool:  loops.filter(l => l.type === 'hole') }
+  if (byType) {
+    // Holes picked with no contour: an STL's bores and reliefs load as 'hole'
+    // chains, and a bore picked alone is the region to clear. Nest the picks the
+    // way 2D Adaptive does (adaptiveClearing2d/engine/index.ts): largest first, a
+    // loop inside no larger picked loop bounds a region of its own, and a loop
+    // inside one is that region's island.
+    const outerBounds: LoopData[] = []
+    const islandPool: LoopData[] = []
+    const byArea = [...loops].sort((a, b) =>
+      Math.abs(signedArea(b.points as Pt2[])) - Math.abs(signedArea(a.points as Pt2[])))
+    for (const loop of byArea) {
+      const c = centroid(loop.points as Pt2[])
+      if (outerBounds.some(o => pointInPolygon(c, o.points as Pt2[]))) islandPool.push(loop)
+      else outerBounds.push(loop)
+    }
+    return { outerBounds: loops.filter(l => outerBounds.includes(l)), islandPool }
+  }
   const outer   = loops.filter(l => signedArea(l.points as Pt2[]) > 0)
   const islands = loops.filter(l => signedArea(l.points as Pt2[]) <= 0)
   if (outer.length === 0) {
@@ -1706,6 +1723,10 @@ function linkDownToHelix(
     if (islands.some(island => pointInPolygon(pt, island))) return false
   }
   const linkZ = Math.max(startZ, levelZ + entryClearance)
+  // WO-2835 (architect ruling 2026-10-20): a link becomes a sideways rapid only where its
+  // clearance is certified. Nothing here certifies a rise that moves sideways off the floor
+  // through the corner the cut just made, so the lift stays straight up, inside the tool's
+  // own cut, and the floor-hop setting does not blend it.
   rapidTo(moves, from, linkZ)
   // performEntry makes the last move to the helix start at startZ.
   if (linkZ > startZ + 1e-9) rapidTo(moves, helixStart, linkZ)
@@ -2395,5 +2416,6 @@ export function buildPocketToolpath(
   // remaining stock on the request, so a first operation is byte-identical.
   return applyRestAir2d(
     'Pocket', moves, tool, (payload as ToolReachInputs).remainingStock, retractZ, notify,
+    resolveFloorHopMm(linking),
   )
 }

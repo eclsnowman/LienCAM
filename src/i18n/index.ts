@@ -25,12 +25,14 @@ import {
   isAvailableLanguage,
   loadCatalog,
 } from './catalogs'
+import { withoutStale } from './freshness/runtime'
 
 export {
   AVAILABLE_LANGUAGES,
   SOURCE_LANGUAGE,
   isAvailableLanguage,
   languageName,
+  machineTranslationNote,
 } from './catalogs'
 
 /** A catalog area name (one file under locales/en/). */
@@ -82,7 +84,9 @@ export async function applyLanguage(language: string): Promise<void> {
   const target = isAvailableLanguage(language) ? language : SOURCE_LANGUAGE
   requested = target
   if (!loaded.has(target)) {
-    const catalog = await loadCatalog(target)
+    // WO-2943: a translation whose English source changed since it was
+    // written is left out, so that key shows English until it is updated.
+    const catalog = withoutStale(target, await loadCatalog(target))
     for (const [area, words] of Object.entries(catalog)) {
       i18n.addResourceBundle(target, area, words, true, true)
     }

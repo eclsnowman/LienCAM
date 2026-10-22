@@ -67,6 +67,7 @@ import {
   rapidEntry,
   plungeTo,
   rampTo,
+  rampDescent,
   cutLoopWithOverlap,
   retractFrom,
 } from './moves'
@@ -178,6 +179,35 @@ export function buildChamferToolpath(
     const side    = params.loopSides[loop.id] ?? (loop.type === 'hole' ? 'inner' : 'outer')
     const isOuter = side === 'outer'
 
+    // WO-3021: a chamfer modeled along part of this loop. Each stretch is its
+    // own open pass with the same side, tip-offset shift and direction rule;
+    // the loop's other edges are never cut.
+    const extent = params.loopExtents?.[loop.id]
+    if (extent && extent.length > 0) {
+      if (clearSpace) {
+        throw new Error(`Chamfer clear-space is unsupported for loop ${loop.id}: it is cut along part of its length, ` +
+          'and the clear-space proof covers whole loops. No on-edge entry was substituted.')
+      }
+      const wantCW = loopWindingFor(plannerDirection, isOuter) === 'cw'
+      for (const span of extent) {
+        const open = openChamferPath(loop.points as Vec2[], span, isOuter ? +xyOffset : -xyOffset, wantCW)
+        if (!open) continue
+        rapidEntry(moves, open, feedZ, retractZ, clearanceZ)
+        let landed = 0
+        if (isRamp) landed = rampAlongOpenPath(moves, open, feedZ, zCut, tanRamp, plungeRate)
+        else plungeTo(moves, open, 0, zCut, plungeRate)
+        // A ramp that landed past the start cuts back to it at depth first.
+        for (let k = landed - 1; k >= 0; k--) {
+          moves.push({ type: 'feed', x: open[k].x, y: open[k].y, z: zCut, feed: feedRate, role: 'cut' })
+        }
+        for (let k = 1; k < open.length; k++) {
+          moves.push({ type: 'feed', x: open[k].x, y: open[k].y, z: zCut, feed: feedRate, role: 'cut' })
+        }
+        retractFrom(moves, retractZ, clearanceZ)
+      }
+      continue
+    }
+
     // Shift the tool path by xyOffset relative to the profile edge.
     // Positive (outward) for outer chamfer; negative (inward) for inner chamfer.
     // When tipOffset = 0, xyOffset = 0 and the loop is used as-is.
@@ -235,6 +265,106 @@ export function buildChamferToolpath(
       : 'Chamfer clear-space: tool and shank checked only; holder clearance and approach before the first programmed position are not established.')
   }
   return moves
+}
+
+/**
+ * WO-3021: the stretch [start, end] (mm along the closed loop's own point
+ * order from points[0]; end may pass the loop's length) as an open path,
+ * shifted by `offset` (+ outward) the way offsetPolygon shifts a whole loop
+ * (mitred joins, capped at 4x), in the travel direction the milling rule
+ * wants. undefined when the stretch is shorter than a micron.
+ */
+export function openChamferPath(points: Vec2[], span: [number, number], offset: number, wantCW: boolean): Vec2[] | undefined {
+  const n = points.length
+  if (n < 2) return undefined
+  const cum = [0]
+  for (let i = 0; i < n; i++) {
+    const a = points[i], b = points[(i + 1) % n]
+    cum.push(cum[i] + Math.hypot(b.x - a.x, b.y - a.y))
+  }
+  const total = cum[n]
+  if (!(total > 1e-9)) return undefined
+  const start = Math.max(0, span[0])
+  const end = Math.min(span[1], start + total)
+  if (!(end - start > 1e-3)) return undefined
+  const at = (s: number): Vec2 => {
+    const lap = Math.floor(s / total)
+    const local = s - lap * total
+    let i = 0
+    while (i < n - 1 && cum[i + 1] < local) i++
+    const segLen = cum[i + 1] - cum[i]
+    const t = segLen > 1e-12 ? (local - cum[i]) / segLen : 0
+    const a = points[i], b = points[(i + 1) % n]
+    return { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) }
+  }
+  const raw: Vec2[] = [at(start)]
+  for (let lap = 0; lap < 2; lap++) {
+    for (let i = 0; i < n; i++) {
+      const s = cum[i] + lap * total
+      if (s > start + 1e-9 && s < end - 1e-9) raw.push({ x: points[i].x, y: points[i].y })
+    }
+  }
+  raw.push(at(end))
+  const path = raw.filter((p, i) => i === 0 || Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) > 1e-9)
+  if (path.length < 2) return undefined
+
+  let area = 0
+  for (let i = 0; i < n; i++) {
+    const a = points[i], b = points[(i + 1) % n]
+    area += a.x * b.y - b.x * a.y
+  }
+  const ccw = area > 0
+  let shifted = path
+  if (Math.abs(offset) > 1e-9) {
+    // Outward normal of travel (dx, dy) along the loop's own order.
+    const normal = (a: Vec2, b: Vec2): Vec2 => {
+      const len = Math.hypot(b.x - a.x, b.y - a.y)
+      const nx = (b.y - a.y) / len, ny = -(b.x - a.x) / len
+      return ccw ? { x: nx, y: ny } : { x: -nx, y: -ny }
+    }
+    shifted = path.map((p, i) => {
+      const n1 = i > 0 ? normal(path[i - 1], p) : undefined
+      const n2 = i < path.length - 1 ? normal(p, path[i + 1]) : undefined
+      if (!n1 || !n2) {
+        const only = (n1 ?? n2)!
+        return { x: p.x + only.x * offset, y: p.y + only.y * offset }
+      }
+      const bx = n1.x + n2.x, by = n1.y + n2.y
+      const bLen = Math.hypot(bx, by)
+      if (bLen < 1e-10) return { x: p.x + n1.x * offset, y: p.y + n1.y * offset }
+      const cos = (bx * n1.x + by * n1.y) / bLen
+      const miter = Math.max(-4 * Math.abs(offset), Math.min(4 * Math.abs(offset), offset / Math.max(cos, 1e-10)))
+      return { x: p.x + (bx / bLen) * miter, y: p.y + (by / bLen) * miter }
+    })
+  }
+  return ccw === wantCW ? [...shifted].reverse() : shifted
+}
+
+/** Ramp from fromZ to toZ along an open path from its start, turning back at
+ *  each end when the path is shorter than the ramp. Returns the index where
+ *  toZ is reached. */
+function rampAlongOpenPath(
+  moves: ToolpathMove[], path: Vec2[], fromZ: number, toZ: number, tanAngle: number, rampRate: number,
+): number {
+  const drop = fromZ - toZ
+  if (drop <= 1e-6) {
+    plungeTo(moves, path, 0, toZ, rampRate)
+    return 0
+  }
+  let landed = 0
+  rampDescent(moves, (length, visit) => {
+    let traveled = 0, i = 0, dir = 1
+    for (let step = 0; step < path.length * 100 && traveled < length; step++) {
+      let j = i + dir
+      if (j < 0 || j >= path.length) { dir = -dir; j = i + dir }
+      traveled += Math.hypot(path[j].x - path[i].x, path[j].y - path[i].y)
+      visit(path[j], traveled)
+      i = j
+    }
+    if (traveled < length) visit(path[i], length)
+    landed = i
+  }, fromZ, toZ, drop / tanAngle, rampRate)
+  return landed
 }
 
 interface ClearSpaceLoop {

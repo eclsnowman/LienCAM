@@ -1,0 +1,46 @@
+[
+  {
+    "file": "src/tests/fixtures/WO-2934/relief-medallion-legacy.camproject",
+    "rough": "3D Rough 2",
+    "sha256": "37fc9e1e2ced12a761e09d3ad928d2af723cbf960c7d46557c8c9fb098734afe",
+    "legacySource": "43b41aab32bdc3335345feea730b5b54152a8c86",
+    "legacyFile": "examples/07-relief-medallion/relief-medallion.camproject",
+    "legacySourceSha256": "c841bfad992802ab10ee4fb27d71884c782547cb4c93e6c0510f124a061e7f29",
+    "inputSource": "5c8751c92b5b33d8444d0e84ab605094a57f278f",
+    "inputSourceSha256": "4e95744d3a67040f3980edfc4ad144b0044a09b45e6b06be8fb1bb6600f419fd",
+    "roughMovesSha256": "7527b76660d8506d0b854b699c09e6a144501884123b7cd2fd5e13c1fd2713af",
+    "operations": [
+      {
+        "id": "62d971b1-e599-4e66-a66d-ee0d5c45c0ee",
+        "name": "Drill 1",
+        "fingerprint": "camgen-v4-5273581408e266a0",
+        "moveCount": 17
+      },
+      {
+        "id": "580ea8ea-57ee-4356-9dc1-ae0a29d9d236",
+        "name": "3D Rough 2",
+        "fingerprint": "camgen-v4-062534263000c65a",
+        "moveCount": 693
+      }
+    ]
+  },
+  {
+    "file": "src/tests/fixtures/WO-2934/knob-handwheel-legacy.camproject",
+    "rough": "3D Rough 1",
+    "sha256": "bcccb6f98bbc4d1966f0b379a0710ec76305e73d74e60963f942d227d7cfc188",
+    "legacySource": "43b41aab32bdc3335345feea730b5b54152a8c86",
+    "legacyFile": "examples/06-knob-handwheel/knob-handwheel.camproject",
+    "legacySourceSha256": "98db5c00ebde40cb65d555eb7235806968899fa3c89404b07f99776d2e20eafc",
+    "inputSource": "5c8751c92b5b33d8444d0e84ab605094a57f278f",
+    "inputSourceSha256": "18a74e92c88da705bf699b76aeff979f13ce8856499c9e7f75ffcfee82115a14",
+    "roughMovesSha256": "e3057f861f3f9478d3129268736956e3b9e6ea92365223f1fa1b2393ee57103b",
+    "operations": [
+      {
+        "id": "c0f62c23-5314-470d-95ef-e5af002ecc02",
+        "name": "3D Rough 1",
+        "fingerprint": "camgen-v4-bcf12e0f3faf3363",
+        "moveCount": 3649
+      }
+    ]
+  }
+]

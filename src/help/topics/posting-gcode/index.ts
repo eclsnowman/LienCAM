@@ -43,6 +43,10 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         text: 'Open the "About this post" tab to inspect the selected definition before editing or exporting: it lists the label and id, whether it is built in, and its arcs, tool change, comment style, dwell units, work offsets, and feed mode.',
       },
       { kind: 'image', slot: 'post-modal' },
+      {
+        kind: 'paragraph',
+        text: 'When a generated operation has nothing left to cut, such as a pocket already cleared by an earlier operation, it posts one comment naming the operation and saying "nothing left to cut", with no tool change, spindle command or motion for that operation. If all selected operations have nothing left to cut, the file contains only those comments, with no program start or end commands. This applies to Combined and Separate files, except that Combined output omits a setup and its comments when it has nothing left to cut and another setup still cuts.',
+      },
     ],
     images: [
       {
@@ -83,7 +87,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         kind: 'steps',
         steps: [
           'Operations that cannot be posted as they are: one that has an error, is still computing, or lost the model geometry it was cut from. Fix, wait for, or regenerate the named operation.',
-          'Work-offset conflicts: two different stocks (or unbound setups) resolving to the same G54-G59 offset, or one stock resolving to two different offsets, block the export until each physical stock owns exactly one offset. Conflicting setups are also flagged inline in the scope tree.',
+          'Work-offset conflicts: in a Combined program, two different stocks (or unbound setups) resolving to the same G54-G59 offset, or one stock resolving to two different offsets, block the export; give each stock its own offset or post Separate files (one per setup), where a shared offset is fine. Conflicting setups are also flagged inline in the scope tree.',
           'Multi-stock setups: a setup whose operations cut more than one stock has no single safe clearance plane, so it is refused - give each stock its own setup.',
           'Tool numbers: two different tools with the same tool number in one program do not post. A Tool numbers section appears at the top of the Properties tab naming both tools ("shares T3 with ..."); type a number into one of them and press Enter or click away. That number is for this program only: every tool change, H offset and the tool list in the file use it, your tool library keeps its own number, and it is saved with the project, so Control > Load, the setup sheet and the next post use it too. The row stays ("posts as T7 in this program - T3 in the library"); clear the field to post with the library number again. A combined program checks its numbers across all its setups; separate files are separate programs. A tool with no number is not refused - it is given a free number, and an info row says which ("Tool "..." has no tool number, so it posts as T3.").',
           'Model-backed geometry: operations cut from modeled bodies are refused until their references have been re-checked against the live model this session - opening each referenced model once re-verifies it. A work coordinate system rotated about Z is posted with the rotation applied to the coordinates; one that is tilted, mirrored or not a true rotation is refused.',

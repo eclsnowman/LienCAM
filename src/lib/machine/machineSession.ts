@@ -13,6 +13,7 @@
 // nothing in this module fires on import or on a timer except the
 // controller's own read-only status polling.
 
+import { readRegisteredSessionData, writeRegisteredSessionData } from '../../store/persistedKeys'
 import {
   useMachineControl,
   type ProgramToolChange,
@@ -497,7 +498,7 @@ function tapBridgeOverrideCalls(transport: BridgeTransport, scope: BackendEventS
   scope.overrideCallsInFlight = inFlight
   const send = transport.send.bind(transport)
   transport.send = (message) => {
-    if (message.m === 'setOverride') {
+    if (message.t === 'call' && message.m === 'setOverride') {
       const kind = (message.a.change as OverrideChange | undefined)?.kind
       if (kind !== undefined) {
         // A newer press retires any note still waiting on its channel.
@@ -9224,6 +9225,24 @@ function buildGrblEvents(scope: BackendEventScope) {
  *  does. WO-1042's fifty-frame test proves there is NO path from a
  *  `MachineStatus` into the durable offset store, and the only honest way to
  *  prove that is to drive the real handler rather than to read the source. */
+const firmwareConsoleSaid = new Set<string>()
+
+/** Keep receipts across controller replacement and page reload. Remember only
+ * after pushConsole succeeds; receiving or buffering a socket frame is not delivery. */
+function acceptFirmwareConsole(entry: ConsoleEntry): void {
+  const id = entry.firmwareUpdateId!
+  try {
+    const stored: unknown = JSON.parse(readRegisteredSessionData('firmwareConsoleSaid') ?? '[]')
+    if (Array.isArray(stored)) for (const item of stored) if (typeof item === 'string') firmwareConsoleSaid.add(item)
+  } catch { /* Memory still deduplicates when storage is unavailable. */ }
+  if (!firmwareConsoleSaid.has(id)) {
+    store().pushConsole(entry.dir, entry.text, entry.severity)
+    firmwareConsoleSaid.add(id)
+    try { writeRegisteredSessionData('firmwareConsoleSaid', JSON.stringify([...firmwareConsoleSaid])) } catch { /* As above. */ }
+  }
+  entry.onAccepted?.()
+}
+
 export function buildContractEvents(scope?: BackendEventScope): ControllerEvents {
   let programFinished = false
   const accepts = () => acceptsBackendEvent(scope)
@@ -9436,6 +9455,10 @@ export function buildContractEvents(scope?: BackendEventScope): ControllerEvents
     // four - straight through, no more collapsing 'warn' into 'error'.
     onConsole: (entry) => {
       if (!accepts()) return
+      if (typeof entry.firmwareUpdateId === 'string' && entry.firmwareUpdateId.length > 0) {
+        acceptFirmwareConsole(entry)
+        return
+      }
       if (scope && entry.severity === 'error' && /^(homeAxes|home): /.test(entry.text)) {
         scope.homeAnnouncement = undefined
       }

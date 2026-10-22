@@ -19,6 +19,11 @@
 // Determinism (D-006): identical inputs -> byte-identical moves. `computeTimeMs`
 // is wall-clock and intentionally NOT part of the determinism contract.
 
+import type { Adaptive3dParams } from '../../kernel/parameterTypes';
+export type { Adaptive3dParams } from '../../kernel/parameterTypes';
+export { DEFAULT_ADAPTIVE3D_PARAMS } from '../../kernel/parameterDefaults';
+export { readAdaptive3dParams } from '../../kernel/schema';
+
 import type { CutterSpec, PartMesh } from '../kernel/types';
 import type { Box3, StockMesh } from '../stock';
 import type { Ring } from '../geom2d';
@@ -30,153 +35,14 @@ import type {
 } from '../../types';
 import { resolveFeedrates } from '../../lib/cam/feedrates';
 import { spindleRotationForTool } from '../../lib/tool/cutHand';
-import type { AdaptiveMillingDirection } from '../../lib/cam/types';
 import type { Cam3dProgressCallback } from '../progress';
 import { roughEntryRefusalWords } from './roughEntryRefusalWords';
+import { parseStraightPlungeRefusal } from '../rough/entryRefusal';
 import { toolToCutterSpec } from './cutterSpec';
 import type { ResolvedParallel3dHeights } from './parallel3dOperation';
 
 /** Adaptive-only clearance above a proven material top. Shared height policy is out of scope. */
 export const ADAPTIVE_TRAVERSE_STANDOFF_MM = 0.5;
-
-/**
- * The parameters an adaptive_3d op carries in `op.params` (Operation.params is
- * `Record<string, unknown>`, so no core type change is needed). A later UI wave
- * reads/writes exactly these fields.
- */
-export interface Adaptive3dParams {
-  /** Max axial depth of cut per Z level, mm (> 0; deep is OK -- engagement is
-   *  bounded in plan view by the 2D engine, not by the stepdown). */
-  maxStepdown: number;
-  /** Stepover as a FRACTION 0..1 of tool DIAMETER (the engagement knob). */
-  stepover: number;
-  /** Physical milling direction for a clockwise spindle. */
-  millingDirection: AdaptiveMillingDirection;
-  /** Add roughing levels between full stepdowns to leave sloped walls nearer net shape. */
-  intermediateStepdown: boolean;
-  /** Tangent radius used to enter retained-wall cleanup contours, mm. */
-  wallLeadInRadius: number;
-  /** Tangent radius used to leave retained-wall cleanup contours, mm. */
-  wallLeadOutRadius: number;
-  /** Stay-down loopback fillet radius as a percent of tool radius. */
-  loopbackFilletPct: number;
-  /** Follow a shared wall at depth instead of retracting between nearby passes. */
-  integralWallFollow: boolean;
-  /** Maximum wall-follow route length divided by straight-line distance. */
-  integralWallFollowLengthFactor: number;
-  /** Max chordal deviation of the sampled polyline from the surface, mm. */
-  tolerance: number;
-  /** Entry helix diameter, mm (> 0). */
-  helixDiameter: number;
-  /** Entry helix descent angle from horizontal, degrees (0.5..30). */
-  helixAngleDeg: number;
-  /** Radial finish stock left on part walls, mm (>= 0). */
-  radialStockToLeave: number;
-  /** Axial finish stock left on the floor, mm (>= 0; raises the computed floor). */
-  axialStockToLeave: number;
-  /** Stock/part grid cell size, mm. <= 0 means "derive from tolerance + tool". */
-  cellSize: number;
-  /** Clip the job to the stock footprint (true) or the part xy-bounds (false). */
-  useStockBoundary: boolean;
-  /**
-   * Corner-reach (Stage C-2): mm PAST the stock edge the tool centre may reach,
-   * so the full-clear pass removes the leftover corner posts. undefined = AUTO
-   * (tool radius: the tool just kisses the corner apex); 0 = stay at the walls /
-   * leave posts. Only consulted in the STOCK-OUTLINE full-clear branch; ignored
-   * in part-bounds / fallback mode (dilating there would gouge uncleared stock).
-   */
-  stockEdgeOvershoot?: number;
-}
-
-/** Defaults for a freshly-created adaptive_3d op / a params record missing fields. */
-export const DEFAULT_ADAPTIVE3D_PARAMS: Adaptive3dParams = {
-  maxStepdown: 3,
-  stepover: 0.4,
-  millingDirection: 'climb',
-  intermediateStepdown: false,
-  wallLeadInRadius: 0,
-  wallLeadOutRadius: 0,
-  loopbackFilletPct: 25,
-  integralWallFollow: true,
-  integralWallFollowLengthFactor: 2,
-  tolerance: 0.05,
-  helixDiameter: 3,
-  helixAngleDeg: 10,
-  radialStockToLeave: 0,
-  axialStockToLeave: 0,
-  cellSize: 0, // 0 -> auto (deriveCellSize)
-  useStockBoundary: false,
-  stockEdgeOvershoot: undefined, // undefined -> auto (tool radius, full-clear only)
-};
-
-/**
- * Read an Adaptive3dParams out of an untyped `op.params` record, filling any
- * missing/invalid field from the defaults (fail-soft on shape, since a UI wave
- * will author these). Numeric fields are validated finite/positive where the
- * strategy requires it; stepover is additionally clamped to (0, 1].
- */
-export function readAdaptive3dParams(params: Record<string, unknown>): Adaptive3dParams {
-  const num = (v: unknown, fallback: number, mustBePositive: boolean): number => {
-    if (typeof v === 'number' && Number.isFinite(v) && (!mustBePositive || v > 0)) return v;
-    return fallback;
-  };
-  const nonNeg = (v: unknown, fallback: number): number => {
-    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
-    return fallback;
-  };
-  // Optional non-negative: a finite >= 0 value wins; anything else -> undefined
-  // (AUTO), so the store can substitute the tool radius in the full-clear branch.
-  const optNonNeg = (v: unknown): number | undefined =>
-    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
-  const rawStep = num(params.stepover, DEFAULT_ADAPTIVE3D_PARAMS.stepover, true);
-  return {
-    maxStepdown: num(params.maxStepdown, DEFAULT_ADAPTIVE3D_PARAMS.maxStepdown, true),
-    // Fraction knob: keep it in (0, 1] even if a record carries a stray value.
-    stepover: rawStep > 1 ? DEFAULT_ADAPTIVE3D_PARAMS.stepover : rawStep,
-    millingDirection:
-      params.millingDirection === 'conventional' ? 'conventional' : 'climb',
-    intermediateStepdown:
-      typeof params.intermediateStepdown === 'boolean'
-        ? params.intermediateStepdown
-        : DEFAULT_ADAPTIVE3D_PARAMS.intermediateStepdown,
-    wallLeadInRadius: nonNeg(params.wallLeadInRadius, DEFAULT_ADAPTIVE3D_PARAMS.wallLeadInRadius),
-    wallLeadOutRadius: nonNeg(params.wallLeadOutRadius, DEFAULT_ADAPTIVE3D_PARAMS.wallLeadOutRadius),
-    loopbackFilletPct:
-      typeof params.loopbackFilletPct === 'number' &&
-      Number.isFinite(params.loopbackFilletPct) &&
-      params.loopbackFilletPct >= 5 && params.loopbackFilletPct <= 100
-        ? params.loopbackFilletPct
-        : DEFAULT_ADAPTIVE3D_PARAMS.loopbackFilletPct,
-    integralWallFollow:
-      typeof params.integralWallFollow === 'boolean'
-        ? params.integralWallFollow
-        : DEFAULT_ADAPTIVE3D_PARAMS.integralWallFollow,
-    integralWallFollowLengthFactor: num(
-      params.integralWallFollowLengthFactor,
-      DEFAULT_ADAPTIVE3D_PARAMS.integralWallFollowLengthFactor,
-      true,
-    ),
-    tolerance: num(params.tolerance, DEFAULT_ADAPTIVE3D_PARAMS.tolerance, true),
-    helixDiameter: num(params.helixDiameter, DEFAULT_ADAPTIVE3D_PARAMS.helixDiameter, true),
-    helixAngleDeg:
-      typeof params.helixAngleDeg === 'number' &&
-      Number.isFinite(params.helixAngleDeg) &&
-      params.helixAngleDeg >= 0.5 &&
-      params.helixAngleDeg <= 30
-        ? params.helixAngleDeg
-        : DEFAULT_ADAPTIVE3D_PARAMS.helixAngleDeg,
-    radialStockToLeave: nonNeg(params.radialStockToLeave, DEFAULT_ADAPTIVE3D_PARAMS.radialStockToLeave),
-    axialStockToLeave: nonNeg(params.axialStockToLeave, DEFAULT_ADAPTIVE3D_PARAMS.axialStockToLeave),
-    // cellSize: 0 (or absent/invalid) means auto; a positive override wins.
-    cellSize: nonNeg(params.cellSize, DEFAULT_ADAPTIVE3D_PARAMS.cellSize),
-    useStockBoundary:
-      typeof params.useStockBoundary === 'boolean'
-        ? params.useStockBoundary
-        : DEFAULT_ADAPTIVE3D_PARAMS.useStockBoundary,
-    // undefined = AUTO (tool radius, resolved in the store's full-clear branch).
-    stockEdgeOvershoot: optNonNeg(params.stockEdgeOvershoot),
-  };
-}
 
 /**
  * The outcome of the Stage C-3 safety gate: may this adaptive_3d op use the
@@ -298,6 +164,67 @@ export function resolveStockOutlineMode(input: {
     }
   }
   return { mode: 'full-clear' }
+}
+
+/**
+ * Stage C-2 corner reach for a full-clear field: one tool radius for the engine's
+ * cutter-centre inset, then the authored overshoot (AUTO = one more radius, so a
+ * side entry starts clear of the stock; explicit 0 keeps the cutter centre on the
+ * stock edge).
+ */
+export function adaptive3dStockEdgeReach(toolDiameter: number, stockEdgeOvershoot: number | undefined): number {
+  const toolRadius = toolDiameter / 2
+  return toolRadius + (stockEdgeOvershoot ?? toolRadius)
+}
+
+/**
+ * WO-2922: the proven stock field a "Clear around part" rough may re-plan on when
+ * the part-bounds field leaves it no legal entry. The part-box field models none
+ * of the stock around the part, so every entry is a helix inside that box; on a
+ * rounded part in proud stock (the Form cylinder and torus starters) the corners
+ * leave less helix room than the smallest entry it cuts, and the rough refused.
+ * The real stock around the part is the way in: the same field, edge reach and
+ * side entry "Clear all stock" uses, under the same safety gate
+ * (resolveStockOutlineMode: unspun, footprint resolved, the only part on its
+ * stock). Undefined -- no retry, today's refusal stands -- when:
+ *  - "Clear all stock" is already chosen (the store plans that field first);
+ *  - the stock is not the proven real stock this part sits in;
+ *  - this rough starts from a retained field (a rest rough keeps clearing around
+ *    the part; WO-2145);
+ *  - the gate turns full-clear down (rotated part, no footprint, shared stock).
+ */
+export interface PartBoundsEntryFallback {
+  /** The real stock field (mesh frame), as resolveStockOutlineMode's full-clear branch sizes it. */
+  stockBounds: Box3
+  /** Corner reach for that field (adaptive3dStockEdgeReach). */
+  reachStockEdgeBy: number
+}
+
+export function resolvePartBoundsEntryFallback(input: {
+  useStockBoundary: boolean
+  stockBoundsAreRealStock: boolean
+  startsFromRetainedField: boolean
+  unspun: boolean
+  solidPartsOnStock: number
+  /** The real stock field, or undefined when no footprint resolved. */
+  stockFieldBounds: Box3 | undefined
+  toolDiameter: number
+  stockEdgeOvershoot: number | undefined
+  opName: string
+}): PartBoundsEntryFallback | undefined {
+  if (input.useStockBoundary || !input.stockBoundsAreRealStock || input.startsFromRetainedField) return undefined
+  const decision = resolveStockOutlineMode({
+    useStockBoundary: true,
+    unspun: input.unspun,
+    hasFootprint: input.stockFieldBounds !== undefined,
+    solidPartsOnStock: input.solidPartsOnStock,
+    opName: input.opName,
+  })
+  if (decision.mode !== 'full-clear' || input.stockFieldBounds === undefined) return undefined
+  return {
+    stockBounds: input.stockFieldBounds,
+    reachStockEdgeBy: adaptive3dStockEdgeReach(input.toolDiameter, input.stockEdgeOvershoot),
+  }
 }
 
 /**
@@ -642,6 +569,12 @@ export interface ComputeAdaptive3dArgs {
    */
   sideEntry?: boolean;
   /**
+   * WO-2922. STORE-DERIVED (resolvePartBoundsEntryFallback): the proven stock field
+   * to re-plan on ONLY when this part-bounds plan throws the straight-plunge entry
+   * refusal. A plan that generates never looks at it, so its moves are unchanged.
+   */
+  partBoundsEntryFallback?: PartBoundsEntryFallback;
+  /**
    * WO-279. Start from the carved field the PREVIOUS rough retained (WO-277)
    * instead of a full stock box, so this operation only works the material that
    * one could not reach. Absent -> full box, exactly as before.
@@ -693,6 +626,13 @@ export async function computeAdaptive3dMoves(
    * with, rather than a second, separately-resolved copy of the same number.
    */
   cellSize: number;
+  /**
+   * WO-2922: the stock field this run actually carved -- the caller's, or the
+   * partBoundsEntryFallback field after a refused part-bounds plan. The caller
+   * records a retained field against this box, never against the one it asked for.
+   * Always set by this adapter; optional only for test doubles that stand in for it.
+   */
+  plannedStockBounds?: Box3;
   /** Structured skipped/partial-region diagnostics. */
   diagnostics?: OperationDiagnostics;
   /** Exact strategy-local envelope used by this generated path. */
@@ -711,71 +651,125 @@ export async function computeAdaptive3dMoves(
     );
   }
 
-  const stockBoundsAreRealStock =
-    args.stockBoundsAreRealStock === true && stockBoxContainsPart(args.stockBounds, args.partMesh);
-  // Provenance is a caller fact, never a relationship inferred from two Z
-  // values. A taller arbitrary box can belong to another stock just as easily
-  // as this one; only the store that resolved the selected stock may assert it.
-  const provenMaterialTopZ = stockBoundsAreRealStock
-    ? Math.max(args.stockBounds.maxZ, args.partMesh.bounds.max[2])
-    : undefined;
-
-  const { topZ, materialTopZ, feedZ, retractZ, clearanceZ } = resolveAdaptive3dTraversePlanes({
+  const realStockField = (stockBounds: Box3) =>
+    args.stockBoundsAreRealStock === true && stockBoxContainsPart(stockBounds, args.partMesh);
+  const planesFor = (stockBounds: Box3) => resolveAdaptive3dTraversePlanes({
     resolvedHeights: args.resolvedHeights,
-    stockTopZ: args.stockBounds.maxZ,
+    stockTopZ: stockBounds.maxZ,
     partTopZ: args.partMesh.bounds.max[2],
-    materialTopZ: provenMaterialTopZ,
+    // Provenance is a caller fact, never a relationship inferred from two Z
+    // values. A taller arbitrary box can belong to another stock just as easily
+    // as this one; only the store that resolved the selected stock may assert it.
+    materialTopZ: realStockField(stockBounds)
+      ? Math.max(stockBounds.maxZ, args.partMesh.bounds.max[2])
+      : undefined,
   });
-  const heights = { clearanceZ, retractZ, feedZ };
-
-  const t0 = performance.now();
   // WO-2869: an entry the engine refuses reaches the operator in machinist words.
-  const roughed = await args.client.generateAdaptiveRough(
-    {
-      partMesh: args.partMesh,
-      cutter,
-      stockBounds: args.stockBounds,
-      cellSize,
-      maxStepdown: args.params.maxStepdown,
-      stepover: args.params.stepover,
-      millingDirection: args.params.millingDirection,
-      intermediateStepdown: args.params.intermediateStepdown,
-      spindleRotation,
-      wallLeadInRadius: args.params.wallLeadInRadius,
-      wallLeadOutRadius: args.params.wallLeadOutRadius,
-      loopbackFilletPct: args.params.loopbackFilletPct,
-      integralWallFollow: args.params.integralWallFollow,
-      integralWallFollowLengthFactor: args.params.integralWallFollowLengthFactor,
-      tolerance: args.params.tolerance,
-      helixDiameter: args.params.helixDiameter,
-      helixAngleDeg: args.params.helixAngleDeg,
-      radialStockToLeave: args.params.radialStockToLeave,
-      axialStockToLeave: args.params.axialStockToLeave,
-      heights,
-      materialTopZ,
-      floorZ: resolveAdaptive3dFloorZ(args),
-      ...(stockBoundsAreRealStock ? { stockBoundsAreRealStock: true } : {}),
-      ...(args.boundary !== undefined ? { boundary: args.boundary } : {}),
-      ...(args.reachStockEdgeBy !== undefined ? { reachStockEdgeBy: args.reachStockEdgeBy } : {}),
-      ...(args.sideEntry ? { sideEntry: true } : {}),
-      // WO-279: rest machining. Forwarded verbatim; the decision to pass it at
-      // all belongs to the caller (restStartStockFor), because only the caller
-      // knows which operation ran before this one.
-      ...(args.startFromStock !== undefined ? { startFromStock: args.startFromStock } : {}),
-    },
-    { signal: args.signal, onProgress: args.onProgress, onNotice: (message) => { notices.push(message); } },
-  ).catch((error: unknown) => {
+  const refusalInWords = (error: unknown, stockBounds: Box3, clearsAllStock: boolean): unknown => {
     const words = error instanceof Error
       ? roughEntryRefusalWords(error.message, {
           toolDiameter: args.tool.diameter,
-          stockTopZ: topZ,
+          stockTopZ: planesFor(stockBounds).topZ,
           partBounds: args.partMesh.bounds,
-          clearsAllStock: args.sideEntry === true,
+          clearsAllStock,
           clearAllStockRequested: args.params.useStockBoundary,
         })
       : undefined;
-    throw words === undefined ? error : new Error(words, { cause: error });
-  });
+    return words === undefined ? error : new Error(words, { cause: error });
+  };
+
+  // One plan on one stock field. The caller's field first; WO-2922's proven stock
+  // field only after that plan refuses every entry it could make.
+  const planOn = async (field: {
+    stockBounds: Box3;
+    reachStockEdgeBy?: number;
+    sideEntry?: boolean;
+    notices: string[];
+  }) => {
+    const stockBoundsAreRealStock = realStockField(field.stockBounds);
+    const planes = planesFor(field.stockBounds);
+    const { materialTopZ, feedZ, retractZ, clearanceZ } = planes;
+    const heights = { clearanceZ, retractZ, feedZ };
+
+    const roughed = await args.client.generateAdaptiveRough(
+      {
+        partMesh: args.partMesh,
+        cutter,
+        stockBounds: field.stockBounds,
+        cellSize,
+        maxStepdown: args.params.maxStepdown,
+        stepover: args.params.stepover,
+        millingDirection: args.params.millingDirection,
+        intermediateStepdown: args.params.intermediateStepdown,
+        spindleRotation,
+        wallLeadInRadius: args.params.wallLeadInRadius,
+        wallLeadOutRadius: args.params.wallLeadOutRadius,
+        loopbackFilletPct: args.params.loopbackFilletPct,
+        integralWallFollow: args.params.integralWallFollow,
+        integralWallFollowLengthFactor: args.params.integralWallFollowLengthFactor,
+        tolerance: args.params.tolerance,
+        helixDiameter: args.params.helixDiameter,
+        helixAngleDeg: args.params.helixAngleDeg,
+        radialStockToLeave: args.params.radialStockToLeave,
+        axialStockToLeave: args.params.axialStockToLeave,
+        heights,
+        materialTopZ,
+        floorZ: resolveAdaptive3dFloorZ(args),
+        ...(stockBoundsAreRealStock ? { stockBoundsAreRealStock: true } : {}),
+        ...(args.boundary !== undefined ? { boundary: args.boundary } : {}),
+        ...(field.reachStockEdgeBy !== undefined ? { reachStockEdgeBy: field.reachStockEdgeBy } : {}),
+        ...(field.sideEntry ? { sideEntry: true } : {}),
+        // WO-279: rest machining. Forwarded verbatim; the decision to pass it at
+        // all belongs to the caller (restStartStockFor), because only the caller
+        // knows which operation ran before this one.
+        ...(args.startFromStock !== undefined ? { startFromStock: args.startFromStock } : {}),
+      },
+      { signal: args.signal, onProgress: args.onProgress, onNotice: (message) => { field.notices.push(message); } },
+    );
+    return { roughed, planes };
+  };
+
+  const t0 = performance.now();
+  const callerField = {
+    stockBounds: args.stockBounds,
+    reachStockEdgeBy: args.reachStockEdgeBy,
+    sideEntry: args.sideEntry,
+    notices: [] as string[],
+  };
+  let field = callerField;
+  let planned: Awaited<ReturnType<typeof planOn>>;
+  try {
+    planned = await planOn(field);
+  } catch (error: unknown) {
+    const fallback = args.partBoundsEntryFallback;
+    const entryRefused = error instanceof Error && parseStraightPlungeRefusal(error.message) !== undefined;
+    // WO-2922: only an entry refusal, only on the part-bounds field, and only when
+    // the store proved the real stock around this part. Any other error, and any
+    // rest rough or job boundary, stands exactly as before.
+    if (
+      !entryRefused || fallback === undefined || args.sideEntry === true ||
+      args.startFromStock !== undefined || args.boundary !== undefined
+    ) {
+      throw refusalInWords(error, args.stockBounds, args.sideEntry === true);
+    }
+    field = {
+      stockBounds: fallback.stockBounds,
+      reachStockEdgeBy: fallback.reachStockEdgeBy,
+      sideEntry: true,
+      notices: [
+        `Clear around part found no entry it could cut inside the part's box with this ${args.tool.diameter} mm tool, ` +
+          'so it entered from the side through the stock around the part, as Clear all stock does, and cleared that stock too.',
+      ],
+    };
+    try {
+      planned = await planOn(field);
+    } catch (retryError: unknown) {
+      throw refusalInWords(retryError, fallback.stockBounds, true);
+    }
+  }
+  notices.push(...field.notices);
+  const { roughed, planes } = planned;
+  const { topZ, feedZ, retractZ, clearanceZ } = planes;
   const { ir, carvedStock, carvedStockWarning, diagnostics, carvedStockHandle } = roughed;
   const computeTimeMs = performance.now() - t0;
 
@@ -785,6 +779,17 @@ export async function computeAdaptive3dMoves(
   const moves = irToToolpathMoves(ir, resolvedFeeds);
   if (moves.length === 0) {
     // ADR-0003: an empty result is a loud failure, never a silently-empty op.
+    // WO-3043: a rest rough that starts from the previous rough's stock can leave
+    // nothing for its tool; the stock-box guesses below are false for it.
+    if (args.startFromStock !== undefined) {
+      const toLeave = args.params.radialStockToLeave > 0
+        ? ` (stock to leave ${args.params.radialStockToLeave} mm)`
+        : '';
+      throw new Error(
+        `Nothing left for this ${args.tool.diameter} mm tool: the previous rough already ` +
+          `removed all the material it can reach${toLeave}.`,
+      );
+    }
     throw new Error(
       'adaptive_3d produced no toolpath moves. The stock box may not enclose the ' +
         'part, the floor may sit at the stock top (nothing to rough), or the ' +
@@ -809,6 +814,7 @@ export async function computeAdaptive3dMoves(
     computeTimeMs,
     heightTruth,
     cellSize,
+    plannedStockBounds: field.stockBounds,
     ...(carvedStockHandle !== undefined ? { carvedStockHandle } : {}),
     ...(carvedStock !== undefined ? { carvedStock } : {}),
     ...(carvedStockWarning !== undefined ? { carvedStockWarning } : {}),

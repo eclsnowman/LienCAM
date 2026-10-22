@@ -34,6 +34,8 @@ function fixture(options: { destination?: string; unsafeContent?: boolean } = {}
   const mapping = manifest.selection.find((entry: { path: string }) => entry.path === SOURCE)
   if (options.destination !== undefined) mapping.destination = options.destination
   write(root, 'tools/release/manifest.json', `${JSON.stringify(manifest, null, 2)}\n`)
+  mkdirSync(join(root, 'tools/lib'), { recursive: true })
+  copyFileSync(join(ROOT, 'tools/lib/is-main.mjs'), join(root, 'tools/lib/is-main.mjs'))
   for (const name of ['export-public.mjs', 'scan.mjs']) {
     copyFileSync(join(ROOT, 'tools/release', name), join(root, 'tools/release', name))
   }

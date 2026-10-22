@@ -47,9 +47,31 @@
 // an existing node) and drives each of them through the shared scheduler --
 // see undo()'s own comment and regen/scheduler.ts's firstMissingUpstream for
 // the mechanism.
+//
+// Prepare/commit split (WO-2978, WO-2951 "First command"): every edit-time
+// check -- name, parse, self-reference AND the cycle -- now runs in the pure
+// prepareExpression(), which reads the dag but never mutates it, so a caller
+// that must refuse BEFORE committing (a later modeling command) gets the same
+// verdict the screen gets. The cycle check walks the same transitive consumes
+// chain FeatureDag.assertNoCycle walks (dag.ts), producer by producer in the
+// same order, so it reports the same {consumer, producer} pair the DAG's own
+// throw would. setExpression() is prepare + commit + rebuild and returns the
+// same outcomes as before; the DagCycleError catch around the commit stays as
+// a backstop.
+//
+// Shared model history (WO-2978, WO-2951 finding G2; the operator's Mission Control
+// card 2026-10-20 2:10 PM CT: "Yes - put parameter edits on Undo"). The
+// optional fourth constructor argument binds the table to the MODEL's
+// history and its touched-id stacks (ModelSession passes its own), so a
+// Parameters edit is one ordinary step on the stack the screen's Undo pops,
+// in order with every other Model step. Without it the table keeps the
+// private history above, exactly as before -- every older test that builds a
+// bare table is unchanged. Bound, undo()/redo() ARE the model's Undo/Redo
+// (they take whatever step is on top, the same one the screen's button
+// takes), with the same genesis-undo cascade.
 
 import type { Diag } from '../../geom/geom-service'
-import { CommandHistory, HISTORY_CAP, InsertNodeCommand, type Command } from '../commands'
+import { CommandHistory, HISTORY_CAP, InsertNodeCommand, type Command, type TouchedStack } from '../commands'
 import { DagCycleError, type FeatureDag } from '../dag'
 import type { FeatureOp, FeatureStatus, RegenDiagnostic, RegenPassResult, RegenScheduler } from '../regen'
 import { SetParameterExpressionCommand } from './commands'
@@ -59,6 +81,32 @@ import { parseExpression, type ParsedExpression } from './parser'
 import { ParamParseError, type ParamDiag } from './types'
 
 export type ParameterDiagnostic = ParamDiag | RegenDiagnostic
+
+/** WO-2978 (G2): the model history a table can commit on instead of its own,
+ *  with the owner's touched-id stacks kept in lockstep with it (one entry of
+ *  node ids per history step; a parameter edit pushes `[param:<name>]`). */
+export interface SharedParameterHistory {
+  history: CommandHistory
+  touchedPast: TouchedStack
+  touchedFuture: TouchedStack
+}
+
+/** A checked, not-yet-committed parameter edit (prepareExpression's success). */
+export interface PreparedExpression {
+  ok: true
+  nodeId: string
+  /** The one command that commits the edit: an InsertNodeCommand for a new
+   *  name, a SetParameterExpressionCommand for an existing one. */
+  command: Command
+  /** The node ids the commit touches (the parameter's own id). */
+  touched: string[]
+}
+
+export interface RefusedExpression {
+  ok: false
+  nodeId: string
+  diag: ParamDiag
+}
 
 export interface SetExpressionOutcome {
   ok: boolean
@@ -96,18 +144,21 @@ export class ParameterTable {
    *  public so an initial/external build of non-parameter nodes can share it. */
   readonly executor: FeatureOp
   private readonly history: CommandHistory
-  // Parallel to `history`'s own private past/future stacks, kept in lockstep
-  // (same cap, cleared-on-new-execute) because CommandHistory does not expose
-  // WHICH node a popped command touched -- see module comment. Safe because
-  // this table is the only thing that ever calls execute/undo/redo on `history`.
-  private readonly touchedPast: string[] = []
-  private readonly touchedFuture: string[] = []
+  // Parallel to `history`'s own past/future stacks, kept in lockstep (same
+  // cap, cleared-on-new-execute) because CommandHistory does not expose WHICH
+  // node a popped command touched -- see module comment. Private (this table
+  // is then the only caller of `history`) or the shared model's own stacks
+  // (WO-2978 G2: every caller of the shared history pushes its entry).
+  private readonly touchedPast: TouchedStack
+  private readonly touchedFuture: TouchedStack
 
-  constructor(dag: FeatureDag, scheduler: RegenScheduler, kernelOp: FeatureOp = NOOP_KERNEL_OP) {
+  constructor(dag: FeatureDag, scheduler: RegenScheduler, kernelOp: FeatureOp = NOOP_KERNEL_OP, shared?: SharedParameterHistory) {
     this.dag = dag
     this.scheduler = scheduler
     this.executor = makeParameterAwareExecutor(dag, kernelOp)
-    this.history = new CommandHistory(dag)
+    this.history = shared?.history ?? new CommandHistory(dag)
+    this.touchedPast = shared?.touchedPast ?? { current: [] }
+    this.touchedFuture = shared?.touchedFuture ?? { current: [] }
   }
 
   /** Wraps an already-populated dag (e.g. just restored from a save) --
@@ -156,11 +207,11 @@ export class ParameterTable {
   }
 
   canUndo(): boolean {
-    return this.touchedPast.length > 0
+    return this.history.canUndo()
   }
 
   canRedo(): boolean {
-    return this.touchedFuture.length > 0
+    return this.history.canRedo()
   }
 
   private paramPayload(name: string): ParameterPayload | undefined {
@@ -172,6 +223,55 @@ export class ParameterTable {
   // -----------------------------------------------------------------------
   // Mutation.
   // -----------------------------------------------------------------------
+
+  /**
+   * WO-2978: every edit-time check setExpression() makes, with NOTHING
+   * mutated -- not the dag, not the history, not the scheduler. Returns the
+   * one command that would commit the edit, or the same ok:false outcome
+   * setExpression() returns for it: PARAM_SYNTAX_ERROR (invalid name,
+   * malformed expression, wrong argument count), PARAM_UNKNOWN_FUNCTION,
+   * PARAM_SELF_REFERENCE or PARAM_CYCLE. Eval-time failures (dangling
+   * reference, division by zero, math domain) are NOT refusals here, exactly
+   * as in setExpression(): the edit commits and reports them afterwards.
+   */
+  prepareExpression(name: string, source: string): PreparedExpression | RefusedExpression {
+    const id = paramNodeId(name)
+    if (!NAME_RE.test(name) || RESERVED_NAMES.has(name)) {
+      return { ok: false, nodeId: id, diag: invalidNameDiag(name) }
+    }
+
+    let parsed: ParsedExpression
+    try {
+      parsed = parseExpression(source)
+    } catch (e) {
+      if (e instanceof ParamParseError) return { ok: false, nodeId: id, diag: e.diagnostic }
+      throw e
+    }
+    const { ast, refs } = parsed
+
+    if (refs.includes(name)) {
+      return { ok: false, nodeId: id, diag: { code: 'PARAM_SELF_REFERENCE', severity: 'error', params: { name } } }
+    }
+
+    const consumes = refs.map(paramNodeId)
+    const producer = this.firstCyclicProducer(id, consumes)
+    if (producer !== undefined) {
+      return {
+        ok: false,
+        nodeId: id,
+        diag: { code: 'PARAM_CYCLE', severity: 'error', params: { name, consumer: id, producer } },
+      }
+    }
+
+    const existed = this.dag.has(id)
+    const priorValue = existed ? this.paramPayload(name)?.value : undefined
+    const payload: ParameterPayload = { name, expression: source, ast, value: priorValue ?? 0 }
+
+    const command: Command = existed
+      ? new SetParameterExpressionCommand(id, payload, consumes)
+      : new InsertNodeCommand({ id, kind: 'parameter', consumes, payload })
+    return { ok: true, nodeId: id, command, touched: [id] }
+  }
 
   /**
    * Creates (if `name` is new) or edits (if it exists) a parameter's
@@ -200,36 +300,15 @@ export class ParameterTable {
    * read/mutation surface.
    */
   async setExpression(name: string, source: string): Promise<SetExpressionOutcome> {
-    const id = paramNodeId(name)
-    if (!NAME_RE.test(name) || RESERVED_NAMES.has(name)) {
-      return { ok: false, nodeId: id, diag: invalidNameDiag(name) }
-    }
-
-    let parsed: ParsedExpression
-    try {
-      parsed = parseExpression(source)
-    } catch (e) {
-      if (e instanceof ParamParseError) return { ok: false, nodeId: id, diag: e.diagnostic }
-      throw e
-    }
-    const { ast, refs } = parsed
-
-    if (refs.includes(name)) {
-      return { ok: false, nodeId: id, diag: { code: 'PARAM_SELF_REFERENCE', severity: 'error', params: { name } } }
-    }
-
-    const existed = this.dag.has(id)
-    const priorValue = existed ? this.paramPayload(name)?.value : undefined
-    const payload: ParameterPayload = { name, expression: source, ast, value: priorValue ?? 0 }
-    const consumes = refs.map(paramNodeId)
-
-    const cmd: Command = existed
-      ? new SetParameterExpressionCommand(id, payload, consumes)
-      : new InsertNodeCommand({ id, kind: 'parameter', consumes, payload })
+    const prepared = this.prepareExpression(name, source)
+    if (!prepared.ok) return prepared
+    const id = prepared.nodeId
 
     try {
-      this.history.execute(cmd)
+      this.history.execute(prepared.command)
     } catch (e) {
+      // Backstop only: prepareExpression() already refused every cycle the
+      // DAG would throw on (same walk, same order).
       if (e instanceof DagCycleError) {
         return {
           ok: false,
@@ -246,49 +325,71 @@ export class ParameterTable {
     return { ok: true, nodeId: id, pass }
   }
 
-  /** Undoes the last committed parameter edit (table value + everything
-   *  downstream), or returns undefined if there is nothing to undo. */
+  /** Undoes the last committed step (table value + everything downstream),
+   *  or returns undefined if there is nothing to undo. Private history: the
+   *  last parameter edit. Shared (G2): the model's last step, whatever it is. */
   async undo(): Promise<RegenPassResult | undefined> {
     if (!this.history.canUndo()) return undefined
-    const id = this.touchedPast.pop() as string
-    // Capture WHO directly consumes `id` (other parameters via an ordinary
+    const ids = this.touchedPast.current.pop() ?? []
+    // Capture WHO directly consumes each id (other parameters via an ordinary
     // 'ref' in their expression, or features/sketches/etc. via a plain DAG
     // edge) BEFORE the undo runs -- if this undo removes the node entirely
-    // (the genesis InsertNodeCommand), `id` is gone afterward and
+    // (the genesis InsertNodeCommand), the id is gone afterward and
     // scheduler.markDirty(id) would throw (it requires an existing node), so
     // there would be no other way to find them (Architect ruling R1.1).
-    const directConsumers = this.directConsumersOf(id)
+    const directConsumers = new Map(ids.map((id) => [id, this.directConsumersOf(id)] as const))
     this.history.undo()
-    this.touchedFuture.push(id)
-    if (!this.dag.has(id)) {
-      // Genesis undo: the parameter node is gone. Drive its FORMER direct
-      // consumers through the shared scheduler instead of returning early --
-      // markDirty on each cascades to ITS OWN downstream closure exactly as
-      // a live edit already does. What happens next depends on the
-      // consumer's own kind (see scheduler.ts's firstMissingUpstream/pass()):
-      // another PARAMETER re-evaluates its own expression and surfaces its
-      // own typed PARAM_UNKNOWN_REFERENCE (the same eval-time path an
-      // always-missing reference already takes); a FEATURE (or any other
-      // non-parameter node) degrades via the scheduler's dangling-upstream
-      // check, guaranteed BEFORE its kernel op runs -- never silently stays
-      // 'ok' on stale geometry.
-      if (directConsumers.length === 0) return { executed: [], cancelled: false }
-      for (const consumerId of directConsumers) this.scheduler.markDirty(consumerId)
-      return this.scheduler.run(this.executor)
-    }
-    this.scheduler.markDirty(id)
+    this.touchedFuture.current.push(ids)
+    // Genesis undo: a removed node's FORMER direct consumers are driven
+    // through the shared scheduler instead of returning early -- markDirty on
+    // each cascades to ITS OWN downstream closure exactly as a live edit
+    // already does. What happens next depends on the consumer's own kind (see
+    // scheduler.ts's firstMissingUpstream/pass()): another PARAMETER
+    // re-evaluates its own expression and surfaces its own typed
+    // PARAM_UNKNOWN_REFERENCE (the same eval-time path an always-missing
+    // reference already takes); a FEATURE (or any other non-parameter node)
+    // degrades via the scheduler's dangling-upstream check, guaranteed BEFORE
+    // its kernel op runs -- never silently stays 'ok' on stale geometry.
+    const roots = ids.flatMap((id) => (this.dag.has(id) ? [id] : (directConsumers.get(id) ?? [])))
+    if (roots.length === 0) return { executed: [], cancelled: false }
+    for (const id of roots) if (this.dag.has(id)) this.scheduler.markDirty(id)
     return this.scheduler.run(this.executor)
   }
 
-  /** Redoes the last undone parameter edit, or returns undefined if there is
-   *  nothing to redo. */
+  /** Redoes the last undone step, or returns undefined if there is nothing
+   *  to redo. */
   async redo(): Promise<RegenPassResult | undefined> {
     if (!this.history.canRedo()) return undefined
-    const id = this.touchedFuture.pop() as string
+    const ids = this.touchedFuture.current.pop() ?? []
     this.history.redo()
-    this.touchedPast.push(id)
-    this.scheduler.markDirty(id)
+    this.touchedPast.current.push(ids)
+    for (const id of ids) if (this.dag.has(id)) this.scheduler.markDirty(id)
     return this.scheduler.run(this.executor)
+  }
+
+  /** WO-2978: the first producer in `consumes` (in order) whose existing
+   *  transitive consumes chain already reaches `consumer` -- i.e. the one
+   *  FeatureDag.insertNode/setConsumes would throw DagCycleError for -- or
+   *  undefined. Read-only mirror of dag.ts's private assertNoCycle walk (a
+   *  producer that isn't a node yet cannot close a cycle); self-reference is
+   *  refused before this runs. */
+  private firstCyclicProducer(consumer: string, consumes: readonly string[]): string | undefined {
+    for (const producer of consumes) {
+      if (producer === consumer) return producer
+      if (!this.dag.has(producer)) continue
+      const visited = new Set<string>()
+      const stack = [producer]
+      while (stack.length > 0) {
+        const cur = stack.pop() as string
+        if (cur === consumer) return producer
+        if (visited.has(cur)) continue
+        visited.add(cur)
+        const node = this.dag.getNode(cur)
+        if (!node) continue
+        for (const next of node.consumes) stack.push(next)
+      }
+    }
+    return undefined
   }
 
   /** Node ids whose OWN `consumes` array directly includes `id` right now --
@@ -305,8 +406,8 @@ export class ParameterTable {
   }
 
   private recordTouch(id: string): void {
-    this.touchedPast.push(id)
-    if (this.touchedPast.length > HISTORY_CAP) this.touchedPast.shift()
-    this.touchedFuture.length = 0
+    this.touchedPast.current.push([id])
+    if (this.touchedPast.current.length > HISTORY_CAP) this.touchedPast.current.shift()
+    this.touchedFuture.current = []
   }
 }

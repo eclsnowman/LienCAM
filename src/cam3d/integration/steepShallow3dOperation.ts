@@ -1,3 +1,7 @@
+import type { SteepShallow3dParams } from '../../kernel/parameterTypes';
+export type { SteepShallow3dParams } from '../../kernel/parameterTypes';
+export { DEFAULT_STEEP_SHALLOW3D_PARAMS } from '../../kernel/parameterDefaults';
+export { readSteepShallow3dParams } from '../../kernel/schema';
 // cam3d integration (L6 bridge): one finish operation composed from the live
 // waterline (steep) and parallel (shallow) operation adapters. No strategy or
 // linker is copied here: each half keeps its existing worker and path builder.
@@ -16,69 +20,8 @@ import {
   type WaterlineParams,
 } from './waterline3dOperation';
 
-export interface SteepShallow3dParams {
-  /** Angle from horizontal dividing steep waterlines from shallow raster passes. */
-  thresholdDeg: number;
-  stepdown: number;
-  stepover: number;
-  angleDeg: number;
-  tolerance: number;
-  stockToLeave: number;
-  useStockBoundary: boolean;
-  finishDepth?: number;
-}
-
-export const DEFAULT_STEEP_SHALLOW3D_PARAMS: SteepShallow3dParams = {
-  thresholdDeg: 30,
-  stepdown: 1,
-  stepover: 1,
-  angleDeg: 0,
-  tolerance: 0.05,
-  stockToLeave: 0,
-  useStockBoundary: false,
-  finishDepth: undefined,
-};
-
 /** Total angular overlap around the threshold, preventing a witness band. */
 export const STEEP_SHALLOW_OVERLAP_DEG = 2;
-
-export function readSteepShallow3dParams(
-  params: Record<string, unknown>,
-): SteepShallow3dParams {
-  const positive = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-  const nonNegative = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
-  const rawThreshold = params.thresholdDeg;
-  let threshold: number;
-  if (typeof rawThreshold === 'number' && Number.isFinite(rawThreshold)) {
-    // WO-1515 / BUG-422: an out-of-range angle clamps to the nearest valid
-    // degree (the UI enforces the same 0-90 bound) rather than being silently
-    // replaced by an unrelated default strategy split.
-    threshold = Math.min(90, Math.max(0, rawThreshold));
-    if (threshold !== rawThreshold) {
-      console.warn(
-        `steep_shallow_3d: thresholdDeg ${rawThreshold} is out of range [0, 90]; using ${threshold}.`,
-      );
-    }
-  } else {
-    threshold = DEFAULT_STEEP_SHALLOW3D_PARAMS.thresholdDeg;
-  }
-  return {
-    thresholdDeg: threshold,
-    stepdown: positive(params.stepdown, DEFAULT_STEEP_SHALLOW3D_PARAMS.stepdown),
-    stepover: positive(params.stepover, DEFAULT_STEEP_SHALLOW3D_PARAMS.stepover),
-    angleDeg: typeof params.angleDeg === 'number' && Number.isFinite(params.angleDeg)
-      ? params.angleDeg
-      : DEFAULT_STEEP_SHALLOW3D_PARAMS.angleDeg,
-    tolerance: positive(params.tolerance, DEFAULT_STEEP_SHALLOW3D_PARAMS.tolerance),
-    stockToLeave: nonNegative(params.stockToLeave, DEFAULT_STEEP_SHALLOW3D_PARAMS.stockToLeave),
-    useStockBoundary: typeof params.useStockBoundary === 'boolean'
-      ? params.useStockBoundary
-      : DEFAULT_STEEP_SHALLOW3D_PARAMS.useStockBoundary,
-    finishDepth: positive(params.finishDepth, 0) || undefined,
-  };
-}
 
 export interface ComputeSteepShallow3dArgs
   extends Omit<ComputeParallel3dArgs, 'params' | 'onProgress'> {

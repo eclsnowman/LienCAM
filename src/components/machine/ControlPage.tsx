@@ -112,8 +112,17 @@ import {
   bridgeHostCapability,
   bridgeProcessStatus,
   prepareHostedBridgeForConnect,
+  takeBridgeConsoleLines,
   type BridgeProcessStatus,
 } from '../../lib/machine/bridgeHost'
+
+/** WO-2847 fix round 2: the bridge's firmware-update lines no session heard,
+ *  carried by the desktop host, each written to this console once. */
+export function sayBridgeConsoleLines(status: BridgeProcessStatus | null): void {
+  for (const line of takeBridgeConsoleLines(status)) {
+    useMachineControl.getState().pushConsole('rx', line.text, line.severity)
+  }
+}
 
 /** Filter only transports a declared controller cannot speak. Generic,
  * LinuxCNC, and legacy unknown declarations keep the pre-WO-1065 capability
@@ -1329,6 +1338,7 @@ export function ControlPage() {
     let lastStatus: BridgeProcessStatus | null = null
     const publish = (status: BridgeProcessStatus | null) => {
       if (!current) return
+      sayBridgeConsoleLines(status)
       lastStatus = status
       const capability = bridgeHostCapability()
       const hosted = capability === 'hosted'
@@ -1513,6 +1523,7 @@ export function ControlPage() {
       if (kind === 'bridge' && bridgeHostCapability() === 'hosted') {
         const prepared = await prepareHostedBridgeForConnect(
           useUiPrefs.getState().machineLinks[machine.id],
+          sayBridgeConsoleLines,
         )
         if (prepared.kind === 'not-started') {
           if (prepared.socketMayAnswer) {

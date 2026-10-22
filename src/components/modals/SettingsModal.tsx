@@ -3,7 +3,7 @@ import { Settings as SettingsIcon, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
-import { type UiScalePreference, useUiPrefs } from '../../store/uiPrefs'
+import { mcpServerHost, type UiScalePreference, useUiPrefs } from '../../store/uiPrefs'
 import { NumericInput } from '../ui/NumericInput'
 import { ThemedListbox } from '../ui/ThemedListbox'
 import { unitLabel } from '../../lib/ui/unitFormat'
@@ -12,7 +12,7 @@ import type { NavPresetId, Units, BrepTessellationQuality, SimulationEngine } fr
 import { APP_VERSION, GIT_COMMIT_LABEL, GIT_BRANCH, BUILD_DATE } from '../../version'
 import { CURRENT_PROJECT_SCHEMA_VERSION } from '../../store/migrations/projectMigrations'
 import { UI_THEME_IDS, UI_THEME_LABELS, type UiThemeId } from '../../theme/uiTheme'
-import { AVAILABLE_LANGUAGES, languageName, useText } from '../../i18n'
+import { AVAILABLE_LANGUAGES, languageName, machineTranslationNote, useText } from '../../i18n'
 import { UserDataStoragePanel } from './UserDataStoragePanel'
 import { writeGrblSettingAndReadBack } from '../../lib/machine/machineSession'
 import { controllerSurface } from '../../lib/machine/controllerSurface'
@@ -106,6 +106,10 @@ function backOffIsStated(machine: MachineConfig, axis: AxisName): boolean {
 export function SettingsModal() {
   const projectOpenDirectly = useUiPrefs((s) => s.projectOpenDirectly)
   const setProjectOpenDirectly = useUiPrefs((s) => s.setProjectOpenDirectly)
+  // WO-3010: the MCP server switch exists only where the server can run (the desktop app).
+  const mcpServerEnabled = useUiPrefs((s) => s.mcpServerEnabled)
+  const setMcpServerEnabled = useUiPrefs((s) => s.setMcpServerEnabled)
+  const mcpAvailable = mcpServerHost() !== undefined
   useShellText('app-shell-settings-menus')
   const activeModal = useCamStore((s) => s.activeModal)
   const closeModal  = useCamStore((s) => s.closeModal)
@@ -273,6 +277,21 @@ export function SettingsModal() {
             <input type="checkbox" checked={projectOpenDirectly} onChange={(event) => setProjectOpenDirectly(event.target.checked)} />
             Always go straight to the file browser
           </label>
+          {mcpAvailable && (
+            <>
+              <div className="mform-section-header">{shellText('SettingsModal.aiAssistantMcp')}</div>
+              <label className="mform-row" style={{ gap: 10 }}>
+                <input
+                  type="checkbox"
+                  data-testid="settings-mcp-server"
+                  checked={mcpServerEnabled}
+                  onChange={(event) => setMcpServerEnabled(event.target.checked)}
+                />
+                {shellText('SettingsModal.allowMcpClients')}
+              </label>
+              <div className="mform-hint">{shellText('SettingsModal.mcpClientsHint')}</div>
+            </>
+          )}
           <div className="mform-section-header">{shellText('SettingsModal.sTLProjection')}</div>
 
           <div className="mform-row">
@@ -482,10 +501,10 @@ export function SettingsModal() {
           </div>
 
           {/* WO-2319: lists exactly the languages that have a catalog under
-              src/i18n/locales/ (English only until a pilot language lands). */}
+              src/i18n/locales/ (English, and the German pilot from WO-2329). */}
           <div className="mform-section-header" data-testid="settings-language-header">{languageText('section')}</div>
 
-          <div className="mform-row" data-testid="settings-language-row">
+          <div className="mform-row" data-testid="settings-language-row" style={{ flexWrap: 'wrap' }}>
             <label className="mform-label">{languageText('label')}</label>
             <ThemedListbox
               testId="settings-language"
@@ -494,6 +513,16 @@ export function SettingsModal() {
               options={AVAILABLE_LANGUAGES.map((code) => ({ value: code, label: languageName(code) }))}
               onChange={setLanguage}
             />
+            {/* WO-2329: a machine-translated language says so beside the list,
+                in its own words, with where a correction goes. */}
+            {AVAILABLE_LANGUAGES.flatMap((code) => {
+              const note = machineTranslationNote(code)
+              return note === null ? [] : [
+                <div key={code} className="mform-hint" style={{ flexBasis: '100%' }} lang={code} data-testid={`settings-language-note-${code}`}>
+                  {languageName(code)}: {note}
+                </div>,
+              ]
+            })}
           </div>
 
           <div className="mform-section-header">{shellText('SettingsModal.performance')}</div>

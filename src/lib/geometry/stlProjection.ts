@@ -122,6 +122,28 @@ function signedArea(pts:{x:number,y:number}[]): number {
   return a/2
 }
 
+// WO-2935: buildLoops chains UNDIRECTED edges. Its winding says nothing about
+// solid versus void. Use the same strict-area / first-vertex containment parity
+// as path2d.ts: exterior, hole, island, hole. Do not reverse or re-order points
+// (their coordinates, signed-content IDs and projection frame must stay intact).
+function classifyByContainment(loops: Loop2D[]): Loop2D[] {
+  const inside = (point: { x: number; y: number }, polygon: Loop2D['points']) => {
+    let contains = false
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const a = polygon[i], b = polygon[j]
+      if ((a.y > point.y) !== (b.y > point.y)
+        && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) contains = !contains
+    }
+    return contains
+  }
+  return loops.map(loop => {
+    const depth = loops.reduce((count, other) => count + (
+      other.area > loop.area && inside(loop.points[0], other.points) ? 1 : 0
+    ), 0)
+    return { ...loop, type: depth % 2 === 0 ? 'contour' : 'hole' }
+  })
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 // `dp` (Douglas-Peucker simplification) exported alongside sliceAtZ/buildLoops
 // for CAM-BINDING Stage 5 (modelBodyDerive.ts's deriveModelBodyFace): a
@@ -229,14 +251,14 @@ export function projectSTLToLoopsInPlane(
       id: '',
       points: simplified.map(p=>({x:p.x,y:p.y})),
       closed: true,
-      type: area>0 ? 'contour' : 'hole',
+      type: 'contour', // placeholder; containment below is authoritative
       layerId: PROJ_LAYER_ID,
       area: Math.abs(area),
     })
   }
 
   return {
-    loops: assignStableLoopIds(result),
+    loops: assignStableLoopIds(classifyByContainment(result)),
     layers: [{ id: PROJ_LAYER_ID, name: 'STL Projection', color: '#00e5ff', visible: true }],
     frame,
   }
@@ -278,14 +300,14 @@ export function projectSTLToLoops(
       id: '',
       points: simplified.map(p=>({x:p.x,y:p.y})),
       closed: true,
-      type: area>0 ? 'contour' : 'hole',
+      type: 'contour', // placeholder; containment below is authoritative
       layerId: PROJ_LAYER_ID,
       area: Math.abs(area),
     })
   }
 
   return {
-    loops: assignStableLoopIds(result),
+    loops: assignStableLoopIds(classifyByContainment(result)),
     layers: [{ id: PROJ_LAYER_ID, name: 'STL Projection', color: '#00e5ff', visible: true }],
   }
 }

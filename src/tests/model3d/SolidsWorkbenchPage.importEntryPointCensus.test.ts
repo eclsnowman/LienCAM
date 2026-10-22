@@ -452,6 +452,17 @@ const KNOWN_UNCLASSIFIABLE_SITES: UnclassifiedSite[] = [
   // unresolved site is NOT this one -- it fails the test below and must be proven safe here (or
   // made statically traceable) before being added.
   { file: 'components/model3d/SolidsWorkbenchPage.tsx', line: 14293, ctor: 'createFeatureCommand', text: 'source.supportInput' },
+  // lib/agent/model/sketchCreate.ts:199 `createFeatureCommand(dag, plane.datumInput)` (WO-3013, the
+  // assistant's sketch-on-face create) -- `plane` is a ResolvedPlane returned by resolvePlane or
+  // resolveFace in the same file. resolvePlane never sets datumInput; resolveFace sets it at EXACTLY
+  // ONE site (sketchCreate.ts:277, `datumInput: built.input`) where
+  // `built = buildFacePlaneDatumNodeInput(...)` (sketch3d/datumPlane.ts:244) -- a literal
+  // `kind: 'datum'` return (datumPlane.ts:258), never 'import'. The resolver cannot follow it because
+  // the value crosses a function return into an optional interface field (the same interprocedural
+  // shape as the entry.datumInput and source.supportInput exemptions above). A NEW unresolved site is
+  // NOT this one -- it fails the test below and must be proven safe here (or made statically
+  // traceable) before being added.
+  { file: 'lib/agent/model/sketchCreate.ts', line: 199, ctor: 'createFeatureCommand', text: 'plane.datumInput' },
 ]
 
 function unclassifiedFailureMessage(sites: readonly UnclassifiedSite[]): string {

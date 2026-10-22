@@ -2,6 +2,22 @@ import { operationGenerationIsCurrent } from '../cam/generationFingerprint'
 import { selectEnabledOperations } from '../cam/operationSuppression'
 import { useCamStore } from '../../store'
 import type { ImportedGeometry, Operation, Project, Setup } from '../../types'
+import { extrudeSpec } from './model/extrude'
+import { revolveSpec } from './model/revolve'
+import { filletSpec } from './model/fillet'
+import { chamferSpec } from './model/chamfer'
+import { holeSpec } from './model/hole'
+import { featureDeleteSpec } from './model/featureDelete'
+import { sketchCreateSpec } from './model/sketchCreate'
+import { summaryReadSpec } from './model/summary'
+import { parameterSetSpec, parametersReadSpec, redoSpec, undoSpec } from './model/parameterSet'
+import {
+  createModelRegistry,
+  runModelCommand,
+  type ModelCommandResult,
+  type ModelCommandSpec,
+  type RunOptions,
+} from './registry'
 
 /**
  * The only renderer commands an external agent may reach in this slice.
@@ -286,11 +302,71 @@ export function machine_limits() {
   return deepFreeze(jsonCopy(useCamStore.getState().project.machine))
 }
 
-export const liencamCommands = Object.freeze({
+/**
+ * The modeling commands an external agent may run (WO-2993, WO-2951 Order B).
+ * Data, like AGENT_COMMAND_ALLOW_LIST: a doc command cannot become an agent
+ * command by accident. registryBoundary.wo2993.test.ts pins this list to the
+ * registry's keys.
+ */
+export const MODEL_COMMAND_ALLOW_LIST = Object.freeze([
+  'model.parameter.set',
+  'model.parameters',
+  'model.undo',
+  'model.redo',
+  'model.extrude',
+  'model.feature.delete',
+  'model.revolve',
+  'model.fillet',
+  'model.chamfer',
+  'model.hole',
+  'model.summary',
+  'model.sketch.create',
+] as const)
+
+export type ModelCommandName = (typeof MODEL_COMMAND_ALLOW_LIST)[number]
+
+const MODEL_SPECS: readonly ModelCommandSpec[] = Object.freeze([parameterSetSpec, parametersReadSpec, undoSpec, redoSpec, extrudeSpec, featureDeleteSpec, revolveSpec, filletSpec, chamferSpec, holeSpec, summaryReadSpec, sketchCreateSpec])
+const modelRegistry = createModelRegistry(MODEL_SPECS)
+
+/** The Model page's model item the agent edits: the one the app has open. */
+function activeModelItem(options: RunOptions): RunOptions {
+  if (options.modelItemId !== undefined) return options
+  const active = useCamStore.getState().activeModelItemId
+  return active === null || active === undefined ? options : { ...options, modelItemId: active }
+}
+
+export const modelCommands = Object.freeze({
+  /** Runs one model command; never throws for a bad call -- it returns a refusal. */
+  run(id: string, args?: unknown, options: RunOptions = {}): Promise<ModelCommandResult> {
+    return runModelCommand(modelRegistry, id, args, activeModelItem(options))
+  },
+  /** The commands the agent can run, as plain data. */
+  list(): ReadonlyArray<{ id: string; effect: 'read' | 'edit' }> {
+    return deepFreeze(MODEL_SPECS.map((spec) => ({ id: spec.id, effect: spec.effect })))
+  },
+  /** One command's id, effect and the exact input/output schemas that run. */
+  describe(id: string) {
+    const spec = modelRegistry.get(id)
+    return spec === undefined
+      ? null
+      : deepFreeze(jsonCopy({ id: spec.id, effect: spec.effect, input: spec.input, output: spec.output }))
+  },
+})
+
+export type ModelCommands = typeof modelCommands
+
+const readCommands = {
   project_summary,
   feature_details,
   tool_library,
   machine_limits,
-})
+}
+
+// `__liencam.model` rides on the same frozen object the DEV hook installs. It is
+// NOT enumerable: the read allow-list above is the object's keys (wo2254 test),
+// and the modeling commands have their own list.
+export const liencamCommands = Object.freeze(
+  Object.defineProperty(readCommands, 'model', { value: modelCommands, enumerable: false }),
+) as Readonly<typeof readCommands> & { readonly model: ModelCommands }
 
 export type LiencamCommands = typeof liencamCommands

@@ -44,7 +44,7 @@ import { buildSideEntrySeed } from '../../cam3d/rough/sideSeed';
 import { processFeature, type AdaptivePass } from '../../cam3d/rough/engineEntry';
 import { emitLevelPasses } from '../../cam3d/rough/emit';
 import { adaptiveRough, type AdaptiveRoughInput } from '../../cam3d/strategies/adaptiveRough';
-import { irFingerprint, type ToolpathIR } from '../../cam3d/ir/types';
+import { irFingerprint, type IrMove, type ToolpathIR } from '../../cam3d/ir/types';
 
 let kernel: BvhKernel;
 
@@ -211,6 +211,39 @@ async function firstLevelEngine(): Promise<{
 }
 
 /**
+ * WO-3062: the straight sweeps the tool actually travels from `from` to the move `m`. A line
+ * is its own chord; an arc (i/j = centre offset from its start, G2/G3) is tessellated at 1 deg
+ * with z interpolated, so the replay follows the arc instead of cutting across it.
+ */
+function sweepsOf(from: { x: number; y: number; z: number }, m: IrMove): LinearMove[] {
+  if (m.t !== 'arc' || m.i === undefined || m.j === undefined) {
+    return [{ x0: from.x, y0: from.y, z0: from.z, x1: m.x, y1: m.y, z1: m.z }];
+  }
+  const cx = from.x + m.i;
+  const cy = from.y + m.j;
+  const r = Math.hypot(m.i, m.j);
+  const a0 = Math.atan2(from.y - cy, from.x - cx);
+  let a1 = Math.atan2(m.y - cy, m.x - cx);
+  if (m.cw) { while (a1 >= a0) a1 -= 2 * Math.PI; } else { while (a1 <= a0) a1 += 2 * Math.PI; }
+  const n = Math.max(1, Math.ceil((Math.abs(a1 - a0) * 180) / Math.PI));
+  const out: LinearMove[] = [];
+  let x0 = from.x;
+  let y0 = from.y;
+  let z0 = from.z;
+  for (let k = 1; k <= n; k++) {
+    const t = a0 + ((a1 - a0) * k) / n;
+    const x1 = k === n ? m.x : cx + r * Math.cos(t);
+    const y1 = k === n ? m.y : cy + r * Math.sin(t);
+    const z1 = from.z + ((m.z - from.z) * k) / n;
+    out.push({ x0, y0, z0, x1, y1, z1 });
+    x0 = x1;
+    y0 = y1;
+    z0 = z1;
+  }
+  return out;
+}
+
+/**
  * Peak windowed radial engagement (WINDOW = 2 mm) over the emitted IR, honest
  * accumulator: the field starts as full stock and every move's removeSweep carves it, so
  * each cut move's fresh removal is measured against what is physically already clear.
@@ -271,20 +304,23 @@ function measureEngagement(
   };
   for (const m of ir.moves) {
     if (prev !== null) {
-      const sweep: LinearMove = { x0: prev.x, y0: prev.y, z0: prev.z, x1: m.x, y1: m.y, z1: m.z };
-      if (m.role !== undefined && engagedRoles.includes(m.role)) {
-        const localDepth = stockTopZ - m.z;
-        const len = Math.hypot(m.x - prev.x, m.y - prev.y);
-        if (localDepth > 0.5 && len > 1e-9) {
-          const engMm2 = engagementAt(field, sweep, cutter);
-          runLen.push(len);
-          runArea.push((engMm2 * len) / localDepth);
-          runMid.push({ x: (prev.x + m.x) / 2, y: (prev.y + m.y) / 2 });
+      const engaged = m.role !== undefined && engagedRoles.includes(m.role);
+      if (!engaged) flushRun();
+      // WO-3062: an arc move is replayed as the arc the tool follows, not as its chord
+      // (the chord of a big arc round the dome sweeps stock the tool never touches).
+      for (const sweep of sweepsOf(prev, m)) {
+        if (engaged) {
+          const localDepth = stockTopZ - sweep.z1;
+          const len = Math.hypot(sweep.x1 - sweep.x0, sweep.y1 - sweep.y0);
+          if (localDepth > 0.5 && len > 1e-9) {
+            const engMm2 = engagementAt(field, sweep, cutter);
+            runLen.push(len);
+            runArea.push((engMm2 * len) / localDepth);
+            runMid.push({ x: (sweep.x0 + sweep.x1) / 2, y: (sweep.y0 + sweep.y1) / 2 });
+          }
         }
-      } else {
-        flushRun();
+        removeSweep(field, sweep, cutter);
       }
-      removeSweep(field, sweep, cutter);
     }
     prev = { x: m.x, y: m.y, z: m.z };
   }

@@ -12,7 +12,7 @@ export const entries: HelpIndexEntry[] = [
     category: 'settings',
     summary: 'Settings holds app-wide preferences in one scrolling window of titled sections - kept on this computer, not in your project file.',
     keywords:
-      'settings preferences options application global window sections about version build schema project file format splash startup grbl controller settings where done',
+      'settings preferences options application global window sections about version build schema project file format splash startup grbl controller settings where done ai assistant mcp',
     contextKeys: ['modal:settings'],
   },
   {

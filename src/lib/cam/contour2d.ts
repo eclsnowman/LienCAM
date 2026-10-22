@@ -27,6 +27,7 @@ import {
   ensureCCW,
 } from './geometry'
 import { offsetLoop } from './face2d/clipperOffset'
+import { createGeometryService, faceAdapter } from '../../kernel/geometry'
 import { resolveHeights } from './heights'
 import { resolveFeedrates } from './feedrates'
 import { assertToolFluteReach, operatorLoopRef, operatorLoopTarget, type OperatorLoop } from './toolFluteReach'
@@ -51,6 +52,7 @@ import {
   retractFrom,
   helixDescent,
   helixFits,
+  resolveFloorHopMm,
 } from './moves'
 import {
   buildTrochoid,
@@ -71,6 +73,32 @@ const OPEN_EPS = 1e-8
 const OPEN_OUTSIDE_EPS = 1e-4
 
 type OpenStockBounds = NonNullable<ContourWorkerPayload['stockBounds']>
+
+// WO-2996: the closed rough/finish offsets go through the kernel geometry service's
+// face compatibility profile over the same clipper2 module (initialised by the
+// caller's ensureClipperReady, unchanged). Rollback: call offsetLoop directly again.
+let nativeOffsetFailure: { error: unknown } | null = null
+const closedOffsets = createGeometryService(faceAdapter({
+  offsetLoop(loop, delta, minArea) {
+    try {
+      return offsetLoop(loop, delta, minArea)
+    } catch (error) {
+      nativeOffsetFailure = { error }
+      throw error
+    }
+  },
+}))
+
+function offsetClosedLoop(rawPts: Vec2[], delta: number, minArea: number): Vec2[][] {
+  nativeOffsetFailure = null
+  const result = closedOffsets.offset([{ id: 'contour-loop', closed: true, points: rawPts }], delta, { minArea })
+  // A native exception stays the caller's exception, exactly as thrown.
+  if (nativeOffsetFailure) throw (nativeOffsetFailure as { error: unknown }).error
+  if (result.status === 'supported' && result.value) return result.value
+  // The service declines input today's offset still answers (fewer than 3 points,
+  // non-finite coordinates or delta). Keep today's answer; nothing new is refused.
+  return offsetLoop(rawPts, delta, minArea)
+}
 
 function finitePoint(p: Vec2): boolean {
   return Number.isFinite(p.x) && Number.isFinite(p.y)
@@ -411,6 +439,7 @@ function buildOpenContourToolpath(
   // WO-1888: see the closed-contour return. Same call, same stock source.
   return applyRestAir2d(
     'Open contour', moves, tool, (payload as ToolReachInputs).remainingStock, retractZ,
+    undefined, resolveFloorHopMm(payload.linking),
   )
 }
 
@@ -605,8 +634,8 @@ export function buildContourToolpath(
     // degenerate near-zero-area loops while preserving every real region —
     // material safety means we never aggressively drop a genuine sub-loop.
     const MIN_LOOP_AREA = 0.01
-    const roughLoops  = hasRoughing ? offsetLoop(rawPts, roughDist, MIN_LOOP_AREA) : []
-    const finishLoops = offsetLoop(rawPts, finishDist, MIN_LOOP_AREA)
+    const roughLoops  = hasRoughing ? offsetClosedLoop(rawPts, roughDist, MIN_LOOP_AREA) : []
+    const finishLoops = offsetClosedLoop(rawPts, finishDist, MIN_LOOP_AREA)
 
     const applyDir = (pts: Vec2[]) => {
       const ccw = ensureCCW(pts as Array<{ x: number; y: number }>)
@@ -880,7 +909,10 @@ export function buildContourToolpath(
   appendCornerRelief(moves, params, toolRadius, opStockToLeave, reliefGroups,
     { feedZ, retractZ, clearanceZ, feedRate, plungeRate, direction: plannerDirection })
 
-  return applyRestAir2d('Contour', moves, tool, (payload as ToolReachInputs).remainingStock, retractZ)
+  return applyRestAir2d(
+    'Contour', moves, tool, (payload as ToolReachInputs).remainingStock, retractZ,
+    undefined, resolveFloorHopMm(payload.linking),
+  )
 }
 
 // -- Trochoidal roughing (WO-2289) ---------------------------------------------

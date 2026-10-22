@@ -1,0 +1,549 @@
+/* WO-2994 (WO-2750 Slice C): the Drawings section and the sheet editor.
+   App chrome uses the theme tokens; the sheet itself is paper - white with
+   black ink in every theme, because that is what prints. */
+
+.drawing-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px 8px 12px;
+  font-size: var(--font-size-sm);
+}
+
+.drawing-entry-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  min-height: var(--hit-target-min);
+  padding: 2px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.drawing-entry-create:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.drawing-entry-notice {
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.drawing-entry-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.drawing-entry-empty {
+  color: var(--text-muted);
+}
+
+.drawing-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+}
+
+.drawing-entry-row.is-open {
+  background: var(--bg-active);
+}
+
+.drawing-entry-open {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--hit-target-min);
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawing-entry-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-entry-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.drawing-entry-remove {
+  flex: none;
+  min-width: var(--hit-target-min);
+  min-height: var(--hit-target-min);
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.drawing-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.drawing-editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: var(--font-size-sm);
+}
+
+.drawing-editor-switch {
+  display: inline-flex;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.drawing-editor-switch button {
+  min-height: var(--hit-target-min);
+  padding: 2px 10px;
+  border: none;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.drawing-editor-switch button.is-active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.drawing-editor-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--text-secondary);
+}
+
+.drawing-editor-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-accent);
+  cursor: pointer;
+}
+
+.drawing-editor-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-editor-size select {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+}
+
+.drawing-editor-status {
+  padding: 5px 10px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawing-editor-status[data-state='missing'],
+.drawing-editor-status[data-state='last-known'],
+.drawing-editor-status[data-state='error'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-orange) 18%, var(--bg-panel));
+}
+
+.drawing-editor-paper {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  display: flex;
+}
+
+.drawing-sheet {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+}
+
+.drawing-sheet-paper {
+  fill: #ffffff;
+  stroke: none;
+}
+
+.drawing-sheet-frame {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 0.35;
+}
+
+.drawing-line-visible {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 0.35;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.drawing-line-hidden {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 0.18;
+  stroke-dasharray: 1.5 1;
+}
+
+.drawing-sheet.is-stale .drawing-line-visible,
+.drawing-sheet.is-stale .drawing-line-hidden {
+  stroke: #8a8a8a;
+}
+
+.drawing-view-label,
+.drawing-title-text {
+  fill: #000000;
+  font-size: 3px;
+  font-family: var(--font-sans, sans-serif);
+}
+
+.drawing-title-name {
+  fill: #000000;
+  font-size: 4.5px;
+  font-weight: 600;
+  font-family: var(--font-sans, sans-serif);
+}
+
+/* WO-3006 (WO-2750 Slice E): tools, the side panel, and what is drawn on the sheet. */
+
+.drawing-editor-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: var(--font-size-sm);
+}
+
+.drawing-editor-tools button,
+.drawing-editor-panel button {
+  min-height: var(--hit-target-min);
+  padding: 2px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.drawing-editor-tools button.is-active {
+  background: var(--bg-active);
+  border-color: var(--text-accent);
+}
+
+.drawing-editor-tools button:disabled,
+.drawing-editor-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.drawing-editor-tools-gap {
+  flex: 1 1 auto;
+}
+
+.drawing-editor-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-accent) 12%, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+}
+
+.drawing-editor-notice {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-orange) 18%, var(--bg-panel));
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.drawing-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.drawing-editor-panel {
+  flex: 0 0 260px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.drawing-panel-section {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.drawing-panel-section h3 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.drawing-panel-empty,
+.drawing-panel-note {
+  color: var(--text-secondary);
+}
+
+.drawing-panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.drawing-panel-field input,
+.drawing-panel-field select {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 2px 4px;
+  min-width: 0;
+}
+
+.drawing-panel-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.drawing-panel-row .drawing-panel-field {
+  flex: 1 1 0;
+}
+
+.drawing-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.drawing-panel-value {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.drawing-panel-status {
+  color: var(--text-secondary);
+}
+
+.drawing-panel-status:not(.is-current) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-orange) 18%, var(--bg-panel));
+  padding: 4px 6px;
+  border-radius: 3px;
+}
+
+.drawing-dim-row {
+  display: flex !important;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+}
+
+.drawing-dim-row.is-selected {
+  border-color: var(--text-accent) !important;
+}
+
+.drawing-dim-chip {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.drawing-dim-chip:not(.is-current) {
+  color: var(--accent-orange);
+}
+
+.drawing-repair-compare {
+  display: flex;
+  gap: 16px;
+}
+
+.drawing-repair {
+  background: color-mix(in srgb, var(--text-accent) 10%, var(--bg-panel));
+}
+
+.drawing-sheet.is-picking {
+  cursor: crosshair;
+}
+
+.drawing-dim line {
+  stroke: #000000;
+  stroke-width: 0.18;
+}
+
+.drawing-dim-arrow {
+  fill: #000000;
+  stroke: none;
+}
+
+.drawing-dim-text {
+  fill: #000000;
+  font-size: 3px;
+  font-family: var(--font-sans, sans-serif);
+  cursor: move;
+  /* The dimension line breaks behind its text, as on a paper drawing. */
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 1.2px;
+  stroke-linejoin: round;
+}
+
+.drawing-dim-tol {
+  font-size: 2.1px;
+}
+
+.drawing-dim.is-broken .drawing-dim-text {
+  fill: #c25400;
+}
+
+.drawing-dim-flag {
+  font-weight: 700;
+}
+
+.drawing-dim.is-selected .drawing-dim-text,
+.drawing-balloon.is-selected .drawing-balloon-text {
+  fill: #1060d0;
+}
+
+.drawing-dim.is-selected line {
+  stroke: #1060d0;
+}
+
+.drawing-balloon line {
+  stroke: #000000;
+  stroke-width: 0.18;
+}
+
+.drawing-balloon-dot {
+  fill: #000000;
+}
+
+.drawing-balloon-ring {
+  fill: #ffffff;
+  stroke: #000000;
+  stroke-width: 0.25;
+  cursor: move;
+}
+
+.drawing-balloon.is-selected .drawing-balloon-ring {
+  stroke: #1060d0;
+}
+
+.drawing-balloon-text {
+  fill: #000000;
+  font-size: 3px;
+  font-family: var(--font-sans, sans-serif);
+  pointer-events: none;
+}
+
+.drawing-detail-crop,
+.drawing-detail-border {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 0.25;
+}
+
+.drawing-detail-crop {
+  stroke-dasharray: 2 1;
+  pointer-events: none;
+}
+
+.drawing-detail-border {
+  pointer-events: stroke;
+  cursor: move;
+}
+
+g.is-selected > .drawing-detail-border {
+  stroke: #1060d0;
+}
+
+.drawing-detail-letter {
+  fill: #000000;
+  font-size: 3.5px;
+  font-weight: 600;
+  font-family: var(--font-sans, sans-serif);
+  pointer-events: none;
+}
+
+.drawing-pick polygon {
+  fill: rgba(16, 96, 208, 0.25);
+  stroke: #1060d0;
+  stroke-width: 0.4;
+  pointer-events: none;
+}
+
+.drawing-title-cell {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 0.13;
+}
+
+.drawing-title-caption {
+  fill: #555555;
+  font-size: 1.5px;
+  font-family: var(--font-sans, sans-serif);
+}
+
+.drawing-sheet .drawing-title-name {
+  font-size: 3.2px;
+}
+
+.drawing-sheet .drawing-title-text {
+  font-size: 2.4px;
+}
+
+.drawing-tolerance-block .drawing-title-text {
+  font-size: 2.6px;
+}

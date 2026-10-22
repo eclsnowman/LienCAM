@@ -1,3 +1,4 @@
+import { isMain } from '../../lib/is-main.mjs';
 import fs from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -135,4 +136,4 @@ export async function compareAll() {
   fs.writeFileSync(`${root}/scores.json`, JSON.stringify({ ...manifest.refresh, images: results }, null, 2) + '\n')
   console.log(JSON.stringify({ total: results.length, captured: results.filter(r => r.status === 'captured').length, changed: results.filter(r => r.changed).length, unchanged: results.filter(r => r.status === 'captured' && !r.changed).length, failed: results.filter(r => r.status !== 'captured').map(r => r.topic + '/' + r.slot) }, null, 2))
 }
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) await compareAll()
+if (isMain(import.meta.url)) await compareAll()

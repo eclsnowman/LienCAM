@@ -18,6 +18,7 @@
 import type { Cage, Vec3 } from './cage'
 import { edgeKey } from './cage'
 import { remeshFromBody } from './remesh'
+import { validateCage } from './halfEdge'
 
 /** How finely a body is tessellated to become a cage: coarse, so the cage stays a handful of points to shape. */
 export const FORM_FROM_BODY_TESS = { deflection: 0.3, angularDeflection: 0.4 }
@@ -48,7 +49,14 @@ export interface FormFromBodyResult {
 
 export function formFromBody(mesh: BodyMesh, opts: FormFromBodyOptions = {}): FormFromBodyResult {
   if (opts.remesh !== false) {
-    const r = remeshFromBody(mesh, { sharpDeg: SHARP_EDGE_DEG })
+    // WO-3022: the Pull composes three subdivision levels over the whole cage, and on a cage the
+    // caller then refuses (a face that repeats a point, faces wound against each other) those rows
+    // grow without bound: the operator's PortalHandle.step gave a 61,228-face cage that failed the check and
+    // ran the page out of memory inside the Pull, before the refusal could show. The Pull only moves
+    // points, so the unpulled cage has the topology the check reads: shape it unpulled, hand a cage
+    // that fails the check straight back (the caller says so in one line), and Pull only one that passes.
+    const bare = remeshFromBody(mesh, { sharpDeg: SHARP_EDGE_DEG, pull: false })
+    const r = validateCage(bare.cage).ok ? remeshFromBody(mesh, { sharpDeg: SHARP_EDGE_DEG }) : bare
     return { cage: r.cage, flatFaces: r.flatFaces, gridFaces: r.gridFaces, curvedTriangles: r.triangles }
   }
   const triCount = Math.floor(mesh.index.length / 3)
@@ -224,4 +232,16 @@ function newell(pts: Vec3[]): Vec3 {
   }
   const l = Math.hypot(x, y, z)
   return l > 0 ? [x / l, y / l, z / l] : [0, 0, 0]
+}
+
+/** The name useFormSession gives the worker it runs From body in (this module is its entry). */
+export const FORM_FROM_BODY_WORKER = 'form-from-body'
+
+// WO-3022: From body on a large body takes seconds (13 s on the operator's PortalHandle.step, a 55,733-triangle
+// mesh), and on the page that held it frozen; useFormSession runs it in a worker started from this
+// module. Only a worker of that name answers, so a worker that imports this module for its helpers
+// keeps its own message handler.
+const workerScope = globalThis as unknown as { name?: unknown; WorkerGlobalScope?: unknown; onmessage: unknown; postMessage(message: unknown): void }
+if (typeof workerScope.WorkerGlobalScope === 'function' && workerScope.name === FORM_FROM_BODY_WORKER) {
+  workerScope.onmessage = (e: MessageEvent<BodyMesh>) => workerScope.postMessage(formFromBody(e.data))
 }

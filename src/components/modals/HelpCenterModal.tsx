@@ -1,4 +1,4 @@
-import { textFor, useText } from '../../i18n'
+import { i18n, machineTranslationNote, textFor, useText } from '../../i18n'
 // Help Center (WO HELP-1 stage S1) - registry-backed help with a category
 // index tree. Topics live in src/help/ (typed modules, lazy bodies per
 // category chunk); this modal owns presentation only. Search REPLACES the
@@ -463,6 +463,16 @@ function HelpCenterDialog({ onAbout, aboutOpen = false }: { onAbout?: () => void
             <Bug size={13} /> {shellText('HelpCenterModal.reportAProblem')}
           </button>
         </div>
+        {/* WO-2329: Help in a machine-translated language says so, and where a
+            correction goes; English shows nothing here. */}
+        {(() => {
+          const note = machineTranslationNote(i18n.language)
+          return note === null ? null : (
+            <div className="mform-hint" lang={i18n.language} style={{ padding: '0 16px 6px' }} data-testid="help-machine-translation-note">
+              {note}
+            </div>
+          )
+        })()}
         <div className="help-center-search">
           <Search size={14} />
           <input

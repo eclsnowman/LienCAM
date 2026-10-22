@@ -17,9 +17,36 @@
 // compartment regions, never one giant merged region".
 
 import { boolean, offset, area, type Ring } from '../geom2d';
+import { validateRings } from '../geom2d/rings';
+import { cam3dAdapter, createGeometryService, fromRings, toRings, type Result } from '../../kernel/geometry';
 import type { ZDexelField } from '../stock';
 import { EPS_ABOVE, remainingAbove } from '../stock';
 import type { CutterSpec, GeometryKernel, MeshHandle } from '../kernel/types';
+
+// WO-2998: the stock/part offsets and the stock-minus-part difference go
+// through the kernel geometry service's cam3d adapter over the UNCHANGED
+// geom2d module (never the reverse, which would recurse). geom2d's own
+// validation runs first so every native exception keeps today's message; the
+// facade then has nothing to skip, and any result it does not fully support
+// is rethrown rather than replaced by another engine.
+const geometry = createGeometryService(cam3dAdapter({ offset, boolean }));
+const closedPaths = (rings: readonly Ring[]) =>
+  fromRings(rings).map((points, i) => ({ id: `ring-${i}`, closed: true, points }));
+function supportedRings(result: Result<ReturnType<typeof fromRings>>): Ring[] {
+  if (result.status !== 'supported' || !result.value) {
+    throw new Error(result.diagnostics.map(d => d.message).join('; '));
+  }
+  return toRings(result.value);
+}
+function serviceOffset(rings: readonly Ring[], delta: number): Ring[] {
+  validateRings(rings, 'offset input');
+  return supportedRings(geometry.offset(closedPaths(rings), delta, { join: 'round' }));
+}
+function serviceDifference(a: readonly Ring[], b: readonly Ring[]): Ring[] {
+  validateRings(a, 'boolean(difference) subject');
+  validateRings(b, 'boolean(difference) clip');
+  return supportedRings(geometry.boolean(closedPaths(a), closedPaths(b), 'difference'));
+}
 
 interface IsoPoint {
   x: number;
@@ -466,7 +493,7 @@ export async function cutRegionAt(
   }
   if (reach > 0) {
     // Round join: the corner-reach rolls the stock edge outward like a radius.
-    stockSec = offset(stockSec, reach, { joinType: 'round' });
+    stockSec = serviceOffset(stockSec, reach);
   }
 
   const blockPartSec = opts?.partSection === undefined ? remainingAbove(part, z) : [];
@@ -475,11 +502,11 @@ export async function cutRegionAt(
     : [];
   if (grow > 0 && partSec.length > 0) {
     // Round join: the grown skin follows the wall like a rolling radius.
-    partSec = offset(partSec, grow, { joinType: 'round' });
+    partSec = serviceOffset(partSec, grow);
   }
   if (partSec.length === 0) return stockSec; // no part here: clear the whole stock
 
-  return boolean(stockSec, partSec, 'difference');
+  return serviceDifference(stockSec, partSec);
 }
 
 /** One bounded region: a CCW outer boundary with the CW holes inside it. */

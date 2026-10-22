@@ -76,6 +76,7 @@ const api = {
   measure: (h: BodyHandle, kind: MeasureResult['kind'], ids?: StableId[]) => engine.measure(h, kind, ids),
   classifyFace: (h: BodyHandle, id: StableId) => engine.classifyFace(h, id),
   importStep: (bytes: ArrayBuffer, importId: string) => engine.importStep(bytes, importId),
+  readStepAttributes: (bytes: ArrayBuffer, importId: string) => engine.readStepAttributes(bytes, importId), // WO-3046
   importIges: (bytes: ArrayBuffer, importId: string) => engine.importIges(bytes, importId), // WO-1824
   exportStep: (handles: BodyHandle[]) => engine.exportStep(handles),
   serializeBody: (h: BodyHandle) => engine.serializeBody(h),

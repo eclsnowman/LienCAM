@@ -185,7 +185,25 @@ function uniquePresetKey(baseKey: string, used: Set<string>): string {
   return `${baseKey} (${n})`
 }
 
-function mapPreset(p: FusionPreset): FeedsAndSpeeds {
+// WO-2917: persist converted import values to 0.0001 of the stored unit.
+// Keep metric libraries byte-identical and keep this out of shared validation:
+// manual edits and internal-format imports already carry canonical values.
+function roundImported(value: number, unit: string): number
+function roundImported(value: number | undefined, unit: string): number | undefined
+function roundImported(value: number | undefined, unit: string): number | undefined {
+  if (value === undefined || unit !== 'inches') return value
+  const scaled = value * 10000
+  const rounded = Number.isFinite(scaled) ? Math.round(scaled) / 10000 : value
+  // Do not erase a real sub-resolution dimension/feed or turn a valid cutter
+  // into a rejected zero-diameter record (rule 11).
+  return rounded === 0 && value !== 0 ? value : rounded
+}
+
+function importedMm(raw: number, unit: string): number {
+  return roundImported(toCanonicalMm(raw, unit), unit)
+}
+
+function mapPreset(p: FusionPreset, unit: string): FeedsAndSpeeds {
   const coolantRaw = p['tool-coolant'] ?? 'disabled'
   const coolant: FeedsAndSpeeds['coolant'] =
     coolantRaw === 'flood' ? 'flood'
@@ -194,17 +212,17 @@ function mapPreset(p: FusionPreset): FeedsAndSpeeds {
     : 'none'
   return {
     rpm:             p.n            ?? 0,
-    feedRate:        p.v_f          ?? 0,
-    plungeRate:      p.v_f_plunge   ?? p.v_f ?? 0,
+    feedRate:        roundImported(p.v_f ?? 0, unit),
+    plungeRate:      roundImported(p.v_f_plunge ?? p.v_f ?? 0, unit),
     depthOfCut:      0,
     stepover:        0,
-    rampFeedrate:    p.v_f_ramp,
-    leadInFeedrate:  p.v_f_leadIn,
-    leadOutFeedrate: p.v_f_leadOut,
-    rampAngle:       p['ramp-angle'],
+    rampFeedrate:    roundImported(p.v_f_ramp, unit),
+    leadInFeedrate:  roundImported(p.v_f_leadIn, unit),
+    leadOutFeedrate: roundImported(p.v_f_leadOut, unit),
+    rampAngle:       roundImported(p['ramp-angle'], unit),
     coolant,
-    feedPerTooth:    p.f_z ?? p.fz,   // The wrapped format uses `f_z`
-    surfaceSpeed:    p.v_c ?? p.vc,   // The wrapped format uses `v_c`
+    feedPerTooth:    roundImported(p.f_z ?? p.fz, unit),   // The wrapped format uses `f_z`
+    surfaceSpeed:    roundImported(p.v_c ?? p.vc, unit),   // The wrapped format uses `v_c`
   }
 }
 
@@ -232,9 +250,9 @@ export function parseFusionHolder(holder: FusionHolder | undefined, unit: string
     const rawLower  = typeof s['lower-diameter'] === 'number' ? s['lower-diameter'] : undefined
     const rawUpper  = typeof s['upper-diameter'] === 'number' ? s['upper-diameter'] : undefined
     const segment: HolderSegment = {
-      height:        rawHeight !== undefined ? toCanonicalMm(rawHeight, unit) : NaN,
-      lowerDiameter: rawLower  !== undefined ? toCanonicalMm(rawLower,  unit) : NaN,
-      upperDiameter: rawUpper  !== undefined ? toCanonicalMm(rawUpper,  unit) : NaN,
+      height:        rawHeight !== undefined ? importedMm(rawHeight, unit) : NaN,
+      lowerDiameter: rawLower  !== undefined ? importedMm(rawLower,  unit) : NaN,
+      upperDiameter: rawUpper  !== undefined ? importedMm(rawUpper,  unit) : NaN,
     }
     const check = validateHolderSegment(segment)
     if (check.ok) segments.push(segment)
@@ -250,7 +268,7 @@ export function parseFusionHolder(holder: FusionHolder | undefined, unit: string
       vendor:      holder.vendor,
       productId:   holder['product-id'],
       description: holder.description,
-      gaugeLength: typeof holder.gaugeLength === 'number' ? toCanonicalMm(holder.gaugeLength, unit) : undefined,
+      gaugeLength: typeof holder.gaugeLength === 'number' ? importedMm(holder.gaugeLength, unit) : undefined,
       segments,
     },
     rejectedSegments,
@@ -296,13 +314,14 @@ export function importFusionTools(
       const fluteLengthRaw   = geo.LCF ?? diameterRaw * 2
       const overallLengthRaw = geo.OAL ?? fluteLengthRaw * 2.5
 
-      const diameter          = toCanonicalMm(diameterRaw, unit)
-      const shankDiameter     = toCanonicalMm(shankDiameterRaw, unit)
-      const fluteLength       = toCanonicalMm(fluteLengthRaw, unit)
-      const overallLength     = toCanonicalMm(overallLengthRaw, unit)
-      const shoulderLength    = geo['shoulder-length'] !== undefined ? toCanonicalMm(geo['shoulder-length'], unit) : undefined
-      const lengthBelowHolder = geo.LB !== undefined ? toCanonicalMm(geo.LB, unit) : undefined
-      const cornerRadius      = geo.RE !== undefined ? toCanonicalMm(geo.RE, unit) : undefined
+      const diameterMm        = toCanonicalMm(diameterRaw, unit)
+      const diameter          = roundImported(diameterMm, unit)
+      const shankDiameter     = importedMm(shankDiameterRaw, unit)
+      const fluteLength       = importedMm(fluteLengthRaw, unit)
+      const overallLength     = importedMm(overallLengthRaw, unit)
+      const shoulderLength    = geo['shoulder-length'] !== undefined ? importedMm(geo['shoulder-length'], unit) : undefined
+      const lengthBelowHolder = geo.LB !== undefined ? importedMm(geo.LB, unit) : undefined
+      const cornerRadius      = geo.RE !== undefined ? importedMm(geo.RE, unit) : undefined
 
       const geometryCheck = validateToolGeometry({ diameter, shankDiameter, fluteLength, overallLength, lengthBelowHolder })
       if (!geometryCheck.ok) {
@@ -326,20 +345,22 @@ export function importFusionTools(
       let feedsAndSpeeds: Record<string, FeedsAndSpeeds>
       if (presets.length === 0) {
         feedsAndSpeeds = {
-          default: { rpm: 10000, feedRate: 1000, plungeRate: 300, depthOfCut: diameter * 0.25, stepover: diameter * 0.5 },
+          // Derive from unrounded mm so rounding the diameter does not compound
+          // into a second rounding error in these generated lengths.
+          default: { rpm: 10000, feedRate: 1000, plungeRate: 300, depthOfCut: roundImported(diameterMm * 0.25, unit), stepover: roundImported(diameterMm * 0.5, unit) },
         }
       } else if (presets.length === 1) {
         // Single preset: keep the existing shape exactly (one entry, no key churn).
-        feedsAndSpeeds = { default: mapPreset(presets[0]) }
+        feedsAndSpeeds = { default: mapPreset(presets[0], unit) }
       } else {
         // Multiple named presets: give each its own entry, and additionally
         // alias 'default' to the first preset so existing readers are unaffected.
-        feedsAndSpeeds = { default: mapPreset(presets[0]) }
+        feedsAndSpeeds = { default: mapPreset(presets[0], unit) }
         const usedKeys = new Set<string>(['default'])
         presets.forEach((preset, i) => {
           const key = uniquePresetKey(presetKey(preset, i), usedKeys)
           usedKeys.add(key)
-          feedsAndSpeeds[key] = mapPreset(preset)
+          feedsAndSpeeds[key] = mapPreset(preset, unit)
         })
       }
 
@@ -367,7 +388,7 @@ export function importFusionTools(
         lengthBelowHolder,
         numberOfFlutes:   geo.NOF ?? 2,
         cornerRadius,
-        angleFromAxisDeg: fusionAngleFromAxis(toolType, geo),
+        angleFromAxisDeg: roundImported(fusionAngleFromAxis(toolType, geo), unit),
         material,
         coating:          'none',
         vendor:           ft.vendor,

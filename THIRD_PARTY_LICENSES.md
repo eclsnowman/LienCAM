@@ -214,13 +214,13 @@ Versions are the ones declared in `package.json` at the time of writing;
   later version", the upstream `COPYING` file is the LGPL-2.1 text, and the
   README badge reads "LGPL v2.1" ("From August 2018 OpenCAMLib is released
   under LGPL license"). The npm package's own `package.json` declares
-  `LGPL-3.0`. Because 2.1-or-later lets a recipient choose version 3, and the
-  package we actually ship declares 3.0, **we comply with LGPL-3.0** - the
-  stricter reading covers both.
+  `LGPL-3.0`, which narrows the upstream "2.1 or any later version" grant.
+  Under that upstream grant **we comply with LGPL-2.1** (Eric, 2026-10-16:
+  the LGPL-2.1 text ships in full in every build; the GPL-3.0 text that
+  LGPL-3.0 incorporates did not ship in the web build).
 - Obligations: the library is used unmodified as a separately identifiable
-  module; we give notice of its use and licence (this section), ship the LGPL-3.0
-  text (end of this file; LGPL-3.0 incorporates the GPL-3.0 terms, whose full
-  text ships in `pendant/linuxcnc-gateway/LICENSE`), point to its source (the
+  module; we give notice of its use and licence (this section), ship the LGPL-2.1
+  text (end of this file, the PlaneGCS block), point to its source (the
   two links above), and keep it replaceable: all of LienCAM's own source is
   published (Apache-2.0), so the application can be rebuilt against a modified
   OpenCAMLib.

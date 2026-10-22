@@ -10,6 +10,10 @@
 //   - weights (optional): semi-sharp edges, "lo:hi" -> sharpness s > 0 (the
 //     edge is sharp for the first s subdivision steps, then smooth; an edge in
 //     `creases` is infinitely sharp and carries no weight)
+//   - symmetryReference (optional): the points where they were before the
+//     latest edits, on these same faces (WO-2955). Symmetry pairs points by
+//     where they were there, so an edit made with symmetry off does not lose
+//     a point its mirror partner. Absent: the points as they are now.
 //
 // Topology questions (who neighbours whom, is it manifold) are answered by
 // the half-edge structure in halfEdge.ts, built from this data on demand.
@@ -23,6 +27,14 @@ export interface Cage {
   creases: string[]
   /** semi-sharp edges: edgeKey -> finite sharpness > 0 (absent: none) */
   weights?: Record<string, number>
+  /** the earlier positions symmetry pairs by; only valid while `faces` is unchanged (symmetryReferenceOf) */
+  symmetryReference?: SymmetryReference
+}
+
+export interface SymmetryReference {
+  positions: Vec3[]
+  /** the faces the reference was taken on: any other topology retires it */
+  faces: number[][]
 }
 
 /** The one spelling of an undirected edge: smaller index first. */
@@ -42,7 +54,28 @@ export function cloneCage(cage: Cage): Cage {
     faces: cage.faces.map((f) => f.slice()),
     creases: cage.creases.slice(),
     ...(cage.weights !== undefined ? { weights: { ...cage.weights } } : {}),
+    // a reference that no longer fits (other faces, malformed in a file) is not carried
+    ...(symmetryReferenceOf(cage) !== null ? { symmetryReference: cloneReference(cage.symmetryReference!) } : {}),
   }
+}
+
+export function cloneReference(r: SymmetryReference): SymmetryReference {
+  return { positions: r.positions.map((p) => [p[0], p[1], p[2]] as Vec3), faces: r.faces.map((f) => f.slice()) }
+}
+
+/** Two face lists that are the same loops in the same order. */
+export function sameFaces(a: readonly (readonly number[])[], b: readonly (readonly number[])[]): boolean {
+  return a.length === b.length && a.every((f, i) => f.length === b[i].length && f.every((p, k) => p === b[i][k]))
+}
+
+/** The cage's symmetry reference when it still describes these points on these faces, else null. */
+export function symmetryReferenceOf(cage: Cage): SymmetryReference | null {
+  const r = cage.symmetryReference
+  if (r === undefined || r === null || typeof r !== 'object' || !Array.isArray(r.positions) || !Array.isArray(r.faces)) return null
+  if (r.positions.length !== cage.positions.length) return null
+  if (!r.positions.every((p) => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite))) return null
+  if (!r.faces.every(Array.isArray) || !sameFaces(r.faces, cage.faces)) return null
+  return r
 }
 
 /** A cage's weights with every key passed through `remap` (dropped where it returns null). */

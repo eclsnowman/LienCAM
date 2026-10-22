@@ -44,8 +44,8 @@ const ALL_ENTITIES: ClickableEntity[] = ['planarFace', 'cylinder', 'edge', 'loop
 
 describe('OPERATION_GEOMETRY record', () => {
   it('covers exactly the OperationType variants (no gaps, no extras)', () => {
-    // 10 x 2.5d + 6 x 3d = 16 ops
-    expect(ALL_OPS).toHaveLength(16)
+    // 11 x 2.5d (WO-3001 added pattern) + 6 x 3d = 17 ops
+    expect(ALL_OPS).toHaveLength(17)
   })
 
   it('every 3d op uses solid selection rather than clickable body entities', () => {
@@ -217,6 +217,17 @@ describe('chamfer', () => {
   })
   it('chamfer + planarFace -> ok:false', () => {
     expect(consumeEntity('chamfer', face()).ok).toBe(false)
+  })
+})
+
+describe('pattern (WO-3001)', () => {
+  it('pattern + closed loop -> ok (its optional region is closed loops)', () => {
+    expect(consumeEntity('pattern', loop()).ok).toBe(true)
+  })
+  it('pattern + open curve, edge or face -> ok:false (an open loop never bounds the region)', () => {
+    expect(consumeEntity('pattern', openCurve()).ok).toBe(false)
+    expect(consumeEntity('pattern', edge()).ok).toBe(false)
+    expect(consumeEntity('pattern', face()).ok).toBe(false)
   })
 })
 

@@ -17,6 +17,7 @@
  * which is the most robust path and sidesteps the worker-fillet bug (gotcha #7).
  */
 import { OcctKernel } from 'occt-wasm'
+import { StepImportCache, type StepImportKey } from '../stepImportCache'
 import { parseEdgeToFaceMap, planarEdgeAdjacency } from './planarAdjacency'
 import { registerKernel, OcctWasmAdapter } from 'brepjs'
 import type { EvolutionData, LabelTag, ShapeHandle, SurfaceKind, XCAFDocument } from 'occt-wasm'
@@ -461,6 +462,8 @@ export interface GeomEngineOptions {
   /** wasm source passed to OcctKernel.init({wasm}). In the browser worker this
    *  is the Vite `?url` string; in Node leave undefined to auto-locate. */
   wasm?: string | URL | ArrayBuffer | Uint8Array
+  /** Disable import reuse for independent geometry/performance comparisons. */
+  stepImportCache?: boolean
 }
 
 /**
@@ -814,11 +817,22 @@ function matchesFeatureQuery(v: FeatureVerdict, q: FeatureQuery): boolean {
   return true
 }
 
+interface CachedStepImport {
+  bodies: Array<{ shape: ShapeHandle; body: Omit<ImportedBody, 'handle'>; snapshots: DeltaSnapshots }>
+  diagnostics: Diag[]
+}
+
 export class GeomEngine {
   #kernel: OcctKernel | null = null
   #wasm: GeomEngineOptions['wasm']
   #bodies = new Map<number, BodyRecord>()
   #nextHandle = 1
+  #stepImportCacheEnabled: boolean
+  #stepImportCache = new StepImportCache<CachedStepImport>(entry => {
+    for (const body of entry.bodies) {
+      try { this.#k().release(body.shape) } catch { /* kernel teardown */ }
+    }
+  })
   /** WO-2093: largest fillet/chamfer that fits, per body GEOMETRY + edge set.
    *  A preview replays onto a fresh body handle on every keystroke, and each
    *  probe the search makes can throw inside the kernel (WO-1894: caught native
@@ -864,6 +878,7 @@ export class GeomEngine {
 
   constructor(opts: GeomEngineOptions = {}) {
     this.#wasm = opts.wasm
+    this.#stepImportCacheEnabled = opts.stepImportCache !== false
   }
 
   #k(): OcctKernel {
@@ -885,6 +900,7 @@ export class GeomEngine {
 
   // ---- lifecycle -------------------------------------------------------
   async init(onProgress?: (pct: number, phase: string) => void): Promise<KernelInfo> {
+    this.#stepImportCache.clear()
     onProgress?.(2, 'geom:starting')
     onProgress?.(10, 'geom:loading-wasm')
     const kernel = await OcctKernel.init(this.#wasm ? { wasm: this.#wasm } : undefined)
@@ -911,6 +927,7 @@ export class GeomEngine {
   }
 
   async disposeAll(): Promise<void> {
+    this.#stepImportCache.clear()
     for (const r of this.#bodies.values()) {
       try {
         this.#k().release(r.shape as ShapeHandle)
@@ -934,6 +951,7 @@ export class GeomEngine {
    * re-init()'d before reuse.
    */
   async disposeKernel(): Promise<void> {
+    this.#stepImportCache.clear()
     // Release everything we still hold before dropping the kernel.
     for (const r of this.#bodies.values()) {
       try { this.#kernel?.release(r.shape as ShapeHandle) } catch { /* ignore */ }
@@ -8621,22 +8639,17 @@ export class GeomEngine {
   }
 
   /**
-   * importStep (GEO-2 acceptance #1/#2). Two-phase: try the XCAF path first
-   * (names/colors from the STEP PRODUCT/label tree, verified working against
-   * this package 2026-07-07 — see STAGE0_FINDINGS gotcha #9 and this WO's
-   * report). If the file carries no usable XCAF structure — no PRODUCT tree,
-   * or importXCAFFromSTEP throws on a pure-geometry STEP export — we degrade
-   * to the plain importStep() path with deterministic `IMPn:step:body#k`
-   * names. Both outcomes are contract-legal (ImportedBody.name is optional);
-   * the gap is recorded as a documented 'OK'/info diagnostic either way, per
-   * WO GEO-2 criterion 2 ("an undocumented silent gap is not" acceptable).
+   * The read half of importStep: the XCAF parse, then the plain-parse fallback
+   * when the document gave no labelled component shapes. Returns the caller-
+   * owned source shapes in import order with their names/colours, or the one
+   * KERNEL_OP_FAILED diagnostic importStep reports when the plain read fails.
    */
-  async importStep(bytes: ArrayBuffer, importId: string): Promise<{ bodies: ImportedBody[]; diagnostics: Diag[] }> {
+  #readStepSources(bytes: ArrayBuffer):
+    | { sources: Array<{ shape: ShapeHandle; name?: string; color?: [number, number, number] }>; diagnostics: Diag[] }
+    | { failure: Diag[] } {
     const k = this.#k()
     const diagnostics: Diag[] = []
-
-    type Source = { shape: ShapeHandle; name?: string; color?: [number, number, number] }
-    let sources: Source[] = []
+    let sources: Array<{ shape: ShapeHandle; name?: string; color?: [number, number, number] }> = []
     try {
       const text = new TextDecoder().decode(bytes)
       const doc = k.importXCAFFromSTEP(text)
@@ -8677,15 +8690,47 @@ export class GeomEngine {
       try {
         root = k.importStep(bytes)
       } catch (e) {
-        return {
-          bodies: [],
-          diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { op: 'importStep', message: (e instanceof Error ? e.message : String(e)).slice(0, 200) } }],
-        }
+        return { failure: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { op: 'importStep', message: (e instanceof Error ? e.message : String(e)).slice(0, 200) } }] }
       }
       let solids = k.getSubShapes(root, 'solid')
       if (solids.length === 0) solids = [root]
+      else k.release(root) // the extracted solids, not their wrapper, become sources
       sources = solids.map((shape) => ({ shape }))
     }
+    return { sources, diagnostics }
+  }
+
+  /**
+   * importStep (GEO-2 acceptance #1/#2). Two-phase: try the XCAF path first
+   * (names/colors from the STEP PRODUCT/label tree, verified working against
+   * this package 2026-07-07 — see STAGE0_FINDINGS gotcha #9 and this WO's
+   * report). If the file carries no usable XCAF structure — no PRODUCT tree,
+   * or importXCAFFromSTEP throws on a pure-geometry STEP export — we degrade
+   * to the plain importStep() path with deterministic `IMPn:step:body#k`
+   * names. Both outcomes are contract-legal (ImportedBody.name is optional);
+   * the gap is recorded as a documented 'OK'/info diagnostic either way, per
+   * WO GEO-2 criterion 2 ("an undocumented silent gap is not" acceptable).
+   */
+  async importStep(bytes: ArrayBuffer, importId: string): Promise<{ bodies: ImportedBody[]; diagnostics: Diag[] }> {
+    const k = this.#k()
+    // The frozen API accepts no reader options or placement. Keep their
+    // actual fixed values explicit; a future parameter must change this key.
+    const key: StepImportKey = {
+      importId, options: 'xcaf-first/plain-fallback/default-units-tolerance',
+      placement: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+      kernelVersion: `${OCCT_VERSION}/occt-wasm-3.6.1-geo9-iges-history-stack`,
+      engineVersion: 'step-import-order-lineage-v1',
+    }
+    const cached = this.#stepImportCacheEnabled ? this.#stepImportCache.get(bytes, key) : undefined
+    if (cached) {
+      try { return this.#copyStepImport(cached) } catch {
+        // A failed copy cannot publish partial bodies or retain bad native data.
+        this.#stepImportCache.delete(importId)
+      }
+    }
+    const read = this.#readStepSources(bytes)
+    if ('failure' in read) return { bodies: [], diagnostics: read.failure }
+    const { sources, diagnostics } = read
 
     const bodies: ImportedBody[] = []
     // Import-order face index is FROZEN across the whole import (spec §Determinism).
@@ -8732,7 +8777,81 @@ export class GeomEngine {
       }
     }
     diagnostics.push(...okDiag())
+    if (this.#stepImportCacheEnabled && bodies.length > 0) {
+      const retained: CachedStepImport = { bodies: [], diagnostics: structuredClone(diagnostics) }
+      try {
+        for (const { handle, ...body } of bodies) {
+          retained.bodies.push({
+            body: structuredClone(body), snapshots: structuredClone(this.snapshotsFor(handle)),
+            shape: k.copy(this.#rec(handle).shape as ShapeHandle),
+          })
+        }
+        this.#stepImportCache.set(bytes, key, retained)
+      } catch {
+        // Reuse is optional: keep the successful import if retaining it fails.
+        for (const entry of retained.bodies) {
+          try { k.release(entry.shape) } catch { /* already released */ }
+        }
+      }
+    }
     return { bodies, diagnostics }
+  }
+
+  /**
+   * WO-3046: the name/colour half of importStep without minting bodies. Same
+   * read (#readStepSources), same per-body names, colours and diagnostics, one
+   * part per body importStep would mint, but no face probes, no body records
+   * and no import-cache copy. CAM Import geometry needs only these attributes
+   * (src/lib/import/stepAttributes.ts); its geometry comes from occt-model.
+   */
+  async readStepAttributes(bytes: ArrayBuffer, importId: string): Promise<{ parts: Array<{ name?: string; color?: [number, number, number] }>; diagnostics: Diag[] }> {
+    const k = this.#k()
+    const read = this.#readStepSources(bytes)
+    if ('failure' in read) return { parts: [], diagnostics: read.failure }
+    const parts: Array<{ name?: string; color?: [number, number, number] }> = []
+    for (const src of read.sources) {
+      const solids = k.getSubShapes(src.shape, 'solid')
+      for (let i = 0; i < Math.max(1, solids.length); i++) {
+        parts.push({ name: src.name ?? `${importId}:step:body#${parts.length}`, color: src.color })
+      }
+      for (const solid of solids) {
+        try { k.release(solid) } catch { /* already released */ }
+      }
+      try { k.release(src.shape) } catch { /* already released */ }
+    }
+    return { parts, diagnostics: [...read.diagnostics, ...okDiag()] }
+  }
+
+  /** Independent native copies: cached topology never belongs to a live body.
+   * Face hashes belong to the COPY, so rebuild that map in frozen import order.
+   * Probes/lineage are evaluated once and cloned, never shared with callers. */
+  #copyStepImport(entry: CachedStepImport): { bodies: ImportedBody[]; diagnostics: Diag[] } {
+    const k = this.#k()
+    const copies: ShapeHandle[] = []
+    try {
+      const records = entry.bodies.map(src => {
+        const shape = k.copy(src.shape)
+        copies.push(shape)
+        const faces = k.getSubShapes(shape, 'face')
+        const faceMap = new Map<number, StableId>()
+        try {
+          if (faces.length !== src.body.elementMap.generated.length) throw new Error('STEP copy face count changed')
+          faces.forEach((face, i) => faceMap.set(k.hashCode(face, HM), src.body.elementMap.generated[i]))
+        } finally {
+          for (const face of faces) k.release(face)
+        }
+        return { shape: shape as number, faceMap,
+          snapshots: new Map(Object.entries(structuredClone(src.snapshots))) }
+      })
+      // Prepare all fallible pure-data copies before minting any live handles.
+      const data = structuredClone(entry.bodies.map(src => src.body))
+      const diagnostics = structuredClone(entry.diagnostics)
+      const bodies = records.map((record, i) => ({ ...data[i], handle: this.#mint(record) }))
+      return { bodies, diagnostics }
+    } catch (error) {
+      for (const shape of copies) { try { k.release(shape) } catch { /* already released */ } }
+      throw error
+    }
   }
 
   /**

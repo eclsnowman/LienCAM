@@ -440,6 +440,15 @@ export function folderSuppressCommand(dag: FeatureDag, folders: TreeFolderStore,
 /** Undo/redo history cap (plan §3.4: "Cap history at N=200 commands"). */
 export const HISTORY_CAP = 200
 
+/** WO-2978: one entry of node ids per history step, kept in lockstep with a
+ *  CommandHistory's past (or future) stack by whoever executes on it -- the
+ *  ids an undo/redo of that step must re-dirty. React's MutableRefObject
+ *  shape, so the workbench page's `touchedPastRef.current = ...` sites work
+ *  on a ModelSession's stacks unchanged. */
+export interface TouchedStack {
+  current: string[][]
+}
+
 /** In-memory checkpoint for a transaction that must be cancelled without
  * replaying a chain of user-visible undo operations. */
 export interface CommandHistoryCheckpoint {
@@ -459,10 +468,25 @@ export class CommandHistory {
   private readonly future: Command[] = []
   private readonly dag: FeatureDag
   private readonly cap: number
+  private rev = 0
 
   constructor(dag: FeatureDag, cap: number = HISTORY_CAP) {
     this.dag = dag
     this.cap = cap
+  }
+
+  /**
+   * WO-2978 (WO-2951 review D1): the history's own edit counter. +1 on every
+   * mutation that changes the document or the undo stacks -- execute, undo,
+   * redo, coalesceIntoLast and restoreCheckpoint -- and never on a call that
+   * changed nothing (an empty undo/redo, a refused coalesce, a do() that
+   * threw). It lives HERE rather than in ModelSession because the workbench
+   * page calls this class directly at many sites (dialog Apply, coalesced
+   * follow-ups, Cancel restores); a counter kept one layer up would miss them.
+   * Session-only, like the stacks: never serialized.
+   */
+  get revision(): number {
+    return this.rev
   }
 
   execute(cmd: Command): void {
@@ -470,6 +494,7 @@ export class CommandHistory {
     this.past.push(cmd)
     if (this.past.length > this.cap) this.past.shift()
     this.future.length = 0
+    this.rev++
   }
 
   /**
@@ -498,6 +523,7 @@ export class CommandHistory {
     followUp.do(this.dag)
     this.past[lastIndex] = new CompositeCommand([expected, followUp], expected.label)
     this.future.length = 0
+    this.rev++
     return true
   }
 
@@ -514,6 +540,7 @@ export class CommandHistory {
     if (!cmd) return false
     cmd.undo(this.dag)
     this.future.push(cmd)
+    this.rev++
     return true
   }
 
@@ -523,6 +550,7 @@ export class CommandHistory {
     cmd.do(this.dag)
     this.past.push(cmd)
     if (this.past.length > this.cap) this.past.shift()
+    this.rev++
     return true
   }
 
@@ -538,6 +566,7 @@ export class CommandHistory {
   restoreCheckpoint(checkpoint: CommandHistoryCheckpoint): void {
     this.past.splice(0, this.past.length, ...checkpoint.past)
     this.future.splice(0, this.future.length, ...checkpoint.future)
+    this.rev++
   }
 
   /** Plain-JSON serialization of the applied (undoable) command history -- geometry never appears here (AC #5). */

@@ -69,9 +69,10 @@ describe('WO-2861: every shipped example opens ready, under its own name', () =>
     expect(operations.filter((op) => op.status !== 'ready' || op.moves === 0)).toEqual([])
   })
 
-  it('Full Suite opens with all nine toolpaths, not "pending"', () => {
+  it('Full Suite opens with all nineteen toolpaths, not "pending"', () => {
     const { operations } = opened.get('Full Suite')!
-    expect(operations).toHaveLength(9)
+    // WO-2935: The operator chose the modeled-bevel Full Suite (19 operations) on 10-18.
+    expect(operations).toHaveLength(19)
     expect(operations.every((op) => op.status === 'ready' && op.moves > 0)).toBe(true)
   })
 

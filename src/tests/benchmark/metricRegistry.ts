@@ -50,6 +50,9 @@ export interface MetricSpec {
    * are not part of the completeness walk over `row.metrics`.
    */
   rowLevel?: boolean
+  hard?: boolean
+  /** Test-side research scores never decide the landing gate. */
+  informational?: boolean
 }
 
 /**
@@ -99,6 +102,16 @@ export const METRIC_SPECS: Record<string, MetricSpec> = {
   maxFlipDeg: { direction: 'lower', band: { pct: 0.1, abs: 1 } },
   p95FlipDeg: { direction: 'lower', band: { pct: 0.1, abs: 1 } },
   distinctCutZValues: { direction: 'neutral', band: { pct: 0, abs: 0 } },
+  // WO-3036: sharp corners in the LINKING motion -- a keep-down ride that feeds out
+  // into cleared space and doubles back (the form-torus spikes, operator ruling 2026-10-21).
+  // The flip rate breaks its runs on links by design, so without these the stick
+  // could not see them. Soft research cells: they are read, never a landing verdict.
+  linkSharpTurns: { direction: 'lower', band: { pct: 0.05, abs: 1 }, informational: true },
+  linkSpikeRides: { direction: 'lower', band: { pct: 0.05, abs: 1 }, informational: true },
+  linkSpikeFeedMm: { direction: 'lower', band: { pct: 0.05, abs: 0.5 }, informational: true },
+  linkSpikeHopMm: { direction: 'lower', band: { pct: 0.05, abs: 0.5 }, informational: true },
+  linkSpikeExtraMm: { direction: 'lower', band: { pct: 0.05, abs: 0.5 }, informational: true },
+  linkSpikeFeedSharePct: { direction: 'lower', band: { pct: 0.05, abs: 0.2 }, informational: true },
   levelCount: { direction: 'neutral', band: { pct: 0, abs: 0 } },
   // Sustained radial engagement, as a fraction of a full-width slot (the engine's
   // own unit -- see metrics.ts). A cap breach is what adaptive exists to prevent,
@@ -126,6 +139,69 @@ export const METRIC_SPECS: Record<string, MetricSpec> = {
   planMs: { direction: 'lower', band: { pct: 0.6, abs: 400 }, timing: true, rowLevel: true },
 }
 
+/** Alpha3-only additions never widen the smoke/full completeness set or bands. */
+export const ALPHA3_METRIC_SPECS: Record<string, MetricSpec> = {
+  // WO-2902: alpha3-only; legacy completeness and landing bands are unchanged.
+  'M-SAFE-2': { direction: 'lower', band: { pct: 0, abs: 0 }, hard: true },
+  'M-SAFE-4': { direction: 'higher', band: { pct: 0, abs: 0 }, hard: true },
+  'M-SAFE-5': { direction: 'lower', band: { pct: 0, abs: 0 }, hard: true },
+  'M-SAFE-6': { direction: 'lower', band: { pct: 0, abs: 0 }, hard: true },
+  'M-LOAD-4': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-LOAD-5': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-LOAD-7': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-GEOM-2': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-GEOM-2.mean': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-GEOM-3': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-GEOM-4': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-1': { direction: 'lower', band: { pct: 0, abs: 0 }, hard: true },
+  'M-ENTRY-2': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-3': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-3.length': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-4': { direction: 'higher', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-4.outside': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-4.cleared': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-4.helix': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-4.ramp': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-4.plunge': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-5': { direction: 'higher', band: { pct: 0.05, abs: 0.001 } },
+  'M-ENTRY-6': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-LINK-4': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-LINK-5': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-AIR-1': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-AIR-1.share': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-AIR-2': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PART-5': { direction: 'higher', band: { pct: 0.05, abs: 0.001 } },
+  'M-TIME-3': { direction: 'higher', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-5': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.uccnc.bytesPerMm': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.uccnc.arcShare': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.grbl.bytesPerMm': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.grbl.arcShare': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.grblhal.bytesPerMm': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.grblhal.arcShare': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.linuxcnc.bytesPerMm': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.linuxcnc.arcShare': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.generic.bytesPerMm': { direction: 'lower', band: { pct: 0.05, abs: 0.001 } },
+  'M-PROG-4.generic.arcShare': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 } },
+  'M-SET-1': { direction: 'lower', band: { pct: 0, abs: 0 }, informational: true },
+  'M-SET-2': { direction: 'neutral', band: { pct: 0.05, abs: 1 }, informational: true },
+  'M-SET-3': { direction: 'neutral', band: { pct: 0.05, abs: 0.001 }, informational: true },
+  'M-SET-4': { direction: 'neutral', band: { pct: 0.05, abs: 0.01 }, informational: true },
+  'M-SET-5': { direction: 'neutral', band: { pct: 0.05, abs: 0.01 }, informational: true },
+  'M-SET-6': { direction: 'neutral', band: { pct: 0.05, abs: 0.05 }, informational: true },
+  'M-SET-7': { direction: 'higher', band: { pct: 0.05, abs: 0.01 }, informational: true },
+  'M-LOAD-6': { direction: 'higher', band: { pct: 0.05, abs: 0.01 }, informational: true },
+  'M-PART-4': { direction: 'higher', band: { pct: 0, abs: 0 }, hard: true },
+}
+
+export function assertAlpha3RowComplete(rowKey: string, metrics: Readonly<Record<string, MetricValue>>): void {
+  assertRowComplete(rowKey, metrics)
+  for (const name of Object.keys(ALPHA3_METRIC_SPECS)) {
+    if (!(name in metrics)) throw new Error(`benchmark row ${rowKey}: alpha3 metric ${name} absent`)
+  }
+}
+
 /**
  * Every metric a row's `metrics` map must carry -- the registry minus the ones
  * that live on the row itself. Sorted, so a completeness failure reads the same
@@ -141,7 +217,7 @@ export const REQUIRED_ROW_METRICS: readonly string[] = Object.keys(METRIC_SPECS)
  * cell judged against a guessed band is worse than no cell.
  */
 export function specFor(metric: string): MetricSpec {
-  const spec = METRIC_SPECS[metric]
+  const spec = METRIC_SPECS[metric] ?? ALPHA3_METRIC_SPECS[metric]
   if (!spec) {
     throw new Error(
       `benchmark: metric "${metric}" is not in METRIC_SPECS. Register it in ` +
@@ -203,7 +279,7 @@ export function assertRowComplete(rowKey: string, metrics: Readonly<Record<strin
         'A missing metric is invisible -- that is how WO-1217 shipped two half-empty rows.',
     )
   }
-  const unregistered = Object.keys(metrics).filter((name) => !(name in METRIC_SPECS))
+  const unregistered = Object.keys(metrics).filter((name) => !(name in METRIC_SPECS) && !(name in ALPHA3_METRIC_SPECS))
   if (unregistered.length > 0) {
     throw new Error(
       `benchmark row ${rowKey}: metric(s) not in the registry: ${unregistered.join(', ')}. ` +

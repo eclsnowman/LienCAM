@@ -65,6 +65,18 @@
   }
 }
 
+/* WO-2330: content-measured fallback supplements the established viewport
+   breakpoints. Keep the workflow names; reclaim utility/file labels first.
+   The final 2px per tab side covers a translated strip's narrow fit without
+   changing the wordmark footprint, font size or any action/accessible name. */
+.top-toolbar[data-fit] .toolbar-section-right .tb-btn span,
+.top-toolbar[data-fit='commands'] .toolbar-section-left .tb-btn span {
+  display: none;
+}
+.top-toolbar[data-fit='commands'] .header-mode-tabs .mode-tab {
+  padding-inline: 10px;
+}
+
 /* WO-047 removed the floating mode strip that needed 46px of clearance. */
 .control-operator-bar {
   margin: 6px 8px;

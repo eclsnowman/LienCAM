@@ -13,6 +13,8 @@
 // API; the FreeCAD +-1 scaled fudge factors (to avoid coincident-edge artifacts) are
 // dropped -- in mm they are sub-resolution and clipper2's precision handles them.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import {
   type Pt, type Loops,
   diskPath, capsulePath, difference, intersection, totalArea,
@@ -165,7 +167,7 @@ export function createToolGeometry(radius: number, stepOver: number, arcTol = 0.
   // Cache the origin-anchored swept crescent, keyed by quantised displacement.
   const shapeCache = new Map<string, Loops>()
   let hits = 0, misses = 0
-  const QUANT = 1e-3 // mm grid for the cache key
+  const QUANT = AP.sampling.cutAreaCacheQuantMm // mm grid for the cache key
 
   function cutShapeAtOrigin(dx: number, dy: number): Loops {
     const key = `${Math.round(dx / QUANT)}|${Math.round(dy / QUANT)}`
@@ -193,8 +195,8 @@ export function createToolGeometry(radius: number, stepOver: number, arcTol = 0.
   // box around the tool and reuse that small local polygon for every query inside the box
   // -- the angle search (~12 calls per step at a fixed `from`) and the next several steps.
   // Far geometry cannot intersect the crescent, so the result is identical; only faster.
-  const BOUND_HALF = radius * 4   // box half-extent: larger => fewer (O(cleared)) re-clips
-  const BOUND_MARGIN = radius * 2 // > max crescent reach from `from` (|step| + radius); keeps every reused crescent fully inside the box
+  const BOUND_HALF = radius * AP.sampling.cutAreaBoundHalfRadii   // box half-extent: larger => fewer (O(cleared)) re-clips
+  const BOUND_MARGIN = radius * AP.sampling.cutAreaBoundMarginRadii // > max crescent reach from `from` (|step| + radius); keeps every reused crescent fully inside the box
   let boundRef: Loops | null = null
   let boundCx = 0, boundCy = 0
   let boundLocal: Loops = []

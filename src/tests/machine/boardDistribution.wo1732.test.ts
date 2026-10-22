@@ -41,8 +41,9 @@ describe.skipIf(process.platform !== 'win32')('WO-1732 board data distribution',
   it('replaces stale output with an exact byte-for-byte copy of shipped tables', () => {
     const sourceNames = readdirSync(SOURCE_BOARDS).filter((name) => name.endsWith('.json')).sort()
     const builtNames = readdirSync(BUILT_BOARDS).filter((name) => name.endsWith('.json')).sort()
-    expect(sourceNames).toEqual(['uc100.json'])
+    expect(sourceNames).toEqual(['compat.json', 'uc100.json']) // WO-2844 adds the compatibility record
     expect(builtNames).toEqual(sourceNames)
+    expect(readFileSync(join(BUILT_BOARDS, 'compat.json')).equals(readFileSync(join(SOURCE_BOARDS, 'compat.json')))).toBe(true)
 
     const source = readFileSync(join(SOURCE_BOARDS, 'uc100.json'))
     const built = readFileSync(join(BUILT_BOARDS, 'uc100.json'))

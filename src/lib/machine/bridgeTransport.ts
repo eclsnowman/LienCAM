@@ -69,6 +69,9 @@ export interface BridgeCallMessage {
   a: Record<string, unknown>
 }
 
+/** Receipt from the console, independent of controller calls and motion. */
+export type BridgeClientMessage = BridgeCallMessage | { t: 'firmwareUpdateAck'; id: string }
+
 /** Arguments for the one bridge call that persists a definition. Provenance
  * is optional on the protocol for compatibility with older callers; the app's
  * apply path always supplies it, including an empty map when no value differs. */
@@ -145,7 +148,7 @@ export interface BridgeStatusPush {
 
 export interface BridgeConsolePush {
   t: 'console'
-  v: { dir: 'tx' | 'rx'; text: string; severity: 'info' | 'warn' | 'error' }
+  v: { dir: 'tx' | 'rx'; text: string; severity: 'info' | 'warn' | 'error'; firmwareUpdateId?: string }
 }
 
 export interface BridgePhasePush {
@@ -1726,7 +1729,7 @@ export class BridgeTransport implements MessageChannel {
 
   /** Send one call frame. Fire-and-forget at the wire level - the caller
    *  correlates the reply by `seq` if it needs one. */
-  send(message: BridgeCallMessage): void {
+  send(message: BridgeClientMessage): void {
     const socket = this.socket
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       throw new Error('Transport not started')

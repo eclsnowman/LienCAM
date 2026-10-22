@@ -14,11 +14,11 @@ To send a test report, post in [GitHub Discussions](https://github.com/eclsnowma
 
 ## The list
 
-- [UCCNC control](Controllers-UCCNC-UC100-AXBB-E) is Windows-only and proven on one machine.
+- [UCCNC control](Controllers-UCCNC-UC100-AXBB-E) is proven on one Windows machine. Ethernet boards are also supported on x86-64 Linux through Wine; see [Linux setup](Install-on-Linux). The Linux launcher still needs machine-seat readback and package validation. Route A release depends on WO-2896 (feed-rate override after a held Stop). Wine route A does not cover USB boards or ARM; ARM uses the separate native-driver route (WO-2895).
 - [LinuxCNC control](Controllers-LinuxCNC) is proven on the LinuxCNC 2.9.4 simulator only; [GRBL and grblHAL](Controllers-GRBL-and-grblHAL) are tested against grbl-sim only.
 - Machine fixes made close to a release may have been proven only on a simulator; each release is checked with a short in-air run on the author's own machine before it ships.
 - A UCCNC bridge restart loses position. After **Restart bridge**, home before jogging or running a job.
-- Linux/mac builds untested. Unsigned installer. See [Install on Windows](Install-on-Windows), [Install on Linux](Install-on-Linux) and [Install on macOS](Install-on-macOS).
+- Linux/mac installers remain unsigned and need real package validation. Linux Wine launcher tests use a stubbed process, not a board readback. See [Install on Windows](Install-on-Windows), [Install on Linux](Install-on-Linux) and [Install on macOS](Install-on-macOS).
 
 ## Status of the rest
 

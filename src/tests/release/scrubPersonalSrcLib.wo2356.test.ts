@@ -50,7 +50,10 @@ describe('WO-2356 personal information in library source', () => {
     // WO-2875 RE-PIN 523 -> 525: WO-2858 operatorLabels.ts, WO-2877 format/lengthDisplay.ts.
     // WO-2882 RE-PIN 525 -> 527: WO-2859 cam/meshChainInstances.ts (ac6e219161),
     // WO-2878 machine/currentTool.ts (6cf08b5011).
-    expect(report.files).toBe(527)
+    // WO-3056 RE-PIN 527 -> 569: 42 library source files were added since WO-2882 (tree growth,
+    // not a scrub change); the hit and rule counts below are unchanged.
+    // WO-3059 RE-PIN 569 -> 570: WO-3021 added cam/chamferFromModel.ts (8860bbf478); hits unchanged.
+    expect(report.files).toBe(570)
     expect(report.hits).toEqual([])
     expect(Object.entries(report.counts).filter(([rule]) => rule !== 'personal:lien').every(([, count]) => count === 0)).toBe(true)
   }, 30_000)

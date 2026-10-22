@@ -1,3 +1,4 @@
+import { isMain } from '../../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -290,7 +291,7 @@ export async function selfCheck({ negativeControl = false } = {}) {
   })
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   if (!process.argv.includes('--self-check')) throw new Error('Usage: node tools/examples/lib/drive.mjs --self-check [--negative-control]')
   await selfCheck({ negativeControl: process.argv.includes('--negative-control') })
 }

@@ -164,8 +164,9 @@ describe('CAM-OPS-MODEL-E2E Part 2: face (boundarySource: stock, the default) wi
   it('is NOT refused by the model-origin guard and reaches a real COMPUTE_FACE worker dispatch', async () => {
     void useCamStore.getState().computeOperationToolpath('setup-1', 'op-1')
       .catch(() => { /* the silent-worker shim never resolves; unrelated to this assertion */ })
-    await Promise.resolve()
-    await Promise.resolve()
+    // WO-2953: Face reads the shared remaining-stock state before it
+    // dispatches, so wait for the one real worker request.
+    await vi.waitFor(() => expect(workerRequests).toHaveLength(1))
 
     expect(currentOp().errorMessage ?? '').not.toMatch(/sources modeled geometry/)
     expect(currentOp().status).not.toBe('unsupported')

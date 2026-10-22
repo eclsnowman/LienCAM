@@ -1,3 +1,4 @@
+import { isMain } from '../../lib/is-main.mjs';
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -374,7 +375,7 @@ export async function runClips({ build, catalog, only, evidence = 'src/tests/evi
   return result
 }
 
-if (import.meta.url === pathToFileURL(path.resolve(process.argv[1] || '')).href) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), option = key => args.includes(key) ? args[args.indexOf(key) + 1] : undefined
   try {
     if (!args[0]) throw new Error('Usage: node tools/capture/lib/clip-runner.mjs <release-build> [--catalog file] [--only V01,V02] [--evidence directory] [--run-name run-1]')

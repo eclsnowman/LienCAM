@@ -17,6 +17,11 @@
 // determinism contract (it is diagnostic only, exactly like the store's other
 // compute paths).
 
+import type { Parallel3dParams } from '../../kernel/parameterTypes';
+export type { Parallel3dParams } from '../../kernel/parameterTypes';
+export { DEFAULT_PARALLEL3D_PARAMS } from '../../kernel/parameterDefaults';
+export { readParallel3dParams } from '../../kernel/schema';
+
 import type { CutterSpec, PartMesh } from '../kernel/types';
 import type { PathBuildHeights } from '../pathbuild';
 import type { Ring } from '../geom2d';
@@ -29,99 +34,6 @@ import type { MeshEditRecord } from '../../mesh/edit';
 import type { Cam3dFaceScope, FeedrateOverride, ToolpathMove, Tool } from '../../types';
 import { resolveFeedrates } from '../../lib/cam/feedrates';
 import { toolToCutterSpec } from './cutterSpec';
-
-/**
- * The parameters a parallel_3d op carries in `op.params` (Operation.params is
- * `Record<string, unknown>`, so no core type change is needed). The UI wave
- * reads/writes exactly these fields.
- */
-export interface Parallel3dParams {
-  /** Pass spacing, mm (> 0). */
-  stepover: number;
-  /** Pass direction, degrees CCW from +X. */
-  angleDeg: number;
-  /** Max chordal deviation of the sampled polyline from the surface, mm. */
-  tolerance: number;
-  /** Material left along the sampled 3D surface normal, mm. */
-  surfaceStockToLeave?: number;
-  /** Shallow areas only; 0/undefined keeps the legacy whole-part raster. */
-  maxSlopeDeg?: number;
-  /** Optional maximum finish depth below model top, mm. */
-  finishDepth?: number;
-  /**
-   * Clip passes to the stock footprint (true) or the part xy-bounds (false).
-   * This SELECTS which boundary contains the passes. It does not overrun
-   * whichever boundary is chosen -- that is `stockEdgeOvershoot` (WO-1271).
-   */
-  useStockBoundary: boolean;
-  /**
-   * WO-1271. Stock-edge overrun: mm PAST the containment edge the tool
-   * CENTRE may travel, so the round cutter clears the edge instead of
-   * stopping with its axis on it and leaving one radius of material behind.
-   * Same name and semantics as Adaptive Rough 3D's `stockEdgeOvershoot`
-   * (ADR-0015 s2 is one cross-cutting convention, not three spellings):
-   * undefined = AUTO (the tool radius); 0 = none (the pre-WO-1271 toolpath).
-   * Never applied to a face-scoped pass (WO-1223): a selection edge is a
-   * wall the cutter must not cross, so that region stays inset.
-   */
-  stockEdgeOvershoot?: number;
-}
-
-/** Defaults for a freshly-created parallel_3d op / a params record missing fields. */
-export const DEFAULT_PARALLEL3D_PARAMS: Parallel3dParams = {
-  stepover: 1,
-  angleDeg: 0,
-  tolerance: 0.05,
-  surfaceStockToLeave: 0,
-  maxSlopeDeg: undefined,
-  finishDepth: undefined,
-  useStockBoundary: false,
-  stockEdgeOvershoot: undefined, // undefined -> auto (tool radius)
-};
-
-/**
- * Read a Parallel3dParams out of an untyped `op.params` record, filling any
- * missing/invalid field from the defaults (fail-soft on shape, since the UI
- * wave is what will author these). Numeric fields are validated finite/positive
- * where that is required by the client input.
- */
-export function readParallel3dParams(params: Record<string, unknown>): Parallel3dParams {
-  const num = (v: unknown, fallback: number, mustBePositive: boolean): number => {
-    if (typeof v === 'number' && Number.isFinite(v) && (!mustBePositive || v > 0)) return v;
-    return fallback;
-  };
-  const optionalPositive = (v: unknown): number | undefined =>
-    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
-  return {
-    stepover: num(params.stepover, DEFAULT_PARALLEL3D_PARAMS.stepover, true),
-    angleDeg: num(params.angleDeg, DEFAULT_PARALLEL3D_PARAMS.angleDeg, false),
-    tolerance: num(params.tolerance, DEFAULT_PARALLEL3D_PARAMS.tolerance, true),
-    surfaceStockToLeave:
-      typeof params.surfaceStockToLeave === 'number' &&
-      Number.isFinite(params.surfaceStockToLeave) &&
-      params.surfaceStockToLeave >= 0
-        ? params.surfaceStockToLeave
-        : DEFAULT_PARALLEL3D_PARAMS.surfaceStockToLeave,
-    maxSlopeDeg:
-      typeof params.maxSlopeDeg === 'number' && Number.isFinite(params.maxSlopeDeg) &&
-      params.maxSlopeDeg > 0 && params.maxSlopeDeg <= 90
-        ? params.maxSlopeDeg
-        : undefined,
-    finishDepth: optionalPositive(params.finishDepth),
-    useStockBoundary:
-      typeof params.useStockBoundary === 'boolean'
-        ? params.useStockBoundary
-        : DEFAULT_PARALLEL3D_PARAMS.useStockBoundary,
-    // Optional non-negative: a finite >= 0 value wins; anything else -> undefined
-    // (AUTO), so every operation authored before WO-1271 gets the tool radius.
-    stockEdgeOvershoot:
-      typeof params.stockEdgeOvershoot === 'number' &&
-      Number.isFinite(params.stockEdgeOvershoot) &&
-      params.stockEdgeOvershoot >= 0
-        ? params.stockEdgeOvershoot
-        : undefined,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // WO-1271: the stock-edge overrun.

@@ -12,4 +12,8 @@ export * from './replay'
 export * from './commands'
 export * from './regen'
 export * from './params'
+// WO-2978 (WO-2951 G3): the parameter refusal words, shared by the Parameters table and later commands.
+export { formatParamDiag } from './params/format'
+// WO-2978 (WO-2951 Order A): the one live modeling session per model item.
+export * from './modelSession'
 export * from './folders'

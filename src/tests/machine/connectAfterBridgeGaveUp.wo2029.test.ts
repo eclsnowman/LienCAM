@@ -15,7 +15,7 @@
 
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { electronMainRequire } from '../support/electronMainRequire'
 import nodePath from 'node:path'
 import nodeProcess from 'node:process'
 import vm from 'node:vm'
@@ -193,7 +193,7 @@ function loadMain(): { api: MainApi; ipc: Map<string, IpcHandler> } {
     protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   }
   const moduleValue = { exports: {} as MainApi }
-  const realRequire = createRequire(import.meta.url)
+  const realRequire = electronMainRequire
   vm.runInNewContext(readFileSync(nodePath.resolve('electron/main.cjs'), 'utf8'), {
     AbortSignal,
     Buffer,

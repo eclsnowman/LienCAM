@@ -22,6 +22,8 @@
 // holes and keep-outs CW, so the union's positive area is the region less the holes
 // less the keep-outs - a keep-out that runs past the boundary included.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import { buildSolidColumns, type ClearanceMesh, type SolidColumns } from '../../holderClearance'
 import { offsetLoop } from '../../face2d/clipperOffset'
 import { signedArea } from '../../geometry'
@@ -34,7 +36,7 @@ const UNION_ONLY_DELTA_MM = 2e-7
 /** Covers the offsetter's round-join and decimation tolerance (0.005 mm) and a
  *  planner's chord sampling, so the planned path never lands exactly on the grown
  *  footprint the trim then measures against. */
-const ISLAND_MARGIN_MM = 0.05
+const ISLAND_MARGIN_MM = AP.caps.workholdingIslandMarginMm
 /** A region piece smaller than this is left out rather than planned. */
 const MIN_PIECE_AREA_MM2 = 1e-3
 

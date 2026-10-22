@@ -18,9 +18,10 @@ const declaredTypes = Object.keys(OPERATION_HEIGHT_POLICIES) as OperationType[]
 
 describe('Smart Height V2 operation policy registry', () => {
   it('is exhaustive and preserves the audited live/unsupported boundary', () => {
-    expect(declaredTypes).toHaveLength(16)
-    // WO-1196 wired the final union member: every declared family is live.
-    expect(declaredTypes.map(type => operationHeightPolicy(type).support)).toEqual(Array(16).fill('live'))
+    expect(declaredTypes).toHaveLength(17)
+    // WO-1196 wired the final union member: every declared family is live
+    // (WO-3001's pattern family included).
+    expect(declaredTypes.map(type => operationHeightPolicy(type).support)).toEqual(Array(17).fill('live'))
   })
 
   it.each(declaredTypes)('%s has internally named variants and conformance fixtures', (operationType) => {

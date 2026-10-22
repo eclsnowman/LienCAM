@@ -112,6 +112,15 @@ export const entries: HelpIndexEntry[] = [
     contextKeys: ['selection:operation:vcarve'],
   },
   {
+    id: 'pattern-op',
+    title: 'Pattern',
+    category: 'cam-operations',
+    summary: 'Pattern cuts a decorative pattern, such as a rose spiral, a wave raster or a line moire, at a shallow depth below the stock top.',
+    keywords:
+      'pattern decorative engine turning guilloche rose spiral sine raster epitrochoid line moire curves formula copies polar array mirror region clip trim depth ball end mill shallow',
+    contextKeys: ['selection:operation:pattern'],
+  },
+  {
     id: 'face-op',
     title: '2D facing',
     category: 'cam-operations',

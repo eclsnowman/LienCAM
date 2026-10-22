@@ -291,6 +291,8 @@ const CHANGED: Record<string, string> = {
   'contour ramp with tabs': WO1896,
   'pocket inside-out helix':
     'WO-1972: the helix starts entry clearance above the material (Top + 1 mm) instead of retract, and stays down between levels; centre, radius, angle and feed unchanged',
+  'v-carve plunge':
+    'WO-2855: corner ridges are cut on the way round the wall and links rise only to Retract, so there are fewer plunges; each plunge is still a straight plunge at the plunge feed',
 }
 
 const measured = new Map<string, EntryMeasure>()

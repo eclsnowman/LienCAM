@@ -12,12 +12,15 @@
 // uses and never reaches into operation internals (ADR-0001).
 //
 // Fail-loud backstop (ADR-0003): before any output it resolves each setup from
-// its physical stock. Different stocks may not share an offset; multiple setups
-// on the same stock deliberately do.
+// its physical stock. In ONE combined program different stocks may not share an
+// offset; multiple setups on the same stock deliberately do. Separate files are
+// independent loads (WO-2983, operator ruling 10-20: "share G54, separate files only"), so
+// two of them may each use G54.
 
 import type { Project, Setup } from '../../types'
 import { buildPostInput, resolveMachineActions, resolveOperatorStops } from './buildPostInput'
 import { postCombined, postProgram } from './index'
+import { nothingToCutLine } from './emit'
 import type {
   PostConfig,
   PostDiagnostic,
@@ -110,13 +113,25 @@ function filterOps(input: PostInput, keepIds: string[]): PostInput {
     new Set(operations.map((operation) => operation.op.id)),
     input.setup.machineActions,
   )
+  // WO-2870: an operation with nothing to cut keeps its one line only when it
+  // is selected, placed before the next kept operation.
+  const { nothingToCut: _allNothingToCut, ...setupRest } = input.setup
+  const ordered = input.setup.operations.map((o) => o.op.id)
+  const nothingToCut = input.setup.nothingToCut
+    ?.filter((entry) => keep.has(entry.opId))
+    .map((entry) => {
+      const from = entry.beforeOpId === null ? -1 : ordered.indexOf(entry.beforeOpId)
+      const beforeOpId = from < 0 ? null : ordered.slice(from).find((id) => keep.has(id)) ?? null
+      return { ...entry, beforeOpId }
+    })
   return {
     ...input,
     setup: {
-      ...input.setup,
+      ...setupRest,
       operations,
       ...(operatorStops ? { operatorStops } : {}),
       ...(machineActions ? { machineActions } : {}),
+      ...(nothingToCut && nothingToCut.length > 0 ? { nothingToCut } : {}),
     },
   }
 }
@@ -152,16 +167,19 @@ export function postProject(
   const resolvedSetups = resolvedWorkOffsets.map((resolved) => resolved.setup)
 
   // ---- FAIL-LOUD BACKSTOP: distinct physical owners cannot collide ----
-  const conflicts = findResolvedWorkOffsetConflicts(resolvedWorkOffsets)
+  // Only inside one combined program; each separate file runs on its own.
+  const conflicts = options.mode === 'combined'
+    ? findResolvedWorkOffsetConflicts(resolvedWorkOffsets)
+    : []
   const offsetDiagnostics: PostDiagnostic[] = [
     ...conflicts.map((conflict): PostDiagnostic => ({
       level: 'error',
       code: 'DUPLICATE_WORK_OFFSET',
       message:
         `Setups ${conflict.setupNames.map((name) => `"${name}"`).join(' and ')} ` +
-        `resolve different stocks or unbound setups to work offset ` +
-        `G${conflict.fixtureOffset}. Each physical owner must use a unique work ` +
-        `offset before export.`,
+        `use work offset G${conflict.fixtureOffset} for different stocks or unbound setups, ` +
+        `so one combined program cannot run them. Post them as separate files ` +
+        `(one per setup), or give each stock its own work offset.`,
     })),
   ]
   if (offsetDiagnostics.length > 0) {
@@ -199,6 +217,9 @@ export function postProject(
   // ---- BUILD + FILTER each setup's input; drop setups with zero kept ops ----
   const diagnostics: PostDiagnostic[] = []
   const prepared: Array<{ setup: Setup; input: PostInput }> = []
+  // WO-2870: setups whose selected operations all have nothing left to cut.
+  // They post no motion at all, only their one line per operation.
+  const nothingToCutSetups: Array<{ setup: Setup; names: string[] }> = []
   const sourceSetupById = new Map(setups.map((setup) => [setup.id, setup]))
   for (const setup of resolvedSetups) {
     // Build from the persisted source setup so generation freshness remains
@@ -211,10 +232,15 @@ export function postProject(
     }
     if (input.setup.operations.length === 0) {
       // Do NOT emit an empty section/program; note it and skip the setup.
+      // WO-2870: say so plainly when its operations have nothing left to cut.
+      const empty = input.setup.nothingToCut ?? []
+      if (empty.length > 0) nothingToCutSetups.push({ setup, names: empty.map((e) => e.name) })
       diagnostics.push({
         level: 'info',
         code: 'SETUP_NO_OPS_SELECTED',
-        message: `Setup "${setup.name}" has no selected operations and was omitted from the export.`,
+        message: empty.length > 0
+          ? `Setup "${setup.name}" has nothing left to cut (${empty.map((e) => e.name).join(', ')}); it posts no motion.`
+          : `Setup "${setup.name}" has no selected operations and was omitted from the export.`,
       })
       continue
     }
@@ -235,7 +261,24 @@ export function postProject(
     return { ok: false, diagnostics: modelRefDiagnostics }
   }
 
+  // WO-2870: an export in which nothing is left to cut is its comment lines
+  // only - no program start or end, so no motion (the end's retract included).
+  const nothingToCutProgram = (names: string[]): PostResult => {
+    const lines = names.map((name) => nothingToCutLine(name, config))
+    return {
+      gcode: lines.join('\n') + '\n', ok: true, diagnostics: [],
+      meta: { opCount: 0, lineCount: lines.length }, operationSpans: [],
+      ...(options.programContext === true
+        ? { programContextEnvelope: { included: false, reason: 'no operation posts motion' } }
+        : {}),
+    }
+  }
+
   // ---- COMBINED ----
+  if (options.mode === 'combined' && prepared.length === 0 && nothingToCutSetups.length > 0) {
+    const combined = nothingToCutProgram(nothingToCutSetups.flatMap((s) => s.names))
+    return { ok: true, diagnostics, combined }
+  }
   if (options.mode === 'combined') {
     const inputs = prepared.map((p) => p.input)
     const sectionComments = prepared.map((p) => p.setup.name)
@@ -264,14 +307,33 @@ export function postProject(
   }
 
   // ---- SEPARATE ----
+  const emptyById = new Map(nothingToCutSetups.map((s) => [s.setup.id, s]))
+  const preparedById = new Map(prepared.map((p) => [p.setup.id, p]))
+  const emptyOrKept = (setupId: string) => emptyById.has(setupId) || preparedById.has(setupId)
+  const filenames = separateFilenames(
+    resolvedSetups.filter((setup) => emptyOrKept(setup.id)),
+    options,
+  )
   const files: PostProjectFile[] = []
-  for (const { setup, input } of prepared) {
+  for (const resolved of resolvedSetups) {
+    const empty = emptyById.get(resolved.id)
+    if (empty) {
+      files.push({
+        filename: filenames.get(empty.setup.id)!,
+        setupId: empty.setup.id,
+        result: nothingToCutProgram(empty.names),
+      })
+      continue
+    }
+    const kept = preparedById.get(resolved.id)
+    if (!kept) continue
+    const { setup, input } = kept
     let result = postProgram(input, config)
     if (options.programContext === true && result.ok) {
       result = withProgramContextEnvelope(project, [sourceSetupById.get(setup.id) ?? setup], config, result, options)
     }
     files.push({
-      filename: `${options.baseName}-G${setup.wcs.fixtureOffset}.${options.ext}`,
+      filename: filenames.get(setup.id)!,
       setupId: setup.id,
       result,
     })
@@ -284,6 +346,64 @@ export function postProject(
     diagnostics: onceEachAssignedToolNumber(diagnostics),
     files,
   }
+}
+
+// ---------------------------------------------------------------------------
+// WO-2983: unique default filenames for separate files
+// ---------------------------------------------------------------------------
+
+/** Characters Windows refuses in a file name (control characters too). */
+const UNSAFE_FILENAME_CHARS = '<>:"/\\|?*'
+
+function filenameLabel(name: string): string {
+  const label = Array.from(name, (ch) =>
+    ch.charCodeAt(0) < 32 || UNSAFE_FILENAME_CHARS.includes(ch) ? '-' : ch).join('')
+    .replace(/\s+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 60)
+    .replace(/^[-.]+|[-.]+$/g, '')
+  return label.length > 0 ? label : 'setup'
+}
+
+/**
+ * Default name of each emitted separate file, keyed by setup id. A file keeps
+ * the historical `<base>-G<offset>.<ext>` name when no other file in the batch
+ * has it. Files that would share a name (two beds on G54) add their setup's
+ * label, and a `-2`, `-3`... suffix when even that repeats. Names are compared
+ * case-insensitively, as Windows does, and a generated name never takes one
+ * that another file keeps.
+ */
+function separateFilenames(
+  setups: ReadonlyArray<Setup>,
+  options: Pick<PostProjectOptions, 'baseName' | 'ext'>,
+): Map<string, string> {
+  const fold = (name: string) => name.toLowerCase()
+  const historical = (setup: Setup) => `${options.baseName}-G${setup.wcs.fixtureOffset}`
+  const counts = new Map<string, number>()
+  for (const setup of setups) {
+    const key = fold(historical(setup))
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const taken = new Set<string>()
+  const names = new Map<string, string>()
+  for (const setup of setups) {
+    const stem = historical(setup)
+    if (counts.get(fold(stem)) === 1) {
+      names.set(setup.id, `${stem}.${options.ext}`)
+      taken.add(fold(stem))
+    }
+  }
+  for (const setup of setups) {
+    if (names.has(setup.id)) continue
+    const stem = `${historical(setup)}-${filenameLabel(setup.name)}`
+    let candidate = stem
+    for (let n = 2; taken.has(fold(candidate)) || counts.has(fold(candidate)); n++) {
+      candidate = `${stem}-${n}`
+    }
+    names.set(setup.id, `${candidate}.${options.ext}`)
+    taken.add(fold(candidate))
+  }
+  return names
 }
 
 // ---------------------------------------------------------------------------

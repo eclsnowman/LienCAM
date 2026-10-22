@@ -1,3 +1,4 @@
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -326,4 +327,4 @@ export async function buildNameSign() {
   })
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildNameSign()
+if (isMain(import.meta.url)) await buildNameSign()

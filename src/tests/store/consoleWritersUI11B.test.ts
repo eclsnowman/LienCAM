@@ -25,9 +25,11 @@ import type {
 } from '../../types'
 import { smartHeightAuthorityFixture } from '../helpers/smartHeightAuthorityFixture'
 
+const initialStoreState = useCamStore.getState()
 beforeEach(() => {
-  useCamStore.setState({ consoleEvents: [], consoleReadThroughId: 0, sketchNotice: null })
+  useCamStore.setState({ ...initialStoreState, consoleEvents: [], consoleReadThroughId: 0, sketchNotice: null }, true)
 })
+afterEach(() => useCamStore.setState(initialStoreState, true))
 
 // =============================================================================
 // BK-78: showSketchNotice severity seam
@@ -76,8 +78,20 @@ describe('showSketchNotice severity seam (BK-78)', () => {
 // =============================================================================
 
 describe('COMPUTE lane console writer', () => {
+  beforeEach(() => {
+    // A transition needs a live target. Missing targets are rejected atomically
+    // by the shared CAM command boundary, rather than emitting phantom errors.
+    useCamStore.setState(state => ({
+      project: { ...state.project, setups: [{ ...crashSetup(), operations: [{ ...crashOp(), id: 'op-1' }] }] },
+      projectHistory: [], projectFuture: [], canUndo: false, canRedo: false,
+    }))
+  })
+
   it('a status:"error" transition with an errorMessage lands one error/compute event with entityRef to the op', () => {
     useCamStore.getState().updateOperation('setup-1', 'op-1', {
+      status: 'error', errorMessage: 'Plane ordering error: clearance must be above retract',
+    })
+    expect(useCamStore.getState().project.setups[0].operations[0]).toMatchObject({
       status: 'error', errorMessage: 'Plane ordering error: clearance must be above retract',
     })
     const events = useCamStore.getState().consoleEvents
@@ -91,9 +105,23 @@ describe('COMPUTE lane console writer', () => {
 
   it('a status transition to anything OTHER than error lands no compute event', () => {
     useCamStore.getState().updateOperation('setup-1', 'op-1', { status: 'ready' })
+    expect(useCamStore.getState().project.setups[0].operations[0].status).toBe('ready')
     useCamStore.getState().updateOperation('setup-1', 'op-1', { status: 'pending' })
+    expect(useCamStore.getState().project.setups[0].operations[0].status).toBe('pending')
     expect(useCamStore.getState().consoleEvents).toEqual([])
   })
+
+  it.each(['missing setup', 'missing operation', 'deleted operation'])(
+    'rejects an error update for a %s without publication', route => {
+      if (route === 'deleted operation') useCamStore.getState().removeOperation('setup-1', 'op-1')
+      const before = useCamStore.getState()
+      before.updateOperation(route === 'missing setup' ? 'missing' : 'setup-1',
+        route === 'missing operation' ? 'missing' : 'op-1', { status: 'error', errorMessage: 'late failure' })
+      for (const key of ['project', 'viewer', 'consoleEvents', 'projectHistory', 'projectFuture'] as const) {
+        expect(useCamStore.getState()[key], key).toBe(before[key])
+      }
+    },
+  )
 
 })
 
@@ -250,6 +278,8 @@ describe('COMPUTE lane console writer: REAL worker.onerror path (UI-11B-R1 Findi
     // Simulate the browser runtime invoking the worker's real onerror callback
     // on a crash — this is the actual trigger point, not a stand-in call.
     worker.onerror!({ message: 'Simulated worker crash', filename: 'toolpathWorker.ts', lineno: 42 })
+
+    expect(useCamStore.getState().project.setups[0].operations[0].status).toBe('error')
 
     const events = useCamStore.getState().consoleEvents.filter((e) => e.source === 'compute')
     expect(events).toHaveLength(1)

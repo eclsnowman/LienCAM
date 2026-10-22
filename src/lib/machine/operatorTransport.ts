@@ -155,6 +155,29 @@ export const PROGRAM_FIT_REMEDY =
 export const LOADED_FILE_FIT_REMEDY =
   'Correct what it names (work offset, saved point, tool length, machine travel) or load another program; CYCLE START then runs it from line 1.'
 
+const PROGRAM_NOT_READY = 'Program is not ready: '
+
+/**
+ * WO-2885: WHETHER THE NEXT-ACTION SENTENCE IS CYCLE START'S OWN REFUSAL.
+ *
+ * The operator, 2026-10-16 at the machine: "There's red text up at the top that was running
+ * off" ... "Redundancy of what's in the terminal and at the top of the
+ * screen". A Load refused for the travel put its whole sentence in the top row
+ * (cut mid-word), under the Load bar and in the console. These three verdicts
+ * are refusals whose reason greyed CYCLE START already carries on hover, and a
+ * press writes the whole sentence to the console - so the top row does not
+ * repeat it. The verdict keeps the sentence: only the row stops showing it.
+ */
+export function nextActionIsCycleStartRefusal(
+  state: Pick<OperatorTransportState, 'cycleStartEnabled' | 'nextAction'>,
+): boolean {
+  if (state.cycleStartEnabled) return false
+  const sentence = state.nextAction
+  return sentence.startsWith(PROGRAM_NOT_READY)
+    || sentence.endsWith(` ${PROGRAM_FIT_REMEDY}`)
+    || sentence.endsWith(` ${LOADED_FILE_FIT_REMEDY}`)
+}
+
 /**
  * Whether re-arming from the top is offered, and if not, why (WO-082). Mirrors
  * armProgramFromTop()'s own refusals - it is a render of the same decision,
@@ -666,7 +689,7 @@ function deriveCycleVerdict(
       return {
         action: 'none',
         cycleStartEnabled: false,
-        nextAction: `Program is not ready: ${programReadiness.reason}`,
+        nextAction: `${PROGRAM_NOT_READY}${programReadiness.reason}`,
         cycleStartDetail: programReadiness.reason,
       }
     }
@@ -819,7 +842,11 @@ function armFromLine1Verdict(
       cycleStartDetail: 'CYCLE START is blocked because the program lies entirely off the table.',
     }
   }
-  const opening = input.job.phase === 'complete'
+  // WO-2840: a refused file is named but never staged. WO-2833 preserves
+  // the previous job's terminal phase; neither that nor a finished MDI/tool
+  // routine means this file ran. Keep its arming decision, describe it afresh.
+  const neverStaged = fileDoor && loadedFileRefusedAtLoad()
+  const opening = neverStaged ? '' : input.job.phase === 'complete'
     ? 'Cycle complete. '
     : input.job.phase === 'failed' ? 'The cycle failed. ' : ''
   // Fix round 4: the file read again against the machine as it stands NOW -
@@ -837,7 +864,7 @@ function armFromLine1Verdict(
   return {
     action: 'arm-start',
     cycleStartEnabled: true,
-    nextAction: `${opening}CYCLE START runs the program from line 1.`,
+    nextAction: `${neverStaged ? 'Ready. ' : opening}CYCLE START runs the program from line 1.`,
     cycleStartDetail: input.singleBlock
       ? 'Arm the program from line 1 and execute its first block.'
       : 'Arm the program from line 1 and run it.',

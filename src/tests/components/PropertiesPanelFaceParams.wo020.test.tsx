@@ -416,3 +416,32 @@ describe('PropertiesPanel first-class Face params (WO-020, rebuilt from WO-015)'
     expectStale(edited)
   })
 })
+
+
+describe('WO-2954 optional inward spiral strategy', () => {
+  it('commits Spiral, invalidates stale paths, persists authored values and supports undo/redo', () => {
+    seedFace()
+    render(<PropertiesPanel />)
+    fireEvent.change(screen.getByTestId('props-face-strategy'), { target: { value: 'spiral' } })
+    expect(paramsNow()).toMatchObject({ pattern: 'spiral', direction: 'climb', keepMe: 'preserved' })
+    expectStale(opNow())
+    const saved = JSON.parse(JSON.stringify(useCamStore.getState().project))
+    expect(saved.setups[0].operations[0].params.pattern).toBe('spiral')
+    act(() => { useCamStore.getState().undo() })
+    expect(paramsNow()).toMatchObject({ pattern: 'one_way', direction: 'conventional' })
+    act(() => { useCamStore.getState().redo() })
+    expect(paramsNow()).toMatchObject({ pattern: 'spiral', direction: 'climb' })
+    expect((screen.getByTestId('props-face-strategy') as HTMLSelectElement).value).toBe('spiral')
+  })
+
+  it('reads an existing Spiral project as Spiral with accessible English fallback', async () => {
+    const { applyLanguage } = await import('../../i18n')
+    await applyLanguage('de')
+    seedFace({ pattern: 'spiral', direction: 'climb' })
+    render(<PropertiesPanel />)
+    expect((screen.getByTestId('props-face-strategy') as HTMLSelectElement).value).toBe('spiral')
+    expect(screen.getByTestId('props-face-strategy').getAttribute('aria-label')).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Inward spiral' })).toBeTruthy()
+    await applyLanguage('en')
+  })
+})

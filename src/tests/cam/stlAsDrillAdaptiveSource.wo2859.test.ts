@@ -8,6 +8,14 @@
 // aim at those holes. The dialog's source list was the only door still shut: it
 // admitted a fresh STL only through the edge-chain rule, which Drill is not on.
 // These tests drive the real New Operation dialog with the shipped plate.
+//
+// WO-3063 (owner 10-22, "correct the tests to match the part"): the shipped
+// Sample Parts/plate.stl is now the owner's NEMA17 motor plate (60 x 60 x 4, 8 mm
+// shaft bore, 22.4 mm boss relief 2.2 mm deep, four 3.6 mm M3 holes on a
+// 31 mm square). The Drill and Adaptive source cases read that shipped part.
+// The two-bore and All Parts binding cases pin an engine behaviour on the
+// earlier plate's 18 mm bore at (0, 3); they read those exact earlier bytes
+// from src/tests/fixtures/plate-old-18mm-bore.stl.
 
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
@@ -64,10 +72,15 @@ const TOOL_ID = 'wo2859-drill'
 const MILL_ID = 'wo2859-mill'
 const STOCK_ID = 'wo2859-stock'
 
-function plateBytes(): ArrayBuffer {
-  const bytes = readFileSync('Sample Parts/plate.stl')
+function stlBytes(path: string): ArrayBuffer {
+  const bytes = readFileSync(path)
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
+/** The shipped sample: the NEMA17 motor plate (WO-3063). */
+const plateBytes = (): ArrayBuffer => stlBytes('Sample Parts/plate.stl')
+/** The earlier plate (18 mm bore at (0, 3), four 6 mm corner holes), kept as a
+ *  fixture for the engine cases that pin its geometry. */
+const oldPlateBytes = (): ArrayBuffer => stlBytes('src/tests/fixtures/plate-old-18mm-bore.stl')
 
 /** The plate exactly as Example Projects/Full Suite.camproject carries it:
  *  60 x 60 x 4 mm, centred on the origin, no loops derived yet. */
@@ -172,8 +185,18 @@ describe('WO-2859: Sample Parts/plate.stl is a Drill source', () => {
     const holeLoops = (row.loops ?? []).filter((loop) => loop.id.startsWith('mfh:'))
     const holeLayer = (row.layers2d ?? []).find((layer) => (layer.holes?.length ?? 0) > 0)
     expect(holeLayer?.holes?.length).toBe(holeLoops.length)
-    // The shipped plate: four 6 mm corner holes and the 18 mm centre bore.
+    // The shipped NEMA17 plate: the 8 mm shaft bore at the centre and the four
+    // 3.6 mm M3 holes on the 31 mm square.
     expect(holeLoops).toHaveLength(5)
+    const tenth = (value: number) => Math.round(value * 10) / 10 + 0 // + 0 folds -0 into 0
+    const found = (holeLayer?.holes ?? []).map((hole) => ({
+      x: tenth(hole.center[0]), y: tenth(hole.center[1]), d: tenth(hole.diameter),
+    })).sort((a, b) => a.x - b.x || a.y - b.y)
+    expect(found).toEqual([
+      { x: -15.5, y: -15.5, d: 3.6 }, { x: -15.5, y: 15.5, d: 3.6 },
+      { x: 0, y: 0, d: 8 },
+      { x: 15.5, y: -15.5, d: 3.6 }, { x: 15.5, y: 15.5, d: 3.6 },
+    ])
 
     // The list names the holes it found, not "0 closed loops", and offers no
     // edge chain: a drill cannot cut a chain (WO-1851).
@@ -231,7 +254,7 @@ describe('WO-2859: Sample Parts/plate.stl is an Adaptive source', () => {
     const listed = document.querySelectorAll('.op-loop-list input[type="checkbox"]').length
     expect(listed).toBe(chains.filter((loop) => loop.closed).length)
 
-    // Clear the 18 mm centre bore: the closed chain whose centre sits at (0, 3).
+    // Clear the 22.4 mm boss relief: the closed chain centred on the plate.
     const centre = (loop: { points: Array<{ x: number; y: number }> }) => {
       const xs = loop.points.map((p) => p.x)
       const ys = loop.points.map((p) => p.y)
@@ -240,7 +263,7 @@ describe('WO-2859: Sample Parts/plate.stl is an Adaptive source', () => {
     }
     const bore = chains.find((loop) => {
       const c = centre(loop)
-      return loop.closed && Math.hypot(c.x, c.y - 3) < 0.5 && Math.abs(c.w - 18) < 0.5
+      return loop.closed && Math.hypot(c.x, c.y) < 0.5 && Math.abs(c.w - 22.4) < 0.5
     })
     expect(bore, JSON.stringify(chains.map((loop) => ({ id: loop.id, closed: loop.closed, ...centre(loop) })))).toBeDefined()
     const boreIndex = chains.filter((loop) => loop.closed).indexOf(bore!)
@@ -259,10 +282,10 @@ describe('WO-2859: Sample Parts/plate.stl is an Adaptive source', () => {
     expect(computed.status).toBe('ready')
     const cuts = (computed.toolpathMoves ?? []).filter((move) => move.type === 'feed' || move.type === 'arc_cw' || move.type === 'arc_ccw')
     expect(cuts.length).toBeGreaterThan(0)
-    // Every cut stays inside the bore it was asked to clear (radius 9 - tool radius 1.5).
+    // Every cut stays inside the relief it was asked to clear (radius 11.2 - tool radius 1.5).
     for (const move of cuts) {
       if (move.x === undefined || move.y === undefined) continue
-      expect(Math.hypot(move.x, move.y - 3)).toBeLessThanOrEqual(7.5 + 1e-3)
+      expect(Math.hypot(move.x, move.y)).toBeLessThanOrEqual(9.7 + 1e-3)
     }
   })
 })
@@ -270,6 +293,8 @@ describe('WO-2859: Sample Parts/plate.stl is an Adaptive source', () => {
 describe('WO-2859: two bores ticked on one plate are both cleared', () => {
   // An STL's bores carry 'hole' winding. With nothing but holes picked, the
   // engine kept the largest as the region and dropped every disjoint other.
+  // Pinned on the earlier plate's geometry (WO-3063 fixture).
+  beforeEach(() => { stlCache.load.mockResolvedValue(oldPlateBytes()) })
   it('clears every ticked bore, not only the largest', async () => {
     openGeometryTab('2D Adaptive Clearing', 'WO-2859 3mm Flat')
     fireEvent.change(screen.getByTestId('op-geometry-select'), { target: { value: GEO_ID } })
@@ -323,6 +348,8 @@ describe('WO-2859: an Adaptive picked under All Parts keeps its STL source bindi
   // copies of the same STL. Compute then needs the authoring-time binding
   // (WO-258) - without it, a valid pick on two STL sources was refused as
   // "no saved source binding" and selecting again could not repair it.
+  // Pinned on the earlier plate's 18 mm bore at (0, 3) (WO-3063 fixture).
+  beforeEach(() => { stlCache.load.mockResolvedValue(oldPlateBytes()) })
   const COPY_ID = 'wo2859-plate-copy'
   const STEP_ID = 'wo2859-step'
   type Bindings = Record<string, Array<{ geometryId: string; geometryName: string }>>
@@ -559,8 +586,7 @@ describe('WO-2859: an Adaptive picked under All Parts keeps its STL source bindi
   })
 
   // Pocket shares the binder and the compute seam. Its pick here is the plate
-  // OUTLINE: Pocket reads an STL bore chain alone as an island with no
-  // boundary and refuses it on either copy (WO-258 behaviour, not this order).
+  // OUTLINE (a bore picked alone is pocketed too: pocketStlBoreAlone.test.ts).
   it('cuts only the SECOND plate for a Pocket too - the one shared chain binder', async () => {
     await twoPlates()
     const outlineId = await pickBoreUnderAllParts([1], '2D Pocket', outlineChain())

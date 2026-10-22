@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "node tools/i18n-freshness.mjs --write-runtime",
+  "policy": "Keys whose English source changed after their translation was recorded show English until the translation is updated.",
+  "fallback": {
+    "de": [
+      "help.topics.work-offsets.sections.0.steps.0",
+      "help.topics.work-offsets.sections.0.steps.1",
+      "help.topics.work-offsets.sections.2.text"
+    ],
+    "es": [
+      "help.topics.work-offsets.sections.0.steps.0",
+      "help.topics.work-offsets.sections.0.steps.1",
+      "help.topics.work-offsets.sections.2.text"
+    ],
+    "fr": [
+      "help.topics.work-offsets.sections.0.steps.0",
+      "help.topics.work-offsets.sections.0.steps.1",
+      "help.topics.work-offsets.sections.2.text"
+    ]
+  }
+}

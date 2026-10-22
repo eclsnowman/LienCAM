@@ -145,7 +145,7 @@ describe('resolveEmbeddedColorOutcome (CAM-13-R2 MAJOR 1: cross-workspace color-
 })
 
 /** Minimal GeomClient double - readStepDisplayAttributes only uses these 4
- *  (+ whatever diagnostics importStep hands back). */
+ *  (+ whatever diagnostics readStepAttributes hands back). */
 function fakeService(over: {
   bodies?: Array<{ handle: number; name?: string; color?: [number, number, number] }>
   diagnostics?: Diag[]
@@ -162,9 +162,10 @@ function fakeService(over: {
       if (over.initThrows) throw new Error('kernel init failed')
       return {} as KernelInfo
     }),
-    importStep: vi.fn(async () => {
+    // WO-3046: the names-only read; it mints no bodies.
+    readStepAttributes: vi.fn(async () => {
       if (over.importThrows) throw new Error('read blew up')
-      return { bodies: (over.bodies ?? []).map((b) => ({ ...b, elementMap: {} })), diagnostics: over.diagnostics ?? [] }
+      return { parts: (over.bodies ?? []).map((b) => ({ name: b.name, color: b.color })), diagnostics: over.diagnostics ?? [] }
     }),
     dispose: vi.fn(async (h: number) => { disposed.push(h) }),
     terminate: vi.fn(async () => { terminations += 1 }),
@@ -181,7 +182,7 @@ describe('readStepDisplayAttributes (injected fake service)', () => {
     })
     const out = await readStepDisplayAttributes(BYTES, IMP, () => svc)
     expect(out).toEqual({ name: 'Colored Part', color: '#d93326', partCount: 1, warning: undefined })
-    expect(disposed).toEqual([7])          // minted body released
+    expect(disposed).toEqual([])           // WO-3046: no body minted, nothing to release
     expect(terminated()).toBe(1)           // service torn down (no leaked kernel)
   })
 
@@ -201,7 +202,7 @@ describe('readStepDisplayAttributes (injected fake service)', () => {
     expect(terminated()).toBe(1)
   })
 
-  it('degrades when importStep throws', async () => {
+  it('degrades when the attribute read throws', async () => {
     const { svc } = fakeService({ importThrows: true })
     const out = await readStepDisplayAttributes(BYTES, IMP, () => svc)
     expect(out.partCount).toBe(0)

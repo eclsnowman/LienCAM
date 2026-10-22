@@ -88,12 +88,11 @@ See also: [Setup and WCS](Setup-Stock-and-Workholding#setup-wcs), [Work offsets 
 Each setup posts under one of six work offsets, G54 through G59, chosen in the Setup modal; setups on the same stock may share one.
 
 1. In the Setup modal, choose the offset from the "Setup work offset" dropdown. The design tree shows each setup's offset on its row.
-2. Setups that machine the same stock may use the same offset. An offset already used by a setup on a different stock shows as "in use" with that owner's name (for example "G54 - in use (stock Auto Stock 1)") and cannot be selected.
-3. If all six offsets are owned by other stocks or setups, the modal says so and Create Setup stays off until one is freed.
+2. Any setup can use any of the six offsets, including one that setups on another stock already use (each load of the machine bed can be G54). When the offset you pick is also used elsewhere, the modal says where. That works when the setups post as separate files; a Combined program refuses it.
 
 ![The Setup work offset list with G54 marked in use by another stock](images/work-offsets/offset-dropdown.webp)
 
-The post writes each setup under its offset. With "Separate files (one per setup)" in Post Process, each file is named with its offset (for example part-G54.nc, part-G55.nc). Before export, the post checks that no offset is shared by two different stocks; a conflict stops the export with a message naming the setups involved.
+The post writes each setup under its offset. With "Separate files (one per setup)" in Post Process, each file is named with its offset (for example part-G54.nc, part-G55.nc). Separate files may share an offset, because each file runs on its own. A Combined program is one run, so an offset shared by two different stocks stops the export with a message naming the setups involved and suggesting separate files.
 
 See also: [Setup and WCS](Setup-Stock-and-Workholding#setup-wcs), [Placing the work origin](Setup-Stock-and-Workholding#wcs-origin-placement), [Posting G-code](Post-Process#post-basics).
 

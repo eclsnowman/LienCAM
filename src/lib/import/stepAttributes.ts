@@ -275,14 +275,9 @@ export async function readStepDisplayAttributes(
     service = await factory()
     const svc = service
     await svc.init()
-    const { bodies, diagnostics } = await svc.importStep(bytes, importId)
-
-    // We only wanted the attributes - release the minted bodies immediately.
-    for (const b of bodies) {
-      try { await svc.dispose(b.handle) } catch { /* already released */ }
-    }
-
-    const parts: RawPartAttributes[] = bodies.map((b) => ({ name: b.name, color: b.color }))
+    // WO-3046: the names-only read - the same XCAF read importStep makes, with
+    // no bodies minted, so the attribute read costs one parse and nothing more.
+    const { parts, diagnostics } = await svc.readStepAttributes(bytes, importId)
     const picked = pickDisplayAttributes(parts, importId)
     const failure = readFailureMessage(diagnostics)
     const warning = failure
@@ -295,7 +290,7 @@ export async function readStepDisplayAttributes(
     return {
       name: failure ? undefined : picked.name,
       color: failure ? undefined : picked.color,
-      partCount: bodies.length,
+      partCount: parts.length,
       warning,
     }
   }

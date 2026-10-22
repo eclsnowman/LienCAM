@@ -63,9 +63,10 @@ jobs:
           REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
           tool="$RUNNER_TEMP/site-releases"
-          mkdir -p "$tool/tools/release" "$tool/site"
+          mkdir -p "$tool/tools/release" "$tool/tools/lib" "$tool/site"
           git fetch --quiet --depth 1 "$REPOSITORY_URL" "$TOOL_SHA"
           git show FETCH_HEAD:tools/release/site-releases.mjs > "$tool/tools/release/site-releases.mjs"
+          git show FETCH_HEAD:tools/lib/is-main.mjs > "$tool/tools/lib/is-main.mjs"
           cp site/download.html "$tool/site/download.html"
           node "$tool/tools/release/site-releases.mjs" --tag "$RELEASE_TAG" --output site/download.html
           ! grep -q 'class="preview-note"' site/download.html

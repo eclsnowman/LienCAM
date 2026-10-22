@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -240,7 +241,7 @@ export function printPublicTestSummary(list, log = console.log) {
   log(`public tests: kept ${list.kept.length}, left out ${list.excluded.length} (evidence read ${count('evidence read')}, harness ${count('harness')}, manifest private-only ${count('manifest private-only')}, platform-only ${count('platform-only')}, desktop runtime ${count('desktop runtime')}; reasons can overlap)`)
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const list = buildPublicTestList()
   printPublicTestSummary(list)
   for (const path of list.kept) console.log(`KEEP ${path}`)

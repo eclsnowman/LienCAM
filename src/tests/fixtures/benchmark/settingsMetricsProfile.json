@@ -1,0 +1,11 @@
+{
+  "id": "liencnc-v2",
+  "minSpindleRpm": 8000,
+  "maxSpindleRpm": 24000,
+  "rapidRate": 8000,
+  "axisLimits": {
+    "x": { "maxCutting": 9000 },
+    "y": { "maxCutting": 10000 },
+    "z": { "maxCutting": 8000 }
+  }
+}

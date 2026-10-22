@@ -14,6 +14,12 @@ import {
   type LayerPreviewSection,
   type ToolpathLayerPreviewPlan,
 } from '../../lib/simulation/toolpathLayerPreview'
+import {
+  selectToolpathWindow,
+  TOOLPATH_WINDOW_MAX_MS,
+  TOOLPATH_WINDOW_MS,
+  type ToolpathWindowSegment,
+} from '../../lib/simulation/toolpathWindow'
 import { seedPoseKeyForGeo } from '../../lib/cam/nesting/instanceToolpath'
 import { collectToolpathSections } from '../../lib/cam/nesting/nestRuntime'
 import { sampleArcMovesForLinearConsumers } from '../../lib/cam/toolpathArcSampling'
@@ -63,6 +69,9 @@ export interface SimFrame {
   durationMs: number
   role: string
   speedMmPerMin: number
+  sourceMove?: ToolpathMove
+  sourceMoveIndex?: number
+  sourceOperationId?: string
   toolRadius: number              // resolved at frame-build time (heightmap carving)
   profile: (d: number) => number  // radial Z-offset profile for shaped tools (heightmap)
   bodyTop?: (d: number) => number // undercut tools only: top of the body over the tip (heightmap, WO-1964)
@@ -179,6 +188,7 @@ type VpHandle = {
   // GPU capability probe for the voxel engine (ADR-0028): WebGL2 + float-3D-
   // texture linear filtering. Drives the 'auto' setting's fallback to heightmap.
   supportsVoxelSim?:      () => boolean
+  setSimulationToolpathWindow?: (segments: ToolpathWindowSegment[] | null) => void
   setSimulationToolpathPreview?: (moves: ToolpathMove[] | null) => void
 }
 const getVp = (): VpHandle | null =>
@@ -229,7 +239,8 @@ export function buildFrames(
   finishRate: number = rapidRate,
   bodyTop?: (d: number) => number,
 ): { frames: SimFrame[]; totalMs: number } {
-  const linearMoves = sampleArcMovesForLinearConsumers(moves as ToolpathMove[])
+  const originIndices: number[] = []
+  const linearMoves = sampleArcMovesForLinearConsumers(moves as ToolpathMove[], {}, originIndices)
   if (linearMoves.length === 0) return { frames: [], totalMs: 0 }
   const frames: SimFrame[] = []
   let t = baseMs
@@ -268,6 +279,8 @@ export function buildFrames(
       startMs: t, durationMs,
       role,
       speedMmPerMin: speed,
+      sourceMove: moves[originIndices[i]] as ToolpathMove,
+      sourceMoveIndex: originIndices[i],
       toolRadius,
       profile,
       bodyTop,
@@ -448,6 +461,14 @@ export function SimulationPanel() {
   const rafIdRef            = useRef(0)
   const layerPreviewPlanRef = useRef<ToolpathLayerPreviewPlan | null>(null)
   const lastPreviewLayerRef = useRef(-2)
+  const trailModeRef = useRef(false)
+  const trailSecondsRef = useRef(TOOLPATH_WINDOW_MS / 1000)
+  const leadSecondsRef = useRef(TOOLPATH_WINDOW_MS / 1000)
+  const previewModeRef = useRef(viewer.mode)
+  useEffect(() => { previewModeRef.current = viewer.mode }, [viewer.mode])
+  const [trailMode, setTrailMode] = useState(false)
+  const [trailSeconds, setTrailSeconds] = useState(trailSecondsRef.current)
+  const [leadSeconds, setLeadSeconds] = useState(leadSecondsRef.current)
 
   const toolTimelineRef     = useRef<Array<{ startMs: number; cfg: ToolGeoCfg | null }>>([])
   const lastAppliedCfgRef   = useRef<ToolGeoCfg | null>(null)
@@ -503,6 +524,16 @@ export function SimulationPanel() {
   const speedGroupRef = useRef<HTMLDivElement>(null)
 
   const syncToolpathLayerPreview = useCallback((frameIndex: number) => {
+    if (previewModeRef.current !== 'simulation') return
+    if (trailModeRef.current) {
+      getVp()?.setSimulationToolpathWindow?.(
+        selectToolpathWindow(framesRef.current, frameIndex, currentMsRef.current, {
+          recentMs: trailSecondsRef.current * 1000,
+          upcomingMs: leadSecondsRef.current * 1000,
+        }),
+      )
+      return
+    }
     const plan = layerPreviewPlanRef.current
     const layerIndex = plan && frameIndex >= 0 && frameIndex < plan.frameToLayer.length
       ? plan.frameToLayer[frameIndex]
@@ -799,7 +830,10 @@ export function SimulationPanel() {
       // adaptive clear is 100k+ frames) spreads every frame as a call argument and
       // overflows the stack ("Maximum call stack size exceeded"), crashing the
       // panel into the error boundary. Same fix as the AC engine emit.
-      for (let i = 0; i < opFrames.length; i++) allFrames.push(opFrames[i])
+      for (let i = 0; i < opFrames.length; i++) {
+        opFrames[i].sourceOperationId = sec.opId
+        allFrames.push(opFrames[i])
+      }
       if (secOp && opFrames.length > 0) {
         layerPreviewSections.push({
           startFrame: sectionStartFrame,
@@ -1458,6 +1492,40 @@ export function SimulationPanel() {
     speedRef.current = SPEED_OPTIONS[idx]
   }, [])
 
+  const handleTrailMode = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    trailModeRef.current = e.target.value === 'trail'
+    setTrailMode(trailModeRef.current)
+    // Invalidate only display caching. Never seek/carve/rebuild on a display change.
+    lastPreviewLayerRef.current = -2
+    let lo = 0, hi = framesRef.current.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >>> 1
+      if (framesRef.current[mid].startMs <= currentMsRef.current) lo = mid
+      else hi = mid - 1
+    }
+    syncToolpathLayerPreview(lo)
+  }, [syncToolpathLayerPreview])
+
+  const handleTrailDuration = useCallback((side: 'recent' | 'upcoming', seconds: number) => {
+    if (!Number.isFinite(seconds)) return
+    const bounded = Math.max(0, Math.min(TOOLPATH_WINDOW_MAX_MS / 1000, seconds))
+    if (side === 'recent') {
+      trailSecondsRef.current = bounded
+      setTrailSeconds(bounded)
+    } else {
+      leadSecondsRef.current = bounded
+      setLeadSeconds(bounded)
+    }
+    if (!trailModeRef.current) return
+    let lo = 0, hi = framesRef.current.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >>> 1
+      if (framesRef.current[mid].startMs <= currentMsRef.current) lo = mid
+      else hi = mid - 1
+    }
+    syncToolpathLayerPreview(lo)
+  }, [syncToolpathLayerPreview])
+
   const handleToggleStockSim = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const enabled = e.target.checked
     setStockSimEnabled(enabled)
@@ -1621,6 +1689,28 @@ export function SimulationPanel() {
       </div>
 
       <div className="sim-stock-row">
+        <label className="sim-stock-check">
+          {tx('SimulationPanel.Path_display')}
+          <select title={tx('SimulationPanel.Cutter_trail_help')} aria-label={tx('SimulationPanel.Path_display')} value={trailMode ? 'trail' : 'layer'} onChange={handleTrailMode}>
+            <option value="layer">{tx('SimulationPanel.Normal_preview')}</option>
+            <option value="trail">{tx('SimulationPanel.Cutter_trail')}</option>
+          </select>
+        </label>
+        {trailMode && <>
+          <label className="sim-stock-check">
+            {tx('SimulationPanel.Cutter_trail_seconds')}
+            <input type="number" min={0} max={TOOLPATH_WINDOW_MAX_MS / 1000} step={0.1}
+              aria-label={tx('SimulationPanel.Cutter_trail_seconds')} value={trailSeconds}
+              onChange={e => handleTrailDuration('recent', e.currentTarget.valueAsNumber)} />
+          </label>
+          <label className="sim-stock-check">
+            {tx('SimulationPanel.Cutter_lead_seconds')}
+            <input type="number" min={0} max={TOOLPATH_WINDOW_MAX_MS / 1000} step={0.1}
+              aria-label={tx('SimulationPanel.Cutter_lead_seconds')} value={leadSeconds}
+              onChange={e => handleTrailDuration('upcoming', e.currentTarget.valueAsNumber)} />
+          </label>
+          <span className="sim-role-badge">{tx('SimulationPanel.Cutter_trail_limit')}</span>
+        </>}
         <label className="sim-stock-check">
           <input
             type="checkbox"

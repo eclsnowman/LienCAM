@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { isMain } from '../lib/is-main.mjs';
 import { spawnSync } from 'node:child_process'
 import { cpSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -75,7 +76,7 @@ export function publishWiki({ source = join(root, 'docs/wiki'), remote = default
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try {
     const options = {}
     const args = process.argv.slice(2)

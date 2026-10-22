@@ -307,6 +307,9 @@ describe('WO-2634: re-derived once, when the rotation is committed', () => {
 
   it('a real tilt leaves the features in model form and compute says why, with no re-import', async () => {
     const op = await createDrill()
+    // The compute Create starts must finish before the tilt; otherwise its
+    // late result lands after the recompute below and outdates the op.
+    await waitFor(() => expect(useCamStore.getState().project.setups[0].operations[0].status).toBe('ready'))
     act(() => useCamStore.getState().updateGeometryTransform(PART, { x: 0, y: 0, z: 0 }, { x: 30, y: 0, z: 0 }))
     expect(layer('holes').frame).toBe('geometry_local')
     const tilted = await recompute(op.id)

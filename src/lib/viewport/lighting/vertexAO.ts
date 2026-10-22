@@ -444,23 +444,145 @@ export function patchMaterialForAO(material: THREE.MeshStandardMaterial): void {
   material.needsUpdate = true
 }
 
+/** WO-3044: a Model-page body opts into the off-thread bake by setting this on its
+ *  geometry's userData (SolidsWorkbenchPage). The CAM viewport never sets it, so its
+ *  bake stays synchronous and its result.ao is still returned for the display cache. */
+export const AO_OFF_THREAD_KEY = 'aoOffThread'
+/** WO-3044: the coarse tessellation pass sets this; its AO is not baked at all (the
+ *  display pass that follows replaces the geometry and bakes). */
+export const AO_SKIP_KEY = 'aoSkipBake'
+
+/** WO-3044: an opted-in body with at least this many vertices bakes in a worker. Under
+ *  it the bake is a few tens of ms (0.1-0.2 ms a vertex) and a worker's start-up is not
+ *  worth it, so the synchronous path stays. */
+export const AO_OFF_THREAD_MIN_VERTICES = 1_000
+
+export interface AoJob {
+  position: Float32Array
+  normal: Float32Array
+  index: Uint16Array | Uint32Array | null
+}
+
+/** The bake one worker job runs: the same computeVertexAO on a rebuilt geometry, so
+ *  the values are the ones the page thread would have produced. */
+export function runAoJob(job: AoJob): Float32Array {
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(job.position, 3))
+  geometry.setAttribute('normal', new THREE.BufferAttribute(job.normal, 3))
+  if (job.index) geometry.setIndex(new THREE.BufferAttribute(job.index, 1))
+  return computeVertexAO(geometry).ao
+}
+
+/** The slice of the Worker API the bake uses; a test supplies an in-process one. */
+export interface AoWorkerLike {
+  postMessage(job: AoJob): void
+  terminate(): void
+  onmessage: ((event: { data: { ao: Float32Array } }) => void) | null
+  onerror: ((event: unknown) => void) | null
+}
+
+let aoWorkerFactory: (() => AoWorkerLike) | null | undefined
+
+/** Test seam: replace (or with null, remove) the worker the off-thread bake starts. */
+export function setAoWorkerFactory(factory: (() => AoWorkerLike) | null | undefined): void {
+  aoWorkerFactory = factory
+}
+
+function createAoWorker(): AoWorkerLike | null {
+  if (aoWorkerFactory !== undefined) return aoWorkerFactory ? aoWorkerFactory() : null
+  if (typeof Worker === 'undefined') return null
+  return new Worker(new URL('./vertexAO.worker.ts', import.meta.url), { type: 'module', name: 'vertex-ao-bake' }) as unknown as AoWorkerLike
+}
+
+const aoLandedListeners = new Set<(mesh: THREE.Mesh) => void>()
+/** WO-3044: called after an off-thread bake lands in a mesh's geometry, so the page can
+ *  draw it again. Returns the unsubscribe. */
+export function onBodyAoLanded(listener: (mesh: THREE.Mesh) => void): () => void {
+  aoLandedListeners.add(listener)
+  return () => { aoLandedListeners.delete(listener) }
+}
+
+const pendingBakes = new WeakMap<THREE.Mesh, () => void>()
+
+/** Stop the mesh's running off-thread bake, if any. */
+function cancelPendingBake(mesh: THREE.Mesh): void {
+  const cancel = pendingBakes.get(mesh)
+  if (cancel) cancel()
+}
+
+/** Start the worker bake for `mesh`'s current geometry. Resolves nothing: the result is
+ *  written into `placeholder` (the geometry's all-1 attribute) when it lands. Returns
+ *  false when no worker could start, so the caller bakes synchronously. */
+function startOffThreadBake(mesh: THREE.Mesh, geometry: THREE.BufferGeometry, placeholder: THREE.BufferAttribute): boolean {
+  const worker = createAoWorker()
+  if (!worker) return false
+  const pos = geometry.getAttribute('position') as THREE.BufferAttribute
+  const nrm = geometry.getAttribute('normal') as THREE.BufferAttribute
+  const index = geometry.getIndex()
+  const t0 = performance.now()
+  const finish = () => {
+    worker.onmessage = null
+    worker.onerror = null
+    worker.terminate()
+    pendingBakes.delete(mesh)
+    geometry.removeEventListener('dispose', cancel)
+  }
+  const cancel = () => finish()
+  worker.onmessage = (event) => {
+    finish()
+    const ao = event.data.ao
+    if (mesh.geometry !== geometry || ao.length !== placeholder.count) return
+    ;(placeholder.array as Float32Array).set(ao)
+    placeholder.needsUpdate = true
+    if (import.meta.env.DEV) {
+      const win = window as unknown as { __geo23AoBakes?: unknown[] }
+      ;(win.__geo23AoBakes ??= []).push({ bakeMs: +(performance.now() - t0).toFixed(2), vertices: ao.length, attributeBytes: ao.length * 4, offThread: true })
+    }
+    aoLandedListeners.forEach((listener) => listener(mesh))
+  }
+  // A worker that fails leaves the body with the flat (no-darkening) look it already has.
+  worker.onerror = () => finish()
+  pendingBakes.set(mesh, cancel)
+  geometry.addEventListener('dispose', cancel)
+  worker.postMessage({
+    position: pos.array as Float32Array,
+    normal: nrm.array as Float32Array,
+    index: index ? (index.array as Uint16Array | Uint32Array) : null,
+  })
+  return true
+}
+
 /**
  * Bake AO into a body mesh's geometry and patch its material. Safe to call again
  * on geometry replacement (recomputes the attribute). No-op (returns zeros) when
  * AO is disabled (the C3(c) mutation) or the geometry lacks position/normal.
+ *
+ * WO-3044: a Model-page body (geometry.userData[AO_OFF_THREAD_KEY]) that is skipped
+ * (AO_SKIP_KEY, the coarse pass) or large (AO_OFF_THREAD_MIN_VERTICES) gets an all-1
+ * attribute at once - the look without AO, and one the patched shader can read - and
+ * a large one is baked in a worker that fills that attribute when it lands.
  */
 export function applyBodyAO(mesh: THREE.Mesh, cachedAo?: Float32Array): AoBakeResult {
   const geometry = mesh.geometry as THREE.BufferGeometry
   const material = mesh.material
   if (!AO_ENABLED) return { bakeMs: 0, vertices: 0, attributeBytes: 0 }
+  cancelPendingBake(mesh)
   const positions = geometry.getAttribute('position') as THREE.BufferAttribute | undefined
   const reusable = positions && isValidVertexAO(cachedAo, positions.count) ? cachedAo : undefined
+  const patch = (m: THREE.Material) => { if (m instanceof THREE.MeshStandardMaterial) patchMaterialForAO(m) }
+  const deferred = !reusable && positions && geometry.getAttribute('normal') && geometry.userData[AO_OFF_THREAD_KEY] === true
+    ? deferBake(mesh, geometry, positions.count)
+    : false
+  if (deferred) {
+    if (Array.isArray(material)) material.forEach(patch)
+    else patch(material)
+    return { bakeMs: 0, vertices: 0, attributeBytes: 0 }
+  }
   const { ao, bakeMs } = reusable
     ? { ao: reusable, bakeMs: 0 }
     : computeVertexAO(geometry)
   if (reusable) geometry.setAttribute(AO_ATTRIBUTE, new THREE.BufferAttribute(reusable, 1))
   if (!geometry.getAttribute(AO_ATTRIBUTE)) return { bakeMs, vertices: 0, attributeBytes: 0 }
-  const patch = (m: THREE.Material) => { if (m instanceof THREE.MeshStandardMaterial) patchMaterialForAO(m) }
   if (Array.isArray(material)) material.forEach(patch)
   else patch(material)
   const result = {
@@ -479,6 +601,20 @@ export function applyBodyAO(mesh: THREE.Mesh, cachedAo?: Float32Array): AoBakeRe
     })
   }
   return result
+}
+
+/** Give an opted-in geometry its all-1 AO attribute and, when it is large and not a
+ *  skipped pass, start the worker bake. False = bake it here instead (small body, or
+ *  no worker to start). */
+function deferBake(mesh: THREE.Mesh, geometry: THREE.BufferGeometry, count: number): boolean {
+  const skip = geometry.userData[AO_SKIP_KEY] === true
+  if (!skip && count < AO_OFF_THREAD_MIN_VERTICES) return false
+  const placeholder = new THREE.BufferAttribute(new Float32Array(count).fill(1), 1)
+  geometry.setAttribute(AO_ATTRIBUTE, placeholder)
+  if (skip) return true
+  if (startOffThreadBake(mesh, geometry, placeholder)) return true
+  geometry.deleteAttribute(AO_ATTRIBUTE)
+  return false
 }
 
 /** (cell, normal bucket) key -> sample slot. A flat Int32Array while the grid is

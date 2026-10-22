@@ -86,12 +86,13 @@ const OTHER_OPS = {
   contour: '1262da61-9c53-4e7f-b1bc-648ab7fe740f',
   pocket: '89d9ca05-1fa9-442f-a609-6c743a2c3988',
 }
+const JOURNEY_DRILL_ID = 'de01b595-7de7-4ec4-8317-0adffc1a660a'
 
 /** The journey's saved project, opened through the store's file open. With a
  *  different Z top allowance the file is the one the same journey saves when
  *  the allowance is typed before the setup is added: stock box and the
  *  stock-corner WCS origin both sit that far above the part top. */
-async function openJourneyProject(topAllowanceMm: number): Promise<void> {
+async function openJourneyProject(topAllowanceMm: number, savedOperations: 'kept' | 'off' = 'kept'): Promise<void> {
   const file = JSON.parse(readFileSync(FIXTURE, 'utf8'))
   if (topAllowanceMm !== 1) {
     const top = PART_TOP_MACHINE + topAllowanceMm
@@ -101,6 +102,21 @@ async function openJourneyProject(topAllowanceMm: number): Promise<void> {
     stock.bounds.size.z = top - stock.bounds.min.z
     stock.bounds.center.z = (top + stock.bounds.min.z) / 2
     file.setups[0].wcs.origin.z = top
+  }
+  // WO-2953 (bd1f42edde): a Face reads the remaining stock every enabled
+  // earlier operation leaves, so each must compute first. The journey's Drill
+  // derives its profile from the modeled body through the geometry worker,
+  // which node does not have ("unsupported ... ep.addEventListener is not a
+  // function"), and would hold every new Face's preflight on "'Drill' is
+  // unsupported". The Drill is not what this file proves; it is switched off.
+  file.setups[0].operations.find((op: { id: string }) => op.id === JOURNEY_DRILL_ID).enabled = false
+  // The journey's own saved Face (10-09, before WO-2694) faces the whole stock
+  // to WCS Z-5, through the part top. Since WO-2953 a new Face meets the
+  // material that Face left, so a new Face to the model top would cut air and
+  // is refused. The new-Face cases put the new Face on the uncut stock - the
+  // operator's case WO-2694 is about - by switching the saved operations off.
+  if (savedOperations === 'off') {
+    for (const op of file.setups[0].operations as { enabled: boolean }[]) op.enabled = false
   }
   await act(async () => {
     await useCamStore.getState().loadProjectFromFile(JSON.stringify(file))
@@ -138,7 +154,8 @@ async function newFace(userBottomWcs?: number): Promise<Operation> {
     expect((screen.getByTestId('face-height-mode') as HTMLSelectElement).value).toBe('explicit_depth')
   }
   const create = screen.getByTestId('op-create') as HTMLButtonElement
-  await waitFor(() => expect(create.disabled, create.getAttribute('data-tooltip') ?? '').toBe(false))
+  // The preflight computes the earlier operations' real toolpaths first (WO-2953).
+  await waitFor(() => expect(create.disabled, create.getAttribute('data-tooltip') ?? '').toBe(false), { timeout: 60_000 })
   const before = setup().operations.length
   fireEvent.click(create)
   const operations = setup().operations
@@ -164,8 +181,9 @@ function post(opIds: string[]): Record<string, string[]> {
   const result = posted.files![0].result
   const lines = result.gcode.split('\n')
   return Object.fromEntries(opIds.map(opId => {
-    const span = result.operationSpans!.find(s => s.opId === opId)!
-    return [opId, lines.slice(span.startLine - 1, span.endLine)]
+    // WO-2870: an operation with nothing left to cut posts one line and no span.
+    const span = result.operationSpans!.find(s => s.opId === opId)
+    return [opId, span ? lines.slice(span.startLine - 1, span.endLine) : lines.filter(l => /: nothing left to cut /.test(l))]
   }))
 }
 
@@ -202,7 +220,7 @@ afterEach(cleanup)
 
 describe('WO-2694: a new Face with smart heights stops at the model top', () => {
   it('(a) Auto Stock top allowance 1 mm: the posted Face never goes below the part top', async () => {
-    await openJourneyProject(1)
+    await openJourneyProject(1, 'off')
     expect(modelTopWcs()).toBeCloseTo(-1, 6)
     const face = await newFace()
     await compute(face.id)
@@ -218,7 +236,7 @@ describe('WO-2694: a new Face with smart heights stops at the model top', () => 
   }, 300_000)
 
   it('(b) the default allowance (5 mm): the Face ends at the model top, and still does after the allowance is edited', async () => {
-    await openJourneyProject(5)
+    await openJourneyProject(5, 'off')
     expect(modelTopWcs()).toBeCloseTo(-5, 6)
     const face = await newFace()
     await compute(face.id)
@@ -243,7 +261,7 @@ describe('WO-2694: a new Face with smart heights stops at the model top', () => 
   })
 
   it('(c) a Face bottom the operator sets below the model top is honoured exactly', async () => {
-    await openJourneyProject(1)
+    await openJourneyProject(1, 'off')
     const face = await newFace(-3)
     await compute(face.id)
     const deepest = deepestFeedZ(post([face.id])[face.id])
@@ -251,7 +269,9 @@ describe('WO-2694: a new Face with smart heights stops at the model top', () => 
     expect(deepest).toBeCloseTo(-3, 3)
 
     // The journey's own Face, saved with its bottom as an operator plane at
-    // WCS -5, keeps exactly that plane on load and regenerate.
+    // WCS -5, keeps exactly that plane on load and regenerate (switched back
+    // on: it is the setup's first operation, so nothing earlier feeds it).
+    act(() => useCamStore.getState().updateOperation(setup().id, JOURNEY_FACE_ID, { enabled: true }))
     await compute(JOURNEY_FACE_ID)
     const saved = deepestFeedZ(post([JOURNEY_FACE_ID])[JOURNEY_FACE_ID])
     results.cSavedFace = saved
@@ -259,7 +279,7 @@ describe('WO-2694: a new Face with smart heights stops at the model top', () => 
   }, 300_000)
 
   it('(e) Properties and the editor name Model top and show the resolved plane; a typed plane can go back', async () => {
-    await openJourneyProject(1)
+    await openJourneyProject(1, 'off')
     // The editor: Model top is the recommended choice and the preflight names it.
     render(createElement(NewOperationModal))
     act(() => useCamStore.getState().openModal('new-operation'))
@@ -272,7 +292,7 @@ describe('WO-2694: a new Face with smart heights stops at the model top', () => 
     expect([...mode.options].map(option => option.textContent))
       .toEqual(['Model top (recommended)', 'Selected model face', 'Explicit WCS plane'])
     await waitFor(() => expect(screen.getByTestId('face-height-preflight').textContent)
-      .toContain('Smart recommendation: Face / Model top'))
+      .toContain('Smart recommendation: Face / Model top'), { timeout: 60_000 })
     cleanup()
 
     const face = await newFace()
@@ -328,8 +348,19 @@ const MAIN_DIGESTS: Record<string, string> = {
   // through hole (fresh profile, current placement) instead of six reach-trim dips; see adaptiveCutsOnASimplePart.wo2713.test.ts.
   // WO-2838: landed WO-2787 (1f65317369 / b5f0240fc7) prices complete
   // reposition + cleanup programs; only Adaptive changes on this project.
-  adaptive: 'c75618a02bb93fb1',
+  // WO-3056 repin, bisected on this test alone (contour and pocket unchanged):
+  // c75618a02bb93fb1 -> 0ce565a48179aa24 at WO-2835's merge 00bc5aa57b (adaptive
+  // rapid hops qualified against cleared corridors), -> dd6b1e16f836cd01 at
+  // WO-2850's merge 2b3d7c4f09 (free cuts steered from the travelled heading),
+  // -> 87d3dc5416bef44e at WO-3023 04d1935bc2 (entries leave vertically before
+  // the rapid to the next entry). Same digest on Windows and Spark.
+  // WO-3059 repin, bisected on this test alone (contour and pocket unchanged): 87d3dc5416bef44e
+  // at 23fbd9b53a -> 8ad05b813d948296 at WO-3057's merge f8afbbb133 (665ce500e9: WO-2850's
+  // travelled heading only on a stock-outline component). Same digest on Windows and Spark.
+  adaptive: '8ad05b813d948296',
   // WO-2701 repin: contour's one re-entry plunge F1000 -> F300 (wo2694-contour-{main,branch}.nc).
   contour: '623c82d0e9c24b75',
-  pocket: '4ef8fc8cca792099',
+  // WO-2870 repin: Face cleared this Pocket's region, so it has nothing left to
+  // cut; its 14 G0 dips to Z-1/-3/-4 became one line (evidence/WO-2870/journey-*.nc).
+  pocket: 'dceb2ea071701b7a',
 }

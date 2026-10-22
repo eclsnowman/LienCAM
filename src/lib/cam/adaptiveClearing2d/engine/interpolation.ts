@@ -10,6 +10,9 @@
 // (or a degree-1 least-squares fit when the target lies outside the sampled range).
 // The deflection is clamped to +-maxDeflection -- the per-step curvature limit.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
+
 export interface Interpolator {
   reset(): void
   /** Predict/probe the next deflection angle to try for `targetArea`. */
@@ -64,7 +67,7 @@ function polyfit1(x: number, xs: number[], ys: number[]): number {
   return my + slope * (x - mx)
 }
 
-export function createInterpolator(maxDeflection = Math.PI / 4): Interpolator {
+export function createInterpolator(maxDeflection = Math.PI / AP.steering.maxDeflectionDivisor): Interpolator {
   let angles: number[] = []
   let areas: number[] = []
   const lo = -maxDeflection

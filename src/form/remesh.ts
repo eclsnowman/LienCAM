@@ -83,6 +83,8 @@ export interface RemeshResult {
   /** the worst distance from a cage point's surface point to the body, before and after the Pull (mm) */
   offBefore: number
   offAfter: number
+  /** scans of a body face's triangles for the one nearest a new face (a kept triangle needs none) */
+  nearestSearches: number
 }
 
 interface Chain {
@@ -113,6 +115,43 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
     if (tri[0] === tri[1] || tri[1] === tri[2] || tri[0] === tri[2]) continue
     tris.push(tri); triFace.push(mesh.triFace[t])
   }
+  // two triangles on the same three points, wound against each other, enclose nothing: a fin standing on the surface.
+  // Both go where the surface round them stays as closed without them (each of their edges keeps as many triangles
+  // running it one way as the other). The operator's PortalHandle.step has such fins: two body faces on the same four points,
+  // back to back, on a plate's inner edge, and (fresh import) one triangle folded back inside a face. Kept, their
+  // edges had four faces and ran the same way twice, and the whole cage was refused (WO-3051). On a connected closed
+  // body a triangle and its reverse cannot both occur, so nothing else changes
+  {
+    const cyc = (a: number, b: number, c: number) => (a < b && a < c ? `${a},${b},${c}` : b < c ? `${b},${c},${a}` : `${c},${a},${b}`)
+    const runs = new Map<string, number>()
+    for (const t of tris) for (let k = 0; k < 3; k++) { const e = `${t[k]}>${t[(k + 1) % 3]}`; runs.set(e, (runs.get(e) ?? 0) + 1) }
+    const open = new Map<string, number[]>()
+    const gone = new Set<number>()
+    tris.forEach(([a, b, c], t) => {
+      const back = open.get(cyc(c, b, a))
+      const edges = [`${a}>${b}`, `${b}>${c}`, `${c}>${a}`]
+      const even = (e: string) => { const [x, y] = e.split('>'); return runs.get(e) === runs.get(`${y}>${x}`) }
+      if (back !== undefined && back.length > 0 && edges.every(even)) {
+        gone.add(back.pop()!); gone.add(t)
+        for (const e of edges) { const [x, y] = e.split('>'); runs.set(e, runs.get(e)! - 1); runs.set(`${y}>${x}`, runs.get(`${y}>${x}`)! - 1) }
+        return
+      }
+      const key = cyc(a, b, c)
+      const list = open.get(key)
+      if (list) list.push(t); else open.set(key, [t])
+    })
+    if (gone.size > 0) {
+      const kt = tris.filter((_, t) => !gone.has(t)), kf = triFace.filter((_, t) => !gone.has(t))
+      tris.length = 0; triFace.length = 0
+      kt.forEach((t, k) => { tris.push(t); triFace.push(kf[k]) })
+    }
+  }
+  // a crack between two faces (the kernel cut their shared edge at different points on each side: 4998-5000 on one
+  // face, 4998-4999-5000 on the other) leaves the edge open on both sides, and the points where the sides meet join
+  // two fans the check refuses (the operator's PortalHandle.step: 157 open edges, 25 such points, WO-3051). An open triangle
+  // edge with another open edge's point along it is split through that point (a fan from its third point), until the
+  // two sides run through the same points. A closed body has no open edge, so nothing else changes
+  zipCracks(tris, triFace, P)
   const faceIds = [...new Set(triFace)]
   const trisOf = new Map<number, number[]>(faceIds.map((f) => [f, []]))
   tris.forEach((_, t) => trisOf.get(triFace[t])!.push(t))
@@ -270,137 +309,205 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
   // triangulated from its loops): a boss's rim from the plate top's 32 to the twelve its length asks
   // let the foot fillet sag 0.27 mm off the body, a dome's rim 1.1 mm
   chains.forEach((c, i) => { if (c.faces.some((f) => kind.get(f)?.kind === 'plate')) want[i] = Math.max(want[i], original[i]) })
-  let counts: number[] = []
-  for (let pass = 0; pass < chains.length + 2; pass++) {
-    const parent = chains.map((_, i) => i)
-    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
-    const join = (a: number, b: number) => { parent[find(a)] = find(b) }
-    for (const f of faceIds) {
-      const k = kind.get(f)!
-      if (k.kind === 'quad') { join(k.sides[0].chain, k.sides[2].chain); join(k.sides[1].chain, k.sides[3].chain) }
-      if (k.kind === 'annulus') join(k.loops[0].chain, k.loops[1].chain)
-      if (k.kind === 'star') for (const s of k.sides) join(s.chain, k.sides[0].chain)
-    }
-    const fixed = new Map<number, number>(), multiple = new Map<number, number>(), best = new Map<number, number>()
-    let conflict = -1
-    chains.forEach((c, i) => {
-      const g = find(i)
-      best.set(g, Math.max(best.get(g) ?? 0, want[i]))
-      const kindOf = (f: number) => kind.get(f)?.kind
-      if (c.faces.some((f) => kindOf(f) === 'triangles' || (f >= 0 && !kind.has(f))) || c.faces.every((f) => f < 0 || kindOf(f) === 'flat' || kindOf(f) === 'plate')) {
-        if (fixed.has(g) && fixed.get(g) !== original[i]) conflict = g
-        fixed.set(g, original[i])
+  /** the chains a grid face's counts tie together (none for a flat, plate or triangle face) */
+  const tiesOf = (k: Kind) => (k.kind === 'quad' || k.kind === 'star' ? k.sides.map((s) => s.chain) : k.kind === 'annulus' ? k.loops.map((s) => s.chain) : k.kind === 'dome' ? [k.loop.chain] : [])
+  /** a face that cannot be gridded keeps its triangles (a flat one its single face) */
+  const demote = (f: number) => kind.set(f, { kind: flatFaceIds.has(f) ? 'flat' : 'triangles' })
+  const settle = (): number[] => {
+    for (let pass = 0; pass < chains.length + 2; pass++) {
+      const parent = chains.map((_, i) => i)
+      const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+      const join = (a: number, b: number) => { parent[find(a)] = find(b) }
+      for (const f of faceIds) {
+        const k = kind.get(f)!
+        if (k.kind === 'quad') { join(k.sides[0].chain, k.sides[2].chain); join(k.sides[1].chain, k.sides[3].chain) }
+        if (k.kind === 'annulus') join(k.loops[0].chain, k.loops[1].chain)
+        if (k.kind === 'star') for (const s of k.sides) join(s.chain, k.sides[0].chain)
       }
-    })
-    const needs = (g: number, m: number) => { const was = multiple.get(g) ?? 1; multiple.set(g, was % m === 0 ? was : m % was === 0 ? m : was * m) }
-    for (const f of faceIds) { const k = kind.get(f)!; if (k.kind === 'dome') needs(find(k.loop.chain), 4); if (k.kind === 'star') needs(find(k.sides[0].chain), 2) }
-    for (const [g, m] of multiple) if (fixed.has(g) && fixed.get(g)! % m !== 0) conflict = g
-    if (conflict < 0) {
-      counts = chains.map((_, i) => { const g = find(i); if (fixed.has(g)) return fixed.get(g)!; const m = multiple.get(g) ?? 1; return Math.ceil(best.get(g)! / m) * m })
-      break
+      const fixedIn = new Map<number, number[]>(), multiple = new Map<number, number>(), best = new Map<number, number>()
+      chains.forEach((c, i) => {
+        const g = find(i)
+        best.set(g, Math.max(best.get(g) ?? 0, want[i]))
+        const kindOf = (f: number) => kind.get(f)?.kind
+        if (c.faces.some((f) => kindOf(f) === 'triangles' || (f >= 0 && !kind.has(f))) || c.faces.every((f) => f < 0 || kindOf(f) === 'flat' || kindOf(f) === 'plate')) {
+          const list = fixedIn.get(g)
+          if (list) list.push(i); else fixedIn.set(g, [i])
+        }
+      })
+      const needs = (g: number, m: number) => { const was = multiple.get(g) ?? 1; multiple.set(g, was % m === 0 ? was : m % was === 0 ? m : was * m) }
+      for (const f of faceIds) { const k = kind.get(f)!; if (k.kind === 'dome') needs(find(k.loop.chain), 4); if (k.kind === 'star') needs(find(k.sides[0].chain), 2) }
+      // a group's fixed chains (beside a face that keeps its points) must agree, and suit the multiple its domes and
+      // stars need. Where they do not, only the faces that tie an odd one out into the group keep their triangles:
+      // the group keeps the count that costs fewest faces, and between equals the count most of its chains already
+      // have (a face that keeps its triangles fixes its other edges at their own counts, so that count stops there).
+      // (Every face tied to the group used to, and each of those fixed its other edges in turn: the operator's
+      // PortalHandle.step lost 98 faces holding 23,354 triangles in 10 passes, WO-3022; Screwdriver Handle
+      // Medium.step 216 faces.)
+      const tying = new Map<number, number[]>()
+      for (const f of faceIds) for (const c of tiesOf(kind.get(f)!)) { const list = tying.get(c); if (list) { if (!list.includes(f)) list.push(f) } else tying.set(c, [f]) }
+      const fixed = new Map<number, number>()
+      const drop = new Set<number>()
+      const members = new Map<number, number[]>()
+      chains.forEach((_, i) => { const g = find(i); const list = members.get(g); if (list) list.push(i); else members.set(g, [i]) })
+      for (const [g, list] of fixedIn) {
+        const m = multiple.get(g) ?? 1
+        const have = (v: number) => members.get(g)!.filter((i) => original[i] === v).length
+        let keepAt: number | undefined, cost = Infinity
+        for (const v of new Set(list.map((i) => original[i]))) {
+          if (v % m !== 0) continue
+          const faces = new Set(list.filter((i) => original[i] !== v).flatMap((i) => tying.get(i) ?? [])).size
+          if (faces < cost || (faces === cost && (have(v) > have(keepAt!) || (have(v) === have(keepAt!) && v > keepAt!)))) { cost = faces; keepAt = v }
+        }
+        for (const i of list) if (original[i] !== keepAt) for (const f of tying.get(i) ?? []) drop.add(f)
+        if (keepAt !== undefined) fixed.set(g, keepAt)
+      }
+      if (drop.size === 0) return chains.map((_, i) => { const g = find(i); if (fixed.has(g)) return fixed.get(g)!; const m = multiple.get(g) ?? 1; return Math.ceil(best.get(g)! / m) * m })
+      for (const f of drop) demote(f)
     }
-    // the faces tying that group together keep their triangles (a flat one its single face), and the counts are settled again
-    for (const f of faceIds) {
-      const k = kind.get(f)!
-      const ties = k.kind === 'quad' || k.kind === 'star' ? k.sides.map((s) => s.chain) : k.kind === 'annulus' ? k.loops.map((s) => s.chain) : k.kind === 'dome' ? [k.loop.chain] : []
-      if (ties.some((c) => find(c) === conflict)) kind.set(f, { kind: flatFaceIds.has(f) ? 'flat' : 'triangles' })
-    }
+    return []
   }
 
-  // --- the new cage's points: original points where kept, chain samples, grid interiors
-  const out: Vec3[] = []
-  const newOfOriginal = new Map<number, number>()
-  const keep = (v: number) => { let id = newOfOriginal.get(v); if (id === undefined) { id = out.length; out.push(P[v]); newOfOriginal.set(v, id) } return id }
-  // a closed rim across an annulus from another starts its samples where the other's first sample is nearest,
-  // so the samples pair off along the face (straight up a cylinder, along a cone) rather than a fraction of a
-  // spacing round: with one ring on a ruled face that fraction would twist it into a waisted hyperboloid
-  const startAt = new Map<number, Vec3>()
-  for (const f of faceIds) {
-    const k = kind.get(f)!
-    if (k.kind !== 'annulus') continue
-    const [a, b] = [k.loops[0].chain, k.loops[1].chain]
-    if (!chains[a].closed || !chains[b].closed || counts[a] !== counts[b] || counts[a] === original[a] || startAt.has(b)) continue
-    const first = startAt.get(a) ?? P[chains[a].verts[0]]
-    startAt.set(b, closestOnPolyline(chains[b].verts.map((v) => P[v]), first))
-  }
-  const samples = chains.map((c, i) => {
-    const n = counts[i]
-    if (n === original[i]) return c.verts.map((v, j) => (c.closed && j === c.verts.length - 1 ? keep(c.verts[0]) : keep(v)))
-    const from = startAt.get(i)
-    if (from !== undefined) {
-      // the closed loop from `from` round to itself
-      const vs = c.verts.map((v) => P[v])
-      let seg = 0, best = Infinity
-      for (let j = 1; j < vs.length; j++) { const d = dist(closestOnPolyline([vs[j - 1], vs[j]], from), from); if (d < best) { best = d; seg = j } }
-      const loop = [from, ...vs.slice(seg, vs.length - 1), ...vs.slice(0, seg), from]
-      const pts = resample(loop, n)
-      out.push(from)
-      const start = out.length - 1
-      return pts.map((p, j) => (j === 0 || j === n ? start : (out.push(p), out.length - 1)))
-    }
-    // evenly by length along the chain; its ends (body vertices) stay the original points
-    const pts = resample(c.verts.map((v) => P[v]), n)
-    return pts.map((p, j) => (j === 0 ? keep(c.verts[0]) : j === n ? keep(c.verts[c.verts.length - 1]) : (out.push(p), out.length - 1)))
-  })
-  /** a chain's points in the face's direction, first to last */
-  const along = (s: { chain: number; forward: boolean }) => (s.forward ? samples[s.chain] : [...samples[s.chain]].reverse())
-
-  const faces: number[][] = []
-  const bodyFaceOf: number[] = []
+  // faces cached per body face: they do not change from one try to the next
   const onFaceOf = new Map<number, ReturnType<typeof closestPointIndex>>()
-  let flatFaces = 0, gridFaces = 0, triangleFaces = 0, triangles = 0
-  for (const f of faceIds) {
-    const k = kind.get(f)!
-    const onFace = closestPointIndex({ position: trisOf.get(f)!.flatMap((t) => tris[t].flatMap((v) => P[v])), index: trisOf.get(f)!.flatMap((_, j) => [j * 3, j * 3 + 1, j * 3 + 2]) })
-    onFaceOf.set(f, onFace)
-    const refN = normalOf(tris[trisOf.get(f)![0]])
-    const addFaces = (list: number[][]) => {
-      // wound like the body's triangles: a face's normal against the triangle nearest it
-      for (const loop of list) {
-        const c = centroid(loop.map((i) => out[i]))
-        const n = newellN(loop.map((i) => out[i]))
-        const t = nearestTriangle(trisOf.get(f)!, c)
-        faces.push(dot(n, t === -1 ? refN : normalOf(tris[t])) < 0 ? [...loop].reverse() : loop)
-        bodyFaceOf.push(f)
+  const nearestOf = new Map<number, (c: Vec3) => number>()
+  const build = (counts: number[]) => {
+    // --- the new cage's points: original points where kept, chain samples, grid interiors
+    const out: Vec3[] = []
+    const newOfOriginal = new Map<number, number>()
+    const keep = (v: number) => { let id = newOfOriginal.get(v); if (id === undefined) { id = out.length; out.push(P[v]); newOfOriginal.set(v, id) } return id }
+    // a closed rim across an annulus from another starts its samples where the other's first sample is nearest,
+    // so the samples pair off along the face (straight up a cylinder, along a cone) rather than a fraction of a
+    // spacing round: with one ring on a ruled face that fraction would twist it into a waisted hyperboloid
+    const startAt = new Map<number, Vec3>()
+    for (const f of faceIds) {
+      const k = kind.get(f)!
+      if (k.kind !== 'annulus') continue
+      const [a, b] = [k.loops[0].chain, k.loops[1].chain]
+      if (!chains[a].closed || !chains[b].closed || counts[a] !== counts[b] || counts[a] === original[a] || startAt.has(b)) continue
+      const first = startAt.get(a) ?? P[chains[a].verts[0]]
+      startAt.set(b, closestOnPolyline(chains[b].verts.map((v) => P[v]), first))
+    }
+    const samples = chains.map((c, i) => {
+      const n = counts[i]
+      if (n === original[i]) return c.verts.map((v, j) => (c.closed && j === c.verts.length - 1 ? keep(c.verts[0]) : keep(v)))
+      const from = startAt.get(i)
+      if (from !== undefined) {
+        // the closed loop from `from` round to itself
+        const vs = c.verts.map((v) => P[v])
+        let seg = 0, best = Infinity
+        for (let j = 1; j < vs.length; j++) { const d = dist(closestOnPolyline([vs[j - 1], vs[j]], from), from); if (d < best) { best = d; seg = j } }
+        const loop = [from, ...vs.slice(seg, vs.length - 1), ...vs.slice(0, seg), from]
+        const pts = resample(loop, n)
+        out.push(from)
+        const start = out.length - 1
+        return pts.map((p, j) => (j === 0 || j === n ? start : (out.push(p), out.length - 1)))
+      }
+      // evenly by length along the chain; its ends (body vertices) stay the original points
+      const pts = resample(c.verts.map((v) => P[v]), n)
+      return pts.map((p, j) => (j === 0 ? keep(c.verts[0]) : j === n ? keep(c.verts[c.verts.length - 1]) : (out.push(p), out.length - 1)))
+    })
+    /** a chain's points in the face's direction, first to last */
+    const along = (s: { chain: number; forward: boolean }) => (s.forward ? samples[s.chain] : [...samples[s.chain]].reverse())
+
+    const faces: number[][] = []
+    const bodyFaceOf: number[] = []
+    /** body faces whose new faces fold (some turned over against the rest) or repeat a point */
+    const bad = new Set<number>()
+    let flatFaces = 0, gridFaces = 0, triangleFaces = 0, triangles = 0, nearestSearches = 0
+    for (const f of faceIds) {
+      const k = kind.get(f)!
+      let onFace = onFaceOf.get(f)
+      if (onFace === undefined) {
+        onFace = closestPointIndex({ position: trisOf.get(f)!.flatMap((t) => tris[t].flatMap((v) => P[v])), index: trisOf.get(f)!.flatMap((_, j) => [j * 3, j * 3 + 1, j * 3 + 2]) })
+        onFaceOf.set(f, onFace)
+      }
+      const refN = normalOf(tris[trisOf.get(f)![0]])
+      // a kept triangle is its own nearest (centroid distance 0, the first of any with the same centroid), so
+      // `own` names each loop's triangle and the scan over the whole face is skipped (WO-3045)
+      let firstAt: Map<string, number> | undefined
+      const ownNearest = (t: number) => {
+        if (firstAt === undefined) {
+          firstAt = new Map()
+          for (const u of trisOf.get(f)!) { const key = centroid(tris[u].map((v) => P[v])).join(','); if (!firstAt.has(key)) firstAt.set(key, u) }
+        }
+        const c = centroid(tris[t].map((v) => P[v]))
+        return c.every(Number.isFinite) ? firstAt.get(c.join(',')) ?? -1 : -1
+      }
+      const addFaces = (list: number[][], own?: number[]) => {
+        // wound like the body's triangles: a face's normal against the triangle nearest it
+        let turned = 0
+        for (const [j, loop] of list.entries()) {
+          const c = centroid(loop.map((i) => out[i]))
+          const n = newellN(loop.map((i) => out[i]))
+          const t = own ? ownNearest(own[j]) : nearestTriangle(trisOf.get(f)!, c)
+          const flip = dot(n, t === -1 ? refN : normalOf(tris[t])) < 0
+          if (flip) turned++
+          faces.push(flip ? [...loop].reverse() : loop)
+          bodyFaceOf.push(f)
+          if (new Set(loop).size !== loop.length) bad.add(f)
+        }
+        // a grid is laid out wound one way: some of its faces turned and some not means it folds over itself
+        if (!own && turned > 0 && turned < list.length) bad.add(f)
+      }
+      const nearestTriangle = (list: number[], c: Vec3) => {
+        nearestSearches++
+        let nearest = nearestOf.get(f)
+        if (nearest === undefined) { nearest = nearestPoint(list.map((t) => centroid(tris[t].map((v) => P[v])))); nearestOf.set(f, nearest) }
+        const j = nearest(c)
+        return j === -1 ? -1 : list[j]
+      }
+      if (k.kind === 'flat') {
+        const loop = loopsOf.get(f)![0].flatMap((s) => along(s).slice(0, -1))
+        addFaces([loop]); flatFaces++
+      } else if (k.kind === 'plate' && loopsOf.get(f)!.some((l) => l.some((s) => counts[s.chain] !== original[s.chain]))) {
+        addFaces(plateTriangles(loopsOf.get(f)!.map((l) => l.flatMap((s) => along(s).slice(0, -1))), out, refN)); flatFaces++
+      } else if (k.kind === 'plate') {
+        // its edges kept their points: its own triangles, as the kernel laid them out (earcut's long slivers
+        // round a rib's corners left a point of the finished body 0.93 mm off the plate)
+        addFaces(trisOf.get(f)!.map((t) => tris[t].map(keep)), trisOf.get(f)!); flatFaces++
+      } else if (k.kind === 'quad' || k.kind === 'dome') {
+        let sides: number[][]
+        if (k.kind === 'quad') sides = k.sides.map(along)
+        else {
+          const ring = along(k.loop).slice(0, -1)
+          const n4 = ring.length / 4
+          sides = [0, 1, 2, 3].map((j) => [...ring, ring[0]].slice(j * n4, (j + 1) * n4 + 1))
+        }
+        // a dome's grid starts flat across its rim: each interior point goes up onto the dome along the rim's
+        // normal, not to the dome's nearest point - over a hemisphere (a ball cap taller than its radius) that
+        // is the rim itself for every point, and the dome came back as a flat lid (WO-2822)
+        const lift = k.kind === 'dome' ? liftOnto(sides.flatMap((sd) => sd.slice(0, -1).map((i) => out[i])), trisOf.get(f)!.map((t) => tris[t].map((v) => P[v]))) : undefined
+        addFaces(coonsGrid(sides, out, onFace, lift)); gridFaces++
+      } else if (k.kind === 'star') {
+        addFaces(starGrid(k.sides.map(along), out, onFace)); gridFaces++
+      } else if (k.kind === 'annulus') {
+        addFaces(ringGrid(along(k.loops[0]).slice(0, -1), along(k.loops[1]).slice(0, -1), out, onFace, h, ruledTol, maxTurn)); gridFaces++
+      } else {
+        const list = trisOf.get(f)!
+        addFaces(list.map((t) => tris[t].map(keep)), list)
+        triangleFaces++; triangles += list.length
       }
     }
-    const nearestTriangle = (list: number[], c: Vec3) => {
-      let best = -1, bestD = Infinity
-      for (const t of list) { const d = dist(centroid(tris[t].map((v) => P[v])), c); if (d < bestD) { bestD = d; best = t } }
-      return best
-    }
-    if (k.kind === 'flat') {
-      const loop = loopsOf.get(f)![0].flatMap((s) => along(s).slice(0, -1))
-      addFaces([loop]); flatFaces++
-    } else if (k.kind === 'plate' && loopsOf.get(f)!.some((l) => l.some((s) => counts[s.chain] !== original[s.chain]))) {
-      addFaces(plateTriangles(loopsOf.get(f)!.map((l) => l.flatMap((s) => along(s).slice(0, -1))), out, refN)); flatFaces++
-    } else if (k.kind === 'plate') {
-      // its edges kept their points: its own triangles, as the kernel laid them out (earcut's long slivers
-      // round a rib's corners left a point of the finished body 0.93 mm off the plate)
-      addFaces(trisOf.get(f)!.map((t) => tris[t].map(keep))); flatFaces++
-    } else if (k.kind === 'quad' || k.kind === 'dome') {
-      let sides: number[][]
-      if (k.kind === 'quad') sides = k.sides.map(along)
-      else {
-        const ring = along(k.loop).slice(0, -1)
-        const n4 = ring.length / 4
-        sides = [0, 1, 2, 3].map((j) => [...ring, ring[0]].slice(j * n4, (j + 1) * n4 + 1))
-      }
-      // a dome's grid starts flat across its rim: each interior point goes up onto the dome along the rim's
-      // normal, not to the dome's nearest point - over a hemisphere (a ball cap taller than its radius) that
-      // is the rim itself for every point, and the dome came back as a flat lid (WO-2822)
-      const lift = k.kind === 'dome' ? liftOnto(sides.flatMap((sd) => sd.slice(0, -1).map((i) => out[i])), trisOf.get(f)!.map((t) => tris[t].map((v) => P[v]))) : undefined
-      addFaces(coonsGrid(sides, out, onFace, lift)); gridFaces++
-    } else if (k.kind === 'star') {
-      addFaces(starGrid(k.sides.map(along), out, onFace)); gridFaces++
-    } else if (k.kind === 'annulus') {
-      addFaces(ringGrid(along(k.loops[0]).slice(0, -1), along(k.loops[1]).slice(0, -1), out, onFace, h, ruledTol, maxTurn)); gridFaces++
-    } else {
-      const list = trisOf.get(f)!
-      addFaces(list.map((t) => tris[t].map(keep)))
-      triangleFaces++; triangles += list.length
-    }
+    return { out, samples, faces, bodyFaceOf, bad, flatFaces, gridFaces, triangleFaces, triangles, nearestSearches }
   }
+  // a face whose grid folds or repeats a point keeps its triangles instead (a flat one its single face), and the
+  // counts are settled again round it: one such grid made the operator's whole PortalHandle.step a cage the check refuses
+  // (WO-3022: face 0 and about 40 others), so From body gave him nothing to shape
+  let counts = settle()
+  let built = build(counts)
+  for (;;) {
+    // a grid falls back to one flat face where it can, then to its triangles; kept triangles are the body's own
+    const fix = [...built.bad].filter((f) => kind.get(f)!.kind !== 'triangles')
+    if (fix.length === 0) break
+    for (const f of fix) {
+      const was = kind.get(f)!.kind
+      if (was !== 'flat' && was !== 'plate' && flatFaceIds.has(f)) demote(f)
+      else kind.set(f, { kind: 'triangles' })
+    }
+    counts = settle()
+    built = build(counts)
+  }
+  const { out, samples, faces, bodyFaceOf, flatFaces, gridFaces, triangleFaces, triangles, nearestSearches } = built
 
   // --- creases: edges between faces of different body faces meeting at a real angle
   const cageNormal = faces.map((loop) => newellN(loop.map((i) => out[i])))
@@ -433,7 +540,62 @@ export function remeshFromBody(mesh: RemeshMesh, opts: RemeshOptions = {}): Reme
     const r = pullOntoTargets(cage, out.map((_, i) => i), (i, q) => home[i](q))
     if (r !== null) { cage = r.cage; offBefore = r.before; offAfter = r.after }
   }
-  return { cage, flatFaces, gridFaces, triangleFaces, triangles, offBefore, offAfter }
+  return { cage, flatFaces, gridFaces, triangleFaces, triangles, offBefore, offAfter, nearestSearches }
+}
+
+/**
+ * Closes the cracks of a tessellation in place: an open triangle edge (no triangle runs it the other way) with a point
+ * of another body face's open edge along it - inside its span, off its line by at most a seventh of its length (a chord
+ * of the kernel's 0.4 rad angular deflection misses its arc by a twentieth) - is split through those points, a fan from the
+ * triangle's third point, in the edge's order. Repeated until no open edge takes a point (each side of a crack that
+ * has points the other lacks takes them in turn).
+ */
+function zipCracks(tris: number[][], triFace: number[], P: Vec3[]): void {
+  for (let round = 0; round < 16; round++) {
+    const runs = new Set<string>()
+    for (const t of tris) for (let k = 0; k < 3; k++) runs.add(`${t[k]}>${t[(k + 1) % 3]}`)
+    const open: Array<[number, number]> = []
+    tris.forEach((t, i) => { for (let k = 0; k < 3; k++) if (!runs.has(`${t[(k + 1) % 3]}>${t[k]}`)) open.push([i, k]) })
+    if (open.length === 0) return
+    // the body faces whose open edges each open point is on (a face's own outline, cut out alone, is no crack)
+    const facesAt = new Map<number, Set<number>>()
+    for (const [i, k] of open) for (const v of [tris[i][k], tris[i][(k + 1) % 3]]) { const set = facesAt.get(v); if (set) set.add(triFace[i]); else facesAt.set(v, new Set([triFace[i]])) }
+    const pts = [...facesAt.keys()]
+    // the open points in buckets the size of the longest open edge, so an edge looks in the 27 round its middle
+    let cell = 0
+    for (const [i, k] of open) cell = Math.max(cell, dist(P[tris[i][k]], P[tris[i][(k + 1) % 3]]))
+    if (!(cell > 0) || !Number.isFinite(cell)) return
+    const key = (p: Vec3, d: number[] = [0, 0, 0]) => p.map((c, j) => Math.floor(c / cell) + d[j]).join(',')
+    const buckets = new Map<string, number[]>()
+    for (const v of pts) { const kk = key(P[v]); const list = buckets.get(kk); if (list) list.push(v); else buckets.set(kk, [v]) }
+    const splitAt = new Map<number, { k: number; along: number[] }>()
+    for (const [i, k] of open) {
+      if (splitAt.has(i)) continue
+      const a = tris[i][k], b = tris[i][(k + 1) % 3]
+      const d = sub(P[b], P[a]), l2 = dot(d, d)
+      if (!(l2 > 0)) continue
+      const mid: Vec3 = [(P[a][0] + P[b][0]) / 2, (P[a][1] + P[b][1]) / 2, (P[a][2] + P[b][2]) / 2]
+      const hits: Array<{ v: number; t: number }> = []
+      for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) for (const v of buckets.get(key(mid, [x, y, z])) ?? []) {
+        if (v === a || v === b || tris[i].includes(v) || ![...facesAt.get(v)!].some((f) => f !== triFace[i])) continue
+        const w = sub(P[v], P[a]), t = dot(w, d) / l2
+        if (t <= 1e-6 || t >= 1 - 1e-6) continue
+        const off = sub(w, [d[0] * t, d[1] * t, d[2] * t])
+        if (dot(off, off) <= l2 / 49) hits.push({ v, t })
+      }
+      if (hits.length > 0) splitAt.set(i, { k, along: hits.sort((p, q) => p.t - q.t || p.v - q.v).map((h) => h.v) })
+    }
+    if (splitAt.size === 0) return
+    const next: number[][] = [], nextFace: number[] = []
+    tris.forEach((t, i) => {
+      const s = splitAt.get(i)
+      if (s === undefined) { next.push(t); nextFace.push(triFace[i]); return }
+      const pts = [t[s.k], ...s.along, t[(s.k + 1) % 3]], c = t[(s.k + 2) % 3]
+      for (let j = 0; j + 1 < pts.length; j++) { next.push([pts[j], pts[j + 1], c]); nextFace.push(triFace[i]) }
+    })
+    tris.length = 0; triFace.length = 0
+    next.forEach((t, j) => { tris.push(t); triFace.push(nextFace[j]) })
+  }
 }
 
 /**
@@ -469,6 +631,10 @@ function plateTriangles(loops: number[][], out: Vec3[], n: Vec3): number[][] {
       const u = t[e], v = t[(e + 1) % 3], c = t[(e + 2) % 3]
       const run = onEdge(u, v)
       if (run.length === 0) continue
+      // its third point lies on this edge: a triangle of no area (earcut's, between samples along a short arc), and
+      // the fan through the run would repeat that point (Example knob.step: 3,984 such faces, a cage the check
+      // refuses). It covers nothing; the triangle across this edge is split through the point instead
+      if (run.includes(c)) return []
       const pts = [u, ...run, v]
       return pts.slice(0, -1).flatMap((q, k) => split([q, pts[k + 1], c], depth + 1))
     }
@@ -606,6 +772,47 @@ function relax(ids: number[], nbs: number[][], out: Vec3[], onFace: { closest(q:
   for (let r = 0; r < rounds; r++) {
     const next = ids.map((_, k) => centroid(nbs[k].map((i) => out[i])))
     ids.forEach((id, k) => { out[id] = onFace.closest(next[k]).point })
+  }
+}
+
+/**
+ * The nearest of `pts` to a query, by `dist` - the same pick as scanning them all in order (the first of any at the
+ * same distance), from a grid of buckets searched in shells outward. A rebuilt face's every new face asked for its
+ * nearest triangle by scanning the whole body face: ~32,000 scans on the operator's PortalHandle.step (WO-3045).
+ */
+function nearestPoint(pts: Vec3[]): (q: Vec3) => number {
+  const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity]
+  for (const p of pts) for (let c = 0; c < 3; c++) { lo[c] = Math.min(lo[c], p[c]); hi[c] = Math.max(hi[c], p[c]) }
+  const finite = pts.length > 0 && [...lo, ...hi].every(Number.isFinite)
+  const cell = finite ? Math.max(1e-9, hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / Math.max(1, Math.round(Math.cbrt(pts.length))) : 1
+  const cellOf = (v: number, c: number) => Math.floor((v - lo[c]) / cell)
+  const buckets = new Map<string, number[]>()
+  const loose: number[] = []
+  pts.forEach((p, j) => {
+    if (!finite || !p.every(Number.isFinite)) { loose.push(j); return }
+    const k = `${cellOf(p[0], 0)},${cellOf(p[1], 1)},${cellOf(p[2], 2)}`
+    const list = buckets.get(k)
+    if (list) list.push(j); else buckets.set(k, [j])
+  })
+  const span = [0, 1, 2].map((c) => (finite ? cellOf(hi[c], c) + 1 : 0))
+  return (q) => {
+    let best = -1, bestD = Infinity
+    const consider = (j: number) => { const d = dist(pts[j], q); if (d < bestD || (d === bestD && j < best)) { bestD = d; best = j } }
+    // a point that is not finite (or a query that is not) only ever loses to a finite one, as in a scan
+    if (!finite || !q.every(Number.isFinite)) { pts.forEach((_, j) => consider(j)); return best }
+    for (const j of loose) consider(j)
+    const qc = [0, 1, 2].map((c) => cellOf(q[c], c))
+    const far = Math.max(...[0, 1, 2].map((c) => Math.max(Math.abs(qc[c]), Math.abs(span[c] - qc[c])))) + 1
+    for (let r = 0; r <= far; r++) {
+      // every point in shell r is at least (r - 1) cells away; one more cell of margin keeps rounding from
+      // ending the search before an equally near point with a smaller index
+      if (bestD < (r - 2) * cell) break
+      for (let x = qc[0] - r; x <= qc[0] + r; x++) for (let y = qc[1] - r; y <= qc[1] + r; y++) {
+        const edge = Math.abs(x - qc[0]) === r || Math.abs(y - qc[1]) === r
+        for (let z = qc[2] - r; z <= qc[2] + r; z += edge ? 1 : 2 * r || 1) for (const j of buckets.get(`${x},${y},${z}`) ?? []) consider(j)
+      }
+    }
+    return best
   }
 }
 

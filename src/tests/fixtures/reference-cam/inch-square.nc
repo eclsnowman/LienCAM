@@ -1,0 +1,9 @@
+(WO-3009 synthetic: inch units)
+G20 G90 G17
+G0 X0 Y0 Z0.5
+G1 Z-0.04 F10
+G1 X1 Y0 F20
+G2 X1.5 Y0.5 I0 J0.5
+G1 Y1
+G0 Z0.5
+M30

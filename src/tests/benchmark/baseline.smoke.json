@@ -2,7 +2,7 @@
   "schema": 1,
   "tier": "smoke",
   "generatedAt": "2026-10-09T17:04:14.036Z",
-  "reason": "WO-2707: selectively repin the two rough-6-flat rows for WO-2693 (eecc6e40a, owner 10-09: the spindle should be at a raised height): adaptive 3D rough now ends with one vertical rapid to its clearance plane, +1 move, +1 retract, +21.7/+19.7 mm rapid and flown, +260/+236 ms cut time. Proof: with only that lift disabled every cell returns to the prior value (src/tests/evidence/WO-2707/wo2693-proof.txt). No other cell, band or tolerance changed. Prior reason: WO-2647: selectively repin 8 failing smoke cells; per-cell values and production controls in src/tests/evidence/WO-2647/cells.md. WO-2530 (44c09c207) intentionally refines remaining-stock columns from 0.5 to 0.2 mm; the shared WO-1641 finish classifier now rapids more proven air. WO-2209 (9d05b10c8) also intentionally cuts whole finish passes; this smoke oracle predates that fix. Bands, safety asserts, timing fields and every other value retained. Prior authority: WO-2196: re-baselined after WO-2145 (a part in its own box stock roughs full-clear: side entry from outside the box, one pass per level), WO-2168 (the pocket wall pass restored) and WO-2169 (the stock-edge wobble straightened). Every moved cell is attributed in src/tests/evidence/WO-2196/rows.md. Control: with the three orders' product diffs reverted every cell is back in band (0 moved, smoke and full). Cause A (engagement-pocket rest-pencil chain) is identical to the pre-WO-2145 baseline and was not baselined in. Known costs baselined with the route: feature-block rough flip rate 2.4 -> 16.2/15.1 percent, retracts 6 -> 10/8, min link clearance 1.6 -> 0.35 mm (WO-2145 route, partly reduced by WO-2169). No band or tolerance changed.",
+  "reason": "WO-2707: selectively repin the two rough-6-flat rows for WO-2693 (eecc6e40a, owner 10-09: the spindle should be at a raised height): adaptive 3D rough now ends with one vertical rapid to its clearance plane, +1 move, +1 retract, +21.7/+19.7 mm rapid and flown, +260/+236 ms cut time. Proof: with only that lift disabled every cell returns to the prior value (src/tests/evidence/WO-2707/wo2693-proof.txt). No other cell, band or tolerance changed. Prior reason: WO-2647: selectively repin 8 failing smoke cells; per-cell values and production controls in src/tests/evidence/WO-2647/cells.md. WO-2530 (44c09c207) intentionally refines remaining-stock columns from 0.5 to 0.2 mm; the shared WO-1641 finish classifier now rapids more proven air. WO-2209 (9d05b10c8) also intentionally cuts whole finish passes; this smoke oracle predates that fix. Bands, safety asserts, timing fields and every other value retained. Prior authority: WO-2196: re-baselined after WO-2145 (a part in its own box stock roughs full-clear: side entry from outside the box, one pass per level), WO-2168 (the pocket wall pass restored) and WO-2169 (the stock-edge wobble straightened). Every moved cell is attributed in src/tests/evidence/WO-2196/rows.md. Control: with the three orders' product diffs reverted every cell is back in band (0 moved, smoke and full). Cause A (engagement-pocket rest-pencil chain) is identical to the pre-WO-2145 baseline and was not baselined in. Known costs baselined with the route: feature-block rough flip rate 2.4 -> 16.2/15.1 percent, retracts 6 -> 10/8, min link clearance 1.6 -> 0.35 mm (WO-2145 route, partly reduced by WO-2169). No band or tolerance changed. | WO-3036 (appended): six informational link-turn cells added, read off moves captured on today's engine (Architect grant, PR #70); every other cell unchanged, including the flip cells already stale against today's moves. | WO-3050 (appended): both approved adaptive switches ON (ADAPTIVE_ENTRY_POLICY.entriesAtMaterial, ADAPTIVE_ARC_JOIN_POLICY.tangentJoins; the operator 2026-10-21 4:51 PM CT); only the cells switch OFF and switch ON differ on, re-read off one machine's capture (alpha3/off 305ba80c1dfa3d8c120f9b48870b3da88564eb6c, alpha3/on 20c52f9b7b954653bd3f5403587e5e8397544449, full/off 20c52f9b7b954653bd3f5403587e5e8397544449, full/on 20c52f9b7b954653bd3f5403587e5e8397544449) (src/tests/evidence/WO-3050/re-pin.json); every other cell unchanged.",
   "rows": [
     {
       "key": "engagement-pocket/top/rough-6-flat/bm-flat-6/whole",
@@ -11,28 +11,28 @@
       "toolDiameterMm": 6,
       "metrics": {
         "moves": {
-          "value": 2206,
+          "value": 4452,
           "band": {
             "pct": 0.02,
             "abs": 2
           }
         },
         "cutMoves": {
-          "value": 2186,
+          "value": 4432,
           "band": {
             "pct": 0.02,
             "abs": 2
           }
         },
         "flownDistanceMm": {
-          "value": 5608.053829,
+          "value": 5541.996404,
           "band": {
             "pct": 0.02,
             "abs": 0.5
           }
         },
         "cutLengthMm": {
-          "value": 5239.399305,
+          "value": 5173.34188,
           "band": {
             "pct": 0.02,
             "abs": 0.5
@@ -88,49 +88,49 @@
           }
         },
         "entryCutMoves": {
-          "value": 506,
+          "value": 392,
           "band": {
             "pct": 0.05,
             "abs": 2
           }
         },
         "entryCutLengthMm": {
-          "value": 197.580093,
+          "value": 197.750245,
           "band": {
             "pct": 0.05,
             "abs": 0.5
           }
         },
         "turns": {
-          "value": 1095,
+          "value": 2505,
           "band": {
             "pct": 0.02,
             "abs": 2
           }
         },
         "flips": {
-          "value": 48,
+          "value": 63,
           "band": {
             "pct": 0.05,
             "abs": 2
           }
         },
         "flipRatePct": {
-          "value": 4.383562,
+          "value": 2.51497,
           "band": {
             "pct": 0.05,
             "abs": 0.5
           }
         },
         "worstZFlipRatePct": {
-          "value": 4.383562,
+          "value": 2.51497,
           "band": {
             "pct": 0.05,
             "abs": 0.5
           }
         },
         "bestZFlipRatePct": {
-          "value": 4.383562,
+          "value": 2.51497,
           "band": {
             "pct": 0.05,
             "abs": 0.5
@@ -144,14 +144,14 @@
           }
         },
         "maxFlipDeg": {
-          "value": 89.923401,
+          "value": 96.545117,
           "band": {
             "pct": 0.1,
             "abs": 1
           }
         },
         "p95FlipDeg": {
-          "value": 89.923401,
+          "value": 90,
           "band": {
             "pct": 0.1,
             "abs": 1
@@ -162,6 +162,48 @@
           "band": {
             "pct": 0,
             "abs": 0
+          }
+        },
+        "linkSharpTurns": {
+          "value": 342,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeRides": {
+          "value": 207,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeFeedMm": {
+          "value": 837.760542,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeHopMm": {
+          "value": 837.760542,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeExtraMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeFeedSharePct": {
+          "value": 16.193798,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
           }
         },
         "minLinkClearanceMm": {
@@ -193,14 +235,14 @@
           }
         },
         "peakEngagementFraction": {
-          "value": 0.451964,
+          "value": 0.545557,
           "band": {
             "pct": 0.05,
             "abs": 0.02
           }
         },
         "p95EngagementFraction": {
-          "value": 0.39764,
+          "value": 0.405424,
           "band": {
             "pct": 0.05,
             "abs": 0.02
@@ -228,14 +270,14 @@
           }
         },
         "measuredCuttingLengthMm": {
-          "value": 4794.321247,
+          "value": 4768.851874,
           "band": {
             "pct": 0.02,
             "abs": 0.5
           }
         },
         "cutTimeMs": {
-          "value": 275331.966618,
+          "value": 272036.792715,
           "band": {
             "pct": 0.03,
             "abs": 200
@@ -289,8 +331,8 @@
         "minCutMarginMm": 0.3,
         "stockToLeaveMm": 0.3,
         "gougeToleranceMm": 0.05,
-        "samplesOverPart": 24849,
-        "cutSamplesOverPart": 23754,
+        "samplesOverPart": 25513,
+        "cutSamplesOverPart": 24417,
         "steepInteriorSamplesSkipped": 304
       }
     },
@@ -454,6 +496,48 @@
             "abs": 0
           }
         },
+        "linkSharpTurns": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeRides": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeFeedMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeHopMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeExtraMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeFeedSharePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
+          }
+        },
         "minLinkClearanceMm": {
           "value": 0.274029,
           "band": {
@@ -602,28 +686,28 @@
       "toolDiameterMm": 6,
       "metrics": {
         "moves": {
-          "value": 225,
+          "value": 644,
           "band": {
             "pct": 0.02,
             "abs": 2
           }
         },
         "cutMoves": {
-          "value": 218,
+          "value": 637,
           "band": {
             "pct": 0.02,
             "abs": 2
           }
         },
         "flownDistanceMm": {
-          "value": 1188.02854,
+          "value": 1265.635,
           "band": {
             "pct": 0.02,
             "abs": 0.5
           }
         },
         "cutLengthMm": {
-          "value": 1119.479053,
+          "value": 1196.774511,
           "band": {
             "pct": 0.02,
             "abs": 0.5
@@ -637,7 +721,7 @@
           }
         },
         "links": {
-          "value": 3,
+          "value": 1,
           "band": {
             "pct": 0.05,
             "abs": 1
@@ -651,7 +735,7 @@
           }
         },
         "keepDownRides": {
-          "value": 2,
+          "value": 0,
           "band": {
             "pct": 0.05,
             "abs": 1
@@ -672,7 +756,7 @@
           }
         },
         "feedLinkMoves": {
-          "value": 2,
+          "value": 0,
           "band": {
             "pct": 0.05,
             "abs": 1
@@ -693,35 +777,35 @@
           }
         },
         "turns": {
-          "value": 212,
+          "value": 398,
           "band": {
             "pct": 0.02,
             "abs": 2
           }
         },
         "flips": {
-          "value": 13,
+          "value": 22,
           "band": {
             "pct": 0.05,
             "abs": 2
           }
         },
         "flipRatePct": {
-          "value": 6.132075,
+          "value": 5.527638,
           "band": {
             "pct": 0.05,
             "abs": 0.5
           }
         },
         "worstZFlipRatePct": {
-          "value": 6.944444,
+          "value": 7.377049,
           "band": {
             "pct": 0.05,
             "abs": 0.5
           }
         },
         "bestZFlipRatePct": {
-          "value": 5.714286,
+          "value": 4.710145,
           "band": {
             "pct": 0.05,
             "abs": 0.5
@@ -735,14 +819,14 @@
           }
         },
         "maxFlipDeg": {
-          "value": 12.319799,
+          "value": 49.248494,
           "band": {
             "pct": 0.1,
             "abs": 1
           }
         },
         "p95FlipDeg": {
-          "value": 7.624391,
+          "value": 49.022111,
           "band": {
             "pct": 0.1,
             "abs": 1
@@ -753,6 +837,48 @@
           "band": {
             "pct": 0,
             "abs": 0
+          }
+        },
+        "linkSharpTurns": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeRides": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeFeedMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeHopMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeExtraMm": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeFeedSharePct": {
+          "value": 0,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
           }
         },
         "minLinkClearanceMm": {
@@ -784,14 +910,14 @@
           }
         },
         "peakEngagementFraction": {
-          "value": 0.523028,
+          "value": 0.525188,
           "band": {
             "pct": 0.05,
             "abs": 0.02
           }
         },
         "p95EngagementFraction": {
-          "value": 0.501556,
+          "value": 0.497478,
           "band": {
             "pct": 0.05,
             "abs": 0.02
@@ -819,14 +945,14 @@
           }
         },
         "measuredCuttingLengthMm": {
-          "value": 1117.557484,
+          "value": 1195.689321,
           "band": {
             "pct": 0.02,
             "abs": 0.5
           }
         },
         "cutTimeMs": {
-          "value": 56796.546495,
+          "value": 60665.051428,
           "band": {
             "pct": 0.03,
             "abs": 200
@@ -880,8 +1006,8 @@
         "minCutMarginMm": 0.3,
         "stockToLeaveMm": 0.3,
         "gougeToleranceMm": 0.05,
-        "samplesOverPart": 4917,
-        "cutSamplesOverPart": 4846,
+        "samplesOverPart": 5607,
+        "cutSamplesOverPart": 5533,
         "steepInteriorSamplesSkipped": 121
       }
     },
@@ -1043,6 +1169,48 @@
           "band": {
             "pct": 0,
             "abs": 0
+          }
+        },
+        "linkSharpTurns": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeRides": {
+          "value": 1,
+          "band": {
+            "pct": 0.05,
+            "abs": 1
+          }
+        },
+        "linkSpikeFeedMm": {
+          "value": 1.595008,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeHopMm": {
+          "value": 1.504818,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeExtraMm": {
+          "value": 0.09019,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.5
+          }
+        },
+        "linkSpikeFeedSharePct": {
+          "value": 0.102169,
+          "band": {
+            "pct": 0.05,
+            "abs": 0.2
           }
         },
         "minLinkClearanceMm": {

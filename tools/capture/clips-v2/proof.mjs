@@ -1,3 +1,4 @@
+import { isMain } from '../../lib/is-main.mjs';
 import { chromium } from 'playwright'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs'
@@ -252,6 +253,6 @@ export async function runProof({ record = false } = {}) {
     })
   } finally { await browser.close() }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   runProof({ record: process.argv.includes('--record') }).catch(e => { console.error(e); process.exitCode = 1 })
 }

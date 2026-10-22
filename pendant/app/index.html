@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>LienCAM Mobile Pendant</title>
-  <link rel="stylesheet" href="app.css?v=12">
+  <link rel="stylesheet" href="app.css?v=13">
 </head>
 <body>
   <div id="app">
@@ -24,6 +24,7 @@
       </div>
     </header>
     <div id="command-feedback" role="status" aria-live="polite" hidden></div>
+    <div id="link-line" role="status" aria-live="polite" hidden><span id="link-text"></span><button id="btn-refresh" type="button" hidden>REFRESH</button></div>
 
     <nav id="tabs">
       <button class="tab active" data-tab="pane-jog" type="button">JOG</button>
@@ -293,6 +294,6 @@
 
     </main>
   </div>
-  <script type="module" src="app.js?v=12"></script>
+  <script type="module" src="app.js?v=13"></script>
 </body>
 </html>

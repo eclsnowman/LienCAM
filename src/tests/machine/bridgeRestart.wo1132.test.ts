@@ -3,6 +3,7 @@
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { electronMainRequire } from '../support/electronMainRequire'
 import net from 'node:net'
 import nodePath from 'node:path'
 import nodeProcess from 'node:process'
@@ -193,7 +194,7 @@ function loadMain({
     resourcesPath: nodePath.resolve('.tmp-wo1132-resources'),
   }
   const moduleValue = { exports: {} as MainRuntime['api'] }
-  const realRequire = createRequire(import.meta.url)
+  const realRequire = electronMainRequire
   const code = readFileSync(nodePath.resolve('electron/main.cjs'), 'utf8')
   vm.runInNewContext(code, {
     AbortSignal,

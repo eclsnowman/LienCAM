@@ -215,6 +215,16 @@ describe('WO-1296 rendered product panel text contrast', () => {
         )
         await page.getByTestId('project-open-indicator').waitFor({ state: 'detached', timeout: 120_000 })
         await dismissMachineModal(page)
+        // WO-2977: the fixture's toolpaths carry camgen-v3 stamps, and WO-2904's contract v4 reopens
+        // them as outdated (recompute once, ADR-0040), so the setup cut-time witness has nothing to
+        // show until they regenerate. Regenerate through the store, then measure.
+        await page.evaluate(() => Reflect.get(window, '__camStore').getState().computeAllToolpaths())
+        await page.waitForFunction(
+          () => Reflect.get(window, '__camStore')?.getState().project.setups
+            .every((setup: { operations: { status: string }[] }) => setup.operations.every(op => op.status === 'ready')),
+          null,
+          { timeout: 120_000 },
+        )
         await page.evaluate(() => {
           const prefs = Reflect.get(window, '__camUiPrefs').getState()
           prefs.setTreeSectionExpanded('geometry', true)

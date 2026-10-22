@@ -3,6 +3,8 @@
   "commit": "de72cf8ebe579f9bcaa3f5e1a956e43e00d4f628",
   "scene": "per entry: generatorCmd names the help-sweep script (src/tests/evidence/WO-2129..2135) that shot it; each lane's scene is in its CHECK.md and manifest-entries.json. Entries no lane re-shot say so in generatorCmd.",
   "note": "surroundings lists every UI surface visible in each image; when a surface changes, grep it here to find recapture candidates",
+  "defaultLocale": "en",
+  "locales": "WO-2943: every image is a capture of the defaultLocale UI unless it names its own \"locale\"; \"neutral\" marks a diagram with no UI words, shared by every language and never re-shot for a text change.",
   "folded": "WO-2144 folded the WO-2129..2135 manifest-entries.json files in (src/tests/evidence/WO-2144/fold.mjs)",
   "images": [
     {

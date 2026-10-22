@@ -13,6 +13,8 @@
 // Boundary contract (operation contract): payload in, ToolpathMove[] out. No payload
 // mutation, no global state.
 
+// WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
+import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import type { ToolpathMove } from '../../../../types'
 import {
   resolveAdaptiveMillingDirection,
@@ -20,6 +22,7 @@ import {
 } from '../../types'
 import { resolveHeights } from '../../heights'
 import { resolveFeedrates } from '../../feedrates'
+import { resolveFloorHopMm } from '../../moves'
 import { signedArea } from '../../geometry'
 import { assertToolFluteReach } from '../../toolFluteReach'
 import { directionForTool } from '../../../tool/cutHand'
@@ -38,10 +41,10 @@ import {
 
 // Sensible defaults for the user-settable engine params (ACParams.helixDiameter /
 // .tolerance). Defaults live here so a payload that omits them still runs.
-const DEFAULT_HELIX_DIAMETER_PCT = 90   // % of tool diameter
-const DEFAULT_MIN_HELIX_RADIUS_MM = 0.2
-const DEFAULT_TOLERANCE_MM = 0.02
-const DEFAULT_STEPOVER_FRACTION = 0.4   // fallback only if passes.stepover is unusable
+const DEFAULT_HELIX_DIAMETER_PCT = AP.defaults.helixDiameterPctOfTool   // % of tool diameter
+const DEFAULT_MIN_HELIX_RADIUS_MM = AP.defaults.minHelixRadiusMm
+const DEFAULT_TOLERANCE_MM = AP.defaults.toleranceMm
+const DEFAULT_STEPOVER_FRACTION = AP.defaults.stepoverFraction   // fallback only if passes.stepover is unusable
 
 /** Plain words for FeatureResult.stats.aborted, for the operator notice (WO-1540). */
 const ABORT_REASON_WORDS: Record<string, string> = {
@@ -96,14 +99,14 @@ export async function buildAdaptiveClearingToolpath(
     )
     stepOver = DEFAULT_STEPOVER_FRACTION
   }
-  stepOver = Math.min(Math.max(stepOver, 0.01), 0.95)
+  stepOver = Math.min(Math.max(stepOver, AP.defaults.stepoverMin), AP.defaults.stepoverMax)
   // Entry type: a 'plunge' choice forces helixDiameter 0, so processFeature seeds every
   // region with a straight plunge instead of a helix ramp. Otherwise the helix diameter
   // is a percentage of tool diameter (processFeature still falls back to a plunge where a
   // helix will not fit a tight pocket).
   const forcePlunge = payload.linking?.entryType === 'plunge'
   const helixDiameter = forcePlunge ? 0 : toolDia * (positiveOr(params.helixDiameter, DEFAULT_HELIX_DIAMETER_PCT) / 100)
-  const helixAngleDeg = positiveOr(params.rampAngle, payload.linking?.rampAngle ?? 3)
+  const helixAngleDeg = positiveOr(params.rampAngle, payload.linking?.rampAngle ?? AP.defaults.rampAngleDeg)
   const millingDirection = directionForTool(
     resolveAdaptiveMillingDirection(params.climb),
     tool,
@@ -119,7 +122,7 @@ export async function buildAdaptiveClearingToolpath(
     integralWallFollow: params.integralWallFollow ?? true,
     integralWallFollowLengthFactor: params.integralWallFollowLengthFactor,
     wallCleanupAsWeGo: params.wallCleanupAsWeGo ?? false,
-    loopbackFilletPct: params.loopbackFilletPct ?? 25,
+    loopbackFilletPct: params.loopbackFilletPct ?? AP.defaults.loopbackFilletPct,
     wallFinish: params.wallFinish ?? false,
     // WO-450 escape hatch, off unless the operation asks for it. FALSE = the wall-finish lap
     // leaves passes.stockToLeave standing; TRUE = it rides the true wall and cuts to net.
@@ -170,6 +173,12 @@ export async function buildAdaptiveClearingToolpath(
     finishLeadInRadius: payload.linking.leadInRadius,
     finishLeadOutRadius: payload.linking.leadOutRadius,
     ...(params.floorFinish === true ? { floorFinishDepth: resolvedHeights.bottomZ } : {}),
+    // WO-2835: the operation's floor-hop setting (0 turns the hop off).
+    floorHopMm: resolveFloorHopMm(payload.linking),
+    // The constructive ledger credits flat-bottom sweeps only. Other cutter
+    // shapes keep their existing fed route; never pretend a ball cleared a disk.
+    floorHopToolRadius: tool.type === 'flat_end_mill' && !(tool.cornerRadius && tool.cornerRadius > 0) ? toolRadius : 0,
+    floorHopAssemblyRadius: Math.max(toolDia, tool.shankDiameter ?? toolDia) / 2,
   }
 
   const floorFinishDepth = params.floorFinish === true ? resolvedHeights.bottomZ : undefined
@@ -193,6 +202,9 @@ export async function buildAdaptiveClearingToolpath(
   const features = runs.map(run => run.feature)
 
   const allMoves: ToolpathMove[] = []
+  // WO-3024: the first region that ended with no pass at all, in operator words. When the
+  // whole operation then cuts nothing it ends with this line instead of reading Ready.
+  let uncutRegion: string | undefined
   for (let f = 0; f < features.length; f++) {
     onProgress?.(0.1 + 0.8 * (f / features.length), 'Clearing region')
     // Remap this feature's local completion fraction (0..1) into the overall 0.1..0.9 band.
@@ -215,10 +227,23 @@ export async function buildAdaptiveClearingToolpath(
     if (result.stats.aborted) {
       console.warn(`[ac-engine] feature ${f} aborted: ${result.stats.aborted} (emitting ${result.passes.length} partial passes)`)
       const why = ABORT_REASON_WORDS[result.stats.aborted] ?? result.stats.aborted
-      notify?.(
-        `region ${f + 1} of ${features.length} stopped early because ${why}; ` +
-        `the ${result.passes.length} pass(es) planned before that are kept.`,
-      )
+      if (result.passes.length === 0) {
+        // WO-3024: no pass was planned before the abort, so the abort is not why the region is
+        // uncut. A plunge opens a hole exactly one tool wide, and every first step out of it
+        // is a full-width slot the load limit refuses (measured on the declared H-pocket row:
+        // 6 mm tool, 1 mm stepover; a helix entry clears the same pocket).
+        const opened = result.stats.aborted !== 'no-cut-region' && result.stats.aborted !== 'no-start-point'
+        const because = forcePlunge && opened
+          ? `every first pass out of the plunge entry's tool-wide hole would overload the ${toolDia} mm tool at a ${+(stepOver * toolDia).toFixed(3)} mm stepover`
+          : why
+        uncutRegion ??= because
+        notify?.(`region ${f + 1} of ${features.length} was not cut because ${because}.`)
+      } else {
+        notify?.(
+          `region ${f + 1} of ${features.length} stopped early because ${why}; ` +
+          `the ${result.passes.length} pass(es) planned before that are kept.`,
+        )
+      }
     }
     const featureMoves = withOperatorNotices(notify, () => emitFeature(result, runCtx))
     // emitFeature can return tens of thousands of moves for a full-stock region.
@@ -242,6 +267,9 @@ export async function buildAdaptiveClearingToolpath(
     }
   }
 
+  // WO-3024 (rule 11): an operation that cuts nothing says so in one line and moves nothing;
+  // it never reads Ready with an empty program.
+  if (allMoves.length === 0 && uncutRegion) throw new Error(`Adaptive Clearing cut nothing because ${uncutRegion}.`)
   onProgress?.(1.0, 'Done')
   return allMoves
 }
@@ -460,11 +488,11 @@ async function processFeatureFastest(
 /** The depth levels emitFeature cuts: topZ down to the rough bottom in stepdown bites,
  *  then the floor-finish depth when it lies below that. */
 function scheduledDepths(schedule: DepthSchedule): { depths: number[]; floorAppended: boolean } {
-  const stepdown = Math.max(schedule.stepdown, 0.1)
+  const stepdown = Math.max(schedule.stepdown, AP.sampling.minStepdownMm)
   const depths: number[] = []
   let z = schedule.topZ
   let guard = 0
-  while (z > schedule.roughBottomZ + 1e-6 && guard++ < 2000) {
+  while (z > schedule.roughBottomZ + 1e-6 && guard++ < AP.sampling.maxDepthLevels) {
     z = Math.max(z - stepdown, schedule.roughBottomZ)
     depths.push(z)
   }

@@ -1,3 +1,7 @@
+import type { Scallop3dParams } from '../../kernel/parameterTypes';
+export type { Scallop3dParams } from '../../kernel/parameterTypes';
+export { DEFAULT_SCALLOP3D_PARAMS } from '../../kernel/parameterDefaults';
+export { readScallop3dParams } from '../../kernel/schema';
 import type { CutterSpec, PartMesh } from '../kernel/types';
 import type { PathBuildHeights } from '../pathbuild';
 import type { Ring } from '../geom2d';
@@ -12,67 +16,6 @@ import {
   resolveStockEdgeOverrun,
   type ResolvedParallel3dHeights,
 } from './parallel3dOperation';
-
-export interface Scallop3dParams {
-  scallopHeight: number;
-  tolerance: number;
-  stockToLeave: number;
-  useStockBoundary: boolean;
-  finishDepth?: number;
-  direction: 'climb' | 'conventional';
-  /**
-   * WO-1282. Stock-edge overrun: mm PAST the containment edge the tool CENTRE
-   * may travel, so the round cutter clears the edge instead of stopping with
-   * its axis on it and leaving one radius of material behind. Same name, same
-   * semantics and the SAME decision function as Parallel Finish 3D and
-   * Adaptive Rough 3D carry (ADR-0015 s2 is one cross-cutting convention, not
-   * four spellings): undefined = AUTO (the tool radius), 0 = none (the
-   * pre-WO-1282 toolpath). Never applied to a face-scoped pass (WO-1223) or to
-   * a boundary the caller has not vouched for as a stock outline.
-   */
-  stockEdgeOvershoot?: number;
-}
-
-export const DEFAULT_SCALLOP3D_PARAMS: Scallop3dParams = {
-  // 0.02 mm, not the 0.01 this shipped with (architect decision 2026-09-04).
-  // Stepover goes as sqrt(scallop), so 0.01 -> 0.02 is roughly half the passes
-  // and half the cycle time - measured at ~15 min on Operator's test plate at 0.01.
-  // 0.02 mm of cusp is below what a finish pass leaves visible on this class of
-  // machine, and anyone who wants a mirror can type 0.01 in the field. A
-  // default nobody would sit through is worse than one they occasionally lower.
-  scallopHeight: 0.02,
-  tolerance: 0.05,
-  stockToLeave: 0,
-  useStockBoundary: false,
-  finishDepth: undefined,
-  direction: 'climb',
-  stockEdgeOvershoot: undefined, // undefined -> auto (tool radius)
-};
-
-export function readScallop3dParams(params: Record<string, unknown>): Scallop3dParams {
-  const positive = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-  const nonNegative = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
-  return {
-    scallopHeight: positive(params.scallopHeight, DEFAULT_SCALLOP3D_PARAMS.scallopHeight),
-    tolerance: positive(params.tolerance, DEFAULT_SCALLOP3D_PARAMS.tolerance),
-    stockToLeave: nonNegative(params.stockToLeave, DEFAULT_SCALLOP3D_PARAMS.stockToLeave),
-    useStockBoundary: typeof params.useStockBoundary === 'boolean'
-      ? params.useStockBoundary : DEFAULT_SCALLOP3D_PARAMS.useStockBoundary,
-    finishDepth: positive(params.finishDepth, 0) || undefined,
-    direction: params.direction === 'conventional' ? 'conventional' : 'climb',
-    // Optional non-negative: a finite >= 0 value wins; anything else ->
-    // undefined (AUTO), so every scallop op authored before WO-1282 gets the
-    // tool radius, exactly as readParallel3dParams does.
-    stockEdgeOvershoot:
-      typeof params.stockEdgeOvershoot === 'number' &&
-      Number.isFinite(params.stockEdgeOvershoot) &&
-      params.stockEdgeOvershoot >= 0
-        ? params.stockEdgeOvershoot
-        : undefined,
-  };
-}
 
 export interface ComputeScallop3dArgs {
   partMesh: PartMesh;

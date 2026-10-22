@@ -58,6 +58,33 @@ button { font-family: inherit; border: none; background: none; color: inherit; c
 
 #command-feedback.error { border-color: var(--red-500); color: var(--red-300); }
 
+/* WO-2886: one line under the header, only while the link to LienCAM is down. */
+#link-line {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--slate-900);
+  border-bottom: 1px solid var(--red-500);
+  color: var(--red-300);
+  font-size: var(--fs-tiny);
+  font-weight: 800;
+}
+#link-line[hidden], #btn-refresh[hidden] { display: none; }
+#btn-refresh {
+  flex: none;
+  min-height: var(--tap-sm);
+  padding: 0 16px;
+  border: 1px solid var(--slate-500);
+  border-radius: 8px;
+  background: var(--slate-800);
+  color: var(--slate-100);
+  font-size: var(--fs-label);
+  font-weight: 800;
+}
+
 /* ---------- header ---------- */
 #hdr {
   flex: none;

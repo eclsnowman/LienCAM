@@ -139,6 +139,7 @@ export type OperationHeightPolicyIntent =
   | { operationType: 'engrave'; variant: 'explicit_depth' | 'width_derived' | 'surface_following' }
   | { operationType: 'vcarve'; variant: 'flat_depth' | 'tool_limit' }
   | { operationType: 'chamfer'; variant: 'edge_width_formula' }
+  | { operationType: 'pattern'; variant: 'explicit_depth' }
   | { operationType: 'parallel_3d'; variant: 'target_surface' | 'bounded_surface' }
   | { operationType: 'waterline_3d'; variant: 'target_surface' | 'bounded_surface' }
   | { operationType: 'adaptive_3d'; variant: 'initial_stock' | 'current_material' | 'rest' | 'bounded_band' }

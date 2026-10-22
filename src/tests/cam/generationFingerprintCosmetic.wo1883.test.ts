@@ -319,7 +319,8 @@ describe('WO-1883 edits that change the cut still outdate', () => {
     const moved = project.geometry.map((geo) => ({ ...geo, position: { x: 1, y: 0, z: 0 } }))
 
     const reference = generationFingerprint({ ...base, geometry: project.geometry })
-    expect(reference).toMatch(/^camgen-v3-/)
+    // WO-2976 repin: WO-2904 bumped CAM_GENERATION_CONTRACT_VERSION 3 -> 4.
+    expect(reference).toMatch(/^camgen-v4-/)
     expect(generationFingerprint({ ...base, geometry: cosmetic })).toBe(reference)
     expect(generationFingerprint({ ...base, geometry: moved })).not.toBe(reference)
   })

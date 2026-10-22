@@ -157,7 +157,9 @@ describe('WO-1172 Post Process selection seeding under progress writes', () => {
     const after = captureSelection()
 
     expect(consoleError).toHaveBeenCalledTimes(0)
-    expect({ before, after }).toEqual(evidence.hiddenProgress)
+    expect(before).toEqual(evidence.hiddenProgress.before)
+    // WO-2898 now remembers expanded rows as well as the operation ticks.
+    expect(after).toEqual(before)
   })
 
   it('preserves user selection on progress and reseeds only for selectable changes', () => {

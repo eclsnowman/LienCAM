@@ -169,6 +169,26 @@ export default defineConfig([
     },
   },
   {
+    // ADR-0055 decision 2.2 (WO-2993): the agent command layer never reaches the
+    // machine. No machine module, machine store, probe routine store, appCommand
+    // G-code helper or pendant code. Its own rule key block, over files no other
+    // no-restricted-imports block matches, so it replaces nothing.
+    files: ['src/lib/agent/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [{
+        group: [
+          '**/machine',
+          '**/machine/**',
+          '**/store/machine*',
+          '**/store/probeRoutineStore',
+          '**/gcode/appCommand',
+          '**/pendant/**',
+        ],
+        message: 'ADR-0055: src/lib/agent may not import machine, machine store, probe routine store, appCommand or pendant code.',
+      }] }],
+    },
+  },
+  {
     // These two boundaries use 'no-restricted-syntax', not 'no-restricted-imports':
     // flat config replaces (never merges) a repeated rule KEY across matching
     // configs, and this block's 'files' (src/**) is a superset of the five

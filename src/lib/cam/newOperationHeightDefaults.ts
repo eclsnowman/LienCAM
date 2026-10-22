@@ -179,7 +179,8 @@ function endpointUse(
     case 'adaptive_clearing_2d':
     case 'drill':
     case 'bore': return 'bottom'
-    case 'face': return 'top'
+    case 'face':
+    case 'pattern': return 'top'
     case 'engrave': return currentParams.useWidthForDepth === true ? 'special' : 'top'
     case 'parallel_3d':
     case 'waterline_3d':
@@ -367,6 +368,14 @@ export function selectStartingHeightPolicy(
         variant: context.hasFlatDepth ? 'flat_depth' : 'tool_limit',
         ready: geometryReady,
         basis: 'geometry',
+      }
+    case 'pattern':
+      // WO-3001: a pattern ends a stated depth below the stock top.
+      return {
+        operationType,
+        variant: 'explicit_depth',
+        ready: stockReady && context.explicitEndConfirmed === true,
+        basis: 'explicit',
       }
     case 'chamfer':
       return {

@@ -9,8 +9,16 @@ import type {
   Setup,
   Tool,
 } from '../../types'
+import { TRAVERSE_STANDOFF_MM } from '../../cam3d/pathbuild'
 import { normalizeToolCutHand } from '../tool/cutHand'
 import { validatePersistedSmartHeightState } from './smartHeights/authority'
+
+// Dependency inversion keeps the current engine independent of src/kernel.
+// The composition root installs the same resolver used at the compute seam.
+let generationEngineId: (type: Operation['type']) => string = () => 'current'
+export function setGenerationEngineResolver(resolve: (type: Operation['type']) => string): void {
+  generationEngineId = resolve
+}
 
 const SAVED_HEIGHT_EPSILON = 1e-6
 
@@ -33,10 +41,105 @@ const CLEARANCE_ANCHORED_OPERATION_TYPES: ReadonlySet<Operation['type']> = new S
   'adaptive_3d',
 ])
 
+// WO-3039: the 3D finishes whose planner lifts its traverse plane on a proven
+// stock top to max(Clearance, stock top + TRAVERSE_STANDOFF_MM) (cam3d/pathbuild
+// and waterline/link, WO-127; the store passes the stock top only when
+// resolveProvenCam3dStockBounds proves it). Adaptive 3D lifts on its retained
+// material top instead, which the saved result does not record; it keeps the
+// strict Clearance bound.
+const STOCK_LIFTED_TRAVERSE_OPERATION_TYPES: ReadonlySet<Operation['type']> = new Set([
+  'parallel_3d',
+  'waterline_3d',
+  'steep_shallow_3d',
+  'scallop_3d',
+  'pencil_3d',
+])
+
 function finiteSavedHeightPlanes(value: unknown): value is Record<(typeof HEIGHT_PLANE_NAMES)[number], number> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   return HEIGHT_PLANE_NAMES.every((name) => Number.isFinite(record[name]))
+}
+
+/**
+ * WO-3039. The proven stock top, in machine Z, for the operation's target
+ * geometry, read from the project records the fingerprint already hashes
+ * (setup WCS, geometry, stocks): the setup-bound stock must be the stock the
+ * target geometry belongs to (the store's resolveProvenCam3dStockBounds gate),
+ * and its persisted world box gives the top. lib/cam may not import the store's
+ * resolver, so anything this cannot prove from the records - no binding, a
+ * different stock, a malformed box - returns undefined and keeps the strict
+ * Clearance bound. A lifted path must also have a rapid AT the plane, so a top
+ * that differs from the one the planner used fails toward "outdated", never
+ * toward a false "current"; a path that stays at Clearance is judged as before.
+ */
+function provenStockTopMachineZ(
+  project: Project,
+  setup: Setup,
+  operation: Operation,
+): number | undefined {
+  const wcs = setup.wcs
+  // Same rule as post/workOffsets wcsBoundStockId.
+  const boundStockId = wcs.originBinding !== undefined
+    ? (wcs.originBinding.kind === 'stock_corner' || wcs.originBinding.kind === 'part_feature'
+        ? wcs.originBinding.stockId
+        : undefined)
+    : wcs.stockId
+  const geometryId = operation.geometrySelections?.[0]
+  const geometry = geometryId ? project.geometry?.find((candidate) => candidate.id === geometryId) : undefined
+  if (boundStockId === undefined || !geometry) return undefined
+  const operationStockId = geometry.ownerNestId !== undefined
+    ? (project.nests ?? []).find((nest) => nest.id === geometry.ownerNestId)?.boundStockId
+    : geometry.stockId
+  if (operationStockId !== boundStockId) return undefined
+
+  let bounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | undefined
+  const stocks = project.stocks ?? []
+  if (stocks.length > 0) {
+    const active = stocks.find((stock) => stock.id === boundStockId)
+    if (!active?.bounds) return undefined
+    // Same frames as store/stockAssignment stockWorldBounds.
+    bounds = active.mode === 'explicit'
+      ? {
+          min: { ...active.position },
+          max: {
+            x: active.position?.x + active.bounds.size?.x,
+            y: active.position?.y + active.bounds.size?.y,
+            z: active.position?.z + active.bounds.size?.z,
+          },
+        }
+      : { min: { ...active.bounds.min }, max: { ...active.bounds.max } }
+  } else {
+    if (project.sceneStock?.mode !== 'fixed') return undefined
+    const active = (project.sceneStock.fixedStocks ?? []).find((stock) => stock.id === boundStockId)
+    if (!active?.position) return undefined
+    bounds = {
+      min: { ...active.position },
+      max: {
+        x: active.position.x + active.width,
+        y: active.position.y + active.height,
+        z: active.position.z + active.depth,
+      },
+    }
+  }
+  if (
+    ![bounds.min?.x, bounds.min?.y, bounds.min?.z, bounds.max?.x, bounds.max?.y, bounds.max?.z]
+      .every((value) => Number.isFinite(value)) ||
+    !(bounds.max.x > bounds.min.x && bounds.max.y > bounds.min.y && bounds.max.z > bounds.min.z)
+  ) return undefined
+  return bounds.max.z
+}
+
+/** WO-3039. The plane the planner sent this operation's rapids to. */
+function savedTraversePlaneMachineZ(
+  project: Project,
+  setup: Setup,
+  operation: Operation,
+  clearance: number,
+): number {
+  if (!STOCK_LIFTED_TRAVERSE_OPERATION_TYPES.has(operation.type)) return clearance
+  const stockTop = provenStockTopMachineZ(project, setup, operation)
+  return stockTop === undefined ? clearance : Math.max(clearance, stockTop + TRAVERSE_STANDOFF_MM)
 }
 
 /**
@@ -51,8 +154,15 @@ function finiteSavedHeightPlanes(value: unknown): value is Record<(typeof HEIGHT
  * machine/WCS records must differ by the setup WCS origin for every plane. Any
  * malformed legacy shape returns false rather than throwing on the file-open
  * path.
+ *
+ * WO-3039: a 3D finish over a proven stock top travels at
+ * max(Clearance, stock top + standoff), not at Clearance. Rapids are bounded
+ * by that resolved traverse plane, and a path with any rapid above Clearance
+ * must have one AT that plane; every other move stays bounded by Clearance.
+ * Without a proven stock top the plane IS Clearance and the rule is unchanged.
  */
 function savedToolpathMatchesHeightSnapshot(
+  project: Project,
   setup: Setup,
   operation: Operation,
   allowEmpty = false,
@@ -89,22 +199,31 @@ function savedToolpathMatchesHeightSnapshot(
   // to validate after a reload.
   if (moves.length === 0) return allowEmpty
 
+  const traverse = savedTraversePlaneMachineZ(project, setup, operation, clearance)
   let hasClearanceRapid = false
+  let hasTraverseRapid = false
+  let rapidAboveClearance = false
   for (const move of moves) {
     if (!move || typeof move !== 'object' || !Number.isFinite(move.z)) return false
-    if (move.z < bottom - SAVED_HEIGHT_EPSILON || move.z > clearance + SAVED_HEIGHT_EPSILON) {
+    const ceiling = move.type === 'rapid' ? traverse : clearance
+    if (move.z < bottom - SAVED_HEIGHT_EPSILON || move.z > ceiling + SAVED_HEIGHT_EPSILON) {
       return false
     }
-    if (move.type === 'rapid' && Math.abs(move.z - clearance) <= SAVED_HEIGHT_EPSILON) {
-      hasClearanceRapid = true
-    }
+    if (move.type !== 'rapid') continue
+    if (Math.abs(move.z - clearance) <= SAVED_HEIGHT_EPSILON) hasClearanceRapid = true
+    if (Math.abs(move.z - traverse) <= SAVED_HEIGHT_EPSILON) hasTraverseRapid = true
+    if (move.z > clearance + SAVED_HEIGHT_EPSILON) rapidAboveClearance = true
   }
+  // A path that never rises above Clearance is judged exactly as before
+  // WO-3039, so nothing current today goes outdated. A lifted path must reach
+  // the resolved traverse plane itself.
+  if (rapidAboveClearance) return hasTraverseRapid
   return !CLEARANCE_ANCHORED_OPERATION_TYPES.has(operation.type) || hasClearanceRapid
 }
 
 // v3 (WO-1883): geometry is hashed through geometryGenerationInputs, not as
 // the raw array. Stamps written by v2 recompute once (ADR-0040).
-export const CAM_GENERATION_CONTRACT_VERSION = 3
+export const CAM_GENERATION_CONTRACT_VERSION = 4
 
 export interface GenerationFingerprintInput {
   operation: Operation
@@ -306,6 +425,7 @@ function generationFingerprintWithMachineInputs(
   const operationInputs = operationGenerationInputs(operation)
   return `camgen-v${CAM_GENERATION_CONTRACT_VERSION}-${hashText(JSON.stringify(canonical({
     contractVersion: CAM_GENERATION_CONTRACT_VERSION,
+    engineId: generationEngineId(operation.type),
     operation: operationInputs,
     ...(operationDependsOnPredecessors(operation) && predecessors && predecessors.length > 0
       ? { predecessors }
@@ -358,6 +478,7 @@ function predecessorFingerprint(
     || (candidate.status === 'computing' && computingReads === 'ready')
   return `camgen-predecessor-v2-${hashText(JSON.stringify(canonical({
     operation: operationGenerationInputs(candidate),
+    engineId: generationEngineId(candidate.type),
     tool: selectToolInputs(tool),
     hiddenParts: hiddenDecidesWhatOperationCuts(candidate)
       ? project.geometry.filter((part) => part.hidden === true).map((part) => part.id)
@@ -604,7 +725,7 @@ export function reconcileProjectGenerationFreshness(
             operation.generationFingerprint,
             project, setup, operation, operation.resolvedHeights!, undefined, resolveTool,
           )) &&
-        savedToolpathMatchesHeightSnapshot(setup, operation)
+        savedToolpathMatchesHeightSnapshot(project, setup, operation)
       ) return operation
       if (
         current !== null &&
@@ -612,7 +733,7 @@ export function reconcileProjectGenerationFreshness(
           operation.generationFingerprint,
           project, setup, operation, operation.resolvedHeights!, undefined, resolveTool,
         ) &&
-        savedToolpathMatchesHeightSnapshot(setup, operation)
+        savedToolpathMatchesHeightSnapshot(project, setup, operation)
       ) {
         changed = true
         setupChanged = true
@@ -653,7 +774,7 @@ export function operationGenerationIsCurrent(
     && operation.resolvedHeightPlan?.version === 2
     && operation.resolvedHeights?.version === 1
     && typeof operation.generationFingerprint === 'string'
-    && savedToolpathMatchesHeightSnapshot(setup, operation, true)
+    && savedToolpathMatchesHeightSnapshot(project, setup, operation, true)
     && projectOperationFingerprintMatches(
       operation.generationFingerprint, project, setup, operation, operation.resolvedHeights,
     )

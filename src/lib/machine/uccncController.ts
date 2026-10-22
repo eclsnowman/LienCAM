@@ -55,7 +55,7 @@ import {
 import type {
   BridgeApplyDefinitionReply,
   BridgeApplyMachineDefinitionArgs,
-  BridgeCallMessage,
+  BridgeClientMessage,
   BridgeDefinitionDriftEntry,
   BridgeDefinitionSource,
   BridgeMessage,
@@ -355,7 +355,7 @@ function readOverrideSupport(capabilities: ControllerCapabilities): OverrideSupp
  *  structurally; tests may pass any fake that does. */
 export interface UccncTransport {
   start(events: BridgeTransportEvents): Promise<void>
-  send(message: BridgeCallMessage): void
+  send(message: BridgeClientMessage): void
   close(): Promise<void>
 }
 
@@ -836,7 +836,7 @@ export class UccncController implements MachineController {
       }
       const startupConsole = this.connectingConsole
       this.connectingConsole = []
-      for (const entry of startupConsole) this.events.onConsole?.(entry)
+      for (const entry of startupConsole) this.deliverConsole(entry, transport, generation)
       // Last, and only once the connection is real: see BRIDGE_KEEPALIVE_MS.
       // `queryStatus` is an EXISTING read - the protocol says there should be no
       // dedicated heartbeat message, because the point is proof the client is
@@ -2429,6 +2429,22 @@ export class UccncController implements MachineController {
     return this.transport === transport && this.transportGeneration === generation
   }
 
+  private deliverConsole(entry: ConsoleEntry, transport: UccncTransport, generation: number): void {
+    if (!this.transportIsCurrent(transport, generation)) return
+    const id = entry.firmwareUpdateId
+    if (typeof id !== 'string' || id.length === 0) {
+      this.events.onConsole?.(entry)
+      return
+    }
+    this.events.onConsole?.({ ...entry, onAccepted: () => {
+      // A callback may outlive its socket. Never acknowledge on its successor.
+      if (!this.transportIsCurrent(transport, generation)) return
+      try { transport.send({ t: 'firmwareUpdateAck', id }) } catch {
+        // Printed but the receipt was lost: replay is deduplicated by the console.
+      }
+    } })
+  }
+
   private handleMessage(
     message: BridgeMessage,
     transport: UccncTransport,
@@ -2517,7 +2533,7 @@ export class UccncController implements MachineController {
       }
       case 'console':
         if (this.phase === 'connecting') this.connectingConsole.push(message.v)
-        else this.events.onConsole?.(message.v)
+        else this.deliverConsole(message.v, transport, generation)
         break
       case 'phase':
         this.firmwareVersionValue = message.v.version

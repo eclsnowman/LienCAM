@@ -1,5 +1,6 @@
 // Release stills, never test-evidence copies. Usage and build identity live in
 // the runner so imports are also usable by the focused contract test.
+import { isMain } from '../lib/is-main.mjs';
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runScenes, stampBuild, verifyBuild, withBuildServer } from './lib/scene-runner.mjs'
@@ -301,7 +302,7 @@ async function walkthroughContactSheets(scenes, output, evidence) {
   } finally { await browser.close() }
 }
 
-if (import.meta.url === pathToFileURL(resolve(process.argv[1] || '')).href) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2)
   try {
     if (args[0] === '--walkthroughs') {

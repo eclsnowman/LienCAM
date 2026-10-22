@@ -140,7 +140,7 @@ function segLength(a: Point3, b: Point3): number {
  * chords would quietly understate every distance metric on exactly the paths
  * WO-1211 taught it to fit arcs to.
  */
-function moveLength(from: Point3, move: ToolpathMove): number {
+export function moveLength(from: Point3, move: ToolpathMove): number {
   const to: Point3 = { x: move.x, y: move.y, z: move.z }
   if ((move.type !== 'arc_cw' && move.type !== 'arc_ccw') ||
       typeof move.cx !== 'number' || typeof move.cy !== 'number') {
@@ -199,8 +199,9 @@ export interface SamplePoint extends Point3 {
  */
 export const STEEP_SEGMENT_DEG = 45
 
-/** Path shape, linking and engagement -- everything readable off the moves alone. */
-export interface PathMetrics {
+/** Path shape, linking and engagement -- everything readable off the moves alone.
+ *  WO-3036: includes the sharp corners of the linking motion (LinkTurnMetrics). */
+export interface PathMetrics extends LinkTurnMetrics {
   moves: number
   cutMoves: number
   flownDistanceMm: number
@@ -334,6 +335,7 @@ export function pathMetrics(moves: readonly ToolpathMove[], startPoint?: Point3)
     maxFlipDeg: flip.maxFlipDeg,
     p95FlipDeg: flip.p95FlipDeg,
     distinctCutZValues: zLevels.size,
+    ...linkTurnMetrics(moves, startPoint),
   }
 }
 
@@ -383,6 +385,191 @@ function linkMetrics(
 }
 
 /**
+ * WO-3036: a join that touches an arc and turns by less than this, degrees, is
+ * read as tangent -- not a turn. The adaptive smoother fits arcs to the dense
+ * path within a POSITION tolerance (src/cam3d/rough/smoothPath.ts,
+ * collapsePolyline at a quarter of the authored tolerance) and does not make
+ * them tangent to their neighbours, so every arc join carries a small heading
+ * jog, often against the arc's own direction. Measured on the alpha3 rows they
+ * sit mostly between 0.3 and 5 deg (src/tests/evidence/WO-3036/). Below this
+ * angle such a jog is fitting residue, not a steering decision. A line-to-line
+ * join keeps its historic 1e-12 floor, so a path with no arcs reads exactly as
+ * it always did.
+ */
+export const ARC_JOIN_TOLERANCE_DEG = 2
+
+/** A join within ARC_JOIN_TOLERANCE_DEG of a full reversal is read as exactly +180 degrees. */
+const REVERSAL_EPS_RAD = (ARC_JOIN_TOLERANCE_DEG * Math.PI) / 180
+
+/** One segment of a flip run, as the tool travels it (WO-3036). */
+interface RunSegment {
+  /** Heading the tool starts the segment on, and the one it leaves on. For a
+   *  line both are the chord itself (unnormalised, as the flip rule always read
+   *  it); for an arc they are its tangents at its two ends. */
+  entryX: number
+  entryY: number
+  exitX: number
+  exitY: number
+  arc: boolean
+  /** The arc's own signed turn, radians: + for G3 (left), - for G2 (right). */
+  arcTurn: number
+  /** No XY heading: a zero-length line or a zero-radius arc. */
+  degenerate: boolean
+}
+
+function runSegment(from: Point3, to: Point3, move: ToolpathMove | undefined): RunSegment {
+  const isArc = move !== undefined && (move.type === 'arc_cw' || move.type === 'arc_ccw') &&
+    typeof move.cx === 'number' && typeof move.cy === 'number'
+  if (!isArc) {
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    return { entryX: dx, entryY: dy, exitX: dx, exitY: dy, arc: false, arcTurn: 0,
+      degenerate: Math.hypot(dx, dy) <= 1e-9 }
+  }
+  const cx = move.cx as number
+  const cy = move.cy as number
+  const clockwise = move.type === 'arc_cw'
+  const r0x = from.x - cx
+  const r0y = from.y - cy
+  const r1x = to.x - cx
+  const r1y = to.y - cy
+  // The tangent is the radius turned a quarter toward the direction of travel.
+  const side = clockwise ? -1 : 1
+  return {
+    entryX: -side * r0y, entryY: side * r0x,
+    exitX: -side * r1y, exitY: side * r1x,
+    arc: true,
+    arcTurn: side * arcSweep(from, to, cx, cy, clockwise),
+    degenerate: Math.hypot(r0x, r0y) <= 1e-9 || Math.hypot(r1x, r1y) <= 1e-9,
+  }
+}
+
+/**
+ * WO-3036: a corner inside a link run that turns the tool by more than this,
+ * degrees, doubles it back on itself -- the V-shaped keep-down detour the operator saw
+ * on the torus ("there would be no reason a part of this smooth geometry would
+ * have spikes in the toolpath that look like this", 2026-10-21). A link that
+ * merely rounds a corner of the part turns by less.
+ */
+export const LINK_SHARP_TURN_DEG = 90
+
+/** Sharp corners in linking motion, and what the runs carrying them cost. */
+export interface LinkTurnMetrics {
+  /** Corners of a feed-rate link ride (leaving its pass, inside it, handing back to
+   *  the next pass) that turn by more than LINK_SHARP_TURN_DEG. */
+  linkSharpTurns: number
+  /** Link runs carrying at least one such corner -- one per spike ride. */
+  linkSpikeRides: number
+  /** Feed travelled by those rides, mm. */
+  linkSpikeFeedMm: number
+  /** The straight hop each of those rides joins, summed, mm. */
+  linkSpikeHopMm: number
+  /** linkSpikeFeedMm - linkSpikeHopMm: what the spikes add over going straight, mm. */
+  linkSpikeExtraMm: number
+  /** linkSpikeFeedMm as a share of all feed-rate travel, %. */
+  linkSpikeFeedSharePct: number
+}
+
+/**
+ * Read the sharp corners of the LINKING motion. The flip rate only ever looks at
+ * steering within a pass (a link breaks its run, by design), so a planner that
+ * keeps the tool down between two passes by feeding out into cleared space and
+ * turning back 125-180 deg is invisible to it -- WO-3027 measured 46 such rides on
+ * the form torus, 900 mm of feed where the straight hops are 623 mm.
+ *
+ * The runs are exactly linkMetrics' runs: the non-pass motion BETWEEN two
+ * programmed passes. A corner counts when a feed-rate link move meets the move
+ * before or after it (a rapid is air, not a ride through the work, and breaks
+ * the heading) and the XY heading turns by more than LINK_SHARP_TURN_DEG; headings are read tangent to
+ * tangent, as the flip rate reads them, so an arc is never mistaken for a corner.
+ * A move with no XY travel (a peck) carries the heading through. The corners
+ * where the ride LEAVES its pass and where it hands back to the next one count
+ * too: the torus rides often double back along the pass they leave (a 175-180
+ * deg corner at the junction) and the V's apex is then inside the run, or the
+ * apex is the junction itself. A plain stepover between two zigzag passes turns
+ * 90 deg at each end and is not sharper than the stated angle.
+ */
+export function linkTurnMetrics(moves: readonly ToolpathMove[], startPoint?: Point3): LinkTurnMetrics {
+  const sharpRad = (LINK_SHARP_TURN_DEG * Math.PI) / 180
+  let linkSharpTurns = 0
+  let linkSpikeRides = 0
+  let linkSpikeFeedMm = 0
+  let linkSpikeHopMm = 0
+  let feedMm = 0
+
+  let seenPass = false
+  let runStart: Point3 | undefined
+  let runFeedMm = 0
+  let runSharp = 0
+  // The heading the tool is on: the exit tangent of the last move with XY travel,
+  // pass or feed link. Undefined after air or a move with no XY heading of its own.
+  let heading: { x: number; y: number } | undefined
+  // True once the current run holds a feed link move with XY travel.
+  let rode = false
+  // A run that went through the air is a lifted link, not a ride on the work.
+  let lifted = false
+
+  const sharp = (next: RunSegment): boolean => {
+    if (!heading) return false
+    const turn = Math.abs(Math.atan2(
+      heading.x * next.entryY - heading.y * next.entryX,
+      heading.x * next.entryX + heading.y * next.entryY,
+    ))
+    return turn > sharpRad + 1e-9
+  }
+
+  let from: Point3 | undefined = startPoint
+  for (const move of moves) {
+    const to: Point3 = { x: move.x, y: move.y, z: move.z }
+    const length = from ? moveLength(from, move) : 0
+    if (!isAir(move)) feedMm += length
+    const segment = from ? runSegment(from, to, move) : undefined
+    if (isPassMove(move)) {
+      // The corner where the ride hands the tool back to the next pass.
+      if (rode && segment && !segment.degenerate && sharp(segment)) runSharp++
+      if (seenPass && runStart && runSharp > 0 && !lifted && from) {
+        linkSharpTurns += runSharp
+        linkSpikeRides++
+        linkSpikeFeedMm += runFeedMm
+        linkSpikeHopMm += segLength(runStart, from)
+      }
+      seenPass = true
+      runStart = to
+      runFeedMm = 0
+      runSharp = 0
+      rode = false
+      lifted = false
+      heading = segment && !segment.degenerate ? { x: segment.exitX, y: segment.exitY } : undefined
+    } else if (seenPass && segment) {
+      if (isAir(move)) {
+        // Air breaks the ride: a corner across a rapid is not the tool turning on the work.
+        heading = undefined
+        rode = false
+        lifted = true
+      } else {
+        runFeedMm += length
+        if (!segment.degenerate) {
+          // The first corner is where the ride leaves the pass; the rest are inside it.
+          if (sharp(segment)) runSharp++
+          heading = { x: segment.exitX, y: segment.exitY }
+          rode = true
+        }
+      }
+    }
+    from = to
+  }
+
+  return {
+    linkSharpTurns,
+    linkSpikeRides,
+    linkSpikeFeedMm,
+    linkSpikeHopMm,
+    linkSpikeExtraMm: linkSpikeFeedMm - linkSpikeHopMm,
+    linkSpikeFeedSharePct: feedMm > 0 ? (linkSpikeFeedMm / feedMm) * 100 : 0,
+  }
+}
+
+/**
  * Flips, PER Z -- WO-1214's definition, verbatim, and its grouping.
  *
  * A flip is the sign change of the signed heading delta between consecutive
@@ -408,6 +595,7 @@ function linkMetrics(
 function flipMetrics(
   moves: readonly ToolpathMove[],
   startPoint?: Point3,
+  arcJoinToleranceDeg = ARC_JOIN_TOLERANCE_DEG,
 ): {
   turns: number
   flips: number
@@ -418,10 +606,14 @@ function flipMetrics(
   p95FlipDeg: number
 } {
   interface ZBucket { turns: number; flips: number }
+  const arcJoinEpsRad = (arcJoinToleranceDeg * Math.PI) / 180
   const byZ = new Map<number, ZBucket>()
   const flipDegrees: number[] = []
 
   let run: Point3[] = []
+  // WO-3036: the move that ARRIVES at run[i] (undefined for the anchor), so an
+  // arc is read as the arc it is rather than as its chord.
+  let arrivals: (ToolpathMove | undefined)[] = []
   let runKey: number | undefined
   let from: Point3 | undefined = startPoint
 
@@ -435,34 +627,53 @@ function flipMetrics(
         byZ.set(runKey, bucket)
       }
       // WO-1928: a closed run (it ends where it began) is a ring, and a ring has
-      // no seam. Its last point repeats its first, so drop the repeat and let
-      // the walk wrap: the turn at the start vertex and the pair that spans the
-      // start count like any other, so the count no longer depends on where the
-      // ring starts. An open run keeps the plain first-to-last walk.
+      // no seam. Its last point repeats its first, so the closing segment ends
+      // ON the first point and the walk wraps: the turn at the start vertex and
+      // the pair that spans the start count like any other, so the count no
+      // longer depends on where the ring starts. An open run keeps the plain
+      // first-to-last walk.
       const first = run[0]
       const last = run[run.length - 1]
       const closed =
         run.length >= 4 && Math.hypot(last.x - first.x, last.y - first.y) <= XY_EPS
-      const pts = closed ? run.slice(0, -1) : run
-      const count = pts.length
-      const turnCount = closed ? count : count - 2
-      // Turn t sits at vertex t+1 (mod count); the last turn of a ring is at the start.
+      const segments: RunSegment[] = []
+      for (let k = 0; k + 1 < run.length; k++) {
+        const end = closed && k + 2 === run.length ? first : run[k + 1]
+        segments.push(runSegment(run[k], end, arrivals[k + 1]))
+      }
+      // WO-3036: the turn sequence, read tangent to tangent. A join turns from the
+      // heading one segment LEAVES on to the heading the next one STARTS on (for a
+      // line both are its chord, so a line-only run reads exactly as before); an
+      // arc is one turn of its own, its sweep, to the side it is drawn (G3 left,
+      // G2 right). A run of arcs and lines that is tangent at every join therefore
+      // reads as the curve it is, not as a chord polygon whose joins look like
+      // steering.
       const signs: number[] = []
       const degrees: number[] = []
-      for (let t = 0; t < turnCount; t++) {
-        const p = pts[t]
-        const a = pts[(t + 1) % count]
-        const b = pts[(t + 2) % count]
-        const ax = a.x - p.x
-        const ay = a.y - p.y
-        const bx = b.x - a.x
-        const by = b.y - a.y
-        if (Math.hypot(ax, ay) <= 1e-9 || Math.hypot(bx, by) <= 1e-9) continue
-        const angle = Math.atan2(ax * by - ay * bx, ax * bx + ay * by)
-        if (Math.abs(angle) <= 1e-12) continue
+      const record = (angle: number, floor: number): void => {
+        if (Math.abs(angle) <= floor) return
         signs.push(Math.sign(angle))
         degrees.push((Math.abs(angle) * 180) / Math.PI)
       }
+      const join = (a: RunSegment, b: RunSegment): void => {
+        if (a.degenerate || b.degenerate) return
+        const raw = Math.atan2(
+          a.exitX * b.entryY - a.exitY * b.entryX,
+          a.exitX * b.entryX + a.exitY * b.entryY,
+        )
+        // A join that reverses the heading (an arc ending antiparallel to the
+        // next segment's start) has no turn side: atan2 returns +pi or -pi from
+        // the sign of a cross product that is only rounding noise, so the same
+        // geometry read from two sources would score different flips (WO-3056).
+        // It is read as +pi, the same on every source.
+        const angle = Math.abs(raw) > Math.PI - REVERSAL_EPS_RAD ? Math.PI : raw
+        record(angle, a.arc || b.arc ? arcJoinEpsRad : 1e-12)
+      }
+      for (let k = 0; k < segments.length; k++) {
+        if (k > 0) join(segments[k - 1], segments[k])
+        if (segments[k].arc && !segments[k].degenerate) record(segments[k].arcTurn, 1e-12)
+      }
+      if (closed) join(segments[segments.length - 1], segments[0])
       // A new run never inherits the previous run's heading, even at the same z.
       bucket.turns += signs.length
       for (let i = closed ? 0 : 1; i < signs.length; i++) {
@@ -474,6 +685,7 @@ function flipMetrics(
       }
     }
     run = []
+    arrivals = []
     runKey = undefined
   }
 
@@ -491,9 +703,13 @@ function flipMetrics(
       // Anchor on where the tool already stands, but ONLY if it stands at this
       // level: a heading measured from a point at another z is the cross-level
       // pair this grouping exists to refuse.
-      if (from && levelKey(from.z) === key) run.push(from)
+      if (from && levelKey(from.z) === key) {
+        run.push(from)
+        arrivals.push(undefined)
+      }
     }
     run.push(to)
+    arrivals.push(move)
     from = to
   }
   closeRun()
@@ -525,6 +741,18 @@ function flipMetrics(
       ? flipDegrees[Math.floor(0.95 * (flipDegrees.length - 1))]
       : 0,
   }
+}
+
+/**
+ * WO-3036 evidence: the flip rate of a path read at another arc-join tolerance,
+ * so the record can show how the stated ARC_JOIN_TOLERANCE_DEG was chosen.
+ */
+export function flipRateAtArcJoinTolerance(
+  moves: readonly ToolpathMove[],
+  arcJoinToleranceDeg: number,
+): { turns: number; flips: number; flipRatePct: number } {
+  const flip = flipMetrics(moves, undefined, arcJoinToleranceDeg)
+  return { turns: flip.turns, flips: flip.flips, flipRatePct: flip.turns ? (flip.flips / flip.turns) * 100 : 0 }
 }
 
 /**

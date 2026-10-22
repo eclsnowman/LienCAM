@@ -1,3 +1,4 @@
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync, copyFileSync, readdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
@@ -537,7 +538,7 @@ async function captureSaved() {
   })
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   if (process.argv.includes('--capture-saved')) await captureSaved()
   else if (process.argv.includes('--negative-control')) {
     // Deliberately demand a wrong readback from the real app. Keep this run in

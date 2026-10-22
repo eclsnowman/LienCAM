@@ -1,7 +1,7 @@
 import { useText, textFor } from '../../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
 import { ReferenceImage2dControls, ReferenceImage2dInsert } from './ReferenceImage2d'
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes } from 'react'
 import { useCamStore } from '../../../store'
 import { useUiPrefs } from '../../../store/uiPrefs'
 import { useSketcherTool, sketcherTools } from '../../../lib/sketch/sketcher'
@@ -182,6 +182,38 @@ export const SECTIONS: SectionDef[] = [
 // Tool tiles keep their label on one line (WO-1960, Operator): the tile gives up
 // its side padding instead, so "Control Spline" fits the 78px column.
 const TOOL_BTN_STYLE = { paddingLeft: 0, paddingRight: 0 } as const
+
+// WO-2330: retain WO-1960's one-line tiles and the operator's panel width.
+// A name that cannot fit uses the existing semantic icon with a full localized
+// hover/accessibility name. The transparent line keeps tile geometry stable;
+// it is still accessible text, and widening restores it without saving prefs.
+function ResponsiveToolButton({ label, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string
+  'data-tooltip'?: string
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [iconLabel, setIconLabel] = useState(false)
+  useLayoutEffect(() => {
+    const button = ref.current!
+    const fit = () => {
+      const span = button.querySelector('span')
+      setIconLabel((span?.getBoundingClientRect().width ?? 0) > button.clientWidth)
+    }
+    fit()
+    // Component tests and embedded hosts may not expose these browser APIs.
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit)
+    resize?.observe(button)
+    document.fonts?.addEventListener('loadingdone', fit)
+    return () => {
+      resize?.disconnect()
+      document.fonts?.removeEventListener('loadingdone', fit)
+    }
+  }, [label])
+  const tooltip = props['data-tooltip'] ?? label
+  return <button {...props} ref={ref} data-icon-label={iconLabel || undefined}
+    aria-label={iconLabel ? label : props['aria-label']}
+    data-tooltip={iconLabel && !tooltip.startsWith(label) ? `${label}: ${tooltip}` : tooltip} />
+}
 
 function FinishSketchButton() {
   useText('sketch-and-model-workbench')
@@ -1284,7 +1316,7 @@ export function SketchToolbox() {
                     // newly drawn entities ('q' does the same).
                     if (id === 'construction') {
                       return (
-                        <button
+                        <ResponsiveToolButton label={label}
                           key={id}
                           className={`sketch-tool-btn${constructionMode ? ' sketch-tool-btn-active' : ''}`}
                           style={TOOL_BTN_STYLE}
@@ -1293,7 +1325,7 @@ export function SketchToolbox() {
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
-                        </button>
+                        </ResponsiveToolButton>
                       )
                     }
                     // Delete is an ACTION button (pulled forward from
@@ -1302,7 +1334,7 @@ export function SketchToolbox() {
                     // Enabled only while something is selected.
                     if (id === 'delete') {
                       return (
-                        <button
+                        <ResponsiveToolButton label={label}
                           key={id}
                           className="sketch-tool-btn"
                           style={TOOL_BTN_STYLE}
@@ -1314,7 +1346,7 @@ export function SketchToolbox() {
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
-                        </button>
+                        </ResponsiveToolButton>
                       )
                     }
 
@@ -1327,7 +1359,7 @@ export function SketchToolbox() {
                             activeSketch.dimensions.some((d) => d.id === sid))
                         : []
                       return (
-                        <button
+                        <ResponsiveToolButton label={label}
                           key={id}
                           className="sketch-tool-btn"
                           style={TOOL_BTN_STYLE}
@@ -1343,7 +1375,7 @@ export function SketchToolbox() {
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
-                        </button>
+                        </ResponsiveToolButton>
                       )
                     }
                     if (id === 'measure') {
@@ -1353,7 +1385,7 @@ export function SketchToolbox() {
                       const measureKey = SHORTCUT_KEY_BY_UTILITY['measure']
                       const keySuffix = measureKey ? ` (${measureKey})` : ''
                       return (
-                        <button
+                        <ResponsiveToolButton label={label}
                           key={id}
                           data-testid="cam-sketch-measure"
                           className={`sketch-tool-btn${measureOpen ? ' sketch-tool-btn-active' : ''}`}
@@ -1368,7 +1400,7 @@ export function SketchToolbox() {
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
-                        </button>
+                        </ResponsiveToolButton>
                       )
                     }
                     // CONSTRAINTS are ACTION buttons: apply the kind to
@@ -1382,7 +1414,7 @@ export function SketchToolbox() {
                         ? planConstraintForSelection(activeSketch, selectedIds, constraintKind)
                         : { ok: false as const, reason: workbenchText('SketchToolbox.noActiveSketch2') }
                       return (
-                        <button
+                        <ResponsiveToolButton label={label}
                           key={id}
                           className="sketch-tool-btn"
                           style={TOOL_BTN_STYLE}
@@ -1394,7 +1426,7 @@ export function SketchToolbox() {
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
-                        </button>
+                        </ResponsiveToolButton>
                       )
                     }
                     // CREATE buttons arm the tool state machine; armed
@@ -1407,7 +1439,7 @@ export function SketchToolbox() {
                       const key = SHORTCUT_KEY_BY_TOOL[id as SketchToolId]
                       const idle = key ? `${label} (${key})` : label
                       return (
-                        <button
+                        <ResponsiveToolButton label={label}
                           key={id}
                           className={`sketch-tool-btn${armed ? ' sketch-tool-btn-active' : ''}`}
                           style={TOOL_BTN_STYLE}
@@ -1416,11 +1448,11 @@ export function SketchToolbox() {
                         >
                           <ToolIcon size={15} />
                           <span>{label}</span>
-                        </button>
+                        </ResponsiveToolButton>
                       )
                     }
                     return (
-                      <button
+                      <ResponsiveToolButton label={label}
                         key={id}
                         className="sketch-tool-btn"
                         style={TOOL_BTN_STYLE}
@@ -1429,7 +1461,7 @@ export function SketchToolbox() {
                       >
                         <ToolIcon size={15} />
                         <span>{label}</span>
-                      </button>
+                      </ResponsiveToolButton>
                     )
                   })}
                 </div>

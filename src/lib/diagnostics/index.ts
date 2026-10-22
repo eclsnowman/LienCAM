@@ -12,7 +12,7 @@
 // environment, operation settings) are not in it: they are read by
 // readOptionalSource() only once their box is ticked (design section 3).
 
-import { useCamStore } from '../../store'
+import { snapshotCurrentProjectFile, useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
 import { useUiPrefs } from '../../store/uiPrefs'
 import { ALL_OPERATION_TYPES } from '../../store/opModelOriginGuard'
@@ -22,11 +22,14 @@ import {
   basicEnvironment, currentSurface, machineAvailable, machineSnapshot, operationSettings,
   preciseEnvironment, probeBasicEnvironment, probePreciseEnvironment, readAppVersions, type MachineInput,
 } from './sources'
-import type { Attachment, ReportSources } from './report'
+import type { Attachment, ConsoleTailSource, ReportSources } from './report'
 import type { OperationSettingsSnapshot, PreciseEnvironment } from './sources'
+import { routeForConsoleSource, type FailureContext } from './failure'
 
 export * from './report'
 export * from './githubPrefill'
+export * from './failure'
+export { captureApp, type AppCapture, type CaptureResult } from './capture'
 export { DiagnosticHistory, MemoryHistoryStorage } from './history'
 export type { SessionSummary } from './history'
 
@@ -205,4 +208,73 @@ export function readOptionalSource(id: OptionalSourceId): PreciseEnvironment | O
   if (!op) return null
   const tool = useCamStore.getState().toolLibrary.find((t) => t.id === op.toolId) ?? null
   return operationSettings(op, tool, ALL_OPERATION_TYPES)
+}
+
+// --- WO-2911: a report started at the failure ---------------------------------
+
+/** The view the operator was in: Model, or the CAM tab. */
+function currentView(): string {
+  const cam = useCamStore.getState()
+  return (cam as { workspace?: string }).workspace === 'part' ? 'model' : cam.viewer.mode
+}
+
+/** Freeze one console line as the failure to report. Reads only; selects nothing. */
+export function failureFromConsoleEvent(eventId: number, reportedAt = Date.now()): FailureContext | null {
+  const cam = useCamStore.getState()
+  const event = cam.consoleEvents.find((e) => e.id === eventId)
+  if (!event) return null
+  const opRef = event.entityRef?.kind === 'op' ? event.entityRef.id : null
+  let operation: FailureContext['operation'] = null
+  if (opRef) {
+    const setup = cam.project.setups.find((st) => (st.operations ?? []).some((o) => o.id === opRef)) ?? null
+    const op = setup?.operations.find((o) => o.id === opRef) ?? null
+    if (op) {
+      const tool = cam.toolLibrary.find((t) => t.id === op.toolId) ?? null
+      operation = {
+        name: op.name, family: op.type, setupName: setup?.name ?? null,
+        settings: operationSettings(op, tool, ALL_OPERATION_TYPES),
+      }
+    }
+  }
+  return {
+    route: routeForConsoleSource(event.source, opRef !== null),
+    source: event.source, errorText: event.message, shownAt: event.at, reportedAt,
+    view: currentView(), operation, frames: [],
+  }
+}
+
+/** Freeze an error screen's error as the failure to report (code locations, never the stack text). */
+export function failureFromError(error: unknown, screen: 'app-error-screen' | 'view-error-screen', reportedAt = Date.now()): FailureContext {
+  const e = error instanceof Error ? error : null
+  let view: string | null = null
+  try { view = currentView() } catch { /* the store itself may be what failed */ }
+  return {
+    route: screen, source: screen === 'app-error-screen' ? 'app error screen' : '3D view error screen',
+    errorText: e ? (e.message || e.name) : String(error), shownAt: reportedAt, reportedAt, view, operation: null,
+    frames: stackLocations(e?.stack, appOrigins()),
+  }
+}
+
+export const CONSOLE_TAIL_LINES = 50
+
+/** The last console lines, as the operator saw them (time, severity, source, message). */
+export function readConsoleTail(): ConsoleTailSource | null {
+  const events = useCamStore.getState().consoleEvents
+  if (events.length === 0) return null
+  const tail = events.slice(-CONSOLE_TAIL_LINES)
+  return {
+    total: events.length,
+    lines: tail.map((e) => `${new Date(e.at).toISOString().slice(11, 19)} ${e.severity} ${e.source}: ${e.message}`),
+  }
+}
+
+/** The open project as Save would write it, unsaved changes included. Read only
+ *  when the operator ticks "Current project"; never written to disk here. */
+export async function readCurrentProject(): Promise<Attachment | null> {
+  try {
+    const text = await snapshotCurrentProjectFile()
+    return text === null ? null : { bytes: new TextEncoder().encode(text) }
+  } catch {
+    return null
+  }
 }

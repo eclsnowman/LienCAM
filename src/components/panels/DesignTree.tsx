@@ -27,6 +27,7 @@ import { normalizeQuery, matchesFilter, isVisible, filteredCountLabel } from './
 import { TreeContextMenu } from './TreeContextMenu'
 import { collectExportGroups, openExportWindow } from '../../lib/exportCenter'
 import { TreeRenameLabel } from './TreeRenameLabel'
+import { clearProjectRow, selectProjectRow } from './PropertiesPanel'
 import type { TreeContextTarget, TreeMenuAction } from '../../lib/tree/treeContextMenu'
 import { setupEnabledCutTimeMs } from '../../lib/cam/operationSuppression'
 import type { CutTimeMotion } from '../../lib/cam/runtime'
@@ -3374,7 +3375,12 @@ export function DesignTree() {
   }
 
   return (
-    <div className={`panel design-tree${treeDensity === 'compact' ? ' tree-density-compact' : ''}`}>
+    <div
+      className={`panel design-tree${treeDensity === 'compact' ? ' tree-density-compact' : ''}`}
+      // WO-2992: any click in the tree other than the project row hands Properties back, even
+      // when it re-selects the row that was already selected.
+      onClickCapture={(e) => { if (!(e.target as HTMLElement).closest('[data-testid="tree-project-row"]')) clearProjectRow() }}
+    >
       {/* Hidden inputs */}
       {/* CVU-2: REGIME 2 ownership marker (see DisclosureSection.tsx) -- this
           is the layer-color picker's own hidden <input type="color">
@@ -3399,7 +3405,12 @@ export function DesignTree() {
       />
 
       <div className="panel-header">
-        <div className="panel-title">
+        <div
+          className="panel-title"
+          data-testid="tree-project-row"
+          style={{ cursor: 'pointer' }}
+          onClick={selectProjectRow}
+        >
           <Layers size={13} style={{ flexShrink: 0 }} />
           <TreeRenameLabel
             name={project.name}
@@ -4794,6 +4805,7 @@ function operationTypeText(type: Operation["type"]): string {
     case 'engrave': return shellText('OperationTypes.engrave')
     case 'vcarve': return shellText('OperationTypes.vcarve')
     case 'chamfer': return shellText('OperationTypes.chamfer')
+    case 'pattern': return shellText('OperationTypes.pattern')
     case 'parallel_3d': return shellText('OperationTypes.parallel_3d')
     case 'waterline_3d': return shellText('OperationTypes.waterline_3d')
     case 'adaptive_3d': return shellText('OperationTypes.adaptive_3d')

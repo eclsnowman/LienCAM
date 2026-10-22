@@ -16,7 +16,7 @@
 import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { createRequire } from 'node:module'
+import { electronMainRequire } from '../support/electronMainRequire'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -173,7 +173,7 @@ function loadMain(
     return child
   }
   const moduleValue = { exports: {} as MainApi }
-  const realRequire = createRequire(import.meta.url)
+  const realRequire = electronMainRequire
   vm.runInNewContext(readFileSync(path.resolve('electron/main.cjs'), 'utf8'), {
     AbortSignal, Buffer, Date, Promise, Response, URL,
     __dirname: path.resolve('electron'),

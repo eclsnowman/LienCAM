@@ -3,7 +3,9 @@
 # lazily in the dedicated model worker and carries:
 #   STEP import + shape healing + tessellation + topology queries + surface
 #   classification (planar/cylindrical) + exact planar sections + bbox/mass props.
-# Pinned image: donalffons/opencascade.js:2.0.0-beta.b5ff984 (single-threaded).
+# Pinned image: donalffons/opencascade.js:2.0.0-beta.b5ff984 (single-threaded), OCCT 7.6.2.
+# Build with build.sh: it recompiles the image's OCCT objects with -O3 and native wasm
+# exceptions (build-inside.py, WO-3047) before linking.
 # embind gotchas (see ../../vendor/README.md): base classes must be listed
 # explicitly (full inheritance chains); ocjs does not support C++ default
 # arguments, so Message_ProgressRange must be bound to call TransferRoots /
@@ -19,6 +21,7 @@ mainBuild:
     # --- Healing ---
     - symbol: ShapeFix_Shape
     - symbol: ShapeFix_Root                # base of ShapeFix_Shape
+    - symbol: BRepCheck_Analyzer           # WO-3047 for WO-3046: IsValid_2() lets the reader skip healing a valid shape
     # --- Tessellation ---
     - symbol: BRepMesh_IncrementalMesh
     - symbol: BRepMesh_DiscretRoot         # base of BRepMesh_IncrementalMesh
@@ -79,7 +82,7 @@ mainBuild:
     - symbol: GProp_GProps
   emccFlags:
     - -O3
-    - -fexceptions                         # ADR 0018: NOT -fwasm-exceptions (conflicts with OCCT setjmp usage)
+    - -fwasm-exceptions                    # WO-3047: native wasm exceptions (build-inside.py recompiles OCCT to match); JS-emulated -fexceptions cost ~44% of a STEP read
     - -sEXPORT_ES6=1
     - -sUSE_ES6_IMPORT_META=0
     - -sEXPORTED_RUNTIME_METHODS=['FS']    # MEMFS access: JS writes the STEP bytes, ReadFile takes the MEMFS path

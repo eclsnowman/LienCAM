@@ -242,9 +242,12 @@ describe('WO-917 NEGATIVE CONTROL: Macros and Diagnostics survived the move', ()
     // one grid (control-user-macro-grid) - the older, separate
     // control-macro-grid this used to read is gone.
     const grid = inWorkspace[0].querySelector('[data-testid="control-user-macro-grid"]')!
-    expect(Array.from(grid.querySelectorAll('button')).map((b) => b.textContent))
-      .toEqual(['Vacuum', 'Lights'])
-    expect(inWorkspace[0].querySelector('[data-testid="control-park-grid"]')).toBeTruthy()
+    // WO-2841 (851f073592) folded the separate park grid into this one grid: the
+    // park this test seeds ('Front left', with its park icon) comes first, then the macros.
+    expect(Array.from(grid.querySelectorAll('button')).map((b) => b.textContent?.trim()))
+      .toEqual(['Front left', 'Vacuum', 'Lights'])
+    expect(grid.querySelector('[data-testid="control-park-wo917-park"]')).toBeTruthy()
+    expect(inWorkspace[0].querySelector('[data-testid="control-park-grid"]')).toBeNull()
     fireEvent.click(inWorkspace[0].querySelector('[data-testid="control-actions-gear"]')!)
     expect(screen.getByTestId('control-actions-modal')).toBeTruthy()
   })

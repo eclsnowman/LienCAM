@@ -1,3 +1,4 @@
+import { TOOLPATH_WINDOW_SIDE_LIMIT, type ToolpathWindowSegment } from '../simulation/toolpathWindow'
 import type { ReferenceImageRuntime } from '../../referenceImage/runtime'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -1155,6 +1156,8 @@ export class CNCViewport {
   private toolpathRoleLines = new Map<string, THREE.Object3D>()
   private simulationToolpathRoleLines = new Map<string, THREE.Object3D>()
   private simulationToolpathPreviewActive = false
+  private simulationWindowLines = new Map<string, THREE.LineSegments>()
+  private simulationWindowActive = false
   private toolpathVisibleRequested = true
   private hiddenToolpathRoles = new Set<string>()
 
@@ -3659,6 +3662,8 @@ export class CNCViewport {
     })
     group.clear()
     this.getSimulationToolpathRoleLines().clear()
+    this.simulationWindowLines?.clear()
+    this.simulationWindowActive = false
   }
 
   /**
@@ -3681,6 +3686,71 @@ export class CNCViewport {
     const requested = this.isToolpathVisibleRequested()
     this.toolpathGroup.visible = requested && !this.simulationToolpathPreviewActive
     this.getSimulationToolpathGroup().visible = requested && this.simulationToolpathPreviewActive
+  }
+
+  /** Bounded render-only cursor overlay. Buffers survive every playback tick. */
+  setSimulationToolpathWindow(segments: ToolpathWindowSegment[] | null) {
+    if (segments === null) {
+      this.setSimulationToolpathPreview(null)
+      return
+    }
+    if (!this.simulationWindowActive) {
+      this.clearSimulationToolpathObjects()
+      this.simulationWindowActive = true
+    }
+    const lines = this.simulationWindowLines ??= new Map()
+    for (const line of lines.values()) line.geometry.setDrawRange(0, 0)
+    // Bound even callers outside the panel. No full path sampling or geometry
+    // disposal happens here; each role/phase owns one fixed-capacity buffer.
+    const capacity = TOOLPATH_WINDOW_SIDE_LIMIT * 2
+    for (let i = 0; i < Math.min(segments.length, capacity); i++) {
+      const segment = segments[i]
+      const role = segment.frame.role
+      const key = `${segment.phase}:${role}`
+      let line = lines.get(key)
+      if (!line) {
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(capacity * 6), 3).setUsage(THREE.DynamicDrawUsage))
+        geo.setAttribute('lineDistance', new THREE.BufferAttribute(new Float32Array(capacity * 2), 1).setUsage(THREE.DynamicDrawUsage))
+        const options = {
+          color: ROLE_COLORS[role] ?? asNumber('--role-unknown'),
+          transparent: true, opacity: segment.phase === 'recent' ? 0.4 : 1,
+          depthTest: false, depthWrite: false,
+        }
+        const material = ROLE_DASHED.has(role)
+          ? new THREE.LineDashedMaterial({ ...options, dashSize: 3, gapSize: 2 })
+          : new THREE.LineBasicMaterial(options)
+        line = new THREE.LineSegments(geo, material)
+        line.renderOrder = 3000
+        line.frustumCulled = false
+        line.userData.toolpathWindowPhase = segment.phase
+        let roleGroup = this.getSimulationToolpathRoleLines().get(role)
+        if (!roleGroup) {
+          roleGroup = new THREE.Group()
+          roleGroup.visible = !this.getHiddenToolpathRoles().has(role)
+          this.getSimulationToolpathRoleLines().set(role, roleGroup)
+          this.getSimulationToolpathGroup().add(roleGroup)
+        }
+        roleGroup.add(line)
+        geo.setDrawRange(0, 0)
+        lines.set(key, line)
+      }
+      const geo = line.geometry
+      const count = geo.drawRange.count
+      const position = geo.getAttribute('position') as THREE.BufferAttribute
+      position.setXYZ(count, segment.fromX, segment.fromY, segment.fromZ)
+      position.setXYZ(count + 1, segment.toX, segment.toY, segment.toZ)
+      position.needsUpdate = true
+      const distance = geo.getAttribute('lineDistance') as THREE.BufferAttribute
+      distance.setX(count, 0)
+      distance.setX(count + 1, Math.hypot(segment.toX - segment.fromX, segment.toY - segment.fromY, segment.toZ - segment.fromZ))
+      distance.needsUpdate = true
+      geo.setDrawRange(0, count + 2)
+    }
+    // An empty window still owns the display (never reveals an unrelated full path).
+    this.simulationToolpathPreviewActive = true
+    this.toolpathGroup.visible = false
+    this.getSimulationToolpathGroup().visible = this.isToolpathVisibleRequested()
   }
 
   /**
@@ -9458,6 +9528,7 @@ export class CNCViewport {
     this.renderer.domElement.removeEventListener('click', this.handleClick)
     this.renderer.domElement.removeEventListener('mousemove', this.handleMoveHoverMove)
     this.renderer.domElement.removeEventListener('mousemove', this.handleMouseMove)
+    this.clearSimulationToolpathObjects()
     this.sketcher.dispose()
     this.clear2DGizmoProxy()
     this.transformControls.dispose()

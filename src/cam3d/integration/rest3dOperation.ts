@@ -1,3 +1,7 @@
+import type { Rest3dParams } from '../../kernel/parameterTypes';
+export type { Rest3dParams, RestMachiningStockSource, RestMachiningSettings } from '../../kernel/parameterTypes';
+export { DEFAULT_REST3D_PARAMS, DEFAULT_REST_MACHINING_SETTINGS } from '../../kernel/parameterDefaults';
+export { readRest3dParams, readRestMachiningSettings } from '../../kernel/schema';
 import type { CutterSpec, PartMesh } from '../kernel/types';
 import type { Ring } from '../geom2d';
 import type { Box3, LinearMove } from '../stock';
@@ -11,25 +15,6 @@ import type { ResolvedParallel3dHeights } from './parallel3dOperation';
 import { spindleRotationForTool } from '../../lib/tool/cutHand';
 import { forEachLinearSweep, toolpathMovesToLinearSweeps, type ToolTipPosition } from '../rough/replayStock';
 import { effectiveMoveRole, isStockCuttingRole } from '../../lib/cam/stockCuttingRoles';
-
-export type RestMachiningStockSource = 'previous_operations' | 'previous_tool';
-
-export interface RestMachiningSettings {
-  restMachining: boolean;
-  stockSource: RestMachiningStockSource;
-}
-
-export const DEFAULT_REST_MACHINING_SETTINGS: RestMachiningSettings = {
-  restMachining: false,
-  stockSource: 'previous_operations',
-};
-
-export function readRestMachiningSettings(params: Record<string, unknown>): RestMachiningSettings {
-  return {
-    restMachining: params.restMachining === true,
-    stockSource: params.stockSource === 'previous_tool' ? 'previous_tool' : 'previous_operations',
-  };
-}
 
 export interface RestMachiningAvailability {
   available: boolean;
@@ -63,52 +48,6 @@ export function restMachiningAvailability(
     };
   }
   return { available: true };
-}
-
-export interface Rest3dParams {
-  stockSource: RestMachiningStockSource;
-  referenceToolDiameter: number;
-  referenceCornerRadius: number;
-  tolerance: number;
-  stockToLeave: number;
-  stepdown: number;
-  useStockBoundary: boolean;
-  direction: 'climb' | 'conventional';
-}
-
-export const DEFAULT_REST3D_PARAMS: Rest3dParams = {
-  // Engine-level compatibility default. Newly-authored operation settings
-  // always persist the UI default (`previous_operations`) explicitly.
-  stockSource: 'previous_tool',
-  referenceToolDiameter: 12,
-  referenceCornerRadius: 0,
-  tolerance: 0.2,
-  stockToLeave: 0,
-  stepdown: 3,
-  useStockBoundary: false,
-  direction: 'climb',
-};
-
-export function readRest3dParams(params: Record<string, unknown>): Rest3dParams {
-  const positive = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-  const nonNegative = (value: unknown, fallback: number): number =>
-    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
-  return {
-    // Missing/unrecognized resolves the same way readRestMachiningSettings does:
-    // only an explicit 'previous_tool' opts out of the previous_operations default.
-    stockSource: params.stockSource === 'previous_tool' ? 'previous_tool' : 'previous_operations',
-    referenceToolDiameter: positive(params.referenceToolDiameter, DEFAULT_REST3D_PARAMS.referenceToolDiameter),
-    referenceCornerRadius: nonNegative(params.referenceCornerRadius, DEFAULT_REST3D_PARAMS.referenceCornerRadius),
-    tolerance: positive(params.tolerance, DEFAULT_REST3D_PARAMS.tolerance),
-    stockToLeave: nonNegative(
-      params.stockToLeave,
-      nonNegative(params.surfaceStockToLeave, DEFAULT_REST3D_PARAMS.stockToLeave),
-    ),
-    stepdown: positive(params.stepdown, DEFAULT_REST3D_PARAMS.stepdown),
-    useStockBoundary: typeof params.useStockBoundary === 'boolean' ? params.useStockBoundary : false,
-    direction: params.direction === 'conventional' ? 'conventional' : 'climb',
-  };
 }
 
 /** Runtime snapshot of one setup operation before the operation being planned. */

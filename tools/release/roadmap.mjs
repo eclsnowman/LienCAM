@@ -7,8 +7,9 @@
 //   - ROADMAP.md at the repo root, and
 //   - site/roadmap.html (the project site's Roadmap page, in the site frame)
 // from it. Both show Item, Goal, Status and Priority grouped by theme, and never
-// the internal Source or Size columns. Rows whose status is "idea" are listed
-// under "Ideas" instead of their theme.
+// the internal Source or Size columns or the lifecycle fields (links, decisions,
+// history; WO-2985). Rows whose status is "idea" are listed under "Ideas" instead
+// of their theme; a superseded row (links.supersededBy) is not listed.
 //
 //   node tools/release/roadmap.mjs            write the two files
 //   node tools/release/roadmap.mjs --check    exit 1 if either file is stale
@@ -16,6 +17,7 @@
 // Writes only when the content changed, keeping the file's existing line
 // endings, so a second run changes nothing.
 
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,7 +36,41 @@ const escapeHtml = (text) => String(text).replaceAll('&', '&amp;').replaceAll('"
 const escapeCell = (text) => String(text).replaceAll('|', '\\|')
 
 export function loadRoadmap(path = join(ROOT, ROADMAP_JSON)) {
-  const roadmap = JSON.parse(readFileSync(path, 'utf8'))
+  return validateRoadmap(JSON.parse(readFileSync(path, 'utf8')))
+}
+
+// WO-2985: the internal lifecycle fields (docs/design/WO-2961-roadmap-oracle.md sec. 4). Written by
+// tools/roadmap/lifecycle.mjs; validated here; never rendered on the public pages.
+const ROW_ID = /^R-\d{3,}$/
+const ORDER_ID = /^WO-\d+[A-Z]?$/
+const REQUEST_ID = /^(issue|discussion)-\d+$/
+const DATE = /^\d{4}-\d{2}-\d{2}/
+const isList = (value, test) => Array.isArray(value) && value.every((v) => typeof v === 'string' && test.test(v))
+
+function validateLifecycle(row, ids) {
+  const fail = (what) => { throw new Error(`roadmap: ${row.id} ${what}`) }
+  if (row.links !== undefined) {
+    const { orders, requests, supersededBy, duplicates, ...extra } = row.links ?? {}
+    if (typeof row.links !== 'object' || row.links === null || Array.isArray(row.links)) fail('links must be an object')
+    if (Object.keys(extra).length) fail(`links has unknown field(s) ${Object.keys(extra).join(', ')}`)
+    if (orders !== undefined && !isList(orders, ORDER_ID)) fail('links.orders must list WO-nnnn ids')
+    if (requests !== undefined && !isList(requests, REQUEST_ID)) fail('links.requests must list issue-<n> or discussion-<n> ids')
+    if (supersededBy !== undefined && (!ROW_ID.test(supersededBy) || supersededBy === row.id || !ids.has(supersededBy))) fail(`links.supersededBy "${supersededBy}" is not another row`)
+    if (duplicates !== undefined && (!isList(duplicates, ROW_ID) || duplicates.some((d) => d === row.id || !ids.has(d)))) fail('links.duplicates must list other rows')
+  }
+  if (row.decisions !== undefined) {
+    if (!Array.isArray(row.decisions)) fail('decisions must be a list')
+    for (const d of row.decisions) {
+      if (!d || !d.ref || !DATE.test(d.at ?? '') || typeof d.words !== 'string' || !d.by) fail('decisions entries need ref, at (YYYY-MM-DD), words and by')
+    }
+  }
+  if (row.history !== undefined) {
+    if (!Array.isArray(row.history)) fail('history must be a list')
+    for (const h of row.history) if (!h || !DATE.test(h.at ?? '') || !h.by) fail('history entries need at (YYYY-MM-DD) and by')
+  }
+}
+
+export function validateRoadmap(roadmap) {
   const words = new Set(roadmap.statuses.map((s) => s.id))
   const priorities = new Set(roadmap.priorities.map((p) => p.id))
   const ids = new Set()
@@ -45,6 +81,7 @@ export function loadRoadmap(path = join(ROOT, ROADMAP_JSON)) {
     if (!roadmap.themes.includes(row.theme)) throw new Error(`roadmap: ${row.id} has unknown theme "${row.theme}"`)
     if (row.priority != null && row.priority !== 'idea' && !priorities.has(row.priority)) throw new Error(`roadmap: ${row.id} has unknown priority ${row.priority}`)
   }
+  for (const row of roadmap.rows) validateLifecycle(row, ids)
   return roadmap
 }
 
@@ -55,12 +92,14 @@ const priorityLabel = (roadmap, row) => {
   return roadmap.priorities.find((p) => p.id === row.priority).label
 }
 
-// [{ title, rows }] in theme order, then Ideas.
+// [{ title, rows }] in theme order, then Ideas. A superseded row (links.supersededBy) stays in the file and
+// leaves the public list (WO-2985).
 export function groupRows(roadmap) {
+  const shown = roadmap.rows.filter((r) => !r.links?.supersededBy)
   const groups = roadmap.themes
-    .map((title) => ({ title, rows: roadmap.rows.filter((r) => r.theme === title && r.status !== 'idea') }))
+    .map((title) => ({ title, rows: shown.filter((r) => r.theme === title && r.status !== 'idea') }))
     .filter((g) => g.rows.length > 0)
-  const ideas = roadmap.rows.filter((r) => r.status === 'idea')
+  const ideas = shown.filter((r) => r.status === 'idea')
   if (ideas.length > 0) groups.push({ title: IDEAS, rows: ideas })
   return groups
 }
@@ -211,6 +250,6 @@ function main(args) {
   return 0
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2))
 }

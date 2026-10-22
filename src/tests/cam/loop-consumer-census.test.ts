@@ -44,6 +44,7 @@ import { buildFaceToolpath } from '../../lib/cam/face2d'
 import { ensureClipperReady } from '../../lib/cam/face2d/clipperOffset'
 import { buildEngraveToolpath } from '../../lib/cam/engrave2d'
 import { buildAdaptiveClearingToolpath } from '../../lib/cam/adaptiveClearing2d/engine'
+import { buildPatternToolpath } from '../../lib/cam/pattern2d'
 import { ensureEngineClipperReady } from '../../lib/cam/adaptiveClearing2d/engine/clipperEngine'
 import type {
   ContourParams, ContourWorkerPayload, PocketParams, PocketWorkerPayload,
@@ -254,6 +255,15 @@ const TABLE: Record<string, {
       '"geometry" boundary branch — this was the live user-facing defect the R1 audit named).',
     refusalPattern: /Adaptive Clearing:.*no closed loop/i,
   },
+  COMPUTE_PATTERN: {
+    builder: 'buildPatternToolpath', behavior: 'refusal',
+    citation: 'toolpathWorker.ts COMPUTE_PATTERN arm (WO-3001) hands the builder only the CLOSED loops as the ' +
+      'region - an open loop never bounds it. A spec that needs the region (anchor "region-centroid" or ' +
+      'clip "region") then throws PATTERN_NO_REGION by name in pattern2d/index.ts. The region is optional BY ' +
+      'DESIGN: a spec anchored at the WCS origin or a stated point, unclipped, cuts with no region ' +
+      '(pattern2d.wo2982.test.ts covers that case; the proven-safe drive below pins it on this fixture).',
+    refusalPattern: /needs a region, and this operation has none/i,
+  },
   COMPUTE_NEST: {
     builder: 'runNest', behavior: 'proven-safe',
     citation: 'Rule (c) explicit row — NestWorkerPayload carries pre-resolved NestPart, not ' +
@@ -353,7 +363,7 @@ describe('Loop-consumer census (SKC-47-R2) — derived mechanically from source'
     }
   })
 
-  it('non-vacuity: the derived set has exactly the 10 known consumers today (documents scope; a ' +
+  it('non-vacuity: the derived set has exactly the 12 known consumers today (documents scope; a ' +
      'change here is expected to accompany a TABLE edit, not silently pass)', () => {
     expect(derived.map(d => d.msgType).sort()).toEqual(Object.keys(TABLE).sort())
   })
@@ -581,6 +591,30 @@ describe('Loop-consumer census — refusal rows drive their builder with the par
     await expect(buildAdaptiveClearingToolpath(acPayload(PARTIAL_ELLIPSE_LOOPS))).rejects.toThrow(TABLE.COMPUTE_ADAPTIVE_CLEARING.refusalPattern!)
   })
 })
+
+// Pattern's builder takes the region, not the loops: the worker arm keeps the closed loops only, so
+// the drive hands it exactly what that arm makes of the fixture (no closed loop -> no region).
+function patternRegion(loops: LoopData[]): Array<Array<{ x: number; y: number }>> {
+  return loops.filter(loop => loop.closed).map(loop => loop.points.map(p => ({ x: p.x, y: p.y })))
+}
+const PATTERN_LINE = [{ kind: 'xy', x: 't', y: '0', t: [-5, 5] }]
+
+describe('Loop-consumer census — Pattern (region optional by design)', () => {
+  it('Pattern throws the named refusal when its spec needs a region and the bake has only open loops', () => {
+    expect(PATTERN_REGION_FROM_OPEN).toEqual([])
+    for (const needs of [{ anchor: 'region-centroid' }, { anchor: 'wcs-origin', clip: 'region' }]) {
+      const spec = { version: 1, units: 'mm', depth: 0.1, curves: PATTERN_LINE, ...needs }
+      expect(() => buildPatternToolpath({ spec, tool: TOOL, heights: HEIGHTS, wcsOrigin: { x: 0, y: 0, z: 0 }, region: PATTERN_REGION_FROM_OPEN }))
+        .toThrow(TABLE.COMPUTE_PATTERN.refusalPattern!)
+    }
+  })
+  it('Pattern anchored at the WCS origin, unclipped, cuts with no region (not overreached into a refusal)', () => {
+    const spec = { version: 1, units: 'mm', anchor: 'wcs-origin', depth: 0.1, curves: PATTERN_LINE }
+    const { moves } = buildPatternToolpath({ spec, tool: TOOL, heights: HEIGHTS, wcsOrigin: { x: 0, y: 0, z: 0 }, region: PATTERN_REGION_FROM_OPEN })
+    expect(moves.some(m => m.type === 'feed')).toBe(true)
+  })
+})
+const PATTERN_REGION_FROM_OPEN = patternRegion(PARTIAL_ELLIPSE_LOOPS)
 
 describe('Loop-consumer census — the proven-safe builder row is NOT overreached into a refusal', () => {
   beforeAll(async () => { await ensureEngineClipperReady() })

@@ -33,6 +33,8 @@
 // and 07 Relief medallion; the branch passes all 12 covered examples.
 
 import * as fs from 'node:fs'
+import { createHash } from 'node:crypto'
+import { gunzipSync } from 'node:zlib'
 import * as path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { CachedStepDisplay, StepDisplayTessellation } from '../../lib/stepCache'
@@ -132,6 +134,7 @@ const { useCamStore, smartHeightStockBounds } = await import('../../store')
 const { resetDocumentHolder, setDocumentStorage } = await import('../../doc/documentHolder')
 const { InMemoryDocumentStorage } = await import('../../doc/persist')
 const post = await import('../../lib/post')
+const { operationGenerationIsCurrent } = await import('../../lib/cam/generationFingerprint')
 
 // 2D families: the real toolpathWorker behind a Worker shim (heightScenario's
 // pattern). Operations are computed one at a time, so one active shim suffices.
@@ -378,18 +381,34 @@ describe.skipIf(!ACCEPT)('WO-2693: the spindle stops only with the tool raised',
   })
 })
 
-// The cached-project route (WO-2693 round 2): a saved kit project whose stored
-// 3D rough still ends at depth (generated before the generator fix; its
-// generation fingerprint still matches, so nothing regenerates). Open, verify,
-// stage and post exactly as Post Process Export and tools/examples/post-all.mjs
-// do - no compute - and the post itself must lift before the spindle stops.
-const STORED_KITS = [
-  { file: 'examples/07-relief-medallion/relief-medallion.camproject', rough: '3D Rough 2' },
-  { file: 'examples/06-knob-handwheel/knob-handwheel.camproject', rough: '3D Rough 1' },
+// Cached-project route: immutable legacy-output fixtures prove that the post
+// lifts a path which really ends low. Current examples separately prove their
+// own Open -> verify -> stage -> post route, without assuming a low endpoint.
+// Provenance documents the legacy moves and unchanged saved machining inputs;
+// neither this test nor its fixture builder calculates a generation stamp.
+interface StoredCase {
+  label: string
+  file: string
+  rough: string
+  legacy: boolean
+  sha256?: string
+}
+const legacyInputs = JSON.parse(fs.readFileSync(path.join(ROOT,
+  'src/tests/fixtures/WO-2934/provenance.json'), 'utf8')) as Array<{
+    file: string; rough: string; sha256: string
+  }>
+const STORED_KITS: StoredCase[] = [
+  ...legacyInputs.map(input => ({ ...input, label: input.file.includes('knob') ? 'legacy knob' : 'legacy medallion', legacy: true })),
+  { label: 'current medallion', file: 'examples/07-relief-medallion/relief-medallion.camproject', rough: '3D Rough 2', legacy: false },
+  { label: 'current knob', file: 'examples/06-knob-handwheel/knob-handwheel.camproject', rough: '3D Rough 1', legacy: false },
 ]
-describe('WO-2693: a stored path that ends at depth is lifted by the post', () => {
-  it.each(STORED_KITS)('$file', { timeout: 600_000 }, async ({ file, rough }) => {
+describe('WO-2693: stored paths through Open, stage and post', () => {
+  it.each(STORED_KITS)('$label ($file)', { timeout: 600_000 }, async ({ file, rough, legacy, sha256 }) => {
     stlBytes.clear(); stepBytes.clear(); stepDisplay.clear(); mem.clear()
+    // New Project preserves shop libraries. Each independent File Open fixture
+    // needs a cold shop: a previous kit's identical cutter can otherwise be
+    // reused under another id, making this kit's saved input stamp stale.
+    useCamStore.setState({ toolLibrary: [], toolLibraries: [], holders: [], machineLibrary: [] })
     resetDocumentHolder()
     setDocumentStorage(new InMemoryDocumentStorage())
     useCamStore.getState().newProject()
@@ -397,22 +416,44 @@ describe('WO-2693: a stored path that ends at depth is lifted by the post', () =
     const origLog = console.log
     console.warn = () => {}
     console.log = () => {}
+    const compute = vi.spyOn(useCamStore.getState(), 'computeOperationToolpath')
     try {
-      await useCamStore.getState().loadProjectFromFile(fs.readFileSync(path.join(ROOT, file), 'utf8'))
+      const bytes = fs.readFileSync(path.join(ROOT, file))
+      const text = file.endsWith('.gz') ? gunzipSync(bytes).toString('utf8') : bytes.toString('utf8')
+      if (legacy) expect(createHash('sha256').update(text).digest('hex'), `${file}: frozen input`).toBe(sha256)
+      const saved = JSON.parse(text) as import('../../types').Project
+      const storedPaths = (project: import('../../types').Project) => project.setups.flatMap(s => s.operations)
+        .map(op => ({ id: op.id, toolId: op.toolId, status: op.status, fingerprint: op.generationFingerprint, moves: op.toolpathMoves }))
+      const originalPaths = storedPaths(saved)
+      await useCamStore.getState().loadProjectFromFile(text)
+      expect(storedPaths(useCamStore.getState().project), `${file}: Open preserves saved paths and stamps`).toEqual(originalPaths)
       await useCamStore.getState().verifyModelReferences()
+      const live = useCamStore.getState()
+      const liveProject = { ...live.project, toolLibrary: live.toolLibrary }
+      const stale = liveProject.setups.flatMap(setup => setup.operations
+        .filter(op => !operationGenerationIsCurrent(liveProject, setup, op))
+        .map(op => ({ name: op.name, toolId: op.toolId,
+          savedTool: saved.toolLibrary.find(t => t.id === op.toolId),
+          liveTool: live.toolLibrary.find(t => t.id === op.toolId) })))
+      expect(stale, `${file}: saved inputs must be current before staging`).toEqual([])
       const restores: Array<() => void> = []
       try {
         for (const setup of useCamStore.getState().project.setups) {
           const staged = await useCamStore.getState().stageOperationsForEmission(setup.id, undefined)
           restores.push(staged.restore)
+          expect(staged.recomputed, `${file}: staging must not regenerate`).toEqual([])
         }
+        expect(compute, `${file}: Open/verify/stage must not compute`).not.toHaveBeenCalled()
+        expect(storedPaths(useCamStore.getState().project), `${file}: staging preserves saved paths and stamps`).toEqual(originalPaths)
         const state = useCamStore.getState()
         const project = { ...state.project, toolLibrary: state.toolLibrary }
-        // The stored path really is the old one: the rough still ends below its own plane.
+        // Only the dedicated legacy inputs promise an endpoint below clearance.
         const roughOp = project.setups.flatMap(s => s.operations).find(o => o.name === rough)!
         const facts = opFacts(roughOp.name, roughOp.toolpathMoves ?? [])
         expect(facts.traverseZ, `${file}: ${rough} has a traverse plane`).toBeDefined()
-        expect(facts.lastZ, `${file}: ${rough}'s stored path ends at depth (not regenerated)`).toBeLessThan(facts.traverseZ! - 1)
+        if (legacy) {
+          expect(facts.lastZ, `${file}: ${rough}'s stored path ends at depth (not regenerated)`).toBeLessThan(facts.traverseZ! - 1)
+        }
         const factsById = new Map(project.setups.flatMap(s => s.operations)
           .map(o => [o.id, opFacts(o.name, o.toolpathMoves ?? [])] as const))
         const lows: string[] = []
@@ -427,17 +468,18 @@ describe('WO-2693: a stored path that ends at depth is lifted by the post', () =
             fs.mkdirSync(DUMP, { recursive: true })
             fs.writeFileSync(path.join(DUMP, `stored--${path.basename(file, '.camproject')}--${config.id}.nc`), program.gcode)
           }
-          tally.checked = 0
+          tally.checked = 0; tally.unjudged = 0
           for (const low of lowSpindleStops(program.gcode, program.operationSpans ?? [], id => factsById.get(id))) {
             lows.push(`${config.id}: line ${low.line} ${low.code} at Z${low.z} below ${low.opName}'s clearance Z${low.clearance}`)
           }
           expect(tally.checked, `${file} ${config.id}: stops judged`).toBeGreaterThan(0)
+          origLog(`[wo2934] ${file} ${config.id}: rough end Z${facts.lastZ}, clearance Z${facts.traverseZ}; ${tally.checked} stops judged, ${tally.unjudged} unjudged; zero recomputations`)
         }
         // WO2693_KIT_DIR=<dir>: write the shipped examples/gcode programs for this
         // kit exactly as tools/examples/post-all.mjs does (same Open -> stage ->
         // postProject combined route, same header line, all five dialects).
         const kitDir = process.env.WO2693_KIT_DIR
-        if (kitDir) {
+        if (kitDir && !legacy) {
           const version = (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version: string }).version
           const stem = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '')
           const dialects = { uccnc: post.UCCNC_CONFIG, grbl: post.GRBL_CONFIG, grblhal: post.GRBLHAL_CONFIG, linuxcnc: post.LINUXCNC_CONFIG, generic: post.GENERIC_CONFIG }
@@ -457,6 +499,7 @@ describe('WO-2693: a stored path that ends at depth is lifted by the post', () =
         expect(lows, file).toEqual([])
       } finally { restores.reverse().forEach(restore => restore()) }
     } finally {
+      compute.mockRestore()
       console.warn = origWarn
       console.log = origLog
     }
