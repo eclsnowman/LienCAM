@@ -16,8 +16,13 @@
 //
 // Default run: a representative set (about 4 minutes). WO3018_PARITY=all plans every
 // adaptive row (about 40 minutes, form-cylinder and ex06 are the slow ones).
-// Re-record on the starter source only:
+// Re-record unchanged rows on the starter source only. An explicitly approved
+// later behaviour change may replace only its named row and set chainHosts[id]
+// to the actual capture host; all other starter records remain pinned.
+// WO-3073: WO-3054's declared 2D plunge rows now enter by helix and are ready.
+// Capture command:
 //   WO3018_RECORD=<path> WO3018_PARITY=all npx vitest run src/tests/kernel/adaptiveParity.wo3018.test.ts
+// WO3018_RECORD_CHAINS=id,... limits a diagnostic capture to explicitly changed chains.
 // WO3018_ENGINE=current|kernel|both picks the engine (default: kernel, or current when recording).
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -134,7 +139,9 @@ describe('WO-3018 adaptive kernel route parity (production Generate)', () => {
   it('moves and posted G-code of every adaptive step equal the starter on the current engine', { timeout: 7_200_000 }, async () => {
     const recordTo = process.env.WO3018_RECORD
     const engine = process.env.WO3018_ENGINE ?? (recordTo ? 'current' : 'kernel')
-    const ids = process.env.WO3018_PARITY === 'all' ? ALL_CHAINS() : [...DEFAULT_CHAINS]
+    const ids = recordTo && process.env.WO3018_RECORD_CHAINS
+      ? process.env.WO3018_RECORD_CHAINS.split(',')
+      : process.env.WO3018_PARITY === 'all' ? ALL_CHAINS() : [...DEFAULT_CHAINS]
     const timings: Record<string, number> = {}
     const records = await recordChains(engine, ids, timings)
     const runs = { ...plannerRuns }
@@ -143,14 +150,24 @@ describe('WO-3018 adaptive kernel route parity (production Generate)', () => {
       writeFileSync(recordTo, JSON.stringify({ host: thisHost(), chains: records }, null, 1) + '\n')
       return
     }
-    const before = JSON.parse(readFileSync(RECORD_PATH, 'utf8')) as { host: CaptureHost; chains: Record<string, StepRecord[]> }
+    const before = JSON.parse(readFileSync(RECORD_PATH, 'utf8')) as {
+      host: CaptureHost; chainHosts?: Record<string, CaptureHost>; chains: Record<string, StepRecord[]>
+    }
     expect(Object.keys(before.host ?? {}).sort(), 'before-record.json names its capture host').toEqual(['arch', 'nodeMajor', 'platform'])
-    if (JSON.stringify(thisHost()) === JSON.stringify(before.host)) {
-      for (const id of ids) expect(records[id], id).toEqual(before.chains[id])
-    } else {
-      for (const id of ids) expect(records[id].map(hostBound), id).toEqual(before.chains[id].map(hostBound))
-      const live = await recordChains('current', ids)
-      for (const id of ids) expect(records[id], `${id} against the live current engine`).toEqual(live[id])
+    const liveIds: string[] = []
+    for (const id of ids) {
+      const host = before.chainHosts?.[id] ?? before.host
+      expect(Object.keys(host).sort(), `${id} names its capture host`).toEqual(['arch', 'nodeMajor', 'platform'])
+      if (JSON.stringify(thisHost()) === JSON.stringify(host)) {
+        expect(records[id], id).toEqual(before.chains[id])
+      } else {
+        expect(records[id].map(hostBound), id).toEqual(before.chains[id].map(hostBound))
+        liveIds.push(id)
+      }
+    }
+    if (liveIds.length) {
+      const live = await recordChains('current', liveIds)
+      for (const id of liveIds) expect(records[id], `${id} against the live current engine`).toEqual(live[id])
     }
     const types = new Set(Object.values(records).flat().filter(step => step.moveCount > 0).map(step => step.type))
     expect([...types].sort()).toEqual(['adaptive_3d', 'adaptive_clearing_2d'])

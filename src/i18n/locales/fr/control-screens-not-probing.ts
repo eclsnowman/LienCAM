@@ -59,7 +59,7 @@ const words: Translation<'control-screens-not-probing'> = {
     text054: 'Activer le brouillard', text055: ' Brouillard', text056: 'Activer l’arrosage', text057: ' Arrosage', text059: 'L’aspiration est en marche ; appuyer pour l’arrêter avec M9',
     text060: ' Aspiration', text062: '{{value1}} arrêté',
   },
-  ProgramPanel: { setupNotes: 'Notes du montage ({{value1}}) :' },
+  ProgramPanel: { setupNotesButton: 'Notes du montage', setupNotesTitle: 'Notes du montage - {{value1}}', setupNotesClose: 'Fermer les notes', setupNotesEmpty: 'Pas encore de notes pour ce montage.', setupNotesEdit: 'Modifier', setupNotesAdd: 'Ajouter des notes', setupNotesSave: 'Enregistrer', setupNotesCancel: 'Annuler' },
   RunClock: {
     unavailable: 'indisponible', text001: 'Écoulé {{value1}}{{value2}}Restant estimé {{value3}}', text002: 'Écoulé {{value1}} ; temps restant estimé indisponible',
     text003: 'Écoulé {{value1}} ; temps restant estimé {{value2}}',

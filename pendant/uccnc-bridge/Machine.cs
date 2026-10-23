@@ -6114,6 +6114,9 @@ namespace LienCAM
             // "has the board finished executing" check costs nothing extra here.
             // WO-1352: except that a run the soft limit tripped did not finish.
             EndRunOnSoftLimitTrip();
+            // WO-3060: and a run the board's own E-STOP ended did not finish
+            // either - the physical button never passes through EmergencyStop().
+            if (estopByRc || (live && st.Estop)) EndDrainingRunOnEstopInput();
             CheckExecutionComplete(state, posOk, x, y, z);
             // WO-1326 (audit): and the other half of it - a run that ended badly
             // holds the machine, and re-issues a refused stop, until the board
@@ -6978,6 +6981,26 @@ namespace LienCAM
             if (raise) RaiseTerminal("failed", SoftLimitRunEndedText, 0);
         }
 
+        /** WO-3060: THE BOARD REPORTS E-STOP WHILE A RUN DRAINS. The physical
+         *  button reaches the bridge only through this status read, so without
+         *  this the run waited out the E-STOP and, once released and reset,
+         *  idle-and-still read as `completed`. Only the draining case: a run
+         *  still pushing meets the E-STOP as refused moves and ends `failed`
+         *  through the streamer, and a software E-STOP has already cancelled
+         *  the completion in EmergencyStop, so this raises nothing twice. */
+        void EndDrainingRunOnEstopInput()
+        {
+            int total;
+            lock (jobLock)
+            {
+                if (!CancelPendingCompletion()) return;
+                total = jobTotal;
+            }
+            Report("[bridge] program STOPPED by the E-STOP input: the run did NOT complete - all " + total
+                   + " move(s) had been sent, but the board had not finished executing them.", "warn");
+            RaiseTerminal("stopped", null, 0);
+        }
+
         /** "X 738.000 -> 724.500 (-13.500 mm)" for every axis that moved. */
         string TripTravel(double x, double y, double z)
         {
@@ -7733,6 +7756,7 @@ namespace LienCAM
                 UC100.ClearSoftlimitState();
                 UC100.SetFeedHold(false);
             }
+            EndRunAsStopped("Stop/Reset");   // WO-3060
             AttemptSoftLimitRecovery("Stop/Reset");
             AttemptDriveFaultRecovery("Stop/Reset");
         }
@@ -7747,6 +7771,40 @@ namespace LienCAM
                 UC100.SetEstopState();
                 UC100.Stop();
             }
+            EndRunAsStopped("E-STOP");   // WO-3060
+        }
+
+        /** WO-3060: A STOP DURING EXECUTION MUST NOT BECOME A COMPLETION (WO-1054)
+         *  - on EVERY stop door, not only StopJob's.
+         *
+         *  Kit rehearsal 2026-10-22: E-STOP at move 3 of an 11-move air file,
+         *  and ~8 s later "[bridge] program COMPLETE: ... all 11 move(s) have
+         *  been executed" + "finished" while the machine stood mid-program.
+         *  The push had already ended, so jobAbort had nothing to unwind; the
+         *  completion watcher then saw exactly what a stop produces - idle and
+         *  still - and called it done. StopJob cancelled that; E-STOP, Stop/Reset
+         *  and the connection-loss stop did not.
+         *
+         *  Called AFTER the stop has been commanded. A run still PUSHING is
+         *  ended by jobAbort and its streamer raises `stopped` itself, so this
+         *  raises only for a draining run - but the console names the stop in
+         *  both cases, because otherwise no line says what ended the run. */
+        void EndRunAsStopped(string by)
+        {
+            bool pushing, draining;
+            int total;
+            lock (jobLock)
+            {
+                pushing = jobRunning;
+                total = jobTotal;
+                draining = CancelPendingCompletion();
+            }
+            if (!pushing && !draining) return;
+            Report("[bridge] program STOPPED by " + by + ": the run did NOT complete - "
+                   + (draining
+                      ? "all " + total + " move(s) had been sent, but the board had not finished executing them."
+                      : "it was still being sent to the board."), "warn");
+            if (draining) RaiseTerminal("stopped", null, 0);
         }
 
         /** Socket loss: feed hold then stop, immediately (BRIDGE-PROTOCOL.md
@@ -7775,6 +7833,7 @@ namespace LienCAM
                 catch (Exception ex) { Console.WriteLine("[bridge] PANIC STOP: Stop failed: " + ex.Message); }
             }
             finally { if (held) Monitor.Exit(io.Api); }
+            EndRunAsStopped("the connection-loss stop");   // WO-3060
         }
 
         /** RELEASE THE FEED HOLD A DEAD SOCKET LEFT BEHIND.

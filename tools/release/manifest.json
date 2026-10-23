@@ -1719,6 +1719,16 @@
     },
     {
       "action": "include",
+      "path": "tools/release/downloads-table.mjs",
+      "reason": "WO-3069: Provide the release workflow's downloads-table entry point."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/release/exportImportClosure.wo3069.test.ts",
+      "reason": "WO-3069: Private inventory regression reads the source workflow directory before export mapping."
+    },
+    {
+      "action": "include",
       "path": "tools/release/scan.mjs",
       "reason": "Provide the public-content scanner imported by the committed-tree exporter."
     },
@@ -2339,6 +2349,31 @@
     },
     {
       "action": "exclude",
+      "path": "tools/capture/axis-colour-audit.mjs",
+      "reason": "alpha.3.1 G1: imports the evidence capture helper src/tests/evidence/WO-103/capture.mjs; evidence never ships (build-from-export isolation), so the importer stays private."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/fit/fit-sweep.mjs",
+      "reason": "alpha.3.1 G1: imports the evidence capture helper src/tests/evidence/WO-103/capture.mjs; evidence never ships (build-from-export isolation), so the importer stays private."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/fixtures/WO-2081/shoot.mjs",
+      "reason": "alpha.3.1 G1: imports the evidence capture helper src/tests/evidence/WO-103/capture.mjs; evidence never ships (build-from-export isolation), so the importer stays private."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/ui/evidence/WO-1126/shoot.mjs",
+      "reason": "alpha.3.1 G1: imports the evidence capture helper src/tests/evidence/WO-103/capture.mjs; evidence never ships (build-from-export isolation), so the importer stays private."
+    },
+    {
+      "action": "exclude",
+      "path": "src/tests/machine/controlRailFitsAt900.test.tsx",
+      "reason": "alpha.3.1 G1: imports the evidence capture helper src/tests/evidence/WO-103/capture.mjs; evidence never ships (build-from-export isolation), so the importer stays private."
+    },
+    {
+      "action": "exclude",
       "path": "src/tests/adaptive-clearing/engine/steeringWobble.wo3029.test.ts",
       "reason": "WO-2629: incomplete exported import closure: src/tests/adaptive-clearing/engine/steeringWobble.wo3029.test.ts imports ../../evidence/WO-3029/wobbleAttribute.mjs -> src/tests/evidence/WO-3029/wobbleAttribute.mjs"
     },
@@ -2356,16 +2391,6 @@
       "action": "exclude",
       "path": "src/tests/components/deviationPanelWaiting.wo3049.test.tsx",
       "reason": "WO-2629: incomplete exported import closure: src/tests/components/deviationPanelWaiting.wo3049.test.tsx imports ../evidence/WO-2947/liveFixture -> src/tests/evidence/WO-2947/liveFixture; src/tests/components/deviationPanelWaiting.wo3049.test.tsx imports ../evidence/WO-2947/liveWorker -> src/tests/evidence/WO-2947/liveWorker"
-    },
-    {
-      "action": "exclude",
-      "path": "src/tests/fit/fit-sweep.mjs",
-      "reason": "WO-2629: incomplete exported import closure: src/tests/fit/fit-sweep.mjs imports ../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs"
-    },
-    {
-      "action": "exclude",
-      "path": "src/tests/fixtures/WO-2081/shoot.mjs",
-      "reason": "WO-2629: incomplete exported import closure: src/tests/fixtures/WO-2081/shoot.mjs imports ../../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs"
     },
     {
       "action": "exclude",
@@ -2439,13 +2464,13 @@
     },
     {
       "action": "exclude",
-      "path": "src/tests/simulation/deviationComparison.wo2947.test.ts",
-      "reason": "WO-2629: incomplete exported import closure: src/tests/simulation/deviationComparison.wo2947.test.ts imports ../evidence/WO-2947/fixtures -> src/tests/evidence/WO-2947/fixtures"
+      "path": "src/tests/release/shipCheck.wo3070.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/release/shipCheck.wo3070.test.ts imports ../../../tools/release/ship-check.mjs -> tools/release/ship-check.mjs"
     },
     {
       "action": "exclude",
-      "path": "src/tests/ui/evidence/WO-1126/shoot.mjs",
-      "reason": "WO-2629: incomplete exported import closure: src/tests/ui/evidence/WO-1126/shoot.mjs imports ../../../evidence/WO-103/capture.mjs -> src/tests/evidence/WO-103/capture.mjs"
+      "path": "src/tests/simulation/deviationComparison.wo2947.test.ts",
+      "reason": "WO-2629: incomplete exported import closure: src/tests/simulation/deviationComparison.wo2947.test.ts imports ../evidence/WO-2947/fixtures -> src/tests/evidence/WO-2947/fixtures"
     },
     {
       "action": "exclude",
@@ -2723,6 +2748,11 @@
       }
     ],
     "ruleExceptions": [
+      {
+        "rule": "personal:eric",
+        "path": "tools/release/downloads-table.mjs",
+        "reason": "WO-3069: The release-note generator comment identifies the tester of the Windows installers; it contains no personal paths, credentials or private machine inputs."
+      },
       {
         "rule": "personal:rfc1918-ip",
         "path": "pendant/uc100net/README.md",

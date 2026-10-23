@@ -538,16 +538,17 @@ describe('WO-1908: the store offers the pocket with its measured floor', () => {
     expect(targets).toMatchObject({ holes: [], pockets: [], refusals: [] })
   })
 
-  it('a pocket op from the feature bottoms at Z 6.0000, where the rim pick bottoms at its layer plane', async () => {
-    // BEFORE this order: the operator picks the rim by hand. The chain has no
-    // floor of its own, so the pocket's depth is not the measured floor -
-    // measured here: it cuts on down to the bottom of the part, Z 0.
+  it('a pocket op from the feature bottoms at Z 6.0000, and so does the rim pick (WO-3066 recess floor)', async () => {
+    // The operator picks the rim by hand. Before this order (and before
+    // WO-3066) the pocket cut on down to the bottom of the part, Z 0. Since
+    // WO-3066 an STL edge chain carries its own Z, so the rim pick stops at
+    // the recess floor too - the same measured floor the feature reports.
     const chains = await useCamStore.getState().loadMeshEdgeChains(POCKET_ID)
     const rim = chains.find((chain) => chain.closed && Math.abs(chain.area - 800) < 1)
     expect(rim, 'no closed rim chain round the pocket').toBeDefined()
     const byRim = await computePocket('op-rim', POCKET_ID, rim!.id)
     const rimFloor = cutFloorZ(byRim)
-    expect(Math.abs(rimFloor - FLOOR)).toBeGreaterThan(1)
+    expect(Number(rimFloor.toFixed(4))).toBe(FLOOR)
 
     // AFTER: the same pocket, driven from the recognised feature.
     await useCamStore.getState().loadMeshFeatureTargets(POCKET_ID)

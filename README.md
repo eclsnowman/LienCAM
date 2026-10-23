@@ -38,6 +38,7 @@ LienCAM takes a part from a sketch to a running CNC machine in one program: draw
 | Post: UCCNC, GRBL, grblHAL, LinuxCNC and Generic dialects | SUPPORTED |
 | Control on the built-in simulator | SUPPORTED |
 | Control on AXBB-E / UC100 (Windows bridge; needs the controller's own software installed for its DLL) | ALPHA - one machine proven |
+| Control on AXBB-E from Linux (native bridge) | ALPHA - one machine proven |
 | Control on LinuxCNC (gateway) | EXPERIMENTAL - simulator only |
 | Control on GRBL / grblHAL (Web Serial) | EXPERIMENTAL - not hardware-verified |
 | Probing routines, tool setter, guided M6, Z surface map, rotated work offsets, pause-move-resume | ALPHA |
@@ -54,6 +55,7 @@ See [Features](https://eclsnowman.github.io/LienCAM/features.html) for the full 
 | Machine or controller | Status |
 |---|---|
 | UCCNC with a UC100 or AXBB-E controller (Windows) | ALPHA - proven on one machine |
+| AXBB-E controller from Linux (LienCAM's own native bridge, no Wine) | ALPHA - proven on one machine |
 | GRBL over Web Serial | EXPERIMENTAL - not hardware-verified |
 | grblHAL over Web Serial | EXPERIMENTAL - not hardware-verified |
 | LinuxCNC (gateway) | EXPERIMENTAL - simulator only |

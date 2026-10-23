@@ -22,8 +22,9 @@ vi.mock('../../../kernel/ops/adaptive/policy', async (importOriginal) => {
   return typedMock<typeof import('../../../kernel/ops/adaptive/policy')>({
     ...real,
     ADAPTIVE_MOTION_SWITCHES: {
-      plungeOpeningRing: real.ADAPTIVE_MOTION_SWITCHES.plungeOpeningRing,
       get keepDownCapForm() { return switchState.on },
+      steeringSmoothing: false, // WO-3042 switch, OFF here
+      keepDownLinksSmooth: false, // WO-3037 switch, OFF here
     },
   })
 })

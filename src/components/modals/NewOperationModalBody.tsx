@@ -28,6 +28,7 @@ import {
   resolveOwningModelItemId,
 } from '../../lib/cam/modelOrigin'
 import { consumeCylinder } from '../../lib/cam/operationGeometry'
+import { stlRecessFloorLocalZ } from '../../lib/cam/stlRecessFloor'
 import { getPocketEntryPolicy, isPocketEntryAllowed, normalizePocketEntryForFillStrategy, } from '../../lib/cam/pocketEntryPolicy'
 import {
   CORNER_RELIEF_STYLES, gentleEngagementLimits, resolveGentleEngagement,
@@ -1780,7 +1781,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     setOpHeightReference(reference)
     setOpPlaneOffset(offset, reference)
   }
+  // WO-3066: Bottom row's "Geometry plane" is the same state as the Smart
+  // geometry floor; this remembers the operator named it, so the row keeps
+  // showing it instead of reading back as Smart.
+  const [bottomRowNamesGeometryPlane, setBottomRowNamesGeometryPlane] = useState(false)
   const setEndCondition = (condition: EndCondition) => {
+    setBottomRowNamesGeometryPlane(false)
     setCustomEndCondition(condition === 'custom')
     switch (condition) {
       case 'depth_from_top': setEndReference('stock_top', -5); break
@@ -1792,6 +1798,52 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       case 'custom': break
     }
   }
+
+  // WO-3066 (owner 2026-10-22): a new Pocket / Adaptive whose picked STL chains
+  // bound a BLIND recess starts with its bottom at the recess floor, as a depth
+  // from stock top the End condition and Bottom row show. A through feature, a
+  // non-STL pick or an opened saved operation keeps its own end. A default,
+  // never an override: once the operator sets the end it stays his.
+  const stlRecessFloorWcs = useMemo(() => {
+    if (isEditMode || !(isPocket || isAdaptive) || !planarRoughUsesGeometryScope) return undefined
+    const geometry = project.geometry.find(candidate => candidate.id === planarRoughScopeGeometryId)
+    if (!geometry || geometry.type !== 'mesh' || geometry.format !== 'stl') return undefined
+    if (Math.abs(geometry.rotation.x) > 1e-9 || Math.abs(geometry.rotation.y) > 1e-9) return undefined
+    const localZ = stlRecessFloorLocalZ(geometry.loops ?? [], planarRoughParams.loopIds ?? [])
+    return localZ === undefined ? undefined : geometry.position.z + localZ - setup.wcs.origin.z
+  }, [isEditMode, isPocket, isAdaptive, planarRoughUsesGeometryScope, project.geometry,
+    planarRoughScopeGeometryId, planarRoughParams.loopIds, setup.wcs.origin.z])
+  const recessEndRef = useRef<Partial<Record<'pocket_2d' | 'adaptive_clearing_2d', {
+    start: { reference: ChamferHeightReference | undefined; offset: number | undefined }
+    written: { reference: ChamferHeightReference | undefined; offset: number | undefined }
+    operatorSet: boolean
+  }>>>({})
+  useEffect(() => {
+    if (isEditMode || !(isPocket || isAdaptive)) return
+    const current = { reference: planarRoughParams.heightReference, offset: planarRoughParams.planeOffset }
+    const record = recessEndRef.current[planarRoughOperationType]
+      ?? (recessEndRef.current[planarRoughOperationType] = { start: current, written: current, operatorSet: false })
+    if (customEndCondition || current.reference !== record.written.reference ||
+        current.offset !== record.written.offset) record.operatorSet = true
+    if (record.operatorSet) return
+    const stockTopWcs = (() => {
+      const bounds = planarRoughOwningStockId ? smartHeightStockBounds(project, planarRoughOwningStockId) : null
+      return bounds
+        ? bounds.max.z - setup.wcs.origin.z
+        : resolveRefZ('stock_top', 0, planarRoughParams.geometryId ?? '', planarRoughParams.loopIds ?? [])
+    })()
+    const depth = stlRecessFloorWcs === undefined || stockTopWcs === undefined
+      ? undefined
+      : Number((stlRecessFloorWcs - stockTopWcs).toFixed(4))
+    const next = depth !== undefined && depth < 0
+      ? { reference: 'stock_top' as const, offset: depth }
+      : record.start
+    if (next.reference === current.reference && next.offset === current.offset) return
+    if (next.reference === undefined || next.offset === undefined) return
+    record.written = next
+    if (isPocket) setPocketReferenceAndIntent(next.reference, next.offset)
+    else setAdaptiveReferenceAndIntent(next.reference, next.offset)
+  })
 
   // Live resolved WCS Z of a reference plane for the diagram preview. Phase 2:
   // this calls the SAME resolveTopZ the dispatch uses (threading project.stocks),
@@ -3067,8 +3119,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
 
   /** The Bottom Height row's formula for that one state, in row vocabulary. */
   function planarBottomRowFormula(): { reference: HeightReference; offset: number } | undefined {
-    if (planarRoughGeometryMode === 'geometry_floor') return undefined
     const reference = planarRoughParams.heightReference ?? 'geometry_face'
+    if (planarRoughGeometryMode === 'geometry_floor' && !(bottomRowNamesGeometryPlane &&
+        reference === 'geometry_face' && heights.bottomHeightMode !== 'selected_face')) return undefined
     const offset = planarRoughParams.planeOffset ?? 0
     if (reference === 'absolute') return { reference: 'wcs_plane', offset: heights.bottomHeight }
     const rowReference = PLANAR_BOTTOM_ROW_REFERENCE[reference]
@@ -3524,6 +3577,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   }
 
   const editOperationHeightReference = (plane: 'top' | 'bottom', choice: string) => {
+    if (plane === 'bottom' && planarRowOwnsBottom) setBottomRowNamesGeometryPlane(choice === 'geometry_plane')
     if (choice === SMART_ROW_OPTION) {
       if (plane === 'bottom' && planarRoughUsesGeometryScope) setEndCondition('to_geometry')
       else returnOperationPlaneToSmart(plane)

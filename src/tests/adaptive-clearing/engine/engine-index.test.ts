@@ -342,12 +342,27 @@ describe('buildAdaptiveClearingToolpath (engine entry)', () => {
     expect(Math.max(...rightCutIndexes)).toBeLessThan(Math.min(...leftCutIndexes))
   }, 120_000)
 
+  // WO-3054 (the operator 10-21: into a pocket "the only viable option is a helix or entering in
+  // from a previously cleared hole"): this case used to pin a straight plunge into the closed
+  // square pocket for both an operator minimum above the planned helix and a helix setting below
+  // the smallest helix. Neither has a cleared hole, so both now enter with a helix: the first is
+  // planned at the operator's minimum radius, the second with the default helix.
   it('threads the minimum helix radius and falls back safely for invalid values', async () => {
-    const belowFloor = squarePocketPayload()
-    belowFloor.params.minHelixRadius = 3
-    const plungeMoves = await buildAdaptiveClearingToolpath(belowFloor)
-    expect(plungeMoves.some(m => m.role === 'helix')).toBe(false)
-    expect(plungeMoves.some(m => m.role === 'plunge')).toBe(true)
+    // The radius of the first helix: its run of consecutive helix moves round their centroid.
+    const helixRadii = (moves: Awaited<ReturnType<typeof buildAdaptiveClearingToolpath>>): number[] => {
+      const first = moves.findIndex(m => m.role === 'helix')
+      const end = moves.findIndex((m, i) => i > first && m.role !== 'helix')
+      const helix = moves.slice(first, end < 0 ? undefined : end)
+      const cx = helix.reduce((a, m) => a + m.x, 0) / helix.length
+      const cy = helix.reduce((a, m) => a + m.y, 0) / helix.length
+      return helix.map(m => Math.hypot(m.x - cx, m.y - cy))
+    }
+
+    const aboveFloor = squarePocketPayload()
+    aboveFloor.params.minHelixRadius = 3
+    const raisedMoves = await buildAdaptiveClearingToolpath(aboveFloor)
+    expect(raisedMoves.some(m => m.role === 'helix')).toBe(true)
+    expect(Math.max(...helixRadii(raisedMoves))).toBeGreaterThan(2.9)
 
     const loweredFloor = squarePocketPayload()
     loweredFloor.params.minHelixRadius = 0.01
@@ -357,8 +372,8 @@ describe('buildAdaptiveClearingToolpath (engine entry)', () => {
     invalidFloor.params.helixDiameter = 2
     invalidFloor.params.minHelixRadius = Number.NaN
     const invalidMoves = await buildAdaptiveClearingToolpath(invalidFloor)
-    expect(invalidMoves.some(m => m.role === 'helix')).toBe(false)
-    expect(invalidMoves.some(m => m.role === 'plunge')).toBe(true)
+    expect(invalidMoves.some(m => m.role === 'helix')).toBe(true)
+    expect(invalidMoves.every(m => Number.isFinite(m.x) && Number.isFinite(m.y) && Number.isFinite(m.z))).toBe(true)
   }, 120_000)
 
   it('floor-finishes each disjoint feature once in deterministic source-order blocks', async () => {

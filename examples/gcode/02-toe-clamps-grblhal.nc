@@ -1,4 +1,4 @@
-(LienCAM 0.37.0-alpha.3 - 02 Toe clamps - grblhal)
+(LienCAM 0.37.0-alpha.3.1 - 02 Toe clamps - grblhal)
 ( grblHAL )
 G90 G94 G17 G21
 ( Setup 1 )

@@ -156,7 +156,14 @@ const controlScreens: Translation<'control-screens-not-probing'> = {
     "text062": "{{value1}} aus"
   },
   "ProgramPanel": {
-    "setupNotes": "Notizen zur Aufspannung ({{value1}}):"
+    "setupNotesButton": "Notizen zur Aufspannung",
+    "setupNotesTitle": "Notizen zur Aufspannung - {{value1}}",
+    "setupNotesClose": "Notizen schließen",
+    "setupNotesEmpty": "Noch keine Notizen zu dieser Aufspannung.",
+    "setupNotesEdit": "Bearbeiten",
+    "setupNotesAdd": "Notizen hinzufügen",
+    "setupNotesSave": "Speichern",
+    "setupNotesCancel": "Abbrechen"
   },
   "RunClock": {
     "unavailable": "nicht verfügbar",

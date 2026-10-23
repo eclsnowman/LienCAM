@@ -87,13 +87,19 @@ function pathContains(parent, child) {
   return child === parent || child.startsWith(parentPath)
 }
 
-function archiveSelection(root, commit, outputDirectory, selection) {
+function archiveSelection(root, commit, outputDirectory, selection, changedPaths) {
   const scratch = mkdtempSync(join(outputDirectory, '.liencam-public-export-'))
   try {
     for (let index = 0; index < selection.length; index += 1) {
       const entry = selection[index]
       if (entry.action !== 'include') continue
 
+      // A landing stages only changed, surviving export inputs. Use the same
+      // include boundaries, later excludes and destination mapping as a full export.
+      const paths = changedPaths?.filter(path => pathContains(entry.path.replace(/\/$/, ''), path)
+        && !selection.slice(index + 1).some(later => later.action === 'exclude'
+          && pathContains(later.path.replace(/\/$/, ''), path)))
+      if (paths?.length === 0) continue
       const archivePath = join(scratch, `selection-${index}.tar`)
       const argumentsForGit = [
         'archive',
@@ -101,7 +107,7 @@ function archiveSelection(root, commit, outputDirectory, selection) {
         `--output=${archivePath}`,
         commit,
         '--',
-        `:(top,literal)${entry.path.replace(/\/$/, '')}`,
+        ...(paths ?? [entry.path.replace(/\/$/, '')]).map(path => `:(top,literal)${path}`),
       ]
       for (const laterEntry of selection.slice(index + 1)) {
         if (laterEntry.action === 'exclude' && pathContains(entry.path, laterEntry.path)) {
@@ -130,6 +136,14 @@ function archiveSelection(root, commit, outputDirectory, selection) {
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
+}
+
+// Share archive selection with the landing scan so private inputs and mapped
+// public exceptions cannot drift from the release export. Read committed policy.
+export function stageChangedExport(root, commit, paths, outputDirectory) {
+  const manifest = validateManifest(JSON.parse(git(root, ['show', `${commit}:${MANIFEST_REPOSITORY_PATH}`])))
+  archiveSelection(root, commit, outputDirectory, manifest.selection, paths)
+  return manifest
 }
 
 function exportedSize(directory) {

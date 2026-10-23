@@ -46,7 +46,7 @@ describe('WO-2539 public text tells the truth', () => {
     const readme = markdownRows(read('README.md').split('## What it does')[1].split('## Open by design')[0], '| Capability | Status |')
     const home = [...read('site/index.html').matchAll(/<th scope="row">([^<]+)<\/th><td>([^<]+)<\/td>/g)]
       .map(match => [match[1], match[2]])
-    expect(promise).toHaveLength(16)
+    expect(promise).toHaveLength(17)
     expect(readme).toEqual(promise)
     expect(home).toEqual(promise)
   })

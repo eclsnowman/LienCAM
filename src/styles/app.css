@@ -15445,6 +15445,73 @@ li > .help-link { margin-left: 4px; }
   font-size: var(--font-size-sm);
 }
 
+/* Setup notes on Control (WO-3079, owner release review 2026-10-23): a button in the program
+   row and a floating panel over the preview, like the Load menu - nothing moves.
+   Wider than the Load menu and at normal reading size. */
+.control-setup-notes-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.control-setup-notes-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(90vw, 520px);
+  max-height: min(70vh, 480px);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--surface-1) 97%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.control-setup-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: var(--font-size-md);
+}
+
+.control-setup-notes-text {
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: var(--font-size-lg);
+  line-height: 1.5;
+}
+
+.control-setup-notes-empty {
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
+}
+
+.control-setup-notes-edit {
+  width: 100%;
+  min-height: 9em;
+  resize: vertical;
+  font: inherit;
+  font-size: var(--font-size-lg);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+
+.control-setup-notes-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 /* Vertical list, one row per item - a menu, not a wrapped row of chips. */
 .control-load-menu-group {
   display: flex;

@@ -26,6 +26,7 @@ import {
   type CSSProperties,
 } from 'react'
 import { ChevronDown, ChevronUp, FileUp, FolderGit2, Scan } from 'lucide-react'
+import { SetupNotesButton } from './SetupNotesButton'
 import { GcodeEditor, type GcodeEditorJump, type GcodeEditorToolRequest } from '../gcode/GcodeEditor'
 import { GcodeLineMenu, type GcodeLineMenuItem } from '../gcode/GcodeLineMenu'
 import { lineChanges, markFromRefusal, readerMarks, withLineEndingsOf, type GcodeLineMark } from '../gcode/gcodeEditing'
@@ -462,9 +463,6 @@ export function ProgramPanel() {
   const machine = useCamStore(controlMachine)
   const parkMachine = useCamStore(parkCarrierMachine)
   const project = useCamStore((s) => s.project)
-  const activeSetup = project.setups.find((setup) => setup.id === project.activeSetupId)
-  const setupNotes = activeSetup?.notes ?? ''
-  const activeSetupName = activeSetup?.name ?? ''
   const toolLibrary = useCamStore((s) => s.toolLibrary)
   // The posting view of the project: the live root tool library is the truth the
   // post resolves tools from (project.toolLibrary is only a save-time snapshot).
@@ -1874,16 +1872,6 @@ export function ProgramPanel() {
   return (
     <section className="panel control-panel control-program-panel">
       <div className="panel-body control-program-body">
-        {/* WO-2992: the active setup's notes, read-only (edited in the setup's Properties). */}
-        {setupNotes.trim() !== '' && (
-          <div
-            className="control-setup-notes"
-            data-testid="control-setup-notes"
-            style={{ maxHeight: '4.5em', overflowY: 'auto', whiteSpace: 'pre-wrap', fontSize: 12, marginBottom: 6 }}
-          >
-            <strong>{controlText('ProgramPanel.setupNotes', { value1: String(activeSetupName) })}</strong>{' '}{setupNotes}
-          </div>
-        )}
         {/* ONE compact controls row - never grows, never wraps the preview down. */}
         <div className="control-program-source">
           {/* WO-414 batch 3b (Operator 2026-08-21, verbatim: "it should be much
@@ -2022,6 +2010,8 @@ export function ProgramPanel() {
               </div>
             )}
           </div>
+          {/* The active setup's notes: a button + floating panel, nothing moves (replaces the WO-2992 strip). */}
+          <SetupNotesButton />
           {showProgramReadouts && job.name && !mergeSetupChip && !openedFileListing && (
             <span
               className="control-program-name"

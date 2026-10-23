@@ -44,11 +44,11 @@ export const PARITY_COMPENSATIONS: readonly Compensation[] = Object.freeze(([
 export const PARITY_TOP_OF_CUT = Object.freeze({
   '2.5D families': Object.freeze({
     mechanism: 'Smart Top replays the enabled ready earlier operations of the setup (0.2 mm field) and starts at the highest material over the region',
-    source: ['src/store/index.ts:5018', 'src/store/toolReachInputs.ts:269'],
+    source: ['src/store/index.ts:5019', 'src/store/toolReachInputs.ts:269'],
   }),
   adaptive_3d: Object.freeze({
     mechanism: 'starts from the retained z-dexel field of the immediately preceding ready adaptive_3d rough, else the stock box top',
-    source: ['src/cam3d/integration/adaptive3dOperation.ts:471', 'src/store/index.ts:4777'],
+    source: ['src/cam3d/integration/adaptive3dOperation.ts:471', 'src/store/index.ts:4778'],
   }),
   '3D finishes': Object.freeze({
     mechanism: 'no top of cut from material: the path is planned over the target surface, then fed moves over removed stock run at rapid with endpoints unchanged',

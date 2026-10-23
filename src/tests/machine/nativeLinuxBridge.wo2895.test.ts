@@ -286,8 +286,8 @@ describe('WO-2895 public release integration', () => {
     expect(native.jobs['native-bridge'].strategy.matrix.rid).toEqual(['linux-x64', 'linux-arm64'])
     expect(release.jobs.linux.needs).toContain('native-bridge')
     const steps = release.jobs.linux.steps as Array<{ name: string; run?: string; with?: Record<string, string> }>
-    const download = steps.findIndex(step => step.with?.name === 'native-bridge-linux-x64')
-    const stage = steps.findIndex(step => step.name === 'Stage native x64 runtime')
+    const download = steps.findIndex(step => step.with?.name === 'native-bridge-linux-${{ matrix.arch }}')
+    const stage = steps.findIndex(step => step.name === 'Stage native runtime')
     const wine = steps.findIndex(step => step.name === 'Stage reviewed Wine bridge executable')
     const pack = steps.findIndex(step => step.run?.includes('electron-builder --linux'))
     expect(download).toBeGreaterThan(-1)
@@ -305,7 +305,7 @@ describe('WO-2895 public release integration', () => {
   // a Windows backing filesystem cannot verify that permission contract.
   it.runIf(process.platform === 'linux')('stages a complete runtime and verifies both standalone archive checksums using the release commands', () => {
     const release = workflow()
-    const stage = release.jobs.linux.steps.find((step: { name: string }) => step.name === 'Stage native x64 runtime')
+    const stage = release.jobs.linux.steps.find((step: { name: string }) => step.name === 'Stage native runtime')
     const checksums = release.jobs.release.steps.find((step: { name: string }) => step.name === 'Verify native bridge download checksums')
     expect(stage, 'Linux packaging needs the complete native runtime').toBeDefined()
     expect(checksums, 'Both native downloads need checked SHA-256 sums').toBeDefined()
@@ -321,7 +321,7 @@ describe('WO-2895 public release integration', () => {
     fs.mkdirSync(nativePath.join(root, 'native-bridge-artifact'))
     fs.copyFileSync(nativePath.join(root, 'release-assets/liencam-bridge-linux-x64.tar.gz'), nativePath.join(root, 'native-bridge-artifact/liencam-bridge-linux-x64.tar.gz'))
     const bash = '/bin/bash'
-    execFileSync(bash, ['-e', '-o', 'pipefail', '-c', stage.run], { cwd: root })
+    execFileSync(bash, ['-e', '-o', 'pipefail', '-c', stage.run.replaceAll('${{ matrix.arch }}', 'x64')], { cwd: root })
     for (const name of ['liencam-bridge', 'libcoreclr.so', 'liencam-bridge.dll']) expect(fs.readFileSync(nativePath.join(root, 'pendant/uc100net/publish/linux-x64', name), 'utf8')).toBe(fs.readFileSync(nativePath.join(root, 'payload', name), 'utf8'))
     expect(fs.statSync(nativePath.join(root, 'pendant/uc100net/publish/linux-x64/liencam-bridge')).mode & 0o111).not.toBe(0)
     execFileSync(bash, ['-e', '-o', 'pipefail', '-c', checksums.run], { cwd: root })

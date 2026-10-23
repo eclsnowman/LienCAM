@@ -407,8 +407,8 @@ export const RESIDUAL_TEXT: ResidualText[] = [
       'Holding method',
       'Holding method',
       'None',
-      'Workholding',
-      'Workholding',
+      'Setup notes',
+      'Setup notes',
     ],
   },
   {

@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { CNCViewport } from '../../lib/viewport/CNCViewport'
-import { selectToolpathWindow, type WindowFrame } from '../../lib/simulation/toolpathWindow'
+import { selectToolpathWindow, TOOLPATH_WINDOW_SIDE_LIMIT, type WindowFrame } from '../../lib/simulation/toolpathWindow'
 
 type TestViewport = Pick<CNCViewport, 'setSimulationToolpathWindow' | 'setSimulationToolpathPreview' | 'setHiddenToolpathRoles' | 'setToolpathVisible'> & Record<string, unknown>
 function viewport() {
@@ -34,8 +34,8 @@ describe('WO-2948 reusable trail overlay', () => {
     expect(lines(vp).map(l => l.geometry.getAttribute('position').array)).toEqual(buffers)
     expect(disposals.every(spy => spy.mock.calls.length === 0)).toBe(true)
     for (const line of initial) {
-      expect(line.geometry.getAttribute('position').count).toBe(128)
-      expect(line.geometry.drawRange.count).toBeLessThanOrEqual(128)
+      expect(line.geometry.getAttribute('position').count).toBe(TOOLPATH_WINDOW_SIDE_LIMIT * 4)
+      expect(line.geometry.drawRange.count).toBeLessThanOrEqual(TOOLPATH_WINDOW_SIDE_LIMIT * 4)
       const mat = line.material as THREE.LineBasicMaterial
       expect(mat.depthTest).toBe(false)
       expect(mat.opacity).toBe(line.userData.toolpathWindowPhase === 'recent' ? 0.4 : 1)

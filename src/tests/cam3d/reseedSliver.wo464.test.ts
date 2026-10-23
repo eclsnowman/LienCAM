@@ -140,8 +140,15 @@ describe('WO-464 re-seed sliver buffer', () => {
     // large re-seed and stopped after one entry. A second entry proves that configured
     // radius no longer stands in for the >100 mm2 remaining region's capacity.
     expect(result.entries.length).toBeGreaterThan(1)
-    expect(result.entries[0].radius).toBeCloseTo(0.1, 10)
-    expect(result.entries[1].radius).toBeCloseTo(0.1, 10)
+    // WO-3054, owner 10-21: a 0.1 mm helix is below the descent floor. With no
+    // earlier cleared hole, use the default 90%-of-tool-radius helix (3.6 mm),
+    // while still reaching the large re-seed rather than dropping it as a sliver.
+    expect(result.entries[0]).toMatchObject({ mode: 'helix' })
+    expect(result.entries[0].radius).toBeCloseTo(3.6, 10)
+    expect(result.entries[1]).toMatchObject({ mode: 'helix' })
+    // The next component cannot hold 3.6 mm; the existing capacity search fits
+    // a 1.9000244140625 mm helix there instead of discarding its large region.
+    expect(result.entries[1].radius).toBeCloseTo(1.9000244140625, 10)
     expect(cutPasses).toBeGreaterThan(1)
   })
 
@@ -149,9 +156,9 @@ describe('WO-464 re-seed sliver buffer', () => {
     const before = JSON.parse(fs.readFileSync(BEFORE_DUMP, 'utf8')) as SliverDump
     const first = before.entries[0].point
 
-    // A radius-zero FIRST entry is outside this WO and correctly remains unchanged. Seed a
-    // proven-clear first cutter disk so this case reaches the later interior re-seed path
-    // with helixDiameter 0. Attempt 1 dropped that large region before recording a plunge.
+    // The exterior clearedSeed reaches the later interior re-seed path. It is not
+    // clearedHoles from an earlier operation: WO-3054 requires those re-seeds to
+    // helix into the remaining closed stock, even when helixDiameter is zero.
     const result = processFeature(before.params, {
       ...before.toolParams,
       helixDiameter: 0,
@@ -159,7 +166,10 @@ describe('WO-464 re-seed sliver buffer', () => {
     })
     const plungeReseeds = result.entries.filter(entry => entry.mode === 'plunge' && entry.radius === 0)
 
-    expect(plungeReseeds).toHaveLength(2)
+    expect(plungeReseeds).toHaveLength(0)
+    const helixReseeds = result.entries.filter(entry => entry.mode === 'helix')
+    expect(helixReseeds.length).toBeGreaterThanOrEqual(2)
+    expect(helixReseeds.every(entry => entry.radius >= MIN_DESCENT_HELIX_RADIUS)).toBe(true)
     // WO-1178 attempt 3 re-pin (> 50 -> > 40): 47 cut passes with the re-sequenced rings; the
     // claim is that the large region was roughed rather than dropped, which 47 still proves.
     expect(result.passes.filter(pass => pass.type === 'cut').length).toBeGreaterThan(40)

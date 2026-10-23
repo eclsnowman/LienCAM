@@ -64,6 +64,13 @@ export interface StepperOptions {
    *  AT/under optimal smoothly (the accept band is symmetric, so aiming exactly at optimal
    *  let ~40% of steps land above it). Default 0.95. Set 1 to disable the shift. */
   loadSetpoint?: number
+  /** WO-3042 cause B (ADAPTIVE_MOTION_SWITCHES.steeringSmoothing; omitted = today's stepper, to the
+   *  bit): the first guess is the momentum plus `gain` x the turn that, along this pass's last measured
+   *  load-per-turn slope, would bring the last accepted load to this step's target, at most
+   *  `maxCorrection` rad. Today's stepper keeps any first guess inside the accept band, so the load
+   *  drifts to a band edge and one search kink corrects it, then it drifts out the other side.
+   *  The guess is still probed and accepted only inside the band, like any guess. */
+  smoothing?: { gain: number; maxCorrection: number }
   /** Measurement only; omitted by production callers. Runs after the search has chosen. */
   onDecision?: (decision: StepDecision) => void
 }
@@ -73,6 +80,11 @@ export interface Stepper {
   resetHistory(): void
   /** One adaptive step from (toolPos,toolDir) holding `targetAreaPerDist` against `cleared`. */
   findNextPoint(cleared: Loops, toolPos: Pt, toolDir: Pt, step: number, targetAreaPerDist: number): StepResult
+  /** WO-3042 cause C: the caller replaced the last accepted move with its own (a departure clamp);
+   *  `deflection` is that move's turn from the heading the last findNextPoint was handed and `load` its
+   *  measured load. The momentum history (and, with `smoothing`, the load the next first guess corrects
+   *  from) keeps it in place of the stepper's own. A no-op when the last call accepted no move. */
+  recordTakenDeflection(deflection: number, load: number): void
 }
 
 // A frontal bite cuts both flanks; polygon faceting also perturbs a symmetric
@@ -90,8 +102,34 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
 
   const interp: Interpolator = createInterpolator(maxDeflection)
   let history: number[] = []
+  // WO-3042 cause B (smoothing only): this pass's last measured d(load)/d(deflection) near an
+  // accepted angle, and the load the last accepted move measured.
+  let loadSlope = 0
+  let lastLoad = NaN
+  // Whether the last findNextPoint call accepted a move (pushed a history entry).
+  let lastAccepted = false
 
-  function resetHistory() { history = [] }
+  function resetHistory() { history = []; loadSlope = 0; lastLoad = NaN }
+
+  function recordTakenDeflection(deflection: number, load: number) {
+    if (!lastAccepted) return
+    history[history.length - 1] = deflection
+    if (opts.smoothing) lastLoad = load
+  }
+
+  /** Cause B: learn the load-per-turn slope from this step's cutting probes nearest the accepted one. */
+  function learnSlope(angle: number, apd: number, cuts: { angle: number; apd: number }[]) {
+    let near: { angle: number; apd: number } | null = null
+    for (const c of cuts) {
+      if (Math.abs(c.angle - angle) < 1e-9) continue
+      if (!near || Math.abs(c.angle - angle) < Math.abs(near.angle - angle)) near = c
+    }
+    if (near) {
+      const s = (near.apd - apd) / (near.angle - angle)
+      if (Number.isFinite(s) && s !== 0) loadSlope = s
+    }
+    lastLoad = apd
+  }
 
   function predicted(): number {
     if (history.length === 0) return 0
@@ -102,13 +140,20 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
 
   function findNextPoint(cleared: Loops, toolPos: Pt, toolDir: Pt, step: number, targetAreaPerDist: number): StepResult {
     interp.reset()
-    const predictedAngle = predicted()
+    lastAccepted = false
     // Setpoint shift: the symmetric search aims just under optimal so realized load holds
     // AT/under optimal (aiming exactly at optimal let the symmetric band overshoot ~40% of
     // steps). Search/accept logic below is unchanged -- only the target it centres on moves.
     targetAreaPerDist *= loadSetpoint
+    let predictedAngle = predicted()
+    const smoothing = opts.smoothing
+    if (smoothing && loadSlope !== 0 && Number.isFinite(lastLoad)) {
+      const correction = smoothing.gain * (targetAreaPerDist - lastLoad) / loadSlope
+      predictedAngle += Math.max(-smoothing.maxCorrection, Math.min(smoothing.maxCorrection, correction))
+    }
     const maxError = maxErrorRel * targetAreaPerDist + maxErrorAbs
     const probes: ProbeRecord[] | undefined = opts.onDecision ? [] : undefined
+    const cuts: { angle: number; apd: number }[] = []
     const observe = (angle: number, area: number, apd: number, overLimit: boolean) => {
       if (!probes) return
       opts.onDecision?.({
@@ -133,7 +178,9 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
 
     const accept = (pos: Pt, dir: Pt, area: number, apd: number, angle: number, overLimit: boolean): StepResult => {
       history.push(angle)
+      lastAccepted = true
       if (history.length > historyLen) history.shift()
+      if (smoothing) learnSlope(angle, apd, cuts)
       observe(angle, area, apd, overLimit)
       return { toolPos: pos, toolDir: normalize(dir), area, areaPerDist: apd, deflectionAngle: angle, hitIterationLimit: overLimit }
     }
@@ -145,6 +192,7 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
       const tryPos = add(toolPos, scale(tryDir, step))
       const { area, areaPerDist, sideBalance } = tool.cutArea(toolPos, tryPos, cleared)
       probes?.push({ angle, area, areaPerDist, sideBalance })
+      if (smoothing && area > 0) cuts.push({ angle, apd: areaPerDist })
       const error = areaPerDist - targetAreaPerDist
 
       const sideAllowed = !opts.materialSide || area <= 0
@@ -183,5 +231,5 @@ export function createStepper(tool: ToolGeometry, opts: StepperOptions = {}): St
     }
   }
 
-  return { resetHistory, findNextPoint }
+  return { resetHistory, findNextPoint, recordTakenDeflection }
 }

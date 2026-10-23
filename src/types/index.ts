@@ -3096,6 +3096,10 @@ export interface Loop2D {
   layerId: string
   area: number       // mm² (absolute); used for display / future op targeting
   segments?: LoopSegment[]  // arc/line segments from optimizer; undefined = use points for rendering
+  /** WO-3066: the part-local Z an STL edge chain lies at (bottom of the part = 0,
+   *  the same number its name shows). Absent on every other loop, whose plane
+   *  is its layer's. */
+  z?: number
 }
 
 // --- Geometry Import ---

@@ -3,7 +3,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, powerSaveBlocker, protocol, screen, shell } = require('electron')
 const { execFile, spawn } = require('node:child_process')
 const { createHash } = require('node:crypto')
-const { existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('node:fs')
+const { accessSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('node:fs')
 const { appendFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } = require('node:fs/promises')
 const net = require('node:net')
 const path = require('node:path')
@@ -1426,6 +1426,33 @@ function cleanupMachineBridgeWine(child) {
   return run.cleanup
 }
 
+// WO-3065: Fedora's unbundled wine-mono needs iconv.dll, which `mingw64-win-iconv`
+// installs here and Wine does not search. Wine route only: the native route and
+// Windows/macOS never see this.
+const MACHINE_BRIDGE_MINGW_BIN = '/usr/x86_64-w64-mingw32/sys-root/mingw/bin'
+
+function machineBridgeMingwBinExists() {
+  try { accessSync(MACHINE_BRIDGE_MINGW_BIN); return true } catch { return false }
+}
+
+function machineBridgeWineEnv(prefix) {
+  const env = { ...process.env, LIENCAM_BRIDGE_HOST_CONSOLE: '1', WINEPREFIX: prefix }
+  if (process.platform !== 'linux' || !machineBridgeMingwBinExists()) return env
+  const folder = 'Z:' + MACHINE_BRIDGE_MINGW_BIN.replaceAll('/', '\\')
+  const current = typeof env.WINEPATH === 'string' ? env.WINEPATH : ''
+  const normalize = (entry) => entry.trim().replace(/\\+$/, '').toLowerCase()
+  if (current.split(';').some((entry) => normalize(entry) === normalize(folder))) return env
+  env.WINEPATH = current.trim() ? `${current.replace(/;+$/, '')};${folder}` : folder
+  return env
+}
+
+// The bridge's last line when Mono cannot load names the missing package.
+function machineBridgeWineExitLine(line) {
+  if (process.platform !== 'linux' || !line || !/iconv\.dll|Could not load Mono/i.test(line)) return line
+  if (machineBridgeMingwBinExists()) return line
+  return `${line} On Fedora, install the mingw64-win-iconv package.`
+}
+
 function startMachineBridge(specOverride = null) {
   if (process.platform === 'linux' && (machineBridgeWineCleanup || machineBridgeWineCleanupFailed)) return null
   if (machineBridgeProcess && machineBridgeProcess.exitCode === null) return machineBridgeProcess
@@ -1442,7 +1469,9 @@ function startMachineBridge(specOverride = null) {
     child = spawn(spec.winePrefix ? 'wine' : spec.executable, spec.winePrefix ? [spec.executable, ...spec.args] : spec.args, {
       // WO-2847: this process carries the bridge's unsaid firmware-update
       // lines to the Control console (machineBridgeStatus consoleLines).
-      env: { ...process.env, LIENCAM_BRIDGE_HOST_CONSOLE: '1', ...(spec.winePrefix ? { WINEPREFIX: spec.winePrefix } : {}) },
+      env: spec.winePrefix
+        ? machineBridgeWineEnv(spec.winePrefix)
+        : { ...process.env, LIENCAM_BRIDGE_HOST_CONSOLE: '1' },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -1487,7 +1516,7 @@ function startMachineBridge(specOverride = null) {
     if (executableMissing) markMachineBridgeLaunchArtifactMissing(spec.executable, 'process exit')
     settle(executableMissing
       ? machineBridgeLastExit
-      : { code, signal, error: machineBridgeLastLine() }, !executableMissing)
+      : { code, signal, error: spec.winePrefix ? machineBridgeWineExitLine(machineBridgeLastLine()) : machineBridgeLastLine() }, !executableMissing)
   })
   armMachineBridgeStabilityReset(child)
   return child

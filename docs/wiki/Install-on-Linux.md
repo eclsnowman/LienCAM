@@ -1,15 +1,15 @@
 # Install on Linux
 
-> **Untested and unsigned.** The Linux builds have not been run on real hardware yet. Please report what you find.
+> **Untested and unsigned.** Apart from one x86-64 PC driving an AXBB-E (see below), the Linux builds have not been run on real hardware yet. Please report what you find.
 
 ## What you need
 
 - A 64-bit Linux desktop with a graphics driver that supports WebGL2.
 - About 8 GB of RAM.
 
-## Two ways to get it
+## Which file to download
 
-From the project's [Releases page](../releases):
+From the project's [Releases page](../releases) (x86-64 PCs use the `x86_64`/`x64` files; ARM64 computers use the `arm64`/`aarch64` ones; `.deb` and `.rpm` packages are also listed there):
 
 - `LienCAM-<version>-linux-x86_64.AppImage` - one file, no install. Make it executable and run it:
 
@@ -20,7 +20,7 @@ chmod +x LienCAM-*-linux-x86_64.AppImage
 
 - `LienCAM-<version>-linux-x64.tar.gz` - unpack it anywhere and run the `liencam` program inside.
 
-If the AppImage refuses to start, your system may lack FUSE; run it with `--appimage-extract-and-run`, or use the tar.gz.
+If the AppImage refuses to start with an error about `libfuse.so.2`, install the FUSE 2 library: `sudo dnf install fuse-libs` on Fedora, `sudo apt install libfuse2` on Debian or Ubuntu (`libfuse2t64` on Ubuntu 24.04). Or run it with `--appimage-extract-and-run`, or use the tar.gz.
 
 ## Running a machine from Linux
 
@@ -41,6 +41,8 @@ For example, from a Linux terminal:
 WINEPREFIX="$HOME/.local/share/liencam-uccnc" ./LienCAM-<version>-linux-x86_64.AppImage
 ```
 
+On Fedora the packaged wine-mono needs the MinGW `iconv.dll`: install `mingw64-win-iconv` (`sudo dnf install mingw64-win-iconv`). LienCAM adds its folder to the bridge's Wine search path by itself; if the console still says "iconv.dll ... not found" or "Could not load Mono", that package is missing.
+
 On the Machine page choose the UCCNC install folder using its Linux path (for
 example `/home/operator/.local/share/liencam-uccnc/drive_c/UCCNC12115`). With
 exactly one UCCNC install in the prefix's `drive_c`, LienCAM finds it. With several,
@@ -57,11 +59,8 @@ with a mismatched DLL. The existing bridge's version handling and firmware-updat
 reporting also apply under Wine.
 
 Route A does not provide USB controller support or ARM execution. ARM uses the
-native-driver route B below. **Release dependency: WO-2896** fixes the
-Wine feed-rate override race after a held Stop; route A's release requires that
-fix. The handoff reports discovery, e-stop, Stop/Reset and 20.7 ms polling under
-Wine; this launcher change still needs machine-seat board readback and a real
-Linux package run. It does not establish a new hardware qualification.
+native-driver route B below. Known limitation: under Wine, spindle control over
+Modbus (VFD) can hang the bridge. If your spindle runs from a VFD, use route B.
 
 ### Native .NET driver (route B)
 
@@ -70,14 +69,28 @@ vendor DLLs. It supports the AXBB-E with firmware 1005 only. It has no firmware
 update path and refuses firmware it has not validated. Other controller
 models and USB UC100 are unsupported by this route.
 
-**Qualification pending:** the native driver has desk and fake-board evidence;
-it has not been read back from a real AXBB-E. Public route-B release requires
-the real-board check at the machine, motors disabled first. Do not
-take a successful build or fake-board test as hardware qualification.
+**Proven on a real board (October 22, 2026):** Fedora 44 x86-64, LienCAM
+0.37.0-alpha.3, an AXBB-E (firmware 1005) on a real router: Connect, Apply to
+Machine, E-STOP and clear, Stop/Reset during a move, Home All, jogs, Feed Hold
+and resume, a short program, and the spindle over Modbus (VFD) all worked.
+One machine so far, so the route is ALPHA. USB UC100 is not covered.
 
-The native bridge is opt-in until it is proven on a real board: Linux uses the
-Wine route by default, and uses the native bridge only when you start LienCAM
-with `LIENCAM_BRIDGE_NATIVE=1`.
+Before you connect from Linux:
+
+- AppImage: install `fuse-libs` (Fedora) or `libfuse2` (Debian/Ubuntu).
+- Network: the AXBB-E has a fixed address (in the 10.10.10.x range by default) and no DHCP
+  server, so the wired port needs its own fixed address in that range (any
+  free 10.10.10.x other than the controller's, with /24). On NetworkManager:
+  `nmcli connection add type ethernet ifname <port> con-name axbb ipv4.method manual ipv4.addresses <address>/24 ipv6.method disabled connection.autoconnect yes connection.autoconnect-priority 10`
+  then `nmcli connection up axbb`. If another computer used the same address
+  on this controller before, pick a different one or power-cycle the
+  controller (it remembers the previous computer for that address).
+- Spindle over a USB serial adapter: set the spindle serial port to the Linux
+  device (for example `/dev/ttyUSB0`), and make sure your user can open it
+  (Fedora/Debian: `sudo usermod -aG dialout $USER`, then log in again).
+
+In this release the native bridge is still opt-in: start LienCAM with
+`LIENCAM_BRIDGE_NATIVE=1`. Without it, Linux uses the Wine route above.
 
 With that opt-in, in a package containing the native bridge for your CPU,
 Connect chooses it before Wine. Choose a Linux folder containing your UCCNC `Profiles` folder

@@ -1376,6 +1376,17 @@ export function resolveTopZ(
     // flat 2D imports the loops sit at the geometry's position.z; projected
     // layers carry the explicit plane they were projected onto.
     const geoFaceZ = (g: ImportedGeometry, loopIds: ReadonlyArray<string> = []) => {
+      // WO-3066: an STL edge chain carries the part-local Z it lies at (one
+      // chain layer holds every Z, so the layer has no plane of its own).
+      // The picked chains' plane is that Z on the part, the highest of them
+      // the way layer planes aggregate below.
+      // A part tipped about X or Y has no single plane for a chain; it keeps
+      // the fallbacks below.
+      const level = Math.abs(g.rotation.x) < 1e-9 && Math.abs(g.rotation.y) < 1e-9
+      const chainZs = loopIds.length === 0 || !level ? [] : (g.loops ?? [])
+        .filter(lp => loopIds.includes(lp.id) && lp.z !== undefined)
+        .map(lp => lp.z as number)
+      if (chainZs.length > 0) return g.position.z + Math.max(...chainZs)
       // Per-layer projection planes are set when loops come from STL/face
       // projections - that IS the plane the projected lines are on.
       // B-rep derived planes (frame 'geometry_local') store the MODEL Z;

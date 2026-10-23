@@ -3,6 +3,14 @@ name: Build draft alpha release
 on:
   push:
     tags: ['v*']
+  # WO-3064: a dry run builds every download and assembles the checksums and
+  # notes, then stops. It never creates a release or uploads to one.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version to stamp (dry run, nothing is published)'
+        default: 'v0.0.0-dryrun.1'
+        required: true
 
 permissions:
   contents: read
@@ -16,7 +24,7 @@ defaults:
     shell: bash
 
 env:
-  RELEASE_TAG: ${{ github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
 jobs:
@@ -25,6 +33,12 @@ jobs:
     uses: ./.github/workflows/native-linux-bridge.yml
 
   windows:
+    # WO-3064: x64 and arm64 installers are both packaged on the x64 runner.
+    # The arm64 build is untested; its machine-control bridge stays x64.
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
     runs-on: windows-latest
     steps:
       - name: Check out tagged source
@@ -43,19 +57,29 @@ jobs:
       - name: Build renderer
         run: npm run build
       - name: Package unsigned Windows installer and portable
-        run: npx electron-builder --win nsis portable --x64 --publish never
+        run: npx electron-builder --win nsis portable --${{ matrix.arch }} --publish never
       - name: Save Windows installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: installers-windows
+          name: installers-windows-${{ matrix.arch }}
           path: release/*.exe
           if-no-files-found: error
           compression-level: 0
 
   linux:
     needs: [native-bridge]
-    # Linux builds are untested and unsigned.
-    runs-on: ubuntu-latest
+    # Linux builds are untested and unsigned. WO-3064: arm64 builds on a native
+    # arm64 runner and ships the native .NET bridge only (the Wine bridge needs x86-64).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    env:
+      # electron-builder's bundled fpm is x86-64 only; arm64 uses the system one.
+      USE_SYSTEM_FPM: ${{ matrix.arch == 'arm64' && 'true' || 'false' }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -72,21 +96,27 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
       - name: Build renderer
         run: npm run build
-      - name: Download native x64 bundle
+      - name: Install rpm packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          if [ "${{ matrix.arch }}" = arm64 ]; then sudo apt-get install -y ruby ruby-dev build-essential && sudo gem install --no-document fpm; fi
+      - name: Download native bridge bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: native-bridge-linux-x64
+          name: native-bridge-linux-${{ matrix.arch }}
           path: native-bridge-artifact
-      - name: Stage native x64 runtime
+      - name: Stage native runtime
         run: |
-          mkdir -p pendant/uc100net/publish/linux-x64
-          tar -xzf native-bridge-artifact/liencam-bridge-linux-x64.tar.gz -C pendant/uc100net/publish/linux-x64
-          test -x pendant/uc100net/publish/linux-x64/liencam-bridge
-          test -s pendant/uc100net/publish/linux-x64/libcoreclr.so
+          mkdir -p pendant/uc100net/publish/linux-${{ matrix.arch }}
+          tar -xzf native-bridge-artifact/liencam-bridge-linux-${{ matrix.arch }}.tar.gz -C pendant/uc100net/publish/linux-${{ matrix.arch }}
+          test -x pendant/uc100net/publish/linux-${{ matrix.arch }}/liencam-bridge
+          test -s pendant/uc100net/publish/linux-${{ matrix.arch }}/libcoreclr.so
       # Route A uses the reviewed Windows-built exe, without redistributing
       # the proprietary wrapper or vendor DLLs. The release owner supplies a
       # pinned HTTPS artifact and its SHA-256 in repository variables.
       - name: Stage reviewed Wine bridge executable
+        if: matrix.arch == 'x64'
         env:
           WINE_BRIDGE_URL: ${{ vars.LIENCAM_WINE_BRIDGE_URL }}
           WINE_BRIDGE_SHA256: ${{ vars.LIENCAM_WINE_BRIDGE_SHA256 }}
@@ -96,21 +126,42 @@ jobs:
           mkdir -p pendant/uccnc-bridge/bin
           curl --fail --location --proto '=https' --proto-redir '=https' --max-time 120 "$WINE_BRIDGE_URL" -o pendant/uccnc-bridge/bin/liencam-bridge.exe
           printf '%s  %s\n' "$WINE_BRIDGE_SHA256" pendant/uccnc-bridge/bin/liencam-bridge.exe | sha256sum --check --strict
-      - name: Package untested unsigned Linux AppImage and archive
-        run: npx electron-builder --linux AppImage tar.gz --x64 --publish never
+      - name: Package untested unsigned Linux AppImage, archive, deb and rpm
+        run: npx electron-builder --linux AppImage tar.gz deb rpm --${{ matrix.arch }} --publish never
+      # Best effort and reported, not a gate: the packages are untested, and a
+      # smoke failure is written to the job summary instead of hiding the files.
+      - name: Smoke the packages the runner can inspect
+        continue-on-error: true
+        run: |
+          {
+            echo "### Linux ${{ matrix.arch }} smoke (packages are untested)"
+            for f in release/*.deb; do echo "deb: $(dpkg-deb --field "$f" Package Version Architecture | tr '\n' ' ')"; done
+            for f in release/*.rpm; do echo "rpm: $(rpm -qp --queryformat '%{NAME} %{VERSION} %{ARCH}' "$f")"; done
+            echo "executable: $(file -b release/linux-*unpacked/liencam | cut -d, -f1-2)"
+            echo "executable --version (not all Electron builds print one): $(timeout 30 xvfb-run -a release/linux-*unpacked/liencam --no-sandbox --version 2>/dev/null | head -1)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Save Linux installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: installers-linux
+          name: installers-linux-${{ matrix.arch }}
           path: |
             release/*.AppImage
             release/*.tar.gz
+            release/*.deb
+            release/*.rpm
           if-no-files-found: error
           compression-level: 0
 
   macos:
     # macOS builds are untested and unsigned. Journey testing is a later order.
-    runs-on: macos-latest
+    # WO-3064: Apple Silicon and Intel are separate builds on their own runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, runner: macos-latest }
+          - { arch: x64, runner: macos-15-intel }
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -127,13 +178,15 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
       - name: Build renderer
         run: npm run build
-      - name: Package untested unsigned macOS dmg
-        run: npx electron-builder --mac dmg --arm64 --publish never
-      - name: Save macOS installer
+      - name: Package untested unsigned macOS dmg and zip
+        run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
+      - name: Save macOS installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: installers-macos
-          path: release/*.dmg
+          name: installers-macos-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.zip
           if-no-files-found: error
           compression-level: 0
 
@@ -167,8 +220,8 @@ jobs:
         run: cp pendant/linuxcnc-gateway/gateway.py release-assets/gateway.py
       - name: Write and verify checksums and Download data
         run: |
-          node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all
-          node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all --verify
+          node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all --require-matrix
+          node tools/release/make-releases-json.mjs release-assets --tag "$RELEASE_TAG" --require-all --require-matrix --verify
       # The existing releases.json schema describes installers and gateway.py.
       # Keep native bridge hashes in a separate attached checksum manifest.
       - name: Verify native bridge download checksums
@@ -178,18 +231,34 @@ jobs:
           test -s liencam-bridge-linux-arm64.tar.gz
           sha256sum liencam-bridge-linux-x64.tar.gz liencam-bridge-linux-arm64.tar.gz > native-bridge-SHA256SUMS.txt
           sha256sum --check --strict native-bridge-SHA256SUMS.txt
-      - name: Create draft pre-release for owner review
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Write release notes with one Downloads row per file
         run: |
           cat > release-notes.txt <<'NOTES'
           Alpha release. All installers are unsigned.
-          Linux and macOS builds are untested and unsigned.
+          Every download except the Windows x64 builds is untested.
           Review the installers before publishing this draft.
           Copy gateway.py to your LinuxCNC PC; it is a separate release download.
           SHA256SUMS.txt and releases.json describe installers and gateway.py.
           Native AXBB-E bridge archives for linux-x64 and linux-arm64 have their own native-bridge-SHA256SUMS.txt.
           Route B needs the motors-disabled-first real-board T3 before this draft is published.
+
+          ## Downloads
+
           NOTES
-          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --prerelease --title "LienCAM $RELEASE_TAG" --notes-file release-notes.txt
+          node tools/release/downloads-table.mjs release-assets/releases.json >> release-notes.txt
+      - name: Dry run stops here and keeps the assembled files
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dry-run-release
+          path: |
+            release-assets/*
+            release-notes.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Create draft pre-release for owner review
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --prerelease --title "LienCAM $RELEASE_TAG" --notes-file release-notes.txt

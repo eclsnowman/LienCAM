@@ -16,23 +16,44 @@ async function checksum(path) {
   return hash.digest('hex')
 }
 
+// WO-3064: the spelling electron-builder gives each CPU differs by file type
+// (getArtifactArchName), so each extension lists the spellings it really emits.
+const archSpellings = {
+  exe: { x64: 'x64', arm64: 'arm64' },
+  AppImage: { x86_64: 'x64', arm64: 'arm64' },
+  'tar.gz': { x64: 'x64', arm64: 'arm64' },
+  deb: { amd64: 'x64', arm64: 'arm64' },
+  rpm: { x86_64: 'x64', aarch64: 'arm64' },
+  dmg: { x64: 'x64', arm64: 'arm64' },
+  zip: { x64: 'x64', arm64: 'arm64' },
+}
+
 function classify(name, version) {
   if (name === 'gateway.py') return { platform: 'linux', kind: 'gateway', arch: null }
-  const match = /^LienCAM-(.+)-(win|linux|mac)-(x64|x86_64|arm64)(-setup|-portable)?\.(exe|AppImage|tar\.gz|dmg|zip)$/.exec(name)
+  const match = /^LienCAM-(.+)-(win|linux|mac)-(x64|x86_64|amd64|arm64|aarch64)(-setup|-portable)?\.(exe|AppImage|tar\.gz|deb|rpm|dmg|zip)$/.exec(name)
   if (!match) return null
   if (match[1] !== version) throw new Error(`Wrong tag version: ${name}`)
-  const [, , os, arch, suffix = '', ext] = match
+  const [, , os, spelled, suffix = '', ext] = match
   const kind = os === 'win' && ext === 'exe' ? { '-setup': 'installer', '-portable': 'portable' }[suffix]
-    : suffix ? null : os === 'linux' ? { AppImage: 'appimage', 'tar.gz': 'archive' }[ext]
+    : suffix ? null : os === 'linux' ? { AppImage: 'appimage', 'tar.gz': 'archive', deb: 'deb', rpm: 'rpm' }[ext]
       : os === 'mac' ? { dmg: 'dmg', zip: 'archive' }[ext] : null
-  if (!kind || (arch === 'x86_64' && (os !== 'linux' || kind !== 'appimage'))) throw new Error(`Unsupported installer: ${name}`)
-  // Electron-builder spells x64 as x86_64 for AppImage filenames only.
-  return { platform: os === 'win' ? 'windows' : os === 'mac' ? 'macos' : 'linux', kind, arch: arch === 'x86_64' ? 'x64' : arch }
+  const arch = archSpellings[ext]?.[spelled]
+  if (!kind || !arch) throw new Error(`Unsupported installer: ${name}`)
+  return { platform: os === 'win' ? 'windows' : os === 'mac' ? 'macos' : 'linux', kind, arch }
 }
+
+// Every download the alpha.3.1 matrix builds. --require-matrix (WO-3064) asks for
+// all of them; --require-all keeps the alpha.3 minimum so older receipts hold.
+export const downloadMatrix = [
+  ['windows', 'installer', 'x64'], ['windows', 'portable', 'x64'],
+  ['windows', 'installer', 'arm64'], ['windows', 'portable', 'arm64'],
+  ['macos', 'dmg', 'arm64'], ['macos', 'archive', 'arm64'], ['macos', 'dmg', 'x64'], ['macos', 'archive', 'x64'],
+  ...['x64', 'arm64'].flatMap(arch => ['appimage', 'archive', 'deb', 'rpm'].map(kind => ['linux', kind, arch])),
+]
 
 // Download-page contract: tag/version/prerelease plus assets with bytes and URLs.
 // Linux and macOS are untested and unsigned; packaging is not a journey test.
-export async function makeReleasesJson({ directory, tag, verify = false, requireAll = false }) {
+export async function makeReleasesJson({ directory, tag, verify = false, requireAll = false, requireMatrix = false }) {
   if (!tagPattern.test(tag)) throw new Error(`Invalid release tag: ${tag}`)
   directory = resolve(directory)
   const version = tag.slice(1)
@@ -42,7 +63,7 @@ export async function makeReleasesJson({ directory, tag, verify = false, require
     const details = classify(name, version)
     if (!details) {
       // Electron-builder logs, blockmaps and unpacked folders are not downloads.
-      if (/^LienCAM-.*\.(exe|AppImage|tar\.gz|dmg|zip)$/.test(name)) throw new Error(`Unsupported installer: ${name}`)
+      if (/^LienCAM-.*\.(exe|AppImage|tar\.gz|deb|rpm|dmg|zip)$/.test(name)) throw new Error(`Unsupported installer: ${name}`)
       continue
     }
     const path = join(directory, name)
@@ -60,6 +81,11 @@ export async function makeReleasesJson({ directory, tag, verify = false, require
   if (requireAll) {
     for (const [platform, kind] of [['windows', 'installer'], ['windows', 'portable'], ['linux', 'appimage'], ['linux', 'archive'], ['macos', 'dmg'], ['linux', 'gateway']]) {
       if (!assets.some(asset => asset.platform === platform && asset.kind === kind)) throw new Error(`Missing release asset: ${platform}/${kind}`)
+    }
+  }
+  if (requireMatrix) {
+    for (const [platform, kind, arch] of downloadMatrix) {
+      if (!assets.some(asset => asset.platform === platform && asset.kind === kind && asset.arch === arch)) throw new Error(`Missing release asset: ${platform}/${kind}/${arch}`)
     }
   }
   const result = { tag, version, prerelease: true, assets }
@@ -85,10 +111,10 @@ if (isMain(import.meta.url)) {
     const tagIndex = args.indexOf('--tag')
     const tag = tagIndex >= 0 ? args[tagIndex + 1] : undefined
     const remaining = args.filter((_, index) => index !== tagIndex && index !== tagIndex + 1)
-    if (!directory || !tag || remaining.some(arg => !['--verify', '--require-all'].includes(arg))) {
-      throw new Error('Usage: make-releases-json.mjs <directory> --tag <vX.Y.Z[-alpha.N]> [--verify] [--require-all]')
+    if (!directory || !tag || remaining.some(arg => !['--verify', '--require-all', '--require-matrix'].includes(arg))) {
+      throw new Error('Usage: make-releases-json.mjs <directory> --tag <vX.Y.Z[-alpha.N]> [--verify] [--require-all] [--require-matrix]')
     }
-    const result = await makeReleasesJson({ directory, tag, verify: remaining.includes('--verify'), requireAll: remaining.includes('--require-all') })
+    const result = await makeReleasesJson({ directory, tag, verify: remaining.includes('--verify'), requireAll: remaining.includes('--require-all'), requireMatrix: remaining.includes('--require-matrix') })
     console.log(`${remaining.includes('--verify') ? 'Verified' : 'Wrote'} ${result.assets.length} assets for ${tag}`)
   } catch (error) {
     console.error(error.message)

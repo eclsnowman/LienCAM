@@ -77,7 +77,7 @@ const words: Translation<'control-screens-not-probing'> = {
     text056: 'Activar inundación', text057: ' Inundación', text059: 'Aspiración en marcha; pulse para apagar con M9',
     text060: ' Aspiración', text062: '{{value1}} apagado',
   },
-  ProgramPanel: { setupNotes: 'Notas de la configuración ({{value1}}):' },
+  ProgramPanel: { setupNotesButton: 'Notas de la configuración', setupNotesTitle: 'Notas de la configuración - {{value1}}', setupNotesClose: 'Cerrar notas', setupNotesEmpty: 'Aún no hay notas para esta configuración.', setupNotesEdit: 'Editar', setupNotesAdd: 'Añadir notas', setupNotesSave: 'Guardar', setupNotesCancel: 'Cancelar' },
   RunClock: { unavailable: 'no disponible', text001: 'Transcurrido {{value1}}{{value2}}Restante estimado {{value3}}',
     text002: 'Transcurrido {{value1}}; tiempo restante estimado no disponible',
     text003: 'Transcurrido {{value1}}; tiempo restante estimado {{value2}}' },

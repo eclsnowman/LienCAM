@@ -1,4 +1,4 @@
-(LienCAM 0.37.0-alpha.3 - 03 Soft jaws - grblhal)
+(LienCAM 0.37.0-alpha.3.1 - 03 Soft jaws - grblhal)
 ( grblHAL )
 G90 G94 G17 G21
 ( Jaw 1 - G54 )

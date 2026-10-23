@@ -8,6 +8,27 @@ need re-saving in the next; nothing is promised to keep working before 1.0. Unre
 
 ## [Unreleased]
 
+## [0.37.0-alpha.3.1] - 2026-10-22
+
+A follow-up to alpha.3.
+
+Release notes: `docs/release/notes-0.37.0-alpha.3.1.md`.
+
+### Added
+
+- More download formats: Linux x64 `.deb` and `.rpm`; Linux arm64 (AppImage, tar.gz, `.deb`, `.rpm`) with the native bridge; macOS Intel; Windows on Arm. Routes nobody has run are labelled untested.
+
+### Changed
+
+- Adaptive into a closed pocket enters by a helix; with plunge entry it plunges only into a hole an earlier operation already cleared at least one tool diameter wide. A deep pocket that stopped with an error now cuts.
+- A new 2D Pocket or Adaptive on an STL recess defaults its bottom to the recess floor; through bores keep the through default. "Geometry plane" on an STL edge loop is that loop's height and stays selected.
+- The native Linux bridge is proven on a real AXBB-E board (still opt-in with LIENCAM_BRIDGE_NATIVE=1).
+
+### Fixed
+
+- E-STOP during a program is no longer reported as a completed run.
+- On Fedora, the Wine bridge route finds the MinGW iconv.dll without a manual WINEPATH.
+
 ## [0.37.0-alpha.3] - 2026-10-22
 
 The third public alpha: cutting and toolpath quality, measured on a 56-job machining benchmark

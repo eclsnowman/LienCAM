@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { selectToolpathWindow, type WindowFrame } from '../../lib/simulation/toolpathWindow'
+import { selectToolpathWindow, TOOLPATH_WINDOW_SIDE_LIMIT, type WindowFrame } from '../../lib/simulation/toolpathWindow'
 import { buildFrames } from '../../components/simulation/SimulationPanel'
 import type { ToolpathMove } from '../../types'
 
@@ -46,8 +46,8 @@ describe('WO-2948 bounded cursor window', () => {
         return path[0]
       },
     })
-    expect(selectToolpathWindow(large, 500000, 0)).toHaveLength(64)
-    expect(reads).toBeLessThanOrEqual(128)
+    expect(selectToolpathWindow(large, 500000, 0)).toHaveLength(TOOLPATH_WINDOW_SIDE_LIMIT * 2)
+    expect(reads).toBeLessThanOrEqual(TOOLPATH_WINDOW_SIDE_LIMIT * 4)
   })
 
   it('retains original arc move references/indices through production frame sampling', () => {

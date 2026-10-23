@@ -24,7 +24,7 @@
 // WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
 import { ADAPTIVE_POLICY as AP, adaptiveEngageMoveDistance } from '../../../../kernel/ops/adaptive/policy'
 // (separate line: WO-3018's record test pins the import above verbatim)
-import { ADAPTIVE_MOTION_SWITCHES, adaptiveKeepDownCapPolicy } from '../../../../kernel/ops/adaptive/policy'
+import { ADAPTIVE_MOTION_SWITCHES, STEERING_SMOOTHING, adaptiveKeepDownCapPolicy } from '../../../../kernel/ops/adaptive/policy'
 import type { AdaptiveMillingDirection } from '../../types'
 import { materialSideFor } from '../../millingDirection'
 import {
@@ -476,8 +476,16 @@ export interface ProcessParams {
    *  (when a helix fits there). For emitters that hold live carved stock (the 3D rougher).
    *  Default OFF: the pass stream is byte-identical without it. */
   liftFallbackHelix?: boolean
-  /** WO-3041: overrides ADAPTIVE_MOTION_SWITCHES.plungeOpeningRing for this call. */
-  plungeOpeningRing?: boolean
+  /** WO-3054: material-space loops (feature frame) that earlier operations already cleared
+   *  down to the deepest level this feature is cut to -- a drilled, bored or milled hole. A
+   *  plunge entry (helixDiameter under the descent floor) into a closed region goes straight
+   *  down only where the whole tool disk stands inside one of them; anywhere else it enters
+   *  with the default helix. Absent: no cleared hole is known. */
+  clearedHoles?: Loops
+  /** WO-3054 fix 1: the operator's minimum helix radius (emit's minHelixRadius). A helix entry
+   *  is planned at least this wide, so emit never turns it into a plunge. Absent: no floor
+   *  above the descent floor. */
+  minHelixRadius?: number
   /** Integral wall-follow: replace a between-pass lift with a wall-skim at depth when its
    *  two endpoints share a boundary loop within a length budget. Default OFF (undefined =
    *  byte-identical to the lift-everywhere behavior). */
@@ -916,7 +924,13 @@ export function processFeature(
     throw new Error(`processFeature: landingUncutCap must be finite and in [0, 1], got ${landingUncutCap}`)
   }
   const arcTol = params.arcTol ?? Math.max(tolerance * AP.sampling.arcTolFraction, AP.sampling.arcTolFloorMm)
-  const helixRadius = params.helixDiameter / 2
+  // WO-3054: a plunge setting can still make this feature a helix entry (below, once the first
+  // entry is known), so the radius every route reads is settled there.
+  let helixRadius = params.helixDiameter / 2
+  // WO-3054 fix 1: emit turns a planned helix smaller than the operator's minimum helix radius
+  // into a straight plunge, so a helix entry into a closed region is planned at least that wide.
+  const operatorHelixFloor = Number.isFinite(params.minHelixRadius) ? Math.max(params.minHelixRadius!, 0) : 0
+  if (helixRadius >= MIN_DESCENT_HELIX_RADIUS && helixRadius < operatorHelixFloor) helixRadius = operatorHelixFloor
   const integralWallFollowLengthFactor =
     resolveIntegralWallFollowLengthFactor(params.integralWallFollowLengthFactor)
 
@@ -1279,25 +1293,43 @@ export function processFeature(
     const seedRadius = rescued.radius + toolRadius
     return { pt: rescued.center, seedDisk: diskPath(rescued.center, seedRadius, arcTol), seedRadius }
   }
-  // WO-3041 (switch, default OFF): the operator's plunge (no helix) is kept, and the entry is
-  // searched where the disk a default helix would open fits, so an opening ring can grow the
-  // plunge hole to that disk at depth before the walker starts. Where that disk does not fit
-  // (or the switch is off) the entry is exactly today's.
-  const plungeOpening = (params.plungeOpeningRing ?? ADAPTIVE_MOTION_SWITCHES.plungeOpeningRing)
-    && helixRadius < MIN_DESCENT_HELIX_RADIUS
-  const openingRadius = (AP.defaults.helixDiameterPctOfTool / 100) * toolRadius
-  // `opening` is the planned ring, measured against `belief` plus the plunge's own hole; a ring
-  // that cannot stay under the slot ceiling leaves today's plain plunge.
-  const findSeed = (searchLoops: Loops, belief: Loops): { pt: Pt; seedDisk: Loops; seedRadius: number; opening?: Pt[] } | null => {
-    if (plungeOpening) {
-      const opened = findEntry(searchLoops, openingRadius)
-      if (opened && opened.seedRadius - toolRadius >= MIN_DESCENT_HELIX_RADIUS) {
-        const hole = union(belief, diskPath(opened.pt, toolRadius, arcTol))
-        const ring = planPlungeOpeningRing(opened.pt, opened.seedRadius - toolRadius, toolRadius, stepOverDistance, forwardTravel, arcTol, hole)
-        if (ring) return { ...opened, opening: ring }
-      }
+  // WO-3054 (the operator 10-21: "it has to do Helix entry for adaptive into a pocket. It can do
+  // adaptive from the outside with the lead in but there is no possibility to do that in a
+  // pocket. So the only viable option is a helix or entering in from a previously cleared hole
+  // (drilled, bored, etc)."). A plunge opens a hole exactly one tool wide and every first pass
+  // out of it is a full slot (WO-3024 finding: the declared H-pocket cut nothing). So under a
+  // plunge setting an interior entry goes straight down only where the whole tool disk stands
+  // inside a hole an earlier operation already cleared to this feature's deepest level
+  // (params.clearedHoles), and the walk starts from the largest disk that hole holds round the
+  // entry. Anywhere else it enters with the default helix and the operator is told once. Helix
+  // settings and side (roll-in) entries never come here.
+  const plungeAsked = helixRadius < MIN_DESCENT_HELIX_RADIUS
+  const defaultHelixRadius = Math.max((AP.defaults.helixDiameterPctOfTool / 100) * toolRadius, operatorHelixFloor)
+  const holeCentres: Loops = plungeAsked && params.clearedHoles && params.clearedHoles.length > 0
+    ? offsetClosed(params.clearedHoles, -toolRadius, arcTol)
+    : []
+  type Seed = { pt: Pt; seedDisk: Loops; seedRadius: number; hole?: true }
+  const findHoleEntry = (searchLoops: Loops): Seed | null => {
+    if (holeCentres.length === 0) return null
+    const room = intersection(searchLoops, holeCentres)
+    if (room.length === 0) return null
+    const found = findStartPointIn(room, cutTree, arcTol, undefined, toolRadius, arcTol)
+    return found ? { ...found, hole: true } : null
+  }
+  let helixNoted = false
+  const findSeed = (searchLoops: Loops): Seed | null => {
+    if (!plungeAsked) return findEntry(searchLoops)
+    const hole = findHoleEntry(searchLoops)
+    if (hole) return hole
+    const helixed = findEntry(searchLoops, defaultHelixRadius)
+    if (helixed && !helixNoted) {
+      helixNoted = true
+      // A helix setting below the smallest helix lands here too: say what the operator chose.
+      operatorNotice(params.helixDiameter > 0
+        ? 'Entry helix is smaller than the smallest helix in a closed pocket with no cleared hole - entered with the default helix.'
+        : 'Plunge entry into a closed pocket with no cleared hole - entered with a helix.')
     }
-    return findEntry(searchLoops)
+    return helixed
   }
 
   // WO-1178: with an exterior seed the region holds the seed's air; the interior fallback entry
@@ -1305,7 +1337,6 @@ export function processFeature(
   const stockRegion: Loops = params.clearedSeed && params.clearedSeed.length > 0
     ? difference(cutRegion, params.clearedSeed)
     : cutRegion
-  const start = findSeed(stockRegion, params.clearedSeed ?? [])
   // WO-1194: the same distinction stockRegion draws (region-over-stock vs region-over-air),
   // as a measurement the tier-1 keep-down router can ask about ONE POINT AT A TIME. Built only
   // when the caller supplied the exterior seed; null otherwise, which leaves every routed ride
@@ -1345,12 +1376,16 @@ export function processFeature(
     }
   }
 
+  const start = findSeed(stockRegion)
+  // WO-3054: a plunge setting whose first entry is an interior one and found no cleared hole
+  // runs the whole feature as the default helix setting does, so its re-seeds and its lift
+  // landings may open stock with a helix too.
+  if (plungeAsked && !sideStart && start && !start.hole) helixRadius = defaultHelixRadius
+
   if (!start && !sideStart) return { ...empty, stats: { ...empty.stats, aborted: 'no-start-point' } }
 
   // start! safe: non-null whenever sideStart is null (guarded by the return above)
-  // WO-3041: an opening entry starts from the plunge's own tool-wide hole; the opening ring
-  // (below, before the walk) is what credits the rest of its disk.
-  let cleared: Loops = sideStart ? params.clearedSeed! : start!.opening ? (params.clearedSeed ?? []) : start!.seedDisk
+  let cleared: Loops = sideStart ? params.clearedSeed! : start!.seedDisk
   const startPoint: Pt = sideStart ? sideStart.pt : start!.pt
 
   // Every region's entry (initial + each re-seed) is recorded so Phase 5 ramps it in
@@ -1358,7 +1393,9 @@ export function processFeature(
   const entries: AdaptiveEntry[] = []
   // 'helix' only when emit will actually make one (>= MIN_DESCENT_HELIX_RADIUS,
   // the single floor shared with emit); anything smaller is honestly a plunge.
-  const makeEntry = (e: { pt: Pt; seedRadius: number }): AdaptiveEntry => {
+  const makeEntry = (e: { pt: Pt; seedRadius: number; hole?: true }): AdaptiveEntry => {
+    // WO-3054: into a cleared hole the operator's plunge goes straight down.
+    if (e.hole) return { point: e.pt, radius: 0, mode: 'plunge' }
     const radius = Math.max(e.seedRadius - toolRadius, 0)
     return { point: e.pt, radius, mode: radius >= MIN_DESCENT_HELIX_RADIUS ? 'helix' : 'plunge' }
   }
@@ -1417,7 +1454,7 @@ export function processFeature(
   // make a region of. The stage on each record says which of the two declined it.
   const droppedSliverRegions: DroppedComponent[] = [...prevented.dropped]
   type ReseedEntry =
-    | { mode: 'interior'; pt: Pt; seedDisk: Loops; seedRadius: number; opening?: Pt[] }
+    | { mode: 'interior'; pt: Pt; seedDisk: Loops; seedRadius: number; hole?: true }
     | { mode: 'side'; pt: Pt; clearPoint: Pt; dir: Pt; frontier: Loops }
   const reseed = (): ReseedEntry | null => {
     const remaining = difference(cutRegion, cleared)
@@ -1475,7 +1512,7 @@ export function processFeature(
         console.warn(`[side-entry] reseed roll-in at (${side.pt.x.toFixed(2)}, ${side.pt.y.toFixed(2)}) is not proven clear at its descent point -- interior entry instead (ADR-0003)`)
       }
     }
-    const entry = findSeed(remaining, cleared)
+    const entry = findSeed(remaining)
     if (entry) {
       // Prove the REGION cannot fit the exact shared descent floor. The capacity search below
       // is deliberately only a measurement: it returns a lower-bound estimate and may stop
@@ -1542,7 +1579,15 @@ export function processFeature(
   // The top-level loadSetpoint (default 0.95) wins over any stepper.loadSetpoint so the
   // ProcessParams knob is authoritative; a per-call stepper override is still respected
   // when the top-level field is left undefined.
-  const stepper = createStepper(tool, { ...params.stepper, materialSide: materialSideFor(millingDirection), loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? AP.steering.loadSetpoint })
+  // WO-3042: the steering wobble smoothing (WO-3029 causes A, B, C), one switch, ships OFF.
+  const smoothSteering = ADAPTIVE_MOTION_SWITCHES.steeringSmoothing
+  const stepper = createStepper(tool, {
+    ...params.stepper, materialSide: materialSideFor(millingDirection), loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? AP.steering.loadSetpoint,
+    ...(smoothSteering ? { smoothing: {
+      gain: STEERING_SMOOTHING.correctionGain,
+      maxCorrection: STEERING_SMOOTHING.maxCorrectionFraction * Math.PI / AP.steering.maxDeflectionDivisor,
+    } } : {}),
+  })
   // WO-439 fix 2: the walker measures its bite inside targetRegion -- the material a
   // roughing pass may actually take. What that excludes is exactly what the raw disk bite
   // used to count and no pass can ever remove: the finishing-stock rim outside the tool's
@@ -1673,22 +1718,6 @@ export function processFeature(
   // Side entry starts AT the in-band boundary point (like a between-pass start): the walker
   // tangent is the initial direction, and the first bite is a normal bounded engagement, not
   // a plunge. Default entry starts inside the seed disk and cuts outward (unchanged).
-  // WO-3041: plant the operator's plunge at `e.pt` and, at depth, run its planned opening ring,
-  // which grows the plunge's tool-wide hole to the seed disk (pass + entry appended, entry
-  // recorded). Returns the belief after the ring. May throw UnsafeReentryError (re-seeds).
-  const openPlungeHole = (e: { pt: Pt; opening: Pt[] }, before: Loops, pas: number): Loops => {
-    const belief = union(before, diskPath(e.pt, toolRadius, arcTol))
-    const entry: AdaptiveEntry = { point: e.pt, radius: 0, mode: 'plunge' }
-    const swept = expandCleared(belief, e.opening, toolRadius, arcTol)
-    const after = appendCutPass(passes, e.opening, swept, belief, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, entry, null, false, integralWallFollowLengthFactor, false, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, undefined, !!params.liftFallbackHelix, 'cut', null, 0, exteriorAirAt, singleWallPass ? wallBandContour : null, false, mainRepositionTime, onAcceptedGraphRoute)
-    if (fragCensus.enabled) fragCensus.entries.push({ pass: pas, x: entry.point.x, y: entry.point.y, mode: entry.mode, radius: entry.radius })
-    entries.push(entry)
-    return after
-  }
-  if (!sideStart && start!.opening) {
-    cleared = openPlungeHole({ pt: start!.pt, opening: start!.opening }, params.clearedSeed ?? [], -1)
-    pendingEntry = null
-  }
   const firstSeedStart = sideStart ? null : seedStart(startPoint, start!.seedRadius, cleared)
   let toolPos: Pt = sideStart
     ? { x: sideStart.pt.x, y: sideStart.pt.y }
@@ -1992,9 +2021,16 @@ export function processFeature(
       const relDistToBoundary = AP.steering.boundaryTaperRadii * distToBoundary / toolRadius
       const minCut = optimal / AP.steering.minCutDivisor
 
-      const targetArea = (relDistToBoundary > 1 || distToEngagePoint < toolRadius)
+      let targetArea = (relDistToBoundary > 1 || distToEngagePoint < toolRadius)
         ? optimal
         : relDistToBoundary * (optimal - minCut) + minCut
+      // WO-3042 cause A: the engage point's full-load zone fades into the wall taper over
+      // STEERING_SMOOTHING.engageFadeRadii instead of stepping at one tool radius, so a cut running
+      // along that circle near a wall no longer sees its target halve and double step to step.
+      if (smoothSteering && relDistToBoundary <= 1 && distToEngagePoint >= toolRadius) {
+        const fade = (STEERING_SMOOTHING.engageFadeRadii * toolRadius - distToEngagePoint) / ((STEERING_SMOOTHING.engageFadeRadii - 1) * toolRadius)
+        if (fade > 0) targetArea += Math.min(1, fade) * (optimal - targetArea)
+      }
 
       // Adaptive step (scale-free port of FreeCAD's 4.0/deflectionAngle): tight turns
       // and wall/engage proximity -> small steps; straight runs -> up to toolRadius/2.
@@ -2054,7 +2090,13 @@ export function processFeature(
               if (lm.area > 0 && lm.areaPerDist <= cap) {
                 newToolPos = pos; newToolDir = dir; area = lm.area; areaPerDist = lm.areaPerDist
                 deflectionAngle = Math.sign(turn) * maxTurn
-                filletPoints.add(pos)
+                // WO-3042 cause C: the stepper's momentum learns the turn taken (from the heading it was
+                // handed), not the one it asked for. A mid-pass clamped step is an ordinary cut step of
+                // the pass, so it is left to the pass's path cleanup like any other: pinned, every
+                // +-step/R kink of a wall ride survived into the toolpath as a flip. The departure head
+                // off a planted wall start stays pinned (appendCutPass counts it as the lead).
+                if (smoothSteering) stepper.recordTakenDeflection(Math.atan2(toolDir.x * dir.y - toolDir.y * dir.x, toolDir.x * dir.x + toolDir.y * dir.y), lm.areaPerDist)
+                if (!smoothSteering || departHeadOpen) filletPoints.add(pos)
                 departRadius = radius
                 limited = true
                 break
@@ -2470,21 +2512,6 @@ export function processFeature(
         // WO-443: same walker responsibility on the reseed reconstruction as on the first
         // build above -- a fresh frontier does not re-acquire the credited finish band.
         walker = createEngagementWalker(rs.frontier, tool, forwardTravel, walkerRegion)
-      } else if (rs.opening) {
-        // WO-3041: the plunge and its opening ring go into the stream now; the walk starts on
-        // the opened disk's rim exactly as it would from a helix seed. A refused way back in
-        // stops the region as the pass loop does for a pass carrying its entry (WO-400).
-        try {
-          cleared = openPlungeHole({ pt: rs.pt, opening: rs.opening }, cleared, pas)
-        } catch (err) {
-          if (!(err instanceof UnsafeReentryError)) throw err
-          console.warn(`[lift-landing] region stopped: ${err.message}`)
-          aborted = 'unsafe-re-entry'
-          break
-        }
-        const opening = seedStart(rs.pt, rs.seedRadius, cleared)
-        toolPos = opening.pos
-        toolDir = opening.dir
       } else {
         pendingSeed = { disk: rs.seedDisk, before: cleared }
         cleared = union(cleared, rs.seedDisk)
@@ -4078,51 +4105,6 @@ function contourOverCapBy(ride: Pt[], cleared: Loops, toolRadius: number, cap: n
   return { overLen, peak, at, maxStep }
 }
 
-/** WO-3041: the opening ring a kept plunge runs at depth. A plunge leaves a hole exactly one
- *  tool wide, so a straight first pass out of it is a full slot (WO-3024 finding). The ring
- *  leaves the hole by a short radial lead, then spirals outward with the radial growth per
- *  turn sized so the material removed per mm of travel -- the width the engine's own
- *  contourOverCap measures -- stays at the operator's stepover (growth = width x r / (r + R)
- *  per turn, so it starts gently where the circle is short), and closes with one full circle
- *  at `ringRadius`. It turns in the milling sense of the seed's opening pass and ends on the
- *  disk's bottom point, where that pass starts, heading the same way. Each candidate is
- *  measured against `belief` (which holds the plunge hole) and the 75%-of-slot ceiling; the
- *  width halves until the sustained width stays under it. Null when none does or the ring
- *  has no room: the caller then keeps today's plain plunge. */
-export function planPlungeOpeningRing(centre: Pt, ringRadius: number, toolRadius: number, stepOverDistance: number,
-  forwardTravel: boolean, arcTol: number, belief: Loops): Pt[] | null {
-  if (!(ringRadius > 0) || !(stepOverDistance > 0)) return null
-  const cap = AP.caps.slotCeilingDiameters * (2 * toolRadius)
-  for (const fraction of [1, 0.5, 0.25]) {
-    const ring = plungeOpeningRingPath(centre, ringRadius, toolRadius, Math.min(stepOverDistance, cap) * fraction, forwardTravel, arcTol)
-    if (contourOverCap(ring, belief, toolRadius, cap, arcTol).overLen === 0) return ring
-  }
-  return null
-}
-
-function plungeOpeningRingPath(centre: Pt, ringRadius: number, toolRadius: number, width: number, forwardTravel: boolean, arcTol: number): Pt[] {
-  const sense = forwardTravel ? 1 : -1
-  const angleStep = (r: number): number => Math.min(Math.PI / 8, 2 * Math.acos(Math.max(-1, 1 - arcTol / Math.max(r, arcTol))))
-  // (angle travelled, radius) samples: the lead's end, the spiral, then the closing circle.
-  let r = Math.min(ringRadius, width / 2)
-  let angle = 0
-  const polar: [number, number][] = [[angle, r]]
-  while (r < ringRadius) {
-    const step = angleStep(r)
-    r = Math.min(ringRadius, r + step * width * r / (2 * Math.PI * (r + toolRadius)))
-    angle += step
-    polar.push([angle, r])
-  }
-  const circleSteps = Math.max(16, Math.ceil((2 * Math.PI) / angleStep(ringRadius)))
-  for (let i = 1; i <= circleSteps; i++) polar.push([angle + (2 * Math.PI * i) / circleSteps, ringRadius])
-  const phase = -Math.PI / 2 - sense * polar[polar.length - 1][0]
-  const ring: Pt[] = [{ x: centre.x, y: centre.y }]
-  for (const [a, radius] of polar) {
-    ring.push({ x: centre.x + radius * Math.cos(phase + sense * a), y: centre.y + radius * Math.sin(phase + sense * a) })
-  }
-  return ring
-}
-
 /** WO-438's T5 TRAVERSE BOUND, in one place so every rung that travels at depth meets the
  *  IDENTICAL number. "Zero belief-uncut" cannot be measured as literal presence (the
  *  polygon belief's faceting under-counts every swept track, and a ride that ends on the
@@ -5564,6 +5546,10 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
     if (link.helixDescent) return
     const cap = AP.caps.rideCapStepovers * stepOverDistance
     if (rideOverloadsUncut(link.points, clearedBeforePass, toolRadius, cap, arcTol)) return
+    // WO-3037 (switch keepDownLinksSmooth, default OFF): the hover is LIFT_DISTANCE over THIS
+    // level's floor, so it clears a sliver of this level and nothing taller. A corridor that
+    // meets stock the belief holds standing outside its landing bite flies at clearance.
+    if (ADAPTIVE_MOTION_SWITCHES.keepDownLinksSmooth && rideMeetsStandingStock(link.points, clearedBeforePass, toolRadius, arcTol)) return
     link.microLift = { z: LIFT_DISTANCE }
     // WO-2835: the proof above tolerates slivers under its cap, which a LIFT_DISTANCE hover
     // clears wherever the stepdown is below it; a floor-setting hop (0.3 mm) would not. So the
@@ -6226,6 +6212,10 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         return ride
       }
 
+      // WO-3037 (switch, default OFF): smooth keep-down links that never ride through standing stock.
+      const smoothLinks = ADAPTIVE_MOTION_SWITCHES.keepDownLinksSmooth
+      const standingAt = (route: Pt[]): Pt | null => smoothLinks ? rideMeetsStandingStock(route, clearedBeforePass, toolRadius, arcTol) : null
+
       const directOverload = primary ? rideOverloadsUncut(primary, clearedBeforePass, toolRadius, cap, arcTol) : null
       if (primary && !directOverload) {
         const ride: Ride = { points: primary, kind: 'wallfollow' }
@@ -6280,7 +6270,11 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         const ms = rideTime(chordRide)
         if (canWin('chord', chordRide, ms)) {
           const chordOverload = rideOverloadsUncut(chordRide.points, clearedBeforePass, toolRadius, cap, arcTol)
-          if (!chordOverload) {
+          const chordStanding = chordOverload ? null : standingAt(chordRide.points)
+          if (chordStanding) {
+            liftRecoveryParts.push('chord-standing')
+            note('chord', chordRide, ms, 'refused', `meets standing stock near ${at(chordStanding)} (WO-3037)`)
+          } else if (!chordOverload) {
             connectionRide = take('chord', chordRide, ms, () => {
               b8GateStats.routedAroundChord++
               // ADR-0003 fail-loud: name the reroute (no safe boundary arc, but a straight at-depth
@@ -6331,6 +6325,74 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
         if (!connectionRide && overBudget === arcs.length) liftRecoveryParts.push('backtrack-detour>budget')
       }
 
+      // Rung (b)(3b) THE BOWED HOP (WO-3037, switch keepDownLinksSmooth, default OFF). The owner
+      // 2026-10-21 on the form torus: "there would be no reason a part of this smooth geometry
+      // would have spikes in the toolpath that look like this." The spikes were rung (b)(4)'s
+      // perpendicular detours: a 1-3 mm hop between two points on the curved torus wall whose
+      // straight chord is clear of stock but whose tool centre sags ~0.05 mm past the wall
+      // (gougesFinish), with the wall arc itself barred by the milling-direction rule, so the
+      // search fed 2.5 mm out into cleared space and turned back by 120-140 deg. The hop the
+      // geometry asks for is the chord bowed just enough to stay off the wall: a shallow arc,
+      // tried at growing sagittas on both sides, its end tangents never more than 2 atan(0.8)
+      // = 77 deg off the chord. It is TRAVEL like the routed ride (a loopback) and meets every
+      // proof that ride meets -- tool centre inside the region, no air excursion, the traverse
+      // cap against the physical pre-move belief -- plus the chord's own tolerance-free wall
+      // test and the standing-stock test.
+      // Without the time model the first proven rung wins, so a bowed hop is held back and
+      // weighed against the routed ride by LENGTH there: the shorter of the two is taken.
+      let heldHop: Pt[] | null = null
+      const takeHop = (hop: Pt[], ms: number): Ride => take('bowed-hop', { points: hop, kind: 'loopback' }, ms, () => {
+        b8GateStats.routedDetour++
+        console.warn(`[keepdown-route] straight hop would graze the wall -- BOWED HOP at depth (${polylineLength(hop).toFixed(2)}mm against the ${chord.toFixed(2)}mm chord) instead of a detour or a lift (WO-3037)`)
+      })
+      if (open() && smoothLinks) {
+        const traverseCap = traverseKeepDownCap(stepOverDistance, optimal, arcTol)
+        const hopWallTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
+        const staysOffWall = (route: Pt[]): boolean => strictWallFlow
+          ? routeEscapingSegment(route, cutTree, Math.min(toolRadius, 0.1), 1e-4) < 0
+          : route.every((p, k) => k === 0 || !centrePathExitsCutRegion(route[k - 1], p, cutTree, toolRadius))
+        const proves = (route: Pt[]): boolean => staysOffWall(route)
+          && routeEscapingSegment(route, cutTree, toolRadius, hopWallTol) < 0
+          && !(exteriorAirDepthAt && routeAirExcursion(route, exteriorAirDepthAt, toolRadius, hopWallTol))
+          && !rideOverloadsUncut(route, clearedBeforePass, toolRadius, traverseCap, arcTol)
+          && !standingAt(route)
+        // WO-3068 (owner 2026-10-22 on the WO-3037 card: "Seems like a larger radius but have a
+        // shorter path"): on one chord an arc's length grows with its sagitta, so the flattest arc
+        // that proves is both the shortest and the largest radius. The steps below are coarse --
+        // on the torus a 13 mm hop whose 25% bow met standing stock took the 40% one when 32%
+        // proved -- so once a step proves, each side that proved there is searched down toward
+        // the step below for the flattest arc that still meets every proof, and the shorter of
+        // the two sides is taken. Every arc taken has met every proof above; the search only
+        // decides which proven arc.
+        let hop: Pt[] | null = null
+        if (chord > 1e-6) {
+          const steps = [0.02, 0.04, 0.08, 0.15, 0.25, 0.4]
+          search: for (let i = 0; i < steps.length; i++) {
+            for (const side of [1, -1] as const) {
+              const route = bowedHop(connStart, connEnd, steps[i] * chord, side, arcTol)
+              if (!proves(route)) continue
+              let lo = i > 0 ? steps[i - 1] : 0, hi = steps[i], best = route
+              for (let k = 0; k < BOWED_HOP_REFINE_STEPS; k++) {
+                const mid = (lo + hi) / 2
+                const flatter = bowedHop(connStart, connEnd, mid * chord, side, arcTol)
+                if (proves(flatter)) { hi = mid; best = flatter } else lo = mid
+              }
+              if (!hop || polylineLength(best) < polylineLength(hop)) hop = best
+            }
+            if (hop) break search
+          }
+        }
+        if (hop && !timeModel) {
+          heldHop = hop
+        } else if (hop) {
+          const ride: Ride = { points: hop, kind: 'loopback' }
+          const ms = rideTime(ride)
+          if (canWin('bowed-hop', ride, ms)) connectionRide = takeHop(hop, ms)
+        } else {
+          liftRecoveryParts.push('bowed-hop-refused')
+        }
+      }
+
       // Rung (b)(4) ROUTED KEEP-DOWN (WO-438, the port of the ancestor's ResolveLinkPath).
       // A single straight chord or a single boundary arc is not the only at-depth route
       // between two points in one connected cleared region: the ancestor searches for a
@@ -6376,9 +6438,40 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
           ? planKeepDownRoute(
             connStart, connEnd, prevCut!.points, collectPriorMotion(), buildTrackGraph(), clearedBeforePass, cutTree,
             toolRadius, stepOverDistance, arcTol, traverseCap, budget, exteriorAirDepthAt, onAcceptedGraphRoute,
+            smoothLinks ? standingAt : null,
           )
           : null
-        if (routed) {
+        if (routed && smoothLinks) {
+          // WO-3037: round what corners the route still has, where the rounded ride proves. A
+          // round cuts each corner on its inside, toward whatever the corner was steering round,
+          // so it is held to every proof the route met; failing that, a smaller round, else the
+          // route as it was.
+          const routeWallTol = Math.max(arcTol * AP.sampling.wallTolArcTols, toolRadius * AP.sampling.wallTolToolRadii)
+          // WO-3068: the largest round that proves. When a share proves after a larger one did
+          // not, the gap between them is searched upward for the largest share that still proves.
+          const roundProves = (rounded: Pt[]): boolean => routeEscapingSegment(rounded, cutTree, toolRadius, routeWallTol) < 0
+            && !(exteriorAirDepthAt && routeAirExcursion(rounded, exteriorAirDepthAt, toolRadius, routeWallTol))
+            && !rideOverloadsUncut(rounded, clearedBeforePass, toolRadius, traverseCap, arcTol)
+            && !standingAt(rounded)
+          const shares = [0.45, 0.25, 0.12]
+          for (let i = 0; i < shares.length; i++) {
+            let rounded = roundRideCorners(routed.points, arcTol, shares[i])
+            if (rounded.length === routed.points.length) break
+            if (!roundProves(rounded)) continue
+            let lo = shares[i], hi = i > 0 ? shares[i - 1] : lo
+            for (let k = 0; hi > lo && k < BOWED_HOP_REFINE_STEPS; k++) {
+              const mid = (lo + hi) / 2
+              const larger = roundRideCorners(routed.points, arcTol, mid)
+              if (roundProves(larger)) { lo = mid; rounded = larger } else hi = mid
+            }
+            routed.points = rounded
+            routed.length = polylineLength(rounded)
+            break
+          }
+        }
+        if (heldHop && (!routed || polylineLength(heldHop) <= routed.length)) {
+          connectionRide = takeHop(heldHop, 0)
+        } else if (routed) {
           const ride: Ride = { points: routed.points, kind: 'loopback' }
           const ms = rideTime(ride)
           if (canWin(`routed-${routed.family}`, ride, ms)) {
@@ -6425,9 +6518,11 @@ function appendCutPass(passes: AdaptivePass[], points: Pt[], cleared: Loops, cle
           gouges: (a, b) => centrePathExitsCutRegion(a, b, cutTree, toolRadius),
           travelClear: (a, b) => {
             const trip = rideOverloadsUncut([a, b], clearedBeforePass, toolRadius, stopShortTraverseCap, arcTol)
-            return trip
-              ? `sustains ${trip.width.toFixed(3)}mm effective width > traverse cap ${stopShortTraverseCap.toFixed(3)}mm near (${trip.at.x.toFixed(2)}, ${trip.at.y.toFixed(2)})`
-              : null
+            if (trip) return `sustains ${trip.width.toFixed(3)}mm effective width > traverse cap ${stopShortTraverseCap.toFixed(3)}mm near (${trip.at.x.toFixed(2)}, ${trip.at.y.toFixed(2)})`
+            // WO-3037: the travel leg hands over to a FED tail at its end, so only the bite at
+            // its end may meet stock (switch OFF: never asked).
+            const standing = standingAt([a, b])
+            return standing ? `meets standing stock near (${standing.x.toFixed(2)}, ${standing.y.toFixed(2)}) (WO-3037)` : null
           },
           feedClear: (a, b) => {
             const trip = rideOverloadsUncut([a, b], clearedBeforePass, toolRadius, stopShortFeedCap, arcTol)
@@ -7303,6 +7398,91 @@ function wallChainInDirection(a: Pt, b: Pt, loops: Loops, direction: AdaptiveMil
   return out && into ? dedupConsecutive([...out, ...into]) : null
 }
 
+/** WO-3037 (switch keepDownLinksSmooth, default OFF): where a kept-down TRAVEL ride meets
+ *  stock the pre-move belief still holds standing -- null when it meets none. The traverse cap
+ *  (traverseKeepDownCap) is an AVERAGE over a 2 mm window, so a ride that slides along an uncut
+ *  wall rim narrower than the cap passes it the whole way: on the 2D H-pocket a routed ride ran
+ *  21 mm down the x = 76.98 wall at fast-traverse rate through the rim the next pass was about to
+ *  cut (src/tests/evidence/WO-3037/). This test is zero-width instead: any piece of the ride's
+ *  full-radius sweep that the belief has not cleared and that is wider than the faceting artifact
+ *  (inscribed radius > arcTol, sweepTouchesUncut's own rule) is standing stock. The one place a
+ *  ride may meet stock is the tool's own disk where it ends: that is the bite the next pass takes
+ *  from that point, which every keep-down link hands over by construction. */
+function rideMeetsStandingStock(route: Pt[], clearedBeforePass: Loops, toolRadius: number, arcTol: number): Pt | null {
+  if (route.length < 2) return null
+  const sweep = offsetOpenRound(route, toolRadius, arcTol)
+  if (sweep.length === 0) return null
+  const uncut = difference(difference(sweep, clearedBeforePass), diskPath(route[route.length - 1], toolRadius + arcTol, arcTol))
+  if (uncut.length === 0) return null
+  const step = Math.max(arcTol, 0.01)
+  if (maxInscribedRadius(uncut, toolRadius, step) <= arcTol) return null
+  const core = offsetClosed(uncut, -arcTol)
+  return centroid(core.length > 0 ? core[0] : uncut[0])
+}
+
+/** WO-3068: halvings of the gap between a refused and a proven step -- a bowed hop's sagitta, a
+ *  routed ride's corner-round share. Six take the widest sagitta gap (25% -> 40% of the chord) to
+ *  0.23% of the chord, ~0.04 mm on a 16 mm hop. */
+const BOWED_HOP_REFINE_STEPS = 6
+
+/** WO-3037: the circular arc from `a` to `b` whose sagitta is `h`, bulging to the LEFT of a->b
+ *  when side = 1 and to the right when side = -1, sampled so no chord strays more than arcTol/2
+ *  from the arc. Its two end tangents turn half its sweep, 2 atan(2h / chord), off the chord. */
+function bowedHop(a: Pt, b: Pt, h: number, side: 1 | -1, arcTol: number): Pt[] {
+  const c = Math.hypot(b.x - a.x, b.y - a.y)
+  const ux = (b.x - a.x) / c, uy = (b.y - a.y) / c
+  const R = (c * c / 4 + h * h) / (2 * h)
+  // The centre sits on the far side of the chord from the bulge.
+  const cx = (a.x + b.x) / 2 - side * uy * -(R - h), cy = (a.y + b.y) / 2 + side * ux * -(R - h)
+  const a0 = Math.atan2(a.y - cy, a.x - cx)
+  // Callers keep h under half the chord, so this is the minor arc.
+  const total = 2 * Math.asin(Math.min(1, c / (2 * R)))
+  const maxStep = 2 * Math.acos(Math.max(-1, 1 - Math.max(arcTol, 1e-4) / (2 * R)))
+  const n = Math.min(64, Math.max(2, Math.ceil(total / Math.max(maxStep, 1e-3))))
+  // Bulging left of a->b means travelling clockwise round the centre.
+  const dir = side === 1 ? -1 : 1
+  const out: Pt[] = [a]
+  for (let k = 1; k < n; k++) {
+    const t = a0 + dir * total * k / n
+    out.push({ x: cx + R * Math.cos(t), y: cy + R * Math.sin(t) })
+  }
+  out.push(b)
+  return out
+}
+
+/** WO-3037: fillet every corner of a kept-down ride that turns by more than `minTurnDeg`, with
+ *  the largest round whose tangent points stay inside `share` of each neighbouring segment, so
+ *  the rounds never overlap. The rounds cut each corner on its inside; the caller re-proves the
+ *  result and keeps the sharp ride when the rounded one does not prove. */
+function roundRideCorners(points: Pt[], arcTol: number, share: number, minTurnDeg = 20): Pt[] {
+  if (points.length < 3) return points
+  const out: Pt[] = [points[0]]
+  for (let i = 1; i + 1 < points.length; i++) {
+    const p = points[i - 1], q = points[i], r = points[i + 1]
+    const l0 = Math.hypot(q.x - p.x, q.y - p.y), l1 = Math.hypot(r.x - q.x, r.y - q.y)
+    if (l0 < 1e-9 || l1 < 1e-9) { out.push(q); continue }
+    const d0 = { x: (q.x - p.x) / l0, y: (q.y - p.y) / l0 }, d1 = { x: (r.x - q.x) / l1, y: (r.y - q.y) / l1 }
+    const cross = d0.x * d1.y - d0.y * d1.x, dot = d0.x * d1.x + d0.y * d1.y
+    const turn = Math.atan2(cross, dot) // signed, + = left
+    if (Math.abs(turn) * 180 / Math.PI <= minTurnDeg || Math.abs(turn) > Math.PI - 1e-6) { out.push(q); continue }
+    const t = share * Math.min(l0, l1)
+    const rad = t / Math.tan(Math.abs(turn) / 2)
+    const s = { x: q.x - d0.x * t, y: q.y - d0.y * t }
+    const sign = turn > 0 ? 1 : -1
+    // Centre: a radius in from the first tangent point, on the side the ride turns to.
+    const cx = s.x - sign * d0.y * rad, cy = s.y + sign * d0.x * rad
+    const a0 = Math.atan2(s.y - cy, s.x - cx)
+    const maxStep = 2 * Math.acos(Math.max(-1, 1 - Math.max(arcTol, 1e-4) / (2 * rad)))
+    const n = Math.min(32, Math.max(2, Math.ceil(Math.abs(turn) / Math.max(maxStep, 1e-3))))
+    for (let k = 0; k <= n; k++) {
+      const a = a0 + turn * k / n
+      out.push({ x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) })
+    }
+  }
+  out.push(points[points.length - 1])
+  return dedupConsecutive(out, Math.max(arcTol * 0.1, 1e-6))
+}
+
 /** WO-438 tier 1, rung (b)(3): a ROUTED keep-down path from `a` to `b` that stays at depth
  *  over PROVEN-cleared stock when neither boundary arc nor the direct chord does.
  *
@@ -7341,6 +7521,7 @@ export function planKeepDownRoute(
   maxLength: number,
   airDepth: ((p: Pt) => number) | null = null,
   onAcceptedGraphRoute?: AcceptedGraphRouteObserver,
+  standing: ((route: Pt[]) => Pt | null) | null = null,
 ): { points: Pt[]; length: number; family: 'backtrack' | 'detour' | 'via-cleared' } | null {
   const direct = Math.hypot(b.x - a.x, b.y - a.y)
   if (direct <= 1e-9 || !Number.isFinite(maxLength) || maxLength <= 0) return null
@@ -7455,6 +7636,7 @@ export function planKeepDownRoute(
     if (airExcursion(cand.points)) continue
     if (fullChecks++ >= 16) break // bounded like the ancestor's point/time budget
     if (rideOverloadsUncut(cand.points, clearedBeforePass, toolRadius, cap, arcTol)) continue
+    if (standing?.(cand.points)) continue // WO-3037 (switch ON only; null otherwise)
     return cand
   }
 
@@ -7490,7 +7672,9 @@ export function planKeepDownRoute(
         // bans the offending leg exactly as an overload does, so the search keeps going.
         const air = escaping >= 0 ? null : airExcursion(route)
         const trip = escaping >= 0 || air ? null : rideOverloadsUncut(route, clearedBeforePass, toolRadius, cap, arcTol)
-        if (escaping < 0 && !air && !trip) {
+        // WO-3037 (switch ON only): a track ride through standing stock bans its leg like an overload.
+        const standingHit = escaping >= 0 || air || trip || !standing ? null : standing(route)
+        if (escaping < 0 && !air && !trip && !standingHit) {
           // WO-2937: observe only after ALL original physical proofs. Deep-copy
           // only when enabled, so even an untyped observer cannot alter motion.
           onAcceptedGraphRoute?.(Object.freeze({
@@ -7504,7 +7688,9 @@ export function planKeepDownRoute(
         // whichever leg of the node path owns it, then look for the next-shortest ride.
         const at = trip
           ? trip.at
-          : air
+          : standingHit
+            ? standingHit
+            : air
             ? air.at
             : { x: (route[escaping - 1].x + route[escaping].x) / 2, y: (route[escaping - 1].y + route[escaping].y) / 2 }
         const distToSeg = (p: Pt, q: Pt): number => {

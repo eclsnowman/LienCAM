@@ -74,6 +74,9 @@ portable:
   artifactName: "${productName}-${version}-${os}-${arch}-portable.${ext}"
 
 mac:
+  # WO-3064: arm64 and Intel are separate builds (one set of files per CPU),
+  # not a universal binary: the universal merge doubles the download and the
+  # app has no native code that would need it. Both are unsigned and untested.
   icon: build/icons/icon.icns
   target:
     - dmg
@@ -95,5 +98,10 @@ linux:
   target:
     - AppImage
     - tar.gz
+    # WO-3064: native packages, same build as the AppImage; untested.
+    - deb
+    - rpm
   category: Engineering
   executableName: liencam
+  maintainer: LienCAM contributors <noreply@liencam.invalid>
+  synopsis: Sketch, model, toolpath, simulate, post and run a CNC machine

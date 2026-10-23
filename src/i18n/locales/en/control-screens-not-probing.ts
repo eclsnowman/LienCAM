@@ -779,7 +779,14 @@ const controlScreens = {
     "text134": "Operations in this program",
     "text135": "lines {{value1}}-{{value2}}",
     "loadRefusedShort": "Load refused - see the console.",
-    "setupNotes": "Setup notes ({{value1}}):"
+    "setupNotesButton": "Setup notes",
+    "setupNotesTitle": "Setup notes - {{value1}}",
+    "setupNotesClose": "Close setup notes",
+    "setupNotesEmpty": "No notes for this setup yet.",
+    "setupNotesEdit": "Edit",
+    "setupNotesAdd": "Add notes",
+    "setupNotesSave": "Save",
+    "setupNotesCancel": "Cancel"
   },
   "ProgramPreview": {
     "text001": "Top view",

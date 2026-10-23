@@ -1,4 +1,4 @@
-; LienCAM 0.37.0-alpha.3 - 03 Soft jaws - linuxcnc
+; LienCAM 0.37.0-alpha.3.1 - 03 Soft jaws - linuxcnc
 G90 G94 G17 G21 G64
 ; Jaw 1 - G54
 G54

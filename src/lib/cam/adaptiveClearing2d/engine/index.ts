@@ -26,13 +26,14 @@ import { resolveFloorHopMm } from '../../moves'
 import { signedArea } from '../../geometry'
 import { assertToolFluteReach } from '../../toolFluteReach'
 import { directionForTool } from '../../../tool/cutHand'
-import { ensureEngineClipperReady, pointInPolygon, type Loop } from './clipperEngine'
+import { ensureEngineClipperReady, offsetClosed, pointInPolygon, union, type Loop } from './clipperEngine'
 import { centroid } from './geom'
 import { processFeature, reportRepositionChoices, restoreFeatureStats, snapshotFeatureStats, type Feature, type FeatureResult, type FeatureStatsSnapshot, type ProcessParams, type RepositionChoiceTrace } from './processFeature'
 import { emitFeature, type EmitContext } from './emit'
 import type { RepositionTimeModel } from './repositionTime'
 import { withOperatorNotices } from './operatorNotices'
 import { estimateRuntimeMs } from '../../runtime'
+import type { StockState } from '../../stockState'
 import { ensureClipperReady } from '../../face2d/clipperOffset'
 import { clearanceAllowanceMmOf, type ToolReachInputs } from '../../holderClearanceGate'
 import {
@@ -117,6 +118,7 @@ export async function buildAdaptiveClearingToolpath(
     stepOver,
     tolerance,
     helixDiameter,
+    minHelixRadius: positiveOr(params.minHelixRadius, DEFAULT_MIN_HELIX_RADIUS_MM),
     millingDirection,
     stockToLeave: passes.stockToLeave ?? 0,
     integralWallFollow: params.integralWallFollow ?? true,
@@ -222,7 +224,14 @@ export async function buildAdaptiveClearingToolpath(
       heights: { ...emitHeights, topZ: run.topZ, bottomZ: run.bottomZ as number },
       floorFinishDepth: run.floorFinish ? floorFinishDepth : undefined,
     }
-    const result = await processFeatureFastest(feature, procParams, repositionTimeFor(runCtx), runCtx, notify, onPassProgress)
+    // WO-3054: under a plunge setting, the holes earlier operations already cleared to this run's
+    // deepest level are where the plunge may go straight down.
+    const clearedHoles = forcePlunge
+      ? clearedHolesAt((payload as { remainingStock?: StockState }).remainingStock, feature, origin,
+        Math.min(runCtx.heights.bottomZ, runCtx.floorFinishDepth ?? Infinity))
+      : []
+    const runParams = clearedHoles.length > 0 ? { ...procParams, clearedHoles } : procParams
+    const result = await processFeatureFastest(feature, runParams, repositionTimeFor(runCtx), runCtx, notify, onPassProgress)
     // ADR-0003: surface a partial/aborted feature; do not silently swallow it.
     if (result.stats.aborted) {
       console.warn(`[ac-engine] feature ${f} aborted: ${result.stats.aborted} (emitting ${result.passes.length} partial passes)`)
@@ -272,6 +281,40 @@ export async function buildAdaptiveClearingToolpath(
   if (allMoves.length === 0 && uncutRegion) throw new Error(`Adaptive Clearing cut nothing because ${uncutRegion}.`)
   onProgress?.(1.0, 'Done')
   return allMoves
+}
+
+/** WO-3054: what earlier operations of this setup cleared at least down to `deepestZ`, read from
+ *  the remaining-stock replay the store hands every request (WO-1582), as material-space loops in
+ *  the feature's own frame. A column counts when its material top is at or below that level. The
+ *  union of those cells is shrunk by one cell, so the replay's sampling never claims air it did
+ *  not prove. No replay (nothing ran before this operation) is no hole. */
+function clearedHolesAt(stock: StockState | undefined, feature: Feature, origin: FeatureOrigin, deepestZ: number): Loop[] {
+  if (!stock || stock.topZ.length !== stock.nx * stock.ny || !Number.isFinite(deepestZ)) return []
+  const cell = stock.resolutionMm
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of feature.boundary) {
+    minX = Math.min(minX, p.x + origin.x); maxX = Math.max(maxX, p.x + origin.x)
+    minY = Math.min(minY, p.y + origin.y); maxY = Math.max(maxY, p.y + origin.y)
+  }
+  const i0 = Math.max(0, Math.floor((minX - stock.bounds.minX) / cell))
+  const i1 = Math.min(stock.nx - 1, Math.ceil((maxX - stock.bounds.minX) / cell))
+  const j0 = Math.max(0, Math.floor((minY - stock.bounds.minY) / cell))
+  const j1 = Math.min(stock.ny - 1, Math.ceil((maxY - stock.bounds.minY) / cell))
+  const cells: Loop[] = []
+  for (let j = j0; j <= j1; j++) {
+    const y0 = stock.bounds.minY + j * cell - origin.y
+    for (let i = i0; i <= i1; i++) {
+      if (!(stock.topZ[j * stock.nx + i] <= deepestZ + 1e-6)) continue
+      let end = i
+      while (end + 1 <= i1 && stock.topZ[j * stock.nx + end + 1] <= deepestZ + 1e-6) end++
+      const x0 = stock.bounds.minX + i * cell - origin.x
+      const x1 = stock.bounds.minX + (end + 1) * cell - origin.x
+      cells.push([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y0 + cell }, { x: x0, y: y0 + cell }])
+      i = end
+    }
+  }
+  if (cells.length === 0) return []
+  return offsetClosed(union(cells, []), -cell, cell / 4)
 }
 
 /** Split the loop set into features. Only the loops the user picked (`loopIds`) are

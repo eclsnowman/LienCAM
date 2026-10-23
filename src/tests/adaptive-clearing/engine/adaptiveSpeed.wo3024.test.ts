@@ -6,7 +6,8 @@
 //    steps. On the host the record was made on, both must also equal the engine before WO-3024.
 // 2. The measuring-stick record (src/tests/evidence/WO-3024/stick-identity.json): the whole stick
 //    planned before and after on one machine. Every adaptive step's moves are the same bytes and
-//    the P0 rows differ in nothing but planning time. The record names the engine source it was
+//    the P0 rows differ in nothing but planning time, except in a chain a later order changed on
+//    purpose (ORDERED_CHANGES). The record names the engine source it was
 //    made on, so it goes stale (and this fails) when the engine changes without a new run.
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -20,6 +21,10 @@ import { alpha3Chains } from '../../benchmark/registry'
 const EVIDENCE = 'src/tests/evidence/WO-3024'
 const sha = (text: string | Buffer): string => createHash('sha256').update(text).digest('hex')
 const host = `${platform()}-${arch()}`
+// Chains a later order changed on purpose, named by that order (Architect grant on its PR). Every
+// other adaptive step and P0 value must be the same bytes before and after.
+// WO-3054 (PR #90): adaptive into a closed pocket enters by helix or plunges into a cleared hole.
+const ORDERED_CHANGES: readonly string[] = ['engagement-pocket-adaptive_clearing_2d-declared']
 
 interface OracleRecord { host: string; engineSource: string; requests: Record<string, string> }
 interface StickRow { chain: string; stepId: string; type: string; before: { status: string; operatorText?: string; moveCount: number; movesSha: string }; after: StickRow['before'] }
@@ -68,9 +73,22 @@ describe('WO-3024 faster adaptive plans the same moves', () => {
       .map(step => `${chain.id} ${step.id}`))
     expect(record.adaptiveRows.map(row => `${row.chain} ${row.stepId}`).sort(), 'every adaptive step of the stick is in the record').toEqual(adaptive.sort())
     for (const row of record.adaptiveRows) {
+      if (ORDERED_CHANGES.includes(row.chain)) {
+        // WO-3054: the plunge entry into the closed H-pocket cut nothing; it now enters by helix and cuts.
+        expect({ status: row.before.status, moves: row.before.moveCount }, `${row.chain} ${row.stepId} before`).toEqual({ status: 'error', moves: 0 })
+        expect(row.after.status, `${row.chain} ${row.stepId} after`).toBe('ready')
+        expect(row.after.moveCount, `${row.chain} ${row.stepId} cuts`).toBeGreaterThan(0)
+        continue
+      }
       expect(row.after, `${row.chain} ${row.stepId} plans the same moves`).toEqual(row.before)
     }
-    expect(record.p0.differences, 'P0 non-timing differences').toBe(0)
+    // Every P0 difference lies in an ordered change: WO-3054's per-chain count of the same two runs.
+    const changed = JSON.parse(readFileSync('src/tests/evidence/WO-3054/stick-before-after.json', 'utf8')) as {
+      before: string; after: string; chainsWithNonTimingDifferences: Record<string, number>
+    }
+    expect({ before: changed.before, after: changed.after }, 'the per-chain count is of this record\'s two runs').toEqual({ before: record.before.source, after: record.after.source })
+    expect(Object.keys(changed.chainsWithNonTimingDifferences).sort(), 'P0 non-timing differences only in ordered changes').toEqual([...ORDERED_CHANGES].sort())
+    if (record.p0.differences > 0) expect(ORDERED_CHANGES.length).toBeGreaterThan(0)
     expect(record.p0.chains).toBe(alpha3Chains().length)
   })
 })

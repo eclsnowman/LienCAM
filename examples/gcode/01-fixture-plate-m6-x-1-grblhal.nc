@@ -1,4 +1,4 @@
-(LienCAM 0.37.0-alpha.3 - 01 Fixture plate - M6 x 1 - grblhal)
+(LienCAM 0.37.0-alpha.3.1 - 01 Fixture plate - M6 x 1 - grblhal)
 ( grblHAL )
 G90 G94 G17 G21
 ( Setup 1 )

@@ -60,7 +60,9 @@ export async function postAll({ check = false, overrides = {}, only } = {}) {
         next()
       })
     } }],
-    server: { host: '127.0.0.1', port: 0,
+    // A one-shot post needs no file watcher; watching the checkout root also walks
+    // every lane worktree under archive/ and ran Node out of heap (10-22).
+    server: { host: '127.0.0.1', port: 0, watch: null,
       fs: { allow: [ROOT, realpathSync(path.join(ROOT, 'node_modules'))] } },
     define: { __APP_GIT_COMMIT__: JSON.stringify('examples'),
       __APP_GIT_BRANCH__: JSON.stringify('examples'), __APP_BUILD_DATE__: JSON.stringify('examples') },

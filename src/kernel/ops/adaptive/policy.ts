@@ -296,23 +296,43 @@ export const ADAPTIVE_POLICY: DeepReadonly<AdaptivePolicy> = deepFreeze<Adaptive
   },
 })
 
-/**
- * WO-3041 switch (the operator 10-21: adaptive must clear the pocket; motion changes ship OFF behind
- * a before/after card). OFF: an operation whose entry is a plunge (helix diameter 0) opens a
- * hole exactly one tool wide, every first pass out of it is a full slot, and the deep
- * H-pocket cuts nothing (WO-3024 finding). ON: the plunge is kept and, at depth, an opening
- * ring (an outward spiral closed by one full circle, its sustained width held to the
- * operator's stepover and checked against the 75%-of-slot ceiling) grows the hole to the
- * disk a default helix would open; the walker then takes over as it does from a helix seed.
- * Helix, ramp and side entries are not touched. Turning it on is this one line.
- */
-export const ADAPTIVE_MOTION_SWITCHES: Readonly<{ plungeOpeningRing: boolean; keepDownCapForm: boolean }> = Object.freeze({
-  plungeOpeningRing: false,
+/** Adaptive motion switches: each changes motion and ships OFF behind a before/after card.
+ *  (WO-3054 removed WO-3041's plungeOpeningRing: the operator ruled a plunge into a closed pocket
+ *  enters by helix or into an already-cleared hole instead.) */
+export const ADAPTIVE_MOTION_SWITCHES: Readonly<{ keepDownCapForm: boolean; steeringSmoothing: boolean; keepDownLinksSmooth: boolean }> = Object.freeze({
   /** WO-3030 (WO-3019 item 8, card D): OFF keeps MD-119's per-site parity (walker band
    *  S/4 + tolerance, routed traverse S/4 + 4 x arcTol). ON: both sites use the S/4 + 4a form
    *  (KEEP_DOWN_CAP_SWITCH_FORM). The two forms are the same number whenever tolerance >= 0.04 mm
    *  (arcTol = max(tolerance/4, 0.01)); below that the walker band widens to the traverse's. */
   keepDownCapForm: false,
+  /** WO-3042 (WO-3029 phase 2, card C): OFF keeps today's steering to the bit. ON smooths the
+   *  steering wobble causes WO-3029 located: (A) the full-load zone round a pass's engage point fades
+   *  into the wall taper instead of stepping at one tool radius; (B) the stepper corrects its first
+   *  guess toward the load target instead of keeping any guess inside the accept band; (C) the
+   *  stepper's momentum learns the departure-clamped turn the tool made, and a mid-pass clamped step
+   *  is no longer pinned against the pass's path cleanup (only the departure head off a planted wall
+   *  start stays pinned). Numbers: STEERING_SMOOTHING. processFeature.ts reads the switch. */
+  steeringSmoothing: false,
+  /** WO-3037 (owner 2026-10-21 on the torus spikes, card on his yes): OFF keeps today's keep-down
+   *  links to the bit. ON: a short hop whose straight chord would graze the finished wall bows
+   *  round it on a shallow arc through proven-cleared stock instead of the perpendicular V detour;
+   *  a routed ride that still turns has its corners rounded when the round proves; and every
+   *  at-depth travel ride (through-cleared chord, bowed hop, routed ride, stop-short travel) is
+   *  refused where it meets stock the belief still holds standing, outside the bite at its own
+   *  end. processFeature.ts reads the switch. */
+  keepDownLinksSmooth: false,
+})
+
+/** WO-3042: the numbers the steeringSmoothing switch uses (read only when it is ON). */
+export const STEERING_SMOOTHING = Object.freeze({
+  /** A: full load within one tool radius of the engage point, the wall taper beyond this many
+   *  radii, linear between. */
+  engageFadeRadii: 2,
+  /** B: the first guess moves by this fraction of the turn that, along this pass's measured
+   *  load-per-turn slope, would bring the last step's load to this step's target. */
+  correctionGain: 0.5,
+  /** B: that correction is at most this fraction of the stepper's per-step deflection clamp. */
+  maxCorrectionFraction: 0.1,
 })
 
 /** The MD-119 form the WO-3030 switch selects at both keep-down cap sites. */

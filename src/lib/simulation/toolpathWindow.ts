@@ -1,7 +1,9 @@
 import type { ToolpathMove } from '../../types'
 
-/** Hard bound applies even to zero-duration moves and densely sampled arcs. */
-export const TOOLPATH_WINDOW_SIDE_LIMIT = 32
+/** Hard bound applies even to zero-duration moves and densely sampled arcs. Large
+ *  enough that the 60 s maximum is drawn in full on finely sampled helices and arcs
+ *  (WO-3082: a 32 cap filled after 2-3 s, so longer Trail/Lead values changed nothing). */
+export const TOOLPATH_WINDOW_SIDE_LIMIT = 4096
 export const TOOLPATH_WINDOW_MS = 2000
 /** Session controls accept a useful finite range without weakening the work bound. */
 export const TOOLPATH_WINDOW_MAX_MS = 60_000

@@ -1394,6 +1394,7 @@ export function meshContourLoops(mesh: MeshBuffers): Loop2D[] {
       type: candidate.chain.closed ? (nestingDepth % 2 === 0 ? 'contour' : 'hole') : 'open',
       layerId: MESH_EDGE_CHAIN_LAYER_ID,
       area: candidate.area,
+      z: zLabel,
     }
   })
 }

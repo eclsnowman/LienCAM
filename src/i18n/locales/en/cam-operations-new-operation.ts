@@ -1622,7 +1622,7 @@ const words = {
     "Cutter_trail": "Cutter trail",
     "Cutter_trail_seconds": "Trail (recent seconds)",
     "Cutter_lead_seconds": "Lead (upcoming seconds)",
-    "Cutter_trail_limit": "Max 32 segments/side; dense paths may show less time.",
+    "Cutter_trail_limit": "Up to 4096 segments per side; very dense paths may show less time.",
     "Simulation_frame_build_refused_move": "Simulation frame build refused move {{p1}} ({{p2}})",
     "WCS_X_Y_Z": "WCS X - Y - Z -",
     "WCS_X_Y_Z_2": "WCS X {{p1}} Y {{p2}} Z {{p3}} {{p4}}",

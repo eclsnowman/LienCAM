@@ -385,7 +385,7 @@ describe('WO-1609: a Face then a Pocket - the pocket starts at the faced surface
   })
 })
 
-/** WCS Z of every non-rapid move that ends below the plate top: cuts, plunges and lead-ins. */
+/** WCS depths including entry moves, retained for the unchanged contour route. */
 function feedDepths(moves: readonly ToolpathMove[]): number[] {
   return moves.filter((m) => m.type !== 'rapid' && m.z - PLATE_TOP < -1e-6).map((m) => m.z - PLATE_TOP)
 }
@@ -395,19 +395,27 @@ describe.each(['contour_2d', 'adaptive_clearing_2d'] as const)('WO-1609: a Face 
     install([faceOp(), secondOp(type)])
     await generate('op-face')
     await generate('op-pocket')
-    const after = feedDepths(opById('op-pocket').toolpathMoves ?? [])
+    // WO-3054 adds a helix from the material surface to the first depth pass.
+    // Descending ramp samples are entry, not cut levels. The existing horizontal
+    // cutting-level reader still detects any air pass or wrong faced start.
+    const depths = type === 'adaptive_clearing_2d' ? cutLevels : feedDepths
+    const after = depths(opById('op-pocket').toolpathMoves ?? [])
     expect(topOfPlan('op-pocket')).toBeCloseTo(-FACE_DEPTH, 6)
     expect(startLines()).toHaveLength(1)
 
     install([secondOp(type)])
     await generate('op-pocket')
-    const before = feedDepths(opById('op-pocket').toolpathMoves ?? [])
+    const before = depths(opById('op-pocket').toolpathMoves ?? [])
     expect(topOfPlan('op-pocket')).toBeCloseTo(0, 6)
 
     expect(after.length).toBeGreaterThan(0)
     expect(before.length).toBeGreaterThan(0)
     expect(Math.max(...before), 'today: first pass one step-down below the stock top').toBeCloseTo(-STEPDOWN, 6)
     expect(Math.max(...after), 'first pass one step-down below the faced surface').toBeCloseTo(-FACE_DEPTH - STEPDOWN, 6)
+    if (type === 'adaptive_clearing_2d') {
+      expect(after, 'all faced depth passes, excluding helix descent').toEqual([-5, -8, -10])
+      expect(before, 'all original depth passes, excluding helix descent').toEqual([-3, -6, -9, -10])
+    }
     expect(Math.min(...after), 'deepest cut unchanged').toBeCloseTo(Math.min(...before), 6)
   })
 })

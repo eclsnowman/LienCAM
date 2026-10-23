@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 //
-// WO-2992: Control's program card shows the active setup's notes read-only
-// when they are not empty, and nothing when they are.
+// WO-2992 + WO-3079 (owner release review 2026-10-23): Control shows the active setup's notes
+// behind a "Setup notes" button that opens a floating panel (nothing on the screen
+// moves), readable and editable right there. The old always-on strip is gone.
 
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { typedMock } from '../support/typedMock'
 
@@ -62,34 +63,73 @@ function seedSetups(notesA: string, notesB: string) {
   })
 }
 
-describe('WO-2992 setup notes on Control', () => {
-  it('shows no block when the active setup has no notes', () => {
-    seedSetups('', 'other')
+const notesOf = (id: string) => useCamStore.getState().project.setups.find((setup) => setup.id === id)?.notes
+const openPanel = () => fireEvent.click(screen.getByTestId('control-setup-notes-button'))
+
+describe('setup notes on Control: button + floating panel', () => {
+  it('shows no button when the project has no setup at all', () => {
+    act(() => {
+      useCamStore.getState().newProject()
+      useCamStore.setState((s) => ({ project: { ...s.project, setups: [], activeSetupId: null } }))
+    })
     render(<ProgramPanel />)
-    expect(screen.queryByTestId('control-setup-notes')).toBeNull()
+    expect(screen.queryByTestId('control-setup-notes-button')).toBeNull()
   })
 
-  it('shows no block when the project has no setup at all', () => {
-    act(() => { useCamStore.getState().newProject() })
-    render(<ProgramPanel />)
-    expect(screen.queryByTestId('control-setup-notes')).toBeNull()
-  })
-
-  it('shows the active setup notes, read-only', () => {
+  it('takes no room until asked: closed by default, a dot only when notes exist', () => {
     seedSetups('Clamp on the left jaw', '')
     render(<ProgramPanel />)
-    const block = screen.getByTestId('control-setup-notes')
-    expect(block.textContent).toContain('Clamp on the left jaw')
-    expect(block.querySelector('textarea, input')).toBeNull()
+    expect(screen.getByTestId('control-setup-notes-button')).toBeTruthy()
+    expect(screen.getByTestId('control-setup-notes-dot')).toBeTruthy()
+    expect(screen.queryByTestId('control-setup-notes')).toBeNull()
+    act(() => { useCamStore.getState().setActiveSetup('b') })
+    expect(screen.queryByTestId('control-setup-notes-dot')).toBeNull()
+  })
+
+  it('opens the active setup notes, read-only until Edit, and closes with Escape', () => {
+    seedSetups('Clamp on the left jaw', '')
+    render(<ProgramPanel />)
+    openPanel()
+    const panel = screen.getByTestId('control-setup-notes')
+    expect(screen.getByTestId('control-setup-notes-text').textContent).toBe('Clamp on the left jaw')
+    expect(panel.querySelector('textarea, input')).toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('control-setup-notes')).toBeNull()
+  })
+
+  it('edits and saves the notes right in the panel', () => {
+    seedSetups('Clamp on the left jaw', '')
+    render(<ProgramPanel />)
+    openPanel()
+    fireEvent.click(screen.getByTestId('control-setup-notes-edit-button'))
+    const box = screen.getByTestId('control-setup-notes-edit') as HTMLTextAreaElement
+    expect(box.value).toBe('Clamp on the left jaw')
+    fireEvent.change(box, { target: { value: 'Clamp on the left jaw\nZero on the top face' } })
+    fireEvent.click(screen.getByTestId('control-setup-notes-save'))
+    expect(notesOf('a')).toBe('Clamp on the left jaw\nZero on the top face')
+    expect(screen.getByTestId('control-setup-notes-text').textContent).toBe('Clamp on the left jaw\nZero on the top face')
+  })
+
+  it('adds notes to a setup that has none', () => {
+    seedSetups('', '')
+    render(<ProgramPanel />)
+    openPanel()
+    expect(screen.queryByTestId('control-setup-notes-text')).toBeNull()
+    fireEvent.click(screen.getByTestId('control-setup-notes-edit-button'))
+    fireEvent.change(screen.getByTestId('control-setup-notes-edit'), { target: { value: 'Soft jaws' } })
+    fireEvent.click(screen.getByTestId('control-setup-notes-save'))
+    expect(notesOf('a')).toBe('Soft jaws')
+    expect(notesOf('b')).toBe('')
   })
 
   it('switching the active setup switches the notes', () => {
     seedSetups('first notes', 'second notes')
     render(<ProgramPanel />)
-    expect(screen.getByTestId('control-setup-notes').textContent).toContain('first notes')
+    openPanel()
+    expect(screen.getByTestId('control-setup-notes-text').textContent).toBe('first notes')
     act(() => { useCamStore.getState().setActiveSetup('b') })
-    expect(screen.getByTestId('control-setup-notes').textContent).toContain('second notes')
+    expect(screen.getByTestId('control-setup-notes-text').textContent).toBe('second notes')
     act(() => { useCamStore.getState().setActiveSetup('a') })
-    expect(screen.getByTestId('control-setup-notes').textContent).toContain('first notes')
+    expect(screen.getByTestId('control-setup-notes-text').textContent).toBe('first notes')
   })
 })
