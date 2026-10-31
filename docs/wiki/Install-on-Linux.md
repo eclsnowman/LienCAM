@@ -9,8 +9,8 @@
 
 ## Which file to download
 
-**Current release:** [0.37.0-alpha.3.2](../releases/tag/v0.37.0-alpha.3.2).
-The Linux board test below was run before this release; it is not a new board test of alpha.3.2.
+**Current release:** [0.37.0-alpha.3.3](../releases/tag/v0.37.0-alpha.3.3).
+The Linux board test below was run before this release; it is not a new board test of alpha.3.3.
 
 From the project's [Releases page](../releases) (x86-64 PCs use the `x86_64`/`x64` files; ARM64 computers use the `arm64`/`aarch64` ones; `.deb` and `.rpm` packages are also listed there):
 

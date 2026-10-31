@@ -8,6 +8,12 @@ need re-saving in the next; nothing is promised to keep working before 1.0. Unre
 
 ## [Unreleased]
 
+## [0.37.0-alpha.3.3] - 2026-10-31
+
+### Fixed
+
+- 3D Adaptive Rough no longer stops with "side entry has no stock section" on x64 PCs when it rolls into a leftover from ground it already cleared at that depth (smoothing stays on).
+
 ## [0.37.0-alpha.3.2] - 2026-10-30
 
 A follow-up to alpha.3.1.

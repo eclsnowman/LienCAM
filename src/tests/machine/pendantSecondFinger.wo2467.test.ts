@@ -62,7 +62,8 @@ for (const order of ['first-then-second', 'second-then-first']) {
       const y = '[data-axis="Y"][data-sign="-1"]'
       await fire(page, z, 'pointerdown', 1)
       await fire(page, y, 'pointerdown', 2)
-      expect(calls.filter((c) => c === 'continuous')).toHaveLength(1)
+      // The jog request reaches the route asynchronously; under a loaded CI shard it can arrive after this line runs.
+      await expect.poll(() => calls.filter((c) => c === 'continuous').length).toBe(1)
       await page.waitForTimeout(400)
       const [a, b] = order === 'first-then-second' ? [[z, 1], [y, 2]] : [[y, 2], [z, 1]]
       await fire(page, a[0] as string, 'pointerup', a[1] as number)

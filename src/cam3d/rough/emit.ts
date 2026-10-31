@@ -47,6 +47,7 @@ import { cutterDiskIntersectsRegion } from './cutRegion';
 import { replayMovesIntoStock, type ToolTipPosition } from './replayStock';
 import { LOW_TRAVEL_HEADROOM_MM } from './traverseSafety';
 import type { AdaptiveMillingDirection } from '../../lib/cam/types';
+import { ADAPTIVE_POLICY } from '../../kernel/ops/adaptive/policy';
 
 /** Fixed helix sampling: 24 straight segments per revolution (D-006 determinism). */
 const HELIX_SEGMENTS_PER_TURN = 24;
@@ -89,6 +90,14 @@ export const ADAPTIVE_ENTRY_POLICY: { entriesAtMaterial: boolean } = {
 };
 /** WO-3028: removed volume at or below this (mm^3) is "the pass removes nothing". */
 const EMPTY_VISIT_VOLUME_MM3 = 1e-3;
+/**
+ * WO-3328: the planner's own bound on a re-seed roll-in's clear disk (the share of the
+ * cutter disk at C its cleared belief may leave uncut). The emitter holds the motion it
+ * actually emitted to the same bound when no stock section or live stock can prove C.
+ */
+const SIDE_RESEED_CLEAR_UNCUT_MAX = ADAPTIVE_POLICY.caps.sideReseedClearUncutMax;
+/** WO-3328: sample grid of the swept-disk proof -- this many cells per cutter radius. */
+const SWEPT_PROOF_CELLS_PER_RADIUS = 10;
 
 /** Exact distance between the segment a-b and the axis-aligned square [x0,x1]x[y0,y1]:
  *  0 when they meet; otherwise the nearest pair is a vertex of one against the other. */
@@ -275,6 +284,11 @@ export function emitLevelPasses(
   const helixRampTan = Math.tan((helixAngleDeg * Math.PI) / 180);
   const cur = ctx.cursor;
   const moves: IrMove[] = [];
+  // WO-3328: every tool-centre segment this call has already run AT the cutting depth
+  // (x0, y0, x1, y1; a point is a zero-length segment). A cutter at depth z empties its
+  // whole column above z, so these are the physical proof of a re-seed roll-in's clear
+  // point when neither a stock section nor the live stock can give one.
+  const sweptAtZ: number[] = [];
   const canUseStockAwareEntry =
     ctx.stockProven === true && ctx.stock !== undefined && ctx.cutter !== undefined;
   // Same-level re-entries may legitimately descend inside the ORIGINAL stock
@@ -505,6 +519,10 @@ export function emitLevelPasses(
     if (cur.x === x && cur.y === y && cur.z === zz) return;
     const move: IrMove = { t, x, y, z: zz, role };
     moves.push(move);
+    if (Math.abs(zz - z) <= EPS) {
+      const fromDepth = Number.isFinite(cur.x) && Number.isFinite(cur.y) && Math.abs(cur.z - z) <= EPS;
+      sweptAtZ.push(fromDepth ? cur.x : x, fromDepth ? cur.y : y, x, y);
+    }
     if (entryProofStock && ctx.cutter) {
       entryProofTip = replayMovesIntoStock(entryProofStock, ctx.cutter, [move], entryProofTip);
     }
@@ -676,6 +694,44 @@ export function emitLevelPasses(
   };
 
   /**
+   * WO-3328: share of the cutter disk at `c` (radius `R`) that this call's own motion at
+   * the cutting depth has NOT swept, read on a grid of R / SWEPT_PROOF_CELLS_PER_RADIUS.
+   * A grid point counts as swept when some emitted segment at depth passes within R of it.
+   */
+  const unsweptDiskFraction = (c: Pt, R: number): number => {
+    const near: number[] = [];
+    for (let k = 0; k < sweptAtZ.length; k += 4) {
+      const x0 = sweptAtZ[k], y0 = sweptAtZ[k + 1], x1 = sweptAtZ[k + 2], y1 = sweptAtZ[k + 3];
+      if (Math.max(x0, x1) < c.x - 2 * R || Math.min(x0, x1) > c.x + 2 * R) continue;
+      if (Math.max(y0, y1) < c.y - 2 * R || Math.min(y0, y1) > c.y + 2 * R) continue;
+      near.push(x0, y0, x1, y1);
+    }
+    const n = SWEPT_PROOF_CELLS_PER_RADIUS;
+    const h = R / n;
+    let total = 0;
+    let unswept = 0;
+    for (let i = -n; i <= n; i++) {
+      for (let j = -n; j <= n; j++) {
+        if (Math.hypot(i * h, j * h) > R + EPS) continue;
+        total++;
+        const px = c.x + i * h;
+        const py = c.y + j * h;
+        let swept = false;
+        for (let k = 0; k < near.length && !swept; k += 4) {
+          const ax = near[k], ay = near[k + 1];
+          const ex = near[k + 2] - ax, ey = near[k + 3] - ay;
+          const l2 = ex * ex + ey * ey;
+          let t = l2 > 0 ? ((px - ax) * ex + (py - ay) * ey) / l2 : 0;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          swept = Math.hypot(px - (ax + ex * t), py - (ay + ey * t)) <= R + EPS;
+        }
+        if (!swept) unswept++;
+      }
+    }
+    return total > 0 ? unswept / total : 1;
+  };
+
+  /**
    * Emit a 'side' (outside-in) entry. The engine supplies both the fully-clear point C
    * on preEngage and the bounded grazing point P. Retract, rapid over C, descend at C,
    * then feed laterally C -> P so engageProtrusion is consumed by the cutter side.
@@ -684,11 +740,22 @@ export function emitLevelPasses(
    * A centre-only point-membership check cannot express that physical invariant.
    */
   const emitSideEntry = (pass: Extract<AdaptivePass, { type: 'entry' }>): void => {
-    // (1) Fail loud only when neither proof source exists. A bounded lateral
+    // (1) Fail loud only when no proof source exists. A bounded lateral
     // reseed can be planned after this Z section is already empty; in the 3D
     // strategy the replayed live stock is the physical authority in that case.
+    // WO-3328: an interior operation on a field the strategy could not prove
+    // (stockProven false) has neither, yet the planner still rolls a helix-less
+    // leftover in from the cleared side (WO-409, WO-1178). Its clear disk lies in
+    // ground this call's own motion swept at this depth, and that motion is the
+    // proof. An outside-in opening whose section was never wired descends in air
+    // nothing swept, so it still fails loud here.
     const hasLiveStockProof = entryProofStock !== undefined && ctx.cutter !== undefined;
-    if ((!stockSection || stockSection.length === 0) && !hasLiveStockProof) {
+    const hasStockSection = stockSection !== undefined && stockSection.length > 0;
+    const sweptProof = !hasStockSection && !hasLiveStockProof
+      && pass.clearPoint !== undefined
+      && ctx.toolRadius !== undefined && Number.isFinite(ctx.toolRadius) && ctx.toolRadius > 0
+      && unsweptDiskFraction(pass.clearPoint, ctx.toolRadius) <= SIDE_RESEED_CLEAR_UNCUT_MAX;
+    if (!hasStockSection && !hasLiveStockProof && !sweptProof) {
       throw new Error(
         `emitLevelPasses: 'side' entry at z=${z} has no stock section (wiring bug, ADR-0003).`,
       );
@@ -721,7 +788,9 @@ export function emitLevelPasses(
           x0: C.x, y0: C.y, z0: z,
           x1: C.x, y1: C.y, z1: z,
         }, ctx.cutter).intrusionMm > 1e-3
-      : cutterDiskIntersectsRegion(stockSection!, C.x, C.y, R);
+      : sweptProof
+        ? false
+        : cutterDiskIntersectsRegion(stockSection!, C.x, C.y, R);
     if (clearPointIntersects) {
       throw new Error(
         `emitLevelPasses: 'side' entry at z=${z}: cutter disk at clear point ` +

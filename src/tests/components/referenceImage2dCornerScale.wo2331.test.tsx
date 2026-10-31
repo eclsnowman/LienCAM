@@ -77,7 +77,8 @@ it('scales through the real 2D toolbox with live width, fixed anchor, one Undo, 
   }
   const distance = await screen.findByLabelText('Real distance')
   fireEvent.change(distance, { target: { value: '20' } }); fireEvent.click(screen.getByRole('button', { name: /^Apply$/ }))
-  await waitFor(() => expect(payload().widthMm * 0.4).toBeCloseTo(20, 3))
+  // Recalibration can take longer than waitFor's 1 s default on a loaded CI shard.
+  await waitFor(() => expect(payload().widthMm * 0.4).toBeCloseTo(20, 3), { timeout: 10_000 })
   fireEvent.click(screen.getByTestId('reference-image-lock-scale'))
   expect(screen.queryByTestId('reference-image-corner-2')).toBeNull()
   const locked = payload()
