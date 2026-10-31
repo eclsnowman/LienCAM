@@ -59,6 +59,7 @@ const { makeMachine, makeOp, makeStock, makeTool, makeWcs, move, stampGeneration
 const { SMART_HEIGHT_INTENT_VERSION, SMART_HEIGHT_POLICY_VERSION } =
   await import('../../lib/cam/smartHeights')
 import type { PhysicalStock, Project, Setup, Tool } from '../../types'
+import { setupLoadAdoptionInProgress, setupLoadInProgress, yieldSetupLoadTask } from '../../lib/machine/setupLoadPreparation'
 
 const GCODE = [
   'G21 G90 G54',
@@ -483,6 +484,14 @@ describe('WO-379: real lifecycle paths (newProject / disconnect)', () => {
   })
 })
 
+// WO-3125/WO-3292 made Setup Load span several real tasks (worker prep, then
+// scan, load and preview draw each in its own task); wait for it to finish.
+async function setupLoadSettled(): Promise<void> {
+  for (let i = 0; i < 500 && (setupLoadInProgress() || setupLoadAdoptionInProgress()); i++) {
+    await act(async () => { await yieldSetupLoadTask() })
+  }
+}
+
 describe('WO-379: end-to-end "Load setup" through the real post + UI path', () => {
   afterEach(() => { cleanup() })
   it('stores a context that matches the exact emitted program, order, spans, and inputs', async () => {
@@ -513,6 +522,7 @@ describe('WO-379: end-to-end "Load setup" through the real post + UI path', () =
     expect((button as HTMLButtonElement).disabled).toBe(false)
 
     await act(async () => { fireEvent.click(button) })
+    await setupLoadSettled()
 
     const ctx = useMachineControl.getState().programContext
     expect(ctx).not.toBeNull()
@@ -554,6 +564,7 @@ describe('WO-379: end-to-end "Load setup" through the real post + UI path', () =
     render(<ProgramPanel />)
     fireEvent.click(screen.getByTestId('control-load-menu'))
     await act(async () => { fireEvent.click(screen.getByTestId(`control-load-setup-item-${project.setups[0].id}`)) })
+    await setupLoadSettled()
     expect(screen.getByTestId('control-program-context').getAttribute('data-staleness')).toBe('current')
     // Settle: any pending render has run.
     await act(async () => {})

@@ -4,9 +4,11 @@
 // output SHAPE, which src/tests/kernel/featureInterface.wo3002.test.ts pins to
 // the real types. GAP-013 (src/tests/evidence/WO-3002/GAP-013.md) is the record
 // of what each source can and cannot tell apart.
-import type { CylinderFeature, HoleFeature, Vec2, Vec3 } from '../../types'
+import type { Vec3 } from '../../types'
 import { axisFoot, canonicalAxis, canonicalRing, dot, qPoint, unit, unorderedPair, type P3 } from './signature'
-import type { AxialBand, EdgeDescriptor, FaceDescriptor, FeatureCandidate, FeatureGeometry, FeatureType } from './types'
+import type { AxialBand, EdgeDescriptor, FaceDescriptor, FeatureCandidate, FeatureGeometry, FeatureType, LoopLike, MeshBlendLike, MeshRecognitionLike, ModelVerdictLike, StepCylinderLike } from './types'
+
+export type { ModelVerdictLike, MeshRoundLike, MeshRegionLike, MeshBlendLike, MeshRecognitionLike, LoopLike, StepCylinderLike } from './types'
 
 export interface AdapterResult {
   readonly candidates: FeatureCandidate[]
@@ -216,8 +218,6 @@ export function edgesFromTessellation(t: TessEdgesLike): Record<string, EdgeDesc
 
 // ---- R1: STEP cylinder scan (derive.ts holeFeatures / cylinderFeatures) ----
 
-type StepCylinderLike = Pick<HoleFeature, 'center' | 'diameter' | 'topZ' | 'bottomZ' | 'through'> & { kind?: CylinderFeature['kind'] }
-
 /** R1 reports one cylinder per radius, so a counterbore arrives as two bores on
  *  one axis that meet end to end (GAP-013 G-102). Those are joined into one
  *  counterbore; everything else maps one to one. R1 never reads cones, so it
@@ -250,22 +250,12 @@ export function fromStepCylinders(cylinders: readonly StepCylinderLike[]): Adapt
       sourceType: stack.map(c => `${c.kind ?? 'bore'}${c.through ? ' through' : ''}`).join(' + '),
       sourceKey: stack.map(c => `${c.kind ?? 'bore'}:${x},${y},${c.diameter}`).join(' + '),
       references: [],
+      evidence: { source: 'step-cylinder-scan', depthProvenance: 'analytic-cylinder-span', cylinders: structuredClone(stack) },
     }
   })
 }
 
 // ---- R2: model-kernel recogniser (defeature.ts recognizeFeatures -> FeatureVerdict) ----
-
-export interface ModelVerdictLike {
-  readonly featureKey: string
-  readonly featureClass: string
-  readonly removable: boolean
-  readonly refuseReason?: string
-  readonly faceIds: readonly string[]
-  readonly params: Readonly<Record<string, number | string>>
-  /** a counterbore's wide wall faces (a subset of faceIds) */
-  readonly counterboreFaceIds?: readonly string[]
-}
 
 /** Hole keys carry the rim centre (`hole:cx:cy:cz:ax:ay:az:r`, defeature.ts:799). */
 function holeRim(key: string): P3 | undefined {
@@ -347,6 +337,14 @@ export function fromModelVerdicts(verdicts: readonly ModelVerdictLike[], faces?:
       depth: n('depth') > 0 ? { evidence: 'measured', depthMm: n('depth') } : { evidence: 'none' },
       dimensions,
       sourceType: v.featureClass, sourceKey: v.featureKey, references: sorted(v.faceIds),
+      evidence: {
+        source: 'model-kernel', depthProvenance: n('depth') > 0 ? 'recognizer-parameter-estimate' : 'unknown',
+        verdict: structuredClone(v),
+        ...(faces ? { faces: structuredClone(Object.fromEntries(
+          [...new Set([...v.faceIds, ...v.counterboreFaceIds ?? []])]
+            .filter(id => faces[id] !== undefined).map(id => [id, faces[id]]),
+        )) } : {}),
+      },
       ...(note ? { note } : {}),
     }
   })
@@ -373,59 +371,13 @@ function facesRegion(faces: readonly FaceDescriptor[]): FeatureGeometry {
 
 // ---- R4: STL mesh recogniser (src/mesh/recognition) ----
 
-type MeshP3 = readonly [number, number, number]
-export interface MeshRoundLike {
-  readonly id: string
-  readonly kind: string
-  readonly axis: { readonly origin: MeshP3; readonly direction: MeshP3 }
-  readonly diameterMm: number
-  readonly diametersMm: readonly number[]
-  readonly depthMm: number
-  readonly bands: readonly {
-    readonly surface: AxialBand['surface']
-    readonly diameterMm: number
-    readonly endDiameterMm?: number
-    readonly axialRangeMm: readonly [number, number]
-  }[]
-  readonly profile?: string
-  readonly sourceFacetIds: readonly number[]
-}
-export interface MeshRegionLike {
-  readonly id: string
-  readonly kind: string
-  readonly floorNormal: MeshP3
-  readonly corners?: readonly MeshP3[]
-  readonly centerline?: readonly [MeshP3, MeshP3]
-  readonly lengthMm: number
-  readonly widthMm: number
-  readonly depthMm: number
-  /** slot only */
-  readonly endStyle?: string
-  /** drafted pocket only: the lean of the wall on side k (corners[k] -> corners[k+1]) */
-  readonly wallDraftDeg?: readonly number[]
-  readonly sourceFacetIds: readonly number[]
-}
-export interface MeshBlendLike {
-  readonly id: string
-  readonly kind: string
-  readonly shape: string
-  readonly radiusMm?: number
-  readonly setbackMm?: readonly [number, number]
-  readonly includedAngleDeg: number
-  readonly lengthMm: number
-  readonly edgeLine: { readonly ends: readonly [MeshP3, MeshP3] }
-  readonly sourceFacetIds: readonly number[]
-}
-export interface MeshRecognitionLike {
-  readonly features: readonly MeshRoundLike[]
-  readonly pockets?: readonly MeshRegionLike[]
-  readonly slots?: readonly MeshRegionLike[]
-  readonly draftedPockets?: readonly MeshRegionLike[]
-}
-
 /** Mesh ids are `${kind}-${smallest facet id}` (GAP-013 G-12): kept verbatim as
  *  the source key, never used for identity. Coordinates are the file's own. */
 export function fromMeshRecognition(recognition: MeshRecognitionLike, blends: readonly MeshBlendLike[] = []): AdapterResult {
+  const { features: _features, pockets: _pockets, slots: _slots, draftedPockets: _drafted, ...query } = recognition
+  // Only query metadata is shared; never copy/recompute every feature per candidate.
+  void _features; void _pockets; void _slots; void _drafted
+  const queryEvidence = structuredClone(query)
   const round = each(recognition.features, f => `mesh feature ${f.id}`, f => {
     const type = lookup(MESH_ROUND_TYPE, f.kind) ?? 'unclassified'
     // A dome (spherical-cap boss) has no fitted band: it spans its depth from the axis origin.
@@ -441,6 +393,7 @@ export function fromMeshRecognition(recognition: MeshRecognitionLike, blends: re
       depth: { evidence: 'measured', depthMm: f.depthMm },
       dimensions: f.profile === undefined ? {} : { profile: f.profile } as Record<string, string>,
       sourceType: f.kind, sourceKey: f.id, references: sorted(f.sourceFacetIds),
+      evidence: { source: 'stl-mesh', kind: 'round', depthProvenance: 'fitted-mesh', feature: structuredClone(f), query: queryEvidence },
       ...(type === 'unclassified' ? { note: notInSet('mesh', f.kind) } : {}),
     }
   })
@@ -466,6 +419,7 @@ export function fromMeshRecognition(recognition: MeshRecognitionLike, blends: re
       depth: { evidence: 'measured', depthMm: r.depthMm },
       dimensions,
       sourceType: r.kind, sourceKey: r.id, references: sorted(r.sourceFacetIds),
+      evidence: { source: 'stl-mesh', kind: 'region', depthProvenance: 'fitted-mesh', feature: structuredClone(r), query: queryEvidence },
       ...(type === 'unclassified' ? { note: notInSet('mesh', r.kind) } : {}),
     }
   })
@@ -476,6 +430,7 @@ export function fromMeshRecognition(recognition: MeshRecognitionLike, blends: re
       depth: { evidence: 'none' },
       dimensions: { shape: b.shape, includedAngleDeg: b.includedAngleDeg },
       sourceType: b.kind, sourceKey: b.id, references: sorted(b.sourceFacetIds),
+      evidence: { source: 'stl-mesh', kind: 'blend', depthProvenance: 'unknown', feature: structuredClone(b), query: queryEvidence },
       ...(type === 'unclassified' ? { note: notInSet('mesh edge blend', b.kind) } : {}),
     }
   })
@@ -483,14 +438,6 @@ export function fromMeshRecognition(recognition: MeshRecognitionLike, blends: re
 }
 
 // ---- 2D loops: no recogniser; today's loop ids ride along verbatim ----
-
-export interface LoopLike {
-  readonly id: string
-  readonly points: readonly Vec2[]
-  readonly closed: boolean
-  readonly type: string
-  readonly layerId: string
-}
 
 /** A 2D loop has no depth of its own: depth comes from the operation's
  *  parameters (draft A3-09 validate rule) and is never inferred here. 2D gives
@@ -516,6 +463,7 @@ export function fromLoops(loops: readonly LoopLike[]): AdapterResult {
       depth: { evidence: 'from-parameters' },
       dimensions: {},
       sourceType: loop.type, sourceKey: loop.id, references: [loop.id],
+      evidence: { source: 'sketch-2d', depthProvenance: 'operation-parameters', loop: structuredClone(loop) },
       note: 'a 2D loop carries no feature type; depth from the operation parameters',
     }
   })

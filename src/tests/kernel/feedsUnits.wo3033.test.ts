@@ -221,13 +221,28 @@ describe('WO-3033 kernel feeds are headless, deterministic and called by no app 
     const run = () => feeds.createFeedSpeedService().resolve({ tool: tool({ default: entry(1000, 18000) }), machineRapidRate: 5000, material: 'x' })
     expect(JSON.stringify(run())).toBe(JSON.stringify(run()))
   })
+  // WO-3317 repin: WO-3227 (862ac0046e) landed src/kernel/estimators/cuttingLoad.ts for
+  // the Tool Library's programmed-cut readout, and it reuses the pure A.4.1 chip-thinning
+  // relation (feeds/thinning.ts) rather than re-deriving it. That is a kernel sibling
+  // reaching a pure relation, not an app path reaching the feed/speed service: the named
+  // allow-list below is one file and one import, and every other kernel->feeds reach and
+  // every service import stays RED. The pin's intent (the carded service is wired to no
+  // app path) is unchanged.
+  const KERNEL_SIBLING_PURE_RELATION: Readonly<Record<string, readonly string[]>> = {
+    'src/kernel/estimators/cuttingLoad.ts': ['../feeds/thinning'],
+  }
+  const kernelSiblingRelation = (path: string, specifier: string): boolean =>
+    KERNEL_SIBLING_PURE_RELATION[rel(path)]?.includes(specifier) === true
   it('no file under src outside the service and src/tests imports src/kernel/feeds (negative control included)', () => {
     const callers = files(resolve('src'))
       .filter(path => !rel(path).startsWith('src/kernel/feeds/') && !rel(path).startsWith('src/tests/'))
       .flatMap(path => imports(path)
         .filter(specifier => specifier.startsWith('.') && rel(resolve(dirname(path), specifier)).startsWith('src/kernel/feeds'))
+        .filter(specifier => !kernelSiblingRelation(path, specifier))
         .map(specifier => `${rel(path)} -> ${specifier}`))
     expect(callers).toEqual([])
+    // Non-vacuity of the one allowance above: it names an import that is really there.
+    expect(imports(resolve('src/kernel/estimators/cuttingLoad.ts'))).toContain('../feeds/thinning')
     expect(imports(resolve('src/store/negative-control.ts'), "import { createFeedSpeedService } from '../kernel/feeds'")
       .filter(specifier => rel(resolve(resolve('src/store'), specifier)).startsWith('src/kernel/feeds'))).toEqual(['../kernel/feeds'])
   })

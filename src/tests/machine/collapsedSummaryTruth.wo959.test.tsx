@@ -28,6 +28,9 @@ import { SpindlePanel } from '../../components/machine/SpindlePanel'
 import type { MachineActionResult, SpindleCommandResult, SpindleRoute } from '../../lib/machine/machineSession'
 import type { MachineController, StreamerProgress } from '../../lib/machine/controller'
 import { useUiPrefs } from '../../store/uiPrefs'
+// WO-3191: the commanded direction now lives in the shared store, which this
+// suite's mock keeps REAL across tests - each case must start from 'off'.
+import { useMachineControl } from '../../store/machineControlStore'
 
 let reportedRunning: boolean | null = null
 // Whether THIS backend owns the spindle/coolant. False is Operator's machine (the
@@ -197,6 +200,10 @@ beforeEach(() => {
   // file - the first test that folds the panel left every later render folded,
   // and the buttons simply were not there. Reset it, so each case starts open.
   useUiPrefs.setState({ collapsedPropsGroups: {} })
+  // WO-3191 moved the commanded direction into the shared store, which this
+  // suite's mock keeps as a REAL store across tests. A successful press in an
+  // earlier case would otherwise leak into the refused / external-running cases.
+  useMachineControl.setState({ commandedSpindle: 'off' })
   reportedRunning = null
   ownsSpindle = false
   pushConsole.mockReset()

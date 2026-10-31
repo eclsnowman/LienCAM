@@ -213,8 +213,9 @@ describe('WO-2514: explicit-depth Drill breaks through at full diameter', () => 
     expect(drillBreak.bottomRow).toBeCloseTo(expected, 6)
     expect(drillBreak.deepestMoveWcs).toBeCloseTo(expected, 4)
     expect(Math.min(...drillBreak.postedZ)).toBeCloseTo(expected, 2)
-    expect(drillBreak.gcode).toContain('G98 G81 X30 Y20 Z-10.002 R5 F150')
-    expect(drillZero.gcode).toContain('G98 G81 X30 Y20 Z-8 R5 F150')
+    // WO-3083 rule 1: the R plane sits 1 mm above the material (Top 0), not at Feed (Top + 5).
+    expect(drillBreak.gcode).toContain('G98 G81 X30 Y20 Z-10.002 R1 F150')
+    expect(drillZero.gcode).toContain('G98 G81 X30 Y20 Z-8 R1 F150')
   })
 
   it('Break through 0 (and an old project with no setting) leaves the tip at the bottom, as before', () => {
@@ -231,7 +232,7 @@ describe('WO-2514: explicit-depth Drill breaks through at full diameter', () => 
     expect(flatBreak.bottomRow).toBeCloseTo(BOTTOM - 0.5, 6)
     expect(flatBreak.deepestMoveWcs).toBeCloseTo(BOTTOM - 0.5, 4)
     expect(Math.min(...flatBreak.postedZ)).toBeCloseTo(BOTTOM - 0.5, 3)
-    expect(flatBreak.gcode).toContain('G98 G81 X30 Y20 Z-8.5 R5 F150')
+    expect(flatBreak.gcode).toContain('G98 G81 X30 Y20 Z-8.5 R1 F150')
   })
 
   it('Bore with an explicit Target End is unchanged: the tool ends at the bottom whatever the setting', () => {

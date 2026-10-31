@@ -31,7 +31,7 @@ import {
   type Pt, type Loop, type Loops, type PolyNode,
   offsetClosed, offsetClosedTree, union, intersection, difference, totalArea, netArea, capsulePath, diskPath, loopArea, offsetOpenRound, capsuleSweep,
 } from './clipperEngine'
-import { createToolGeometry } from './toolGeometry'
+import { createToolGeometry, type ToolGeometry } from './toolGeometry'
 import { createStepper, type StepperOptions } from './steering'
 import { boundedCleanPath } from './boundedCleanPath'
 import { createEngagementWalker, boundaryArcsBetween } from './engagementPoint'
@@ -1579,7 +1579,8 @@ export function processFeature(
   // The top-level loadSetpoint (default 0.95) wins over any stepper.loadSetpoint so the
   // ProcessParams knob is authoritative; a per-call stepper override is still respected
   // when the top-level field is left undefined.
-  // WO-3042: the steering wobble smoothing (WO-3029 causes A, B, C), one switch, ships OFF.
+  // WO-3042: the steering wobble smoothing (WO-3029 causes A, B, C), one switch.
+  // WO-3067: ships ON (owner 2026-10-22 "Turn it on (recommended)"); OFF retains the prior pass stream.
   const smoothSteering = ADAPTIVE_MOTION_SWITCHES.steeringSmoothing
   const stepper = createStepper(tool, {
     ...params.stepper, materialSide: materialSideFor(millingDirection), loadSetpoint: params.loadSetpoint ?? params.stepper?.loadSetpoint ?? AP.steering.loadSetpoint,
@@ -1966,6 +1967,9 @@ export function processFeature(
     stepper.resetHistory()
 
     const passToolPath: Pt[] = [toolPos]
+    // WO-3067: the stock each raw step was measured against, so a cleanup chord that
+    // replaces steps can be held to the same load (proveCleanedChords). References only.
+    const passStock: Loops[] = [cleared]
     let toClearPath: Pt[] = [toolPos]
     let cumulativeCuttingArea = 0
     let deflectionAngle = Math.PI
@@ -2120,6 +2124,7 @@ export function processFeature(
             cumulativeCuttingArea += fillet.areas[k]
             toClearPath.push(p)
             passToolPath.push(p)
+            passStock.push(cleared)
             filletPoints.add(p)
             toolPos = p
             gyro.push(fillet.dirs[k]); gyro.shift()
@@ -2231,6 +2236,7 @@ export function processFeature(
         overCutStreak = 0
       }
 
+      const stepStock = cleared
       toClearPath.push(newToolPos)
       // The very first pass clears incrementally so the engage walk sees fresh `cleared`.
       if (firstEngagePoint && toClearPath.length > 10) {
@@ -2243,6 +2249,7 @@ export function processFeature(
         passTravelDistance += stepDistance
         cumulativeCuttingArea += area
         passToolPath.push(newToolPos)
+        passStock.push(stepStock)
         toolPos = newToolPos
         gyro.push(newToolDir); gyro.shift()
         // WO-1178 ride-on accounting (see the skim above): a productive step clears the
@@ -2344,12 +2351,27 @@ export function processFeature(
     // 12 mm proud, a 15 mm full-width feed to the neck). WO-402d.
     const keepPass = passToolPath.length > 1 && cumulativeCuttingArea > 1e-12
     if (keepPass) {
-      const cleaned = params.boundedPathCleanup
-        ? boundedCleanPath(passToolPath, tolerance * AP.sampling.pathCleanTolerances, filletPoints)
+      // Smoothing can release transition samples; bound each replacement chord
+      // against all original samples instead of a previously simplified tail.
+      // WO-3067: with smoothing ON the pass's first step (its engage out of a standing
+      // start, measured from rest) stays exact, as OFF's cleanPathKeeping always keeps it.
+      // Merged into the next step it lengthens the engage bite inside the sustained
+      // engagement window that opens on it (H-pocket: peak 0.755552 over OFF 0.755418).
+      const simplified = (params.boundedPathCleanup || smoothSteering)
+        ? boundedCleanPath(passToolPath, tolerance * AP.sampling.pathCleanTolerances, smoothSteering && passToolPath.length > 2 ? new Set([...filletPoints, passToolPath[1]]) : filletPoints)
         : cleanPathKeeping(passToolPath, tolerance * AP.sampling.pathCleanTolerances, filletPoints)
+      // WO-3067: the stepper proved each raw step's load; a chord that replaces steps is
+      // proved the same way before it is credited or emitted, never by a looser limit.
+      const cleaned = smoothSteering ? proveCleanedChords(passToolPath, passStock, simplified, tool) : simplified
+      // WO-3067: smoothing releases mid-pass departure samples to cleanup. The path
+      // credited above is still the raw stepper path, but only `cleaned` will execute.
+      // Future engagement/landing/traverse proofs must see the stock that path removes,
+      // not strips swept only by discarded samples (WO-410's no-phantom-credit rule).
+      if (smoothSteering) cleared = expandCleared(clearedAtPassStart, cleaned, toolRadius, arcTol)
       // The departure fillet's points survive cleaning by construction (filletPoints), so the
       // run is still the first `departHeadCount` points after the start.
       const departHead = Math.min(departHeadCount, Math.max(0, cleaned.length - 2))
+      const firstEmittedPass = passes.length
       try {
         cleared = appendCutPass(passes, cleaned, cleared, clearedAtPassStart, cutTree, cutRegion, toolRadius, helixRadius, stepOverDistance, arcTol, optimal, pendingEntry, pendingBoundarySpan, !!params.integralWallFollow, integralWallFollowLengthFactor, !!params.wallCleanupAsWeGo && !singleWallPass, params.loopbackFilletPct ?? 25, millingDirection, landingUncutCap, wallCleanupDirectionFallback, !!params.liftFallbackHelix, 'cut', null, departHead, exteriorAirAt, singleWallPass ? wallBandContour : null, false, mainRepositionTime, onAcceptedGraphRoute)
       } catch (err) {
@@ -2377,6 +2399,21 @@ export function processFeature(
           aborted = 'unsafe-re-entry'
           break
         }
+      }
+      const emittedCut = passes.at(-1)
+      const keepsWholePath = emittedCut?.type === 'cut'
+        && (emittedCut.points === cleaned || (departHead > 0 && emittedCut.points[0] === cleaned[departHead]))
+      if (smoothSteering && !skippedStart && !keepsWholePath) {
+        // A landing can re-seam the cut and omit its prefix. Credit only the
+        // assembled stream, including its connection, rather than that omitted path.
+        let physical = clearedAtPassStart
+        for (const pass of passes.slice(firstEmittedPass)) {
+          if (pass.type === 'entry') physical = union(physical, diskPath(pass.point, toolRadius + pass.radius, arcTol))
+          else if (!(pass.type === 'link' && pass.jumpType === 2)) physical = expandCleared(physical, pass.points, toolRadius, arcTol)
+        }
+        // Retain the conservative omission of connection rides from the walker's
+        // belief (WO-466); assembly can only remove credit, never add new credit.
+        cleared = intersection(cleared, physical)
       }
       if (pendingEntry && !skippedStart) {
         // WO-439 census: the entry actually planted, with the pass it opened.
@@ -7667,7 +7704,17 @@ export function planKeepDownRoute(
         if (route.length < 3) break
         const length = polylineLength(route)
         if (length > maxLength) break
-        const escaping = routeEscapingSegment(route, cutTree, toolRadius, wallTol)
+        let escaping = routeEscapingSegment(route, cutTree, toolRadius, wallTol)
+        // WO-3067 (steering smoothing ON only): the hops onto and off the tracks are straight
+        // chords, not cleared by construction, and a smoothed cut can end where the shortest hop
+        // cuts a wall's curve (B8 island repro: a 4.74 mm chord round the island 0.073 mm inside
+        // the full-cutter clearance, admitted by wallTol). Hold those two hops to the cut region
+        // within its own arc tolerance; the existing leg ban below then offers the next source
+        // or sink. (A zero allowance also refused an H-pocket tool2 hop, raising M-SAFE-2 2 -> 3.)
+        if (escaping < 0 && ADAPTIVE_MOTION_SWITCHES.steeringSmoothing) {
+          if (routeEscapingSegment(route.slice(0, 2), cutTree, toolRadius, arcTol) >= 0) escaping = 1
+          else if (routeEscapingSegment(route.slice(-2), cutTree, toolRadius, arcTol) >= 0) escaping = route.length - 1
+        }
         // WO-1194: a track ride is held to the SAME air veto as every candidate above -- and it
         // bans the offending leg exactly as an overload does, so the search keeps going.
         const air = escaping >= 0 ? null : airExcursion(route)
@@ -7888,6 +7935,44 @@ function nearestEdgeCandidates(p: Pt, loops: Loops): { lp: Loop; g: number }[] {
     for (const g of [...found].sort((u, v) => (u + 1) % n - (v + 1) % n)) out.push({ lp, g })
   }
   return out
+}
+
+/** WO-3067: hold a simplified pass to the stepper's own load proof. `cleaned` is a
+ *  subsequence of `raw` (same point objects); `stock[i]` is the stock raw step i-1 -> i was
+ *  measured against. Every chord that replaces raw steps is measured against the stock its
+ *  first replaced step saw, as are the steps it replaces; a chord that loads the tool harder
+ *  than the hardest of those steps is split at its farthest original sample, recursively, so
+ *  the worst case is the raw stepper path itself. (H-pocket: a 0.199 mm cleanup chord over
+ *  two proven 0.1 mm steps bit into stock the steps did not, raising measured engagement.) */
+function proveCleanedChords(raw: Pt[], stock: Loops[], cleaned: Pt[], tool: ToolGeometry): Pt[] {
+  if (cleaned.length < 2 || cleaned.length === raw.length) return cleaned
+  const kept: number[] = []
+  for (let i = 0, j = 0; i < raw.length && j < cleaned.length; i++) if (raw[i] === cleaned[j]) { kept.push(i); j++ }
+  if (kept.length !== cleaned.length) return cleaned // not a subsequence: nothing to prove against
+  const keep = new Uint8Array(raw.length)
+  for (const i of kept) keep[i] = 1
+  const stack: [number, number][] = []
+  for (let k = kept.length - 1; k > 0; k--) if (kept[k] - kept[k - 1] > 1) stack.push([kept[k - 1], kept[k]])
+  while (stack.length) {
+    const [first, last] = stack.pop()!
+    const s = stock[first + 1]
+    let peak = 0
+    for (let i = first + 1; i <= last; i++) peak = Math.max(peak, tool.cutArea(raw[i - 1], raw[i], s).areaPerDist)
+    if (tool.cutArea(raw[first], raw[last], s).areaPerDist <= peak) continue
+    const a = raw[first], b = raw[last]
+    const dx = b.x - a.x, dy = b.y - a.y, lengthSq = dx * dx + dy * dy
+    let worst = -1, split = first + 1
+    for (let i = first + 1; i < last; i++) {
+      const p = raw[i]
+      const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq)) : 0
+      const ex = p.x - a.x - t * dx, ey = p.y - a.y - t * dy
+      if (ex * ex + ey * ey > worst) { worst = ex * ex + ey * ey; split = i }
+    }
+    keep[split] = 1
+    if (last - split > 1) stack.push([split, last])
+    if (split - first > 1) stack.push([first, split])
+  }
+  return raw.filter((_, i) => keep[i])
 }
 
 /** WO-1178: geom's cleanPath, except that the points in `keep` (a pass's wall-fillet samples)

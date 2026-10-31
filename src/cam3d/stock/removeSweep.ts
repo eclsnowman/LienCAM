@@ -131,6 +131,7 @@ function sweepHorizontal(
 ): void {
   const { nx, ny, cell, originX, originY, top, bottom } = field;
   const z = move.z0;
+  const minEnvelope = isBall ? z - 4 * Number.EPSILON * (Math.abs(z) + R) : z;
   const ax = move.x0;
   const ay = move.y0;
   const abx = move.x1 - move.x0;
@@ -149,6 +150,11 @@ function sweepHorizontal(
     const wy = cy - ay;
     const rowBase = j * nx;
     for (let i = i0; i <= i1; i++) {
+      const c = rowBase + i;
+      const cur = top[c];
+      // WO-3126: every supported profile has envelope >= tip Z. A column
+      // already at/below it cannot change; retain the same f32/delta order.
+      if (cur <= minEnvelope) continue;
       const cx = originX + (i + 0.5) * cell;
       const wx = cx - ax;
       // Closest point on the segment (clamped projection).
@@ -159,10 +165,8 @@ function sweepHorizontal(
       const d2 = ex * ex + ey * ey;
       if (d2 <= r2) {
         const env = isBall ? z + R - Math.sqrt(r2 - d2) : z;
-        const c = rowBase + i;
         const bot = bottom[c];
         const nt = env < bot ? bot : env;
-        const cur = top[c];
         if (nt < cur) {
           top[c] = nt;
           removed += cur - top[c]; // f32 round-trip: charge the STORED delta
@@ -187,6 +191,9 @@ function stampDisc(
 ): void {
   const { nx, ny, cell, originX, originY, top, bottom } = field;
   const r2 = R * R;
+  // Include roundoff of z + R - sqrt(...); update counts include even writes
+  // whose f32 round-trip stores the same value, so use a conservative bound.
+  const minEnvelope = isBall ? z - 4 * Number.EPSILON * (Math.abs(z) + R) : z;
   const [i0, i1] = idxRange(x - R, x + R, originX, cell, nx);
   const [j0, j1] = idxRange(y - R, y + R, originY, cell, ny);
 
@@ -197,14 +204,15 @@ function stampDisc(
     const ey2 = ey * ey;
     const rowBase = j * nx;
     for (let i = i0; i <= i1; i++) {
+      const c = rowBase + i;
+      const cur = top[c];
+      if (cur <= minEnvelope) continue;
       const ex = originX + (i + 0.5) * cell - x;
       const d2 = ex * ex + ey2;
       if (d2 <= r2) {
         const env = isBall ? z + R - Math.sqrt(r2 - d2) : z;
-        const c = rowBase + i;
         const bot = bottom[c];
         const nt = env < bot ? bot : env;
-        const cur = top[c];
         if (nt < cur) {
           top[c] = nt;
           removed += cur - top[c];

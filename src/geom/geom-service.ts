@@ -246,8 +246,37 @@ interface ExtrudeRequestBase {
    * a cross-Model-Item target even if a caller supplied a live foreign handle. */
   modelItemId?: string;
   draftAngleDeg?: number;
-  thin?: { thickness: number };
+  /** Thin closed-wall extrude (WO-3233). Absent = an ordinary solid extrude;
+   * solid mode never sends it. Present = every loop of every profile becomes
+   * a wall `thickness` thick, open top and bottom closed only by the wall's own
+   * annular end faces, with no floor across the cavity. `side` is measured
+   * against the material, never the loop orientation: 'inside' puts the wall
+   * toward the material (outer loop inward, hole loop outward), 'outside' away
+   * from it, 'center' half each way. A missing side means 'inside'. Every end
+   * kind applies (WO-3235): Up to next / part are decided against each
+   * connected wall section, never the filled profile, so separate walls may
+   * stop at different targets; draftAngleDeg stays ignored for thin.
+   *
+   * WO-3237: `open: true` makes it a wall along ONE open chain instead. The
+   * request then carries exactly one profile with exactly one loop, and that
+   * loop is the chain in its persisted travel order (each segment walked the
+   * way the chain travels, as the sweep-path resolver returns it). The wall is
+   * square-ended: both ends are cut straight across, square to the chain at
+   * its first and last point. `side` is measured against the travel direction,
+   * never the chain's shape: 'left' / 'right' of travel, 'center' half each
+   * way; a missing side means 'left'. Nothing closes the chain, fills it or
+   * joins its ends. */
+  thin?: ThinExtrudeClosed | ThinExtrudeOpen;
 }
+
+/** Where a thin extrude wall sits relative to its sketch loop (WO-3233). */
+export type ThinExtrudeSide = 'inside' | 'outside' | 'center'
+
+/** WO-3237: where an open-chain wall sits, seen walking the chain's persisted direction. */
+export type ThinOpenSide = 'left' | 'right' | 'center'
+
+export interface ThinExtrudeClosed { thickness: number; side?: ThinExtrudeSide; open?: false }
+export interface ThinExtrudeOpen { thickness: number; side?: ThinOpenSide; open: true }
 
 export type ExtrudeRequest = ExtrudeRequestBase & (
   | {
@@ -351,6 +380,12 @@ export interface SweepRequest {
   orientation: 'frenet' | 'fixed';
   op: 'newBody' | 'add' | 'cut' | 'intersect';
   target?: BodyHandle;
+  /** WO-3229 — corner treatment along a line/arc chain. 'rightCorner' builds
+   *  one exact capped solid whose corners are mitred on the tangent bisector
+   *  plane, with every side named by its profile x path entity pair and the
+   *  caps by the path's start and end. Omitted = the original pipe sweep,
+   *  whose geometry and ids are unchanged. */
+  transition?: 'rightCorner';
 }
 
 /** v0.5 — lofted solid through ordered sections (WP6.2). ruled=true gives
@@ -398,6 +433,23 @@ export interface PatternRequest {
   featureId: string;
   body: BodyHandle;
   spec: PatternSpec;
+}
+
+/** WO-3244 — ONE body moved by ONE exact rigid transform (no fuse, no other
+ *  solid). The result is the transformed BREP itself, tessellated like any
+ *  other body. Result face ids are `<featureId>:PAT:i1:<sourceFaceId>`.
+ *  `identity: 'replace'` records each source face's lineage as
+ *  modified[source] = [result] (the result replaces the source body);
+ *  `'copy'` lists the result faces as generated only (an independent body). */
+export type BodyTransformSpec =
+  | { kind: 'mirror'; plane: PlaneDef }
+  | { kind: 'translate'; delta: Vec3 };
+
+export interface TransformBodyRequest {
+  featureId: string;
+  body: BodyHandle;
+  transform: BodyTransformSpec;
+  identity: 'replace' | 'copy';
 }
 
 // ---------- v0.6 (GEO-6) direct edit / defeature ----------
@@ -626,6 +678,9 @@ export interface GeomService {
   makeLoft(req: LoftRequest): Promise<OpResult>;             // v0.5
   makeHole(req: HoleRequest): Promise<OpResult>;             // v0.5
   applyBodyPattern(req: PatternRequest): Promise<OpResult>;  // v0.5
+  /** WO-3244 — OPTIONAL until the WO merges (the v0.4/v0.5/v0.6 flow): the
+   *  Architect flips it to required with the test fakes at the merge. */
+  transformBody?(req: TransformBodyRequest): Promise<OpResult>; // WO-3244
   // ------------------------------------------------------------ [Stage 7: direct edit / defeature]
   // v0.6 (GEO-6) — OPTIONAL until the WO merges; the Architect flips each to
   // required at the merge (v0.4/v0.5 precedent). Recognition + rule-based batch

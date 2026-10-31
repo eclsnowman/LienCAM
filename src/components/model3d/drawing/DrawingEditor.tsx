@@ -37,6 +37,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { useText } from '../../../i18n'
+import { drawingEditorPort, drawingEditorSignature, type DrawingEditorSession } from './drawingModePort'
 import type { BodyHandle, TessBuffers } from '../../../geom/geom-service'
 import type { GeomClient } from '../../../geom'
 import { projectMesh, toSheet } from '../../../lib/drawing/project'
@@ -116,7 +117,7 @@ import type { SheetLine, SourceRevision } from '../../../lib/drawing/types'
 import { getDrawingRecords, getModelSession } from '../../../doc/documentHolder'
 import {
   bodyLineage,
-  readBodyMesh,
+  readDrawingBody,
   saveItemDrawings,
   setOpenDrawing,
   useItemDrawings,
@@ -378,13 +379,15 @@ function DrawingSheetEditor({ modelItemId, bodies, getClient, getBodyHandle, sou
   const status = sourceStatus(lineage)
   const body = bodies.find((b) => bodyLineage(b) === lineage)
   const handle = body === undefined ? undefined : getBodyHandle(body.bodyId)
+  // WO-3092: a mesh body has no kernel handle; its read key (row + edit journal) stands in for it.
+  const meshKey = body?.mesh?.key
   const layout = viewLayoutKey(doc)
-  const currentKey = `${slot}\u0000${handle}\u0000${layout}`
+  const currentKey = `${slot}\u0000${meshKey ?? handle}\u0000${layout}`
 
   useEffect(() => {
     if (status !== 'present') return
     const client = getClient()
-    if (body === undefined || handle === undefined || client === null) {
+    if (body === undefined || (body.mesh === undefined && (handle === undefined || client === null))) {
       setPhase('waiting')
       return
     }
@@ -401,9 +404,11 @@ function DrawingSheetEditor({ modelItemId, bodies, getClient, getBodyHandle, sou
       try {
         // One read serves the views, the picks and the dimensions: the
         // tessellation readBodyMesh asks for is kept for its face ids.
+        // WO-3092: a mesh body reads itself - no face ids, so its views draw
+        // and its faces are not picked for dimensions.
         let tess: TessBuffers | undefined
-        const capturing = { tessellate: async (...args: Parameters<GeomClient['tessellate']>) => (tess = await client.tessellate(...args)) } as unknown as GeomClient
-        const read = await readBodyMesh(capturing, handle)
+        const capturing = client === null ? null : { tessellate: async (...args: Parameters<GeomClient['tessellate']>) => (tess = await client.tessellate(...args)) } as unknown as GeomClient
+        const read = await readDrawingBody(body, capturing, handle)
         const scenes = new Map<string, ReturnType<typeof projectMesh>>()
         const views = getDrawingRecords(modelItemId).documents.find((d) => d.id === doc.id)?.sheets.flatMap((s) => s.views).filter((v) => v.detail === undefined) ?? []
         for (const view of views) {
@@ -442,7 +447,7 @@ function DrawingSheetEditor({ modelItemId, bodies, getClient, getBodyHandle, sou
     })()
     // `doc` changes on every write; the layout key and handle are what the lines depend on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot, status, body?.bodyId, handle, layout, modelItemId])
+  }, [slot, status, body?.bodyId, handle, meshKey, layout, modelItemId])
 
   const views = drawn.get(slot)
   const sheet = doc.sheets[0]
@@ -582,6 +587,27 @@ function DrawingSheetEditor({ modelItemId, bodies, getClient, getBodyHandle, sou
     setRepair(null)
     setNotice(null)
   }
+
+  // WO-3301: the New UI ribbon drives this editor through the port (tools, size, export, undo)
+  const editorSession: DrawingEditorSession = {
+    modelItemId,
+    drawingId: doc.id,
+    tool,
+    sheetChoice: size,
+    hasSheet: sheet !== undefined,
+    hasLogo,
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0,
+    chooseTool,
+    changeSize,
+    exportSheet,
+    undo,
+    redo,
+  }
+  const editorSignature = drawingEditorSignature(editorSession)
+  const [owner] = useState(() => ({}))
+  useEffect(() => { drawingEditorPort.update(editorSession, editorSignature, owner) })
+  useEffect(() => () => drawingEditorPort.release(owner), [owner])
 
   const problemText = (p: MeasureProblem | 'faces-face-viewer', kind: DrawingMeasurementKind): string =>
     t(PROBLEM_KEYS[p] as 'annotate.problemNeedsPlane', { kind: t(TOOL_TEXT[kind][0]) })
@@ -728,6 +754,7 @@ function DrawingSheetEditor({ modelItemId, bodies, getClient, getBodyHandle, sou
     status === 'deleted' ? t('editor.sourceDeleted')
       : status === 'off' ? t('editor.sourceOff')
         : status === 'failed' ? t('editor.sourceFailed')
+          : status === 'closed' ? t('editor.sourceClosed')
           : null
   const state = sentence !== null ? (views === undefined ? 'missing' : 'last-known') : phase
   const partLabel = status === 'deleted' ? t('editor.partDeleted') : partName(lineage)

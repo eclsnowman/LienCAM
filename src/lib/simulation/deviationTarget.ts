@@ -4,7 +4,8 @@ import { MeshBVH } from 'three-mesh-bvh'
 import type { ImportedGeometry, Project } from '../../types'
 import { LEGACY_MODEL_ITEM_ID } from '../../doc/documentHolder'
 import { effectiveStockIdForCompute } from '../../store/stockAssignment'
-import { partWorldTransform } from '../../store/partTransform'
+import { partWorldTransform, partWorldTransformAsSetupHoldsIt } from '../../store/partTransform'
+import type { SecondSideTurn } from '../cam/flipSetup'
 import { resolveModelReferenceFrame } from '../cam/modelReferenceFrame'
 import { frameRef, mapPoint, pointMm, rigidMapFromPose, type FrameRef } from '../geometry/coordinateFrames'
 import { loadCachedSTL } from '../stlCache'
@@ -19,10 +20,13 @@ export function centerStlForDeviation(mesh: BufferGeometry): void {
   const box = mesh.boundingBox!
   mesh.translate(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, -box.min.z)
 }
-export function placeDeviationMesh(mesh: BufferGeometry, geo: ImportedGeometry, project: Project, world: FrameRef<'world'>): void {
-  const pose = geo.format === 'model' && geo.modelBody
+/** WO-3196: `turn` is the setup's - a second side compares against the part
+ *  turned inside its block, the part its 3D toolpaths were computed on. */
+export function placeDeviationMesh(mesh: BufferGeometry, geo: ImportedGeometry, project: Project, world: FrameRef<'world'>,
+  turn: SecondSideTurn | null = null): void {
+  const pose = partWorldTransformAsSetupHoldsIt(geo.format === 'model' && geo.modelBody
     ? resolveModelReferenceFrame(project.modelItemPlacements ?? [], geo.modelItemId ?? LEGACY_MODEL_ITEM_ID, geo.modelBody.ref.bodyId)
-    : partWorldTransform(geo, project.stocks ?? [])
+    : partWorldTransform(geo, project.stocks ?? []), turn)
   const native = frameRef({ kind: 'geometry-native', projectEpoch: world.projectEpoch,
     entityId: geo.id, revision: JSON.stringify([geo.modelBody?.ref, pose]) })
   const map = rigidMapFromPose(native, world, pose)
@@ -54,13 +58,22 @@ export function triangleTarget(meshes: readonly BufferGeometry[], frame: FrameRe
   }
 }
 
+const TWO_D_FORMATS: ReadonlySet<ImportedGeometry['format']> = new Set(['svg', 'dxf', 'sketch'])
+
 /** Load actual intended geometry, never bounding-box substitute solids. A
  * missing member prevents comparison: ignoring it would invent empty space.
  * Nest placements / planar-only geometry need another representation. */
-export async function loadDeviationTarget(project: Project, stockId: string, world: FrameRef<'world'>, signal: AbortSignal) {
-  const members = project.geometry.filter(geo => !geo.workholding &&
+export async function loadDeviationTarget(project: Project, stockId: string, world: FrameRef<'world'>, signal: AbortSignal,
+  partTurn: (geo: ImportedGeometry) => SecondSideTurn | null = () => null) {
+  const all = project.geometry.filter(geo => !geo.workholding &&
     effectiveStockIdForCompute(geo, project.nests ?? [], project.stocks ?? []) === stockId)
-  if (!members.length) throw new Error('No intended solid geometry belongs to this stock.')
+  if (!all.length) throw new Error('No intended solid geometry belongs to this stock.')
+  // WO-3096: a drawing (SVG/DXF/sketch) beside the part's solid is the 2D
+  // source of its toolpaths, not a missing surface: compare against the
+  // solids. The fixture plate (example 01) has its SVG and its STL on one
+  // stock and failed on the SVG. With no solid at all, nothing is skipped.
+  const solids = all.filter(geo => !TWO_D_FORMATS.has(geo.format))
+  const members = solids.length ? solids : all
   const meshes: BufferGeometry[] = []
   let triangles = 0
   try {
@@ -94,7 +107,7 @@ export async function loadDeviationTarget(project: Project, stockId: string, wor
       meshes.push(mesh)
       triangles += (mesh.index?.count ?? mesh.getAttribute('position').count) / 3
       if (triangles > 100_000) throw new Error('Intended surface exceeds 100,000 triangles.')
-      placeDeviationMesh(mesh, geo, project, world)
+      placeDeviationMesh(mesh, geo, project, world, partTurn(geo))
       await new Promise<void>(resolve => setTimeout(resolve, 0))
     }
     signal.throwIfAborted()

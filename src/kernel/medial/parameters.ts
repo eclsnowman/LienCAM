@@ -32,11 +32,11 @@ export const MEDIAL_PARAMETERS = Object.freeze({
   simplifyPerSpacing: row(0.25, 'chain simplification tolerance (position and radius), in sample spacings; zero disables', 'src/lib/cam/vcarve2d/medialAxis.ts:445'),
   dedupeEps: row(1e-9, 'consecutive chain nodes closer than this (per axis, mm) are one node; the smaller radius is kept', 'src/lib/cam/vcarve2d/medialAxis.ts:346'),
   // The V-carve consumer's spacing law (index.ts sampleSpacing and the floor-ring core).
-  carveSpacingMin: row(0.05, 'smallest carve sample spacing (mm)', 'src/lib/cam/vcarve2d/index.ts:697'),
-  carveSpacingMax: row(0.5, 'largest carve sample spacing from the tolerance (mm)', 'src/lib/cam/vcarve2d/index.ts:697'),
-  carveSpacingPerTolerance: row(8, 'carve sample spacing in arc tolerances', 'src/lib/cam/vcarve2d/index.ts:697'),
-  sampleBudget: row(60_000, 'perimeter / this is the spacing floor that keeps a long outline inside the sample budget', 'src/lib/cam/vcarve2d/index.ts:698,745'),
-  floorCoreSpacingPerStepover: row(0.25, 'floor-ring core axis spacing in stepovers, clamped to [0.05, 0.5] mm', 'src/lib/cam/vcarve2d/index.ts:745'),
+  carveSpacingMin: row(0.05, 'smallest carve sample spacing (mm)', 'src/lib/cam/vcarve2d/index.ts:685'),
+  carveSpacingMax: row(0.5, 'largest carve sample spacing from the tolerance (mm)', 'src/lib/cam/vcarve2d/index.ts:685'),
+  carveSpacingPerTolerance: row(8, 'carve sample spacing in arc tolerances', 'src/lib/cam/vcarve2d/index.ts:685'),
+  sampleBudget: row(60_000, 'perimeter / this is the spacing floor that keeps a long outline inside the sample budget', 'src/lib/cam/vcarve2d/index.ts:686,733'),
+  floorCoreSpacingPerStepover: row(0.25, 'floor-ring core axis spacing in stepovers, clamped to [0.05, 0.5] mm', 'src/lib/cam/vcarve2d/index.ts:733'),
 })
 
 export type MedialParameterName = keyof typeof MEDIAL_PARAMETERS

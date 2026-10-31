@@ -27,6 +27,7 @@ import {
   armProgramFromLine,
   connectMachine,
   disconnectMachine,
+  setSimulatedPart,
   getMachineController,
   loadGcodeTextToolpathProgram,
   loadMachineProgram,
@@ -249,6 +250,10 @@ describe('WO-2400 after a pause and return, the later tool change still happens 
     __resetEstopInterlockForTest()
     getMachineController().home()
     await vi.advanceTimersByTimeAsync(2000)
+    // WO-3189 seeds the setup's stock box at every simulator connect; the M6
+    // measures on the machine's fixed pad, so this fixture says no part is
+    // placed (a placed part replaces the pad by design, WO-416).
+    setSimulatedPart(null)
     useMachineToolTable.setState({ byMachine: {}, availableMeasurement: null })
     const tools = useMachineToolTable.getState()
     tools.setProbeConfig(SIM_ID, { maxTravel: 50 })

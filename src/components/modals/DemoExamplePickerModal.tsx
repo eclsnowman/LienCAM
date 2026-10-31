@@ -8,6 +8,7 @@ import { shouldPromptMachineChoice } from '../../lib/machine/machineChoice'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 import { useText } from '../../i18n'
 import { MachineChoiceModal } from './MachineChoiceModal'
+import { useGuidedSetup } from './GuidedSetupModal'
 import { useUiPrefs } from '../../store/uiPrefs'
 import { useProjectPicker } from '../../lib/projectOpen/picker'
 import { browseProject } from '../../lib/projectOpen/actions'
@@ -110,6 +111,7 @@ export function DemoExamplePickerModal({ onDismiss, onOpened, onExampleOpened, i
   initialSection?: 'recent' | 'examples'
 }) {
   const t = useText('app-shell-settings-menus')
+  const guidedText = useText('guided-setup.wo3256')
   // WO-2789: this is the existing dismissal, never a project replacement.
   // Offer it as a start choice only while the project has no authored content;
   // loaded models live in modelItems, including the migrated legacy document.
@@ -262,6 +264,8 @@ export function DemoExamplePickerModal({ onDismiss, onOpened, onExampleOpened, i
       <div className="modal-footer project-picker-footer">
         <label><input type="checkbox" checked={direct} onChange={(event) => setDirect(event.target.checked)} /> Always go straight to the file browser</label>
         <div className="project-picker-footer-actions">
+          {startChoice && <button className="modal-btn modal-btn-ghost" disabled={busy} data-tooltip={guidedText('openerTooltip')}
+            onClick={() => { onDismiss(); useGuidedSetup.getState().show() }}>{guidedText('openerButton')}</button>}
           {startChoice && <button className="modal-btn modal-btn-ghost" disabled={busy} onClick={onDismiss}>{t('ProjectPicker.startWithAnEmptyProject')}</button>}
           <button className="modal-btn modal-btn-ghost" disabled={busy} onClick={onDismiss}>Close</button>
         </div>

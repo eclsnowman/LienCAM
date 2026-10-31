@@ -28,6 +28,7 @@ import {
   type TierQualities,
 } from './progressiveTessellate';
 import { SelectionState } from './SelectionState';
+import { readStepPresentationColors } from '../lib/import/stepPresentationColors';
 import type { BodyId, PickHit, PickThresholds, RayLike, SelectionFilterMode } from './types';
 
 export interface CreateBoxSpec {
@@ -162,10 +163,13 @@ export class GeomBridgeSession {
     bytes: ArrayBuffer,
   ): Promise<{ bodies: ImportedBodySummary[]; diagnostics: Diag[] }> {
     const result = await this.client.importStep(bytes, importId);
+    // WO-3324: the kernel read carries no colour for presentation-style files; fall back to the same
+    // STEP presentation reader CAM uses (stepAttributes.ts), so both workspaces agree on the colour.
+    const embedded = readStepPresentationColors(bytes);
     const bodies: ImportedBodySummary[] = result.bodies.map((body, index) => {
       const bodyId = `${importId}:body#${index}`;
       this.handles.set(bodyId, body.handle);
-      return { bodyId, name: body.name ?? bodyId, color: body.color };
+      return { bodyId, name: body.name ?? bodyId, color: body.color ?? embedded.get(body.name ?? '') };
     });
     return { bodies, diagnostics: result.diagnostics };
   }

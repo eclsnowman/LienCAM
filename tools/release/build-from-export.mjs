@@ -172,7 +172,7 @@ export async function smokePackagedApp({ appPath, outDir, version, commit, examp
   // implementation to keep this packaging check within its declared slice.
   const { Journey, assert } = await import(pathToFileURL(join(harnessRoot, 'e2e/lib/harness.mjs')).href)
   const { firstLaunch } = await import(pathToFileURL(join(harnessRoot, 'e2e/steps/setup-steps.mjs')).href)
-  const journey = new Journey({ appPath, outDir, shots: true })
+  const journey = new Journey({ appPath, outDir, shots: true, offline: true })
   let aboutText = ''
   let aboutCommit = ''
   const opened = []
@@ -221,10 +221,11 @@ export async function smokePackagedApp({ appPath, outDir, version, commit, examp
     }
   } finally {
     await journey.close()
-    journey.finish({ version, aboutText, aboutCommit, examples: opened })
+    journey.finish({ version, aboutText, aboutCommit, examples: opened, network: journey.network })
   }
   if (journey.steps.some(step => step.status !== 'PASS')) throw new Error(`Packaged smoke failed: see ${outDir}`)
-  return { version, aboutText, aboutCommit, examples: opened, steps: journey.steps.length, verdict: 'PASS' }
+  return { version, aboutText, aboutCommit, examples: opened, network: journey.network,
+    steps: journey.steps.length, verdict: 'PASS' }
 }
 
 export async function buildFromExport({ source = 'HEAD', version = RELEASE_VERSION, outDir,

@@ -69,7 +69,9 @@ See [Features](https://eclsnowman.github.io/LienCAM/features.html) for the full 
 
 ## Quick start
 
-Open **Full Suite**, the first entry in **Try an example**. Check the stock, tools and machine in Setup, generate toolpaths with **REGEN ALL**, then simulate and post the G-code. Follow [First part in 15 minutes](https://github.com/eclsnowman/LienCAM/wiki/First-part-in-15-minutes) for a walkthrough, or [Set up your machine](https://github.com/eclsnowman/LienCAM/wiki/Set-Up-Your-Machine) to connect a controller.
+On first launch, the **Open a project** window appears. The examples previously called **Try an example** are under **Examples** at the top; choose **Full Suite**, the first example. If you have already closed that window, click **Open** at the top left, then **Examples**.
+
+Check the stock, tools and machine in Setup, generate toolpaths with **REGEN ALL**, then simulate and post the G-code. Follow [First part in 15 minutes](https://github.com/eclsnowman/LienCAM/wiki/First-part-in-15-minutes) for a walkthrough, or [Set up your machine](https://github.com/eclsnowman/LienCAM/wiki/Set-Up-Your-Machine) to connect a controller.
 
 ## Why I built this
 

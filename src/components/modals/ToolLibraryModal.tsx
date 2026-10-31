@@ -9,6 +9,7 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import { useCamStore } from '../../store'
+import { CUT_REASON, RUBBING_CHIP_THICKNESS_MM, estimateProgrammedCut, type Estimate } from '../../kernel/estimators'
 import { importFusionTools, decodeToolLibraryFile, serializeHolderForFusion, parseFusionHolder, type FusionHolder } from '../../lib/fusionImporter'
 import { rpmInMachineRange } from '../../lib/machine/spindleRange'
 import { validateToolGeometry, validateToolRecordShape, type RecordDiagnostic } from '../../lib/tool/toolValidation'
@@ -1463,6 +1464,9 @@ export function ToolLibraryModal() {
                           </select>
                         </div>
 
+                        {/* WO-3227: advisory programmed cut of the tool's own preset */}
+                        {!isProbe && <ProgrammedCut draft={draft} feeds={feeds} displayUnits={displayUnits} onFeeds={patchFeeds} />}
+
                         {/* Material guide panel */}
                         {showFeedsHelp && (
                           <div className="feeds-guide-panel">
@@ -1602,6 +1606,82 @@ function NumField({ label, value, min, step, onChange, units, kind = 'dim' }: {
         onChange={onChange}
         units={units} kind={kind}
       />
+    </div>
+  )
+}
+
+// ── Programmed cut (WO-3227) ──────────────────────────────────────────────────
+// Read-only results of the tool's own default preset: what the programmed depth,
+// stepover, speed and feed ask of a flat end mill cutting on its side. It advises;
+// the only fields it writes are the two inputs the operator types (depth and
+// stepover, already part of the preset). Power and torque need cutting
+// coefficients, which no tool carries yet, so they are not shown.
+
+const WIDE = { gridColumn: '1 / -1' } as const
+
+function ProgrammedCut({ draft, feeds, displayUnits, onFeeds }: {
+  draft: Tool
+  feeds: FeedsAndSpeeds
+  displayUnits: Units
+  onFeeds: (updates: Partial<FeedsAndSpeeds>) => void
+}) {
+  const t = useText('tool-cut-calculator.wo3227')
+  const load = estimateProgrammedCut({
+    toolType: draft.type,
+    diameterMm: draft.diameter,
+    flutes: draft.numberOfFlutes,
+    fluteLengthMm: draft.fluteLength,
+    rpm: feeds.rpm,
+    feedMmMin: feeds.feedRate,
+    axialDepthMm: feeds.depthOfCut,
+    radialDepthMm: feeds.stepover,
+  })
+  const chipDecimals = displayUnits === 'inch' ? 5 : 4
+  const why = (e: Estimate<number>): string | undefined => {
+    if (e.status !== 'unavailable') return undefined
+    switch (e.reason) {
+      case CUT_REASON.shape: return t('notApplicableShape')
+      case CUT_REASON.depthOverFlutes: return t('notApplicableDepth')
+      case CUT_REASON.noSpindle: return t('needsSpindle')
+      case CUT_REASON.noContact: return t('noContact')
+      case CUT_REASON.stepoverOverDiameter: return t('stepoverOverDiameter')
+      default: return t('needsNumbers')
+    }
+  }
+  const row = (label: string, e: Estimate<number>, show: (v: number) => string) => (
+    <div className="mform-row" data-testid="programmed-cut-row">
+      <label className="mform-label">{label}</label>
+      <span className={e.status === 'unavailable' ? undefined : 'mform-input-mono'} data-testid="programmed-cut-value">{e.status === 'unavailable' ? `— ${why(e)}` : show(e.value)}</span>
+    </div>
+  )
+  const chip = (v: number) => `${toDisplay(v, displayUnits).toFixed(chipDecimals)} ${unitLabel(displayUnits)}`
+  const removal = (cm3: number) => displayUnits === 'inch'
+    ? `${Number((cm3 / 16.387064).toPrecision(3))} ${t('removalUnitInch')}`
+    : `${Number(cm3.toPrecision(3))} ${t('removalUnitMm')}`
+  const whole = load.maxChipMm.status === 'unavailable'
+    && (load.maxChipMm.reason === CUT_REASON.shape || load.maxChipMm.reason === CUT_REASON.depthOverFlutes)
+
+  return (
+    // display: contents keeps the rows in the tab's two-column grid; the header
+    // and notes span both columns like the tab's own section-wide material.
+    <div data-testid="programmed-cut" style={{ display: 'contents' }}>
+      <div className="mform-section-header" style={WIDE}>{t('title')}</div>
+      <NumField label={t('depthOfCut')} value={feeds.depthOfCut} min={0} step={0.5}
+        onChange={(v) => onFeeds({ depthOfCut: v })} units={displayUnits} />
+      <NumField label={t('stepover')} value={feeds.stepover} min={0} step={0.5}
+        onChange={(v) => onFeeds({ stepover: v })} units={displayUnits} />
+      {whole ? (
+        <div className="tool-post-tip" style={WIDE}>{why(load.maxChipMm)}</div>
+      ) : (
+        <>
+          {row(t('engagementAngle'), load.engagementAngleRad, (v) => `${Math.round(v * 180 / Math.PI)}${t('degrees')}`)}
+          {row(t('maxChip'), load.maxChipMm, chip)}
+          {row(t('meanChip'), load.meanChipMm, chip)}
+          {row(t('removalRate'), load.removalRateCm3Min, removal)}
+          {load.rubbing && <div className="tool-post-tip" style={WIDE}>{t('rubbing', { value: chip(RUBBING_CHIP_THICKNESS_MM) })}</div>}
+        </>
+      )}
+      <div className="tool-post-tip" style={WIDE}>{t('trust')}</div>
     </div>
   )
 }

@@ -41,6 +41,7 @@ const {
   cancelGuidedToolChange,
   connectMachine,
   disconnectMachine,
+  setSimulatedPart,
   getMachineController,
   loadGcodeTextToolpathProgram,
   setMachineSingleBlock,
@@ -118,6 +119,10 @@ async function connectAndHome(controller: MachineConfig['controller']): Promise<
   act(() => { __resetEstopInterlockForTest() })
   getMachineController().home()
   await advance(2000)
+  // WO-3189 seeds the setup's stock box at every simulator connect; the M6
+  // measures on the machine's fixed pad, so this fixture says no part is
+  // placed (a placed part replaces the pad by design, WO-416).
+  setSimulatedPart(null)
   for (const axis of ['X', 'Y', 'Z'] as const) {
     expect(setWorkOffsetValue('G54', axis, 0)).toBe(true)
     await advance(50)

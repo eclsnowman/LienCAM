@@ -81,6 +81,7 @@ const setupStockToolsMachinePost: Translation<'setup-stock-tools-machine-post'> 
     "could_not_read_the_selected_file": "Die gewählte Datei konnte nicht gelesen werden."
   },
   "PostProcessModal": {
+    "no_operations_selected": "Keine Arbeitsschritte ausgewählt. Wählen Sie die auszugebenden Arbeitsschritte.",
     "controller_not_declared": "Steuerung nicht angegeben",
     "built_in_templates": "Eingebaute Vorlagen",
     "saved_posts": "Gespeicherte Postprozessoren",

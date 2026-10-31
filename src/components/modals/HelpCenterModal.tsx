@@ -1,3 +1,4 @@
+import { EngraveVcarveGuide } from './EngraveVcarveGuide'
 import { i18n, machineTranslationNote, textFor, useText } from '../../i18n'
 // Help Center (WO HELP-1 stage S1) - registry-backed help with a category
 // index tree. Topics live in src/help/ (typed modules, lazy bodies per
@@ -26,6 +27,7 @@ import { closeHelp, isHelpOpen, useHelpOpen } from '../../help/helpOpen'
 import { helpIndex, helpIndexEntry, loadTopic } from '../../help/registry'
 import type { ContextKey, HelpCategoryId, HelpSection, HelpTopic } from '../../help/types'
 import { HelpFigure } from './HelpFigure'
+import { CamShortcutMap } from '../settings/CamShortcutMap'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 import { useProjectPicker } from '../../lib/projectOpen/picker'
 import { assetUrl } from '../../lib/assetUrl'
@@ -178,7 +180,7 @@ function TopicBody({ topic }: { topic: HelpTopic }) {
     }
     parts.push(<SectionBlock key={i} section={sections[i]} topic={topic} />)
   }
-  return <>{parts}</>
+  return <>{parts}{topic.id === 'keyboard-shortcuts' && <CamShortcutMap />}<EngraveVcarveGuide operation={topic.id} /></>
 }
 
 function SectionBlock({ section, topic }: { section: HelpSection; topic: HelpTopic }) {

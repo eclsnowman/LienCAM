@@ -1,0 +1,42 @@
+// WO-3220: French, machine-translated and checked against docs/i18n/GLOSSARY.md.
+import type { Translation } from '../../index'
+
+const holdingTabs: Translation<'holding-tabs.wo3220'> = {
+  suggest: 'Suggérer des positions de pattes',
+  suggestTooltip: 'Propose des centres de pattes loin des angles, des segments courts, des trous proches et du bridage. Rien ne change avant Appliquer. Les contours aux pattes placées à la main restent tels quels.',
+  foundOf: '{{found}} suggestions trouvées sur {{requested}}',
+  loopLine: 'Contour {{index}} : {{found}} sur {{requested}} à {{positions}} mm le long de la coupe',
+  loopNone: "Contour {{index}} : aucune position ne convient, il reste donc sans pattes à l'application",
+  loopHandPlaced: 'Contour {{index}} : pattes placées à la main conservées',
+  avoided: 'Évité : {{reasons}}',
+  notChecked: 'Non vérifié : {{items}}',
+  apply: 'Appliquer',
+  applyPartial: 'Appliquer {{count}}',
+  cancel: 'Annuler',
+  applied: '{{count}} positions de pattes appliquées. Générez pour les usiner.',
+  appliedWithNone: '{{count}} positions de pattes appliquées ; contours sans pattes : {{none}}. Générez pour les usiner.',
+  outlinesWithoutTabs: 'Contours sans pattes : {{count}}',
+  reasonCorner: 'les angles et segments courts',
+  reasonEntry: "l'entrée et la sortie",
+  reasonOppositeWall: 'la paroi opposée',
+  reasonOtherOutline: "d'autres contours et trous",
+  reasonFixture: 'le bridage',
+  reasonMaterial: 'les endroits sans matière autour',
+  reasonOther: "d'autres limites",
+  omittedHolder: 'dégagement du porte-outil',
+  omittedFixtures: 'bridage sans forme lisible',
+  diagnosticThinWeb: "La patte n'est pas plus large que la fraise : elle ne laisse presque pas de matière.",
+  diagnosticOther: 'Aucune suggestion possible pour un contour ({{code}}).',
+  refuseMissing: "Cette opération n'existe plus.",
+  refuseNotContour: 'Suggérer des positions de pattes ne fonctionne que sur les opérations de contournage.',
+  refuseOpen: 'Suggérer des positions de pattes fonctionne sur les contours fermés ; celui-ci est ouvert.',
+  refuseRoughing: "Suggérer des positions de pattes fonctionne sur les contours de finition seule ; celui-ci ébauche d'abord, donc ce n'est pas proposé.",
+  refuseTabsOff: "Activez d'abord les pattes de maintien.",
+  refuseGenerateFirst: "Générez d'abord cette opération : les suggestions sont placées sur sa trajectoire de finition.",
+  refuseStale: "L'opération a changé depuis sa génération. Générez à nouveau pour obtenir des suggestions.",
+  refuseAllHandPlaced: "Chaque contour a déjà des pattes placées à la main. Revenez d'abord à l'espacement régulier.",
+  refuseChanged: 'Quelque chose a changé, les suggestions ont donc été recalculées. Vérifiez-les et appliquez à nouveau.',
+  refuseNothingFound: "Aucune position ne convient, il n'y a donc rien à appliquer.",
+}
+
+export default holdingTabs

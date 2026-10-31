@@ -19,7 +19,7 @@
 // the rapid-to-R / feed-to-depth / retract moves the controller would execute,
 // so no reader has to grow a second walk of the program text to see them.
 
-import { parseGcode, type GcodeLine, type GcodePoint, type GcodeSegment } from '../gcode'
+import { parseGcode, type GcodeLine, type GcodePoint, type GcodeSegment, type GcodeProgram } from '../gcode'
 import {
   gcodeWordEntry,
   gcodeWordRefusal,
@@ -58,6 +58,10 @@ export interface PreviewPolyline {
   kind: 'rapid' | 'feed' | 'arc'
   /** XY points in work coordinates; arcs are sampled. */
   points: Array<{ x: number; y: number }>
+  /** WO-3263: axes the source command addresses (`PreviewMove.addressedAxes`),
+   *  so a caller that places G53 feed moves knows which axes a later work
+   *  move takes back from where the machine move left them. */
+  addressedAxes?: ReadonlyArray<CoordinateAxis>
   /** Depth at the move's start point, for depth interpolation along the move. */
   z0: number
   /** Depth of the move's endpoint, for depth tinting. */
@@ -753,8 +757,22 @@ function resolveProgramSegments(
   return { resolved: out, spindleRpmMax, addressedAxes }
 }
 
-export function buildPreviewModel(programText: string): PreviewModel {
+// Session staging changes only standard stop/tool/spindle M words. Reuse
+// geometry only after checking every changed physical line; other edits (even
+// a changed S on the same line) must rebuild and reassess the exact staged text.
+export function setupLoadPreviewMatches(source: string, staged: string): boolean {
+  const a = source.split(/\r?\n/), b = staged.split(/\r?\n/)
+  if (a.length !== b.length) return false
+  const normalize = (line: string) => stripPreviewComments(line).replace(/(^|\s)M0?([01346])(?=\s|$)/gi,
+    (word, space: string, code: string) => gcodeWordEntry(gcodeWordTable(PREVIEW_DIALECT), 'M', Number(code)) ? space : word).trim()
+  return a.every((line, index) => line === b[index] || normalize(line) === normalize(b[index]))
+}
+
+export function buildPreviewModel(programText: string, captureParsed?: (program: GcodeProgram) => void): PreviewModel {
   const program = parseGcode(stripPreviewComments(programText))
+  // Request-local capture lets display-only preparation share this parse. The
+  // caller must still check its own comment/token authority before using it.
+  captureParsed?.(program)
   const assessment = assessPreview(program.lines)
   if (assessment.refusal !== null) return refusedPreviewModel(assessment.refusal, assessment.notes)
   const polylines: PreviewPolyline[] = []
@@ -781,7 +799,9 @@ export function buildPreviewModel(programText: string): PreviewModel {
       if (p.x > maxX) maxX = p.x
       if (p.y > maxY) maxY = p.y
     }
-    polylines.push({ line: seg.line, kind: seg.kind, points, z0, z, feedMmMin: seg.feedMmMin })
+    polylines.push({
+      line: seg.line, kind: seg.kind, points, z0, z, feedMmMin: seg.feedMmMin, addressedAxes: seg.addressedAxes,
+    })
   }
 
   const { resolved, spindleRpmMax, addressedAxes } = resolveProgramSegments(program.lines, program.segments)

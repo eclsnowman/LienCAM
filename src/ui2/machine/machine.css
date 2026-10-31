@@ -1,0 +1,38 @@
+/* WO-3303: the Machine window and pill. Token custom properties only (spec 3). */
+.ui2-machine-pill { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.ui2-machine-choice { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 340px; max-width: 90vw; }
+.ui2-machine-choices { display: flex; flex-direction: column; gap: 6px; }
+.ui2-machine-note { color: var(--tx3); margin: 0 0 8px; }
+.ui2-machine-window { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ui2-machine-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.ui2-machine-fact { margin: 0 0 4px; font-family: var(--mono); }
+.ui2-machine-library-split { display: flex; flex-direction: column; gap: 12px; }
+.ui2-machine-list { display: flex; flex-direction: column; }
+.ui2-machine-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ui2-machine-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ui2-machine-bar-spacer { flex: 1; }
+.ui2-machine-fixing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ui2-machine-fixing li { display: flex; align-items: center; gap: 8px; }
+.ui2-machine-fixing-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ui2-machine-fixing-here { border-left: 3px solid var(--warn); padding-left: 8px; }
+.ui2-machine-table { width: 100%; border-collapse: collapse; }
+.ui2-machine-table th, .ui2-machine-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--b2); }
+.ui2-machine-undefined { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.ui2-gantry { width: 100%; max-height: 240px; }
+.ui2-gantry-bed { fill: var(--panel); stroke: var(--b1); }
+.ui2-gantry-rail, .ui2-gantry-leg, .ui2-gantry-beam { fill: none; stroke: var(--acc); stroke-width: 2; }
+.ui2-gantry-block { fill: var(--acc); }
+.ui2-gantry-spindle { fill: var(--app); stroke: var(--b1); }
+.ui2-gantry-home { fill: var(--err); }
+
+.ui2-machine-facts { display: flex; flex-direction: column; gap: 2px; }
+.ui2-machine-fact { overflow-wrap: anywhere; font-size: var(--f-cap); }
+.ui2-machine-bar > [data-testid='machine-def-kind'], .ui2-machine-bar > [data-testid='machine-def-controller'], .ui2-machine-bar > [data-testid='machine-def-search'] { flex: 0 1 220px; min-width: 120px; }
+.ui2-gantry { min-height: 120px; }
+.ui2-machine-window .kit-card-body { display: flex; flex-direction: column; gap: var(--sp3); }
+.ui2-machine-window .kit-card .kit-card-body { padding: var(--sp4) var(--sp5); }
+/* spec 5.1 rule 4 at every interface scale: the minimum hit target in this window's own pixels (the
+   shell zooms its windows by --ui2-scale); the hosted editors' buttons and fields meet it too, and
+   keep the taller of their own height and that minimum */
+.ui2-machine-window { --machine-hit: calc(var(--min-hit) / var(--ui2-scale, 1)); }
+.ui2-machine-window :is(button, select, input:not([type='hidden']), textarea, [role='tab'], a[href]) { min-height: max(var(--h-ctl, 0px), var(--machine-hit)); }

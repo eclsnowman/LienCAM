@@ -369,7 +369,9 @@ describe('WO-467 refusal paths: what happens when it should not just work', () =
     await connectHomed()
     await jogTo(CENTRE.x, CENTRE.y, CENTRE.z)
     const mpos = useMachineControl.getState().mpos!
-    // No setSimulatedPart at all - nothing to touch.
+    // Nothing to touch: WO-3189 seeds a part at simulator connect, so the empty
+    // table has to be stated explicitly or this is not the no-contact case.
+    setSimulatedPart(null)
     await jogTo(mpos.x, mpos.y, mpos.z - 15)
     const start = useMachineControl.getState().mpos!
     const expanded = expandProbeRoutine(

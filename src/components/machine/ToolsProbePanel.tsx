@@ -1,6 +1,7 @@
 import { jsxTextValue } from '../../i18n/locales/en/probing-screens'
 import { textFor, useText } from '../../i18n'
 const probeText = textFor('probing-screens')
+const resumeText = textFor('measure-tool-resume.wo3198')
 
 // ToolsProbePanel - sender-side tool table + fixed-pad Z probe (MACHINE-
 // CONTROL stage 10). One panel, two sections, per the plan: the per-machine
@@ -16,8 +17,8 @@ const probeText = textFor('probing-screens')
 // fixed-pad Z probe stay here unchanged; they measure and record TOOL
 // length, not a workpiece feature.
 
-import { useMemo, useState } from 'react'
-import { ArrowDownToLine, Plus, Star, Trash2 } from 'lucide-react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
+import { ArrowDownToLine, CirclePlay, Plus, Star, Trash2 } from 'lucide-react'
 import { controlMachine, useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
 import { currentToolOf } from '../../lib/machine/currentTool'
@@ -33,13 +34,19 @@ import {
 import {
   applyToolLengthOffset,
   clearToolLengthOffset,
+  estopNeedsReset,
   fixedToolSetterPosition,
+  isProbeCycleActive,
+  programHoldCycleStartDecision,
   recoverFromProbeAlarm,
   runZProbeCycle,
   setProbeSensing,
+  subscribeEstopNeedsReset,
+  subscribeProbeCycleActive,
   useMachineProbeSensing,
   type ZProbeMode,
 } from '../../lib/machine/machineSession'
+import { executeOperatorCycleStart } from '../../lib/machine/operatorTransport'
 import { DEFAULT_PROBE_SENSING, type ProbeSensing } from '../../lib/machine/probeFeatureCycle'
 import { useDisplayUnits } from './useDisplayUnits'
 import { ResizableSplit } from '../common/ResizableSplit'
@@ -70,6 +77,11 @@ export const TOOLS_JOG_PANEL_KEY = 'control-tools-jog'
 /** The Tools panel's narrowest designed layout (its 420px container step)
  *  plus its padding: the jog rail never widens past what leaves this. */
 export const TOOLS_PANEL_MIN_PX = 440
+
+/** WO-3198: a Measure this tab started is still running. Module scope, not
+ *  component state: the tab unmounts when the operator goes to Main and back,
+ *  and the held measurement is still this tab's when they return. */
+let toolsTabMeasureRunning = false
 
 export function ToolsProbePanel() {
   useText('probing-screens')
@@ -113,6 +125,10 @@ export function ToolsProbePanel() {
   // TOOL glance. Measuring still defaults to the store's activeTool.
   const currentTool = useMachineControl(currentToolOf)
   const tlo = useMachineControl((s) => s.tlo)
+  // WO-3198: re-render on the probe routine's own start/pause/stop and on the
+  // E-STOP latch, the two facts the Resume below reads besides machineState.
+  useSyncExternalStore(subscribeProbeCycleActive, isProbeCycleActive, () => false)
+  const estopLatched = useSyncExternalStore(subscribeEstopNeedsReset, estopNeedsReset, () => true)
   const machineZ = useMachineControl((s) => s.mpos?.z)
   const probeSignals = useProbeSignals()
   const units = useDisplayUnits()
@@ -171,6 +187,7 @@ export function ToolsProbePanel() {
     const receiptTool = probeTool
     setBusy(true)
     setStatus(null)
+    if (mode === 'measureTool') toolsTabMeasureRunning = true
     try {
       const result = await runZProbeCycle(mode, probeCfg)
       const receiptState = useCamStore.getState()
@@ -259,9 +276,21 @@ export function ToolsProbePanel() {
         text: result.message + suffix,
       })
     } finally {
+      if (mode === 'measureTool') toolsTabMeasureRunning = false
       setBusy(false)
     }
   }
+
+  // WO-3198 (the operator 10-27, "do it"): a Measure this tab started and Feed Hold
+  // held is resumed here too. The session's own hold decision says the probe
+  // routine owns the press (programHoldCycleStartDecision 'probe-cycle', the
+  // same one Main's CYCLE START reads), and the button calls the one resume
+  // route Main's CYCLE START calls. A held program, a hold the Probing tab or a
+  // guided change started, Stop/Reset and the E-STOP keep today's behaviour.
+  const measureHeldHere = toolsTabMeasureRunning
+    && connected
+    && !estopLatched
+    && programHoldCycleStartDecision()?.owner === 'probe-cycle'
 
   const onAddTool = () => {
     const n = Number(addText.trim())
@@ -678,6 +707,20 @@ export function ToolsProbePanel() {
               >
                 <ArrowDownToLine size={13} /> {busy ? probeText('toolsProbePanel115') : probeText('toolsProbePanel116')}
               </button>
+              {/* WO-3198: while this tab's Measure is held, Resume stands in the
+                  Measure button's own place (Measure is greyed for the whole
+                  run anyway). Nothing below it moves, so the pointer that just
+                  pressed Feed Hold is never left over Resume. */}
+              {measureHeldHere ? (
+                <button
+                  className="control-jog-btn control-probe-btn control-tools-resume"
+                  data-testid="control-tools-resume"
+                  data-tooltip={resumeText('resumeTip')}
+                  onClick={() => void executeOperatorCycleStart()}
+                >
+                  <CirclePlay size={13} /> {resumeText('resume')}
+                </button>
+              ) : (
               <button
                 className="control-jog-btn control-motion-outline control-probe-btn"
                 data-testid="control-probe-measure"
@@ -695,6 +738,7 @@ export function ToolsProbePanel() {
               >
                 <ArrowDownToLine size={13} /> {busy ? probeText('toolsProbePanel120') : probeText('toolsProbePanel121', { value1: String(probeTool !== null ? `T${probeTool}` : 'tool') })}
               </button>
+              )}
         </div>
             {status && (
           <div

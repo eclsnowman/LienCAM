@@ -1,6 +1,17 @@
 // WO-2939: current English meaning, not stale German instructions. Wording only.
 import type { Translation } from '../../index'
 const words: Translation<'control-screens-not-probing'> = {
+  ProgramInsight: {
+    "title": "Informations du programme",
+    "unknown": "Inconnu",
+    "feed": "Avance de coupe (commandée)",
+    "spindle": "Broche pendant la coupe (commandée)",
+    "tools": "Outils utilisés en coupe",
+    "bounds": "Limites de travail",
+    "time": "Durée estimée",
+    "minutes": "{{value}} min",
+    "note": "Valeurs commandées, sans retour mesuré. Durée estimée ; les changements d’outil et les arrêts opérateur peuvent prendre plus de temps."
+},
   ControlTransportBar: {
     programHeld: 'En pause', programRunning: 'En marche', text001: 'ARRÊT D’URGENCE',
     text002: 'ARRÊT D’URGENCE - arrêt immédiat et réinitialisation du contrôleur', text003: 'ATTENDRE',
@@ -59,7 +70,7 @@ const words: Translation<'control-screens-not-probing'> = {
     text054: 'Activer le brouillard', text055: ' Brouillard', text056: 'Activer l’arrosage', text057: ' Arrosage', text059: 'L’aspiration est en marche ; appuyer pour l’arrêter avec M9',
     text060: ' Aspiration', text062: '{{value1}} arrêté',
   },
-  ProgramPanel: { setupNotesButton: 'Notes du montage', setupNotesTitle: 'Notes du montage - {{value1}}', setupNotesClose: 'Fermer les notes', setupNotesEmpty: 'Pas encore de notes pour ce montage.', setupNotesEdit: 'Modifier', setupNotesAdd: 'Ajouter des notes', setupNotesSave: 'Enregistrer', setupNotesCancel: 'Annuler' },
+  ProgramPanel: { setupNotesButton: 'Notes du montage', setupNotesInsightButton: 'Notes', setupNotesInsightTitle: 'Notes du montage et informations du programme - {{value1}}', setupNotesTitle: 'Notes du montage - {{value1}}', setupNotesClose: 'Fermer les notes', setupNotesEmpty: 'Pas encore de notes pour ce montage.', setupNotesEdit: 'Modifier', setupNotesAdd: 'Ajouter des notes', setupNotesSave: 'Enregistrer', setupNotesCancel: 'Annuler' },
   RunClock: {
     unavailable: 'indisponible', text001: 'Écoulé {{value1}}{{value2}}Restant estimé {{value3}}', text002: 'Écoulé {{value1}} ; temps restant estimé indisponible',
     text003: 'Écoulé {{value1}} ; temps restant estimé {{value2}}',

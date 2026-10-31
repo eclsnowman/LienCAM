@@ -383,6 +383,8 @@ describe('WO-1075 load gate and acknowledgement', () => {
       project: { ...state.project, machine: camMachine },
       machineLibrary: [camMachine, target],
       control: { activeMachineId: target.id },
+      // WO-3184: a G54 stored by an earlier test is handed to the simulator at connect.
+      machineWorkOffsets: {},
     }))
     useMachineControl.setState({
       activeWcs: 'G54',
@@ -702,16 +704,18 @@ describe('WO-1075 load gate and acknowledgement', () => {
     await vi.advanceTimersByTimeAsync(50)
 
     expect(useMachineControl.getState().programText).toBe(text)
+    // WO-3184: the zero set before the reconnect is stored and handed back to
+    // the simulator, which counts as reported - X travel is judged on it, as
+    // after a real bridge's write receipt.
     expect(transferReview().result).toEqual({
       refusals: [
         'Controller mismatch: the job was posted for uccnc, but Spare runs grbl.',
+        'X program range 5..905 mm exceeds soft limits 0..100 mm.',
       ],
       warnings: [
         'Spindle speed reaches 40000 RPM; Spare allows 24000 RPM.',
       ],
-      notes: [
-        'Work zero not set on X - travel on X is unchecked until you set it.',
-      ],
+      notes: [],
     })
     expect(useMachineControl.getState().programReadiness).toEqual({
       ready: false,

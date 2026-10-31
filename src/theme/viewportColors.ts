@@ -31,6 +31,7 @@ const FALLBACK: Record<string, string> = {
   '--role-helix': '#ff8c00',   // v3: merged with ramp (was #ffd700)
   '--role-ramp': '#ff8c00',
   '--role-plunge': '#ff44ff',
+  '--role-retract': '#c6ff00',
   '--role-finish': '#ff85a8',
   '--role-stepover': '#44ff88',
   '--role-wall-follow': '#00d0a0',
@@ -227,7 +228,7 @@ export function refreshViewportColors(): void {
 
 // ---- Role colors ---------------------------------------------------------
 //
-// Map of toolpath role -> #rrggbb string. The 11 production roles plus the
+// Map of toolpath role -> #rrggbb string. The 12 production roles plus the
 // `unknown` fallback. Both the CSS legend (string form) and the THREE scene
 // (via asNumber) read from this single definition.
 export const ROLE_TOKENS: Record<string, string> = {
@@ -237,11 +238,15 @@ export const ROLE_TOKENS: Record<string, string> = {
   helix: '--role-helix',
   ramp: '--role-ramp',
   plunge: '--role-plunge',
+  retract: '--role-retract',
   finish: '--role-finish',
   stepover: '--role-stepover',
   wall_follow: '--role-wall-follow',
   lead_in: '--role-lead-in',
   lead_out: '--role-lead-out',
+  // Kept non-cutting by the move-role authority; gold makes its display
+  // independently legible from the blue fast-traverse links.
+  loop_back: '--vp-wcs-origin',
   unknown: '--role-unknown',
 }
 

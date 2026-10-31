@@ -460,6 +460,9 @@ describe('WO-2015: a different controller behaves as before', () => {
     const ended = linesSince(mark).filter((line) =>
       line.text.includes('Program parts ended because the machine connection changed'))
     expect(ended).toHaveLength(1)
-    expect(ended[0].severity).toBe('error')
+    // WO-3127 (6051538432) reports an ordinary requested Disconnect as an info
+    // console row and keeps its failed job lifecycle; only an unrequested
+    // boundary stays an error. The bar here is that it is never silent.
+    expect(ended[0].severity).toBe('info')
   })
 })

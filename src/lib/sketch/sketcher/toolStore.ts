@@ -26,6 +26,7 @@
 // controller) read `sketcherToolStore.getState()` directly.
 import { DEFAULT_SNAP_FLAGS, type WokenRef } from '../snap'
 import type { PendingSnap } from '../inference'
+import type { CreationSizeDraft } from '../tools/drawValue'
 import type { SketchToolId, ToolChainState } from '../tools/toolMachine'
 import type { PolygonMode } from '../tools/polygonSlotTools'
 import { DEFAULT_GEAR_PARAMS, type GearParams } from '../tools/gearTool'
@@ -69,6 +70,9 @@ export interface SketcherToolState {
   //      the SAME live session, but closes on real document switches and
   //      Sketcher.exit() so it cannot leak into the next sketch. ----
   measureOpen: boolean
+  creationSize: CreationSizeDraft | null
+  creationSessionActive: boolean
+  creationDocumentId: string | null
 }
 
 /** Item 8 (inference half): snapped clicks recorded across a chain, resolved into real constraints
@@ -112,6 +116,9 @@ function initialState(): SketcherToolState {
     circularPatternCount: 4,
     circularPatternAngleDeg: 90,
     measureOpen: false,
+    creationSize: null,
+    creationSessionActive: false,
+    creationDocumentId: null,
   }
 }
 
@@ -141,6 +148,10 @@ class SketcherToolStore {
     partial: Partial<SketcherToolState> | ((s: SketcherToolState) => Partial<SketcherToolState>),
   ): void => {
     const next = typeof partial === 'function' ? partial(this.state) : partial
+    // Every chain/tool transition invalidates locks. Kept at the state owner so
+    // direct host restore writes and all controller routes obey the same rule.
+    if ((next.tool !== undefined && next.tool !== this.state.tool) ||
+        (next.chain !== undefined && next.chain !== this.state.chain)) next.creationSize = null
     let changed = false
     for (const key of Object.keys(next) as (keyof SketcherToolState)[]) {
       if (next[key] !== this.state[key]) {

@@ -1,20 +1,90 @@
 // WO-2953: the store adapter for OperationStockAuthority. One authority per
-// project epoch / setup / stock. Inputs are rebuilt from the LIVE store on every
-// read, query and async settlement; nothing here caches a plannable answer.
+// project epoch / setup / stock. Every access checks LIVE content; changed
+// snapshots are prepared once off-page and late preparation cannot publish.
 //
 // Coordinates: stored toolpath moves, stock bounds and Face regions are project
 // world mm (scene space, Z up) - the frame the worker writes moves in and the
 // legacy Smart Height "MachineMm" evidence fields actually carry. Setup WCS
 // origin/axes are NOT applied here: they only relabel moves for the post.
-import { frameRef, pointMm, vectorMm, rigidMap, mapPoint, mapVector, type FrameRef } from '../lib/geometry/coordinateFrames'
+import { frameRef, type FrameRef } from '../lib/geometry/coordinateFrames'
 import {
-  OperationStockAuthority, type OperationStockInputs, type StockOperationInput, type StockRemoval,
+  OperationStockAuthority, stockCutSteps, stockMoveMatchesJson, type PreparedMoveWitness, type OperationStockInputs, type StockOperationInput, type StockRemoval,
 } from '../lib/cam/operationStockAuthority'
 import type { StockCut } from '../lib/cam/stockState'
-import { effectiveMoveRole, isStockCuttingRole } from '../lib/cam/stockCuttingRoles'
+import { offPageStockBackend, prepareStockCutsOffPage, captureStockOffPage, prepareMoveWitnessOffPage } from './toolpathPostprocess'
 import { stockCutterOf } from './toolReachInputs'
-import { operationGenerationIsCurrent } from '../lib/cam/generationFingerprint'
+import { operationGenerationIsCurrent, operationDependsOnPredecessors } from '../lib/cam/generationFingerprint'
+import { validatePersistedSmartHeightState } from '../lib/cam/smartHeights/authority'
+import { operationReferencedGeometryIds } from './opModelOriginGuard'
+import { isWorkholdingGeometry } from './dispatchGeo'
+import { effectiveStockIdForCompute } from './stockAssignment'
 import type { Operation, Project, Setup, Tool, ToolpathMove, Vec3 } from '../types'
+
+// WO-3126/2953/3085: inspect every supplied value, including raw and ABA
+// writes. Keep a per-operation witness across equal array/object replacements;
+// array identity is only a lookup, never the currency contract.
+type MoveWitness = PreparedMoveWitness & { revision: number }
+const moveWitnesses = new WeakMap<readonly ToolpathMove[], MoveWitness>()
+const operationMoveWitnesses = new Map<string, MoveWitness>()
+type ObservedMoves = { epoch: string; project: Project; tools: readonly Tool[]; moves: Map<readonly ToolpathMove[], MoveWitness> }
+// Valid only inside synchronous internal reconciliation after a complete exact
+// scan. notify() revokes this BEFORE arbitrary subscriber code can edit moves.
+let reconciliationScan: ObservedMoves | undefined
+let stockCallbackSerial = 0
+let moveRevision = 0
+function moveWitness(moves: readonly ToolpathMove[] | undefined, owner?: string): MoveWitness | undefined {
+  if (!moves) { if (owner) operationMoveWitnesses.delete(owner); return undefined }
+  const scoped = reconciliationScan?.moves.get(moves)
+  if (scoped) { if (owner) operationMoveWitnesses.set(owner, scoped); return scoped }
+  const primed = moveWitnesses.get(moves)
+  const previous = (owner && operationMoveWitnesses.get(owner)) || primed
+  let copies: ToolpathMove[] | undefined
+  let fieldCounts: number[] | undefined
+  let fieldKeys: (readonly string[])[] | undefined
+  for (let i = 0; i < moves.length; i++) {
+    if (previous?.moves[i] && stockMoveMatchesJson(moves[i], previous.moves[i], previous.fieldKeys[i])) continue
+    copies ??= previous ? [...previous.moves] : []
+    fieldCounts ??= previous ? [...previous.fieldCounts] : []
+    fieldKeys ??= previous ? [...previous.fieldKeys] : []
+    // A generated result already owns an off-page snapshot. Adopt that copy
+    // after checking live values instead of cloning the whole result on-page.
+    const prepared = primed?.moves[i] && stockMoveMatchesJson(moves[i], primed.moves[i], primed.fieldKeys[i])
+    const copy = prepared ? primed!.moves[i] : JSON.parse(JSON.stringify(moves[i])) as ToolpathMove
+    copies[i] = copy
+    fieldKeys[i] = prepared ? primed!.fieldKeys[i] : Object.keys(copy)
+    fieldCounts[i] = fieldKeys[i].length
+  }
+  let witness = previous
+  if (copies || previous?.moves.length !== moves.length) {
+    copies ??= previous ? [...previous.moves] : []
+    copies.length = moves.length
+    fieldCounts ??= previous ? [...previous.fieldCounts] : []
+    fieldCounts.length = moves.length
+    fieldKeys ??= previous ? [...previous.fieldKeys] : []
+    fieldKeys.length = moves.length
+    witness = { revision: ++moveRevision, moves: copies, fieldCounts, fieldKeys }
+  }
+  moveWitnesses.set(moves, witness!)
+  if (owner) operationMoveWitnesses.set(owner, witness!)
+  return witness
+}
+function moveOwner(epoch: string, setupId: string, opId: string): string {
+  return JSON.stringify([epoch, setupId, opId])
+}
+
+/** Prime only an unpublished result. Verify every supplied field against the
+ * worker-owned copy before adoption; a concurrent raw edit falls back to the
+ * normal exact observer, never an identity-only certificate. */
+export async function primeOperationStockMoves(moves: readonly ToolpathMove[], signal?: AbortSignal): Promise<void> {
+  const prepared = await prepareMoveWitnessOffPage(moves, signal)
+  let matches = prepared.moves.length === moves.length
+  for (let i = 0; matches && i < moves.length; i++) {
+    matches = stockMoveMatchesJson(moves[i], prepared.moves[i], prepared.fieldKeys[i])
+  }
+  if (matches) moveWitnesses.set(moves, { revision: ++moveRevision, ...prepared })
+  await new Promise<void>(resolve => setTimeout(resolve, 16))
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+}
 
 /** Requested whole-cell size; coarsening is reported on the snapshot quality. */
 export const OPERATION_STOCK_CELL_MM = 0.5
@@ -37,6 +107,8 @@ const LIFECYCLE_FIELDS = new Set([
 let serialCounter = 0
 let environmentSerial = 0
 let observedEnvironment = ''
+let observedRemoval = ''
+let removalRevision = 0
 const opSerials = new Map<string, { content: string; serial: number }>()
 
 function contentOf(op: Operation): string {
@@ -86,6 +158,7 @@ function environmentOf(project: Project, tools: readonly Tool[]): string {
 
 type Domain = { epoch: string; authority: OperationStockAuthority }
 const authorities = new Map<string, Domain>()
+let reconciling = false
 let currentEpoch: string | undefined
 
 function disposeOtherEpochs(epoch: string): void {
@@ -98,6 +171,7 @@ function disposeOtherEpochs(epoch: string): void {
     authorities.delete(key)
   }
   if (old !== undefined) for (const key of [...opSerials.keys()]) if (key.startsWith(`${old}\u0000`)) opSerials.delete(key)
+  operationMoveWitnesses.clear()
   restoredFaces.clear()
 }
 
@@ -147,25 +221,78 @@ function restoredFaceIsCurrent(ctx: OperationStockContext, op: Operation): boole
 
 /** Call from a store subscription on EVERY change. Cheap when nothing relevant
  * moved; otherwise renews serials and reconciles live authorities eagerly. */
-export function observeOperationStockState(epoch: string, project: Project, tools: readonly Tool[]): void {
+export function observeOperationStockState(epoch: string, project: Project, tools: readonly Tool[]): ObservedMoves | undefined {
+  if (reconciliationScan?.epoch === epoch && reconciliationScan.project === project && reconciliationScan.tools === tools) return reconciliationScan
   disposeOtherEpochs(epoch)
   observeFaces(epoch, project)
   const environment = environmentOf(project, tools)
   const changed = environment !== observedEnvironment
   if (changed) { observedEnvironment = environment; environmentSerial = ++serialCounter }
   for (const setup of project.setups) for (const op of setup.operations) opSerial(epoch, op)
-  for (const domain of authorities.values()) domain.authority.reconcile()
+  // WO-3085: a progress message used to clone and fingerprint every completed
+  // toolpath once per outstanding stock request. Full Suite spent 75 seconds
+  // in capture() alone. Keep eager invalidation for actual inputs/results,
+  // including raw in-place move edits; progress and timing are not removal.
+  const scan: ObservedMoves = { epoch, project, tools, moves: new Map() }
+  const inspected = (moves: readonly ToolpathMove[] | undefined, owner: string) => {
+    if (!moves) { operationMoveWitnesses.delete(owner); return undefined }
+    let witness = scan.moves.get(moves)
+    if (!witness) { witness = moveWitness(moves, owner)!; scan.moves.set(moves, witness) }
+    operationMoveWitnesses.set(owner, witness)
+    return witness.revision
+  }
+  const removal = JSON.stringify([epoch, environmentSerial, project.setups.map(setup => [setup.id,
+    setup.operations.map(op => [op.name, op.status, op.errorMessage, op.generationFingerprint,
+      op.resolvedHeights, op.resolvedHeightPlan, operationDependsOnPredecessors(op), inspected(op.toolpathMoves, moveOwner(epoch, setup.id, op.id))])])])
+  if (removal === observedRemoval) return scan
+  observedRemoval = removal
+  ++removalRevision
+  if (reconciling) return scan
+  reconciling = true
+  const callbacksBefore = stockCallbackSerial
+  reconciliationScan = scan
+  try { for (const domain of authorities.values()) domain.authority.reconcile() }
+  finally { reconciling = false; reconciliationScan = undefined }
+  // A callback may have changed live content without a store notification.
+  return callbacksBefore === stockCallbackSerial ? scan : undefined
 }
 
 export function operationStockAuthorityFor(
-  epoch: string, setupId: string, stockId: string, getLatest: () => OperationStockInputs,
+  epoch: string, setupId: string, stockId: string, getContext: () => OperationStockContext,
 ): OperationStockAuthority {
   disposeOtherEpochs(epoch)
   const key = JSON.stringify([epoch, setupId, stockId])
   let domain = authorities.get(key)
   if (!domain) {
     if (authorities.size === 0) environmentSerial = ++serialCounter
-    authorities.set(key, domain = { epoch, authority: new OperationStockAuthority(getLatest) })
+    let preparedRevision = -1
+    let prepared: Promise<OperationStockInputs>
+    const revision = (request: import('../lib/cam/operationStockAuthority').StockBeforeRequest) => {
+      let ctx = getContext()
+      const scan = observeOperationStockState(ctx.epoch, ctx.project, ctx.toolLibrary)
+      if (!scan) ctx = getContext()
+      const end = request.beforeOperationId === STOCK_END_OPERATION_ID ? ctx.setup?.operations.length ?? 0
+        : ctx.setup?.operations.findIndex(op => op.id === request.beforeOperationId) ?? -1
+      // A target's computing/ready write must not revoke the material it is
+      // currently using. Only enabled predecessors in this stock enter capture.
+      return JSON.stringify([ctx.epoch, environmentSerial, ctx.setup?.operations.slice(0, Math.max(0, end))
+        .filter(op => op.enabled !== false && (ctx.stockIdOf(op) === null || ctx.stockIdOf(op) === ctx.stockId))
+        .map(op => [op.id, op.name, op.status, op.errorMessage, op.generationFingerprint,
+          op.resolvedHeights, op.resolvedHeightPlan, operationDependsOnPredecessors(op),
+          (op.toolpathMoves && scan?.moves.get(op.toolpathMoves) || moveWitness(op.toolpathMoves, moveOwner(ctx.epoch, ctx.setup!.id, op.id)))?.revision])])
+    }
+    const prepare = () => {
+      if (!prepared || preparedRevision !== removalRevision) {
+        preparedRevision = removalRevision
+        prepared = prepareOperationStockInputs(getContext())
+      }
+      return prepared
+    }
+    authorities.set(key, domain = { epoch, authority: new OperationStockAuthority(
+      () => buildOperationStockInputs(getContext()), offPageStockBackend,
+      { revision, prepare, capture: captureStockOffPage,
+        beforeNotify: () => { reconciliationScan = undefined; ++stockCallbackSerial } },
+    ) })
   }
   return domain.authority
 }
@@ -179,105 +306,13 @@ export function operationStockWorldFrame(epoch: string): FrameRef<'world'> {
 const resultSerials = new WeakMap<readonly ToolpathMove[], number>()
 let resultSerial = 0
 
-/** A ramp piece may drop at most this far; each piece counts at its higher end. */
-export const RAMP_PIECE_DROP_MM = 0.25
-/** Largest chord sagitta an arc is split to (also capped at a tenth of the cutter radius). */
-export const ARC_CHORD_SAGITTA_MM = 0.01
-const MAX_PIECES_PER_MOVE = 4096
-
-/** Stored world-mm moves to upward-open level/plunge sweeps that never remove
- * more than the real cut: retained stock can only be over-reported.
- * - A ramp (XY+Z together) is split into short level pieces, each swept at its
- *   HIGHER end, so no piece reaches below the cutter's real path.
- * - An arc (or helix) becomes chords. Each chord is swept by the cutter shrunk
- *   by the chord's sagitta s; a ball is also lifted by s so its centre height is
- *   unchanged. A disc/ball of radius R-s within s of the arc lies inside the real
- *   cutter of radius R there. An arc without a centre, or whose start and end
- *   coincide, removes nothing.
- * - A tool with no conservative removal shape (v-bit, chamfer, dovetail...)
- *   removes nothing, and so does a cutting move with no known start.
- * Only rotary endpoints are refused: the stock itself turns under them. */
+// The identical converter is shared by worker and cooperative fallback.
+export { RAMP_PIECE_DROP_MM, ARC_CHORD_SAGITTA_MM } from '../lib/cam/operationStockAuthority'
 export function stockCutsFromMoves(moves: readonly ToolpathMove[], tool: Tool | undefined, frame: FrameRef<'world'>): readonly StockCut[] | string {
-  const replay = stockCutterOf(tool)
-  if (!replay) return Object.freeze([])
-  let result: readonly StockCut[] | string
-  try {
-    const cuts: StockCut[] = []
-    // Stored endpoints already live in project world mm. The checked identity
-    // ingress prevents applying geometry placement or WCS origin a second time.
-    const ingress = rigidMap(frame, frame, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
-    const axis = mapVector(ingress, vectorMm(frame, { x: 0, y: 0, z: 1 })).value
-    if (axis.x !== 0 || axis.y !== 0 || axis.z !== 1) throw new Error('a tilted cutter')
-    const radius = replay.cutter.diameter / 2
-    const sweep = (from: Vec3, to: Vec3, shrinkMm: number) => {
-      const cutter = shrinkMm > 0 ? { ...replay.cutter, diameter: replay.cutter.diameter - 2 * shrinkMm } : replay.cutter
-      const lift = replay.liftMm + (replay.cutter.kind === 'ball' ? shrinkMm : 0)
-      const planar = to.x !== from.x || to.y !== from.y
-      const drop = Math.abs(to.z - from.z)
-      // A plunge (or a level move) keeps its own ends; float noise on a level
-      // move is taken at the HIGHER end like any ramp.
-      const pieces = !planar ? 1 : drop <= 1e-9 ? 1 : Math.min(MAX_PIECES_PER_MOVE, Math.ceil(drop / RAMP_PIECE_DROP_MM))
-      for (let k = 0; k < pieces; k++) {
-        const a = k === 0 ? from : lerp(from, to, k / pieces)
-        const b = k === pieces - 1 ? to : lerp(from, to, (k + 1) / pieces)
-        const z0 = planar ? Math.max(a.z, b.z) : a.z
-        const z1 = planar ? z0 : b.z
-        cuts.push({ cutter, move: { x0: a.x, y0: a.y, z0: z0 + lift, x1: b.x, y1: b.y, z1: z1 + lift } })
-      }
-    }
-    let tip: Vec3 | undefined
-    for (const raw of moves) {
-      if (raw.a !== undefined || raw.b !== undefined || raw.c !== undefined) throw new Error('a rotary endpoint')
-      const move = { ...raw, ...mapPoint(ingress, pointMm(frame, raw)).value }
-      if (tip && isStockCuttingRole(effectiveMoveRole(move))) {
-        if (move.type === 'arc_cw' || move.type === 'arc_ccw') {
-          const chords = arcChords(tip, move, radius)
-          for (let k = 1; chords && k < chords.points.length; k++) sweep(chords.points[k - 1], chords.points[k], chords.sagittaMm)
-        } else {
-          sweep(tip, move, 0)
-        }
-      }
-      tip = { x: move.x, y: move.y, z: move.z }
-    }
-    result = Object.freeze(cuts)
-  } catch (error) {
-    result = `Material removal of ${error instanceof Error ? error.message : String(error)} is not supported.`
-  }
-  return result
-}
-
-function lerp(a: Vec3, b: Vec3, t: number): Vec3 {
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t }
-}
-
-/** Chord points along an arc/helix and the largest distance (mm) any chord
- * strays from it, or undefined when the arc cannot be enclosed by a cutter at
- * least half the real radius (it then removes nothing). */
-function arcChords(start: Vec3, move: ToolpathMove, cutterRadius: number): { points: Vec3[]; sagittaMm: number } | undefined {
-  const { cx, cy } = move
-  if (cx === undefined || cy === undefined || !Number.isFinite(cx) || !Number.isFinite(cy)) return undefined
-  if (start.x === move.x && start.y === move.y) return undefined
-  const r0 = Math.hypot(start.x - cx, start.y - cy)
-  const r1 = Math.hypot(move.x - cx, move.y - cy)
-  const rMax = Math.max(r0, r1)
-  if (!(Math.min(r0, r1) > 0) || !Number.isFinite(rMax)) return undefined
-  const a0 = Math.atan2(start.y - cy, start.x - cx)
-  let span = Math.atan2(move.y - cy, move.x - cx) - a0
-  if (move.type === 'arc_ccw') { while (span <= 0) span += 2 * Math.PI } else { while (span >= 0) span -= 2 * Math.PI }
-  const tolerance = Math.min(ARC_CHORD_SAGITTA_MM, cutterRadius / 10)
-  const halfStep = tolerance < rMax ? Math.acos(1 - tolerance / rMax) : Math.PI / 2
-  const count = Math.min(MAX_PIECES_PER_MOVE, Math.max(1, Math.ceil(Math.abs(span) / (2 * halfStep))))
-  // The chord sagitta, plus any start/end radius mismatch: the interpolated
-  // spiral is within that of every reading of the arc's radius.
-  const sagittaMm = rMax * (1 - Math.cos(Math.abs(span) / (2 * count))) + Math.abs(r1 - r0)
-  if (!(sagittaMm < cutterRadius / 2)) return undefined
-  const points: Vec3[] = [start]
-  for (let k = 1; k < count; k++) {
-    const t = k / count, angle = a0 + span * t, r = r0 + (r1 - r0) * t
-    points.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle), z: start.z + (move.z - start.z) * t })
-  }
-  points.push({ x: move.x, y: move.y, z: move.z })
-  return { points, sagittaMm }
+  const steps = stockCutSteps(moves, stockCutterOf(tool), frame)
+  let step = steps.next()
+  while (!step.done) step = steps.next()
+  return step.value
 }
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
@@ -295,13 +330,38 @@ export interface OperationStockContext {
   resultIsCurrent: (op: Operation) => boolean
 }
 
+/** The stock an operation's material belongs to: its geometry's stock, else its
+ * Smart Height stock-footprint scope, else the setup's proven stock. Null is
+ * unresolved (geometry on more than one stock, or nothing to read), never
+ * "no stock". WO-3096: the same reading as the store's operationMaterialStockId
+ * (src/store/index.ts), which feeds getOperationStockDomain; the store keeps
+ * its own copy until it imports this one. */
+export function operationMaterialStockIdOf(project: Project, op: Operation, provenStockId: () => string | undefined): string | null {
+  const references = operationReferencedGeometryIds(op)
+  const ids = references.includes('__all__')
+    ? project.geometry.filter(geo => !isWorkholdingGeometry(geo)).map(geo => geo.id)
+    : references.filter(id => id !== '__stock__')
+  if (ids.length) {
+    const memberships = ids.map(id => {
+      const geo = project.geometry.find(candidate => candidate.id === id)
+      return geo ? effectiveStockIdForCompute(geo, project.nests ?? [], project.stocks ?? []) : undefined
+    })
+    return memberships.every(id => id && id === memberships[0]) ? memberships[0]! : null
+  }
+  const validated = validatePersistedSmartHeightState(op.smartHeight)
+  const scope = validated.ok ? validated.state.intent.machining.scope.value : undefined
+  if (scope?.kind === 'stock_footprint') return scope.stockId
+  return provenStockId() ?? null
+}
+
 function toolRevision(tool: Tool | undefined): string {
   const replay = stockCutterOf(tool)
   return replay ? JSON.stringify(tool) : `unsupported:${JSON.stringify(tool)}`
 }
 
 function removalOf(ctx: OperationStockContext, op: Operation, frame: FrameRef<'world'>,
-  inputRevision: string, toolRev: string, tool: Tool | undefined): StockRemoval {
+  inputRevision: string, toolRev: string, tool: Tool | undefined,
+  cutsOf: (op: Operation, tool: Tool | undefined, frame: FrameRef<'world'>) => readonly StockCut[] | string): StockRemoval {
   switch (op.status) {
     case 'computing': return { status: 'computing' }
     case 'error': return { status: 'error', reason: `'${op.name}' failed: ${op.errorMessage ?? 'no result'}` }
@@ -315,7 +375,7 @@ function removalOf(ctx: OperationStockContext, op: Operation, frame: FrameRef<'w
   if (!axis || Math.abs(axis.x) > 1e-10 || Math.abs(axis.y) > 1e-10 || Math.abs(axis.z - 1) > 1e-10) {
     return { status: 'unsupported', reason: 'Remaining stock does not support a tilted cutter axis.' }
   }
-  const cuts = stockCutsFromMoves(op.toolpathMoves, tool, frame)
+  const cuts = cutsOf(op, tool, frame)
   if (typeof cuts === 'string') return { status: 'unsupported', reason: `'${op.name}': ${cuts}` }
   if (!resultSerials.has(op.toolpathMoves)) resultSerials.set(op.toolpathMoves, ++resultSerial)
   return { status: 'ready', resultRevision: `${op.generationFingerprint!}:${resultSerials.get(op.toolpathMoves)}`, inputRevision, toolRevision: toolRev, frame, cuts }
@@ -323,7 +383,9 @@ function removalOf(ctx: OperationStockContext, op: Operation, frame: FrameRef<'w
 
 /** Current world/mm inputs for one setup/stock domain, in execution order,
  * disabled operations included, plus the virtual end-of-setup operation. */
-export function buildOperationStockInputs(ctx: OperationStockContext): OperationStockInputs {
+export function buildOperationStockInputs(ctx: OperationStockContext,
+  cutsOf = (op: Operation, tool: Tool | undefined, frame: FrameRef<'world'>) => stockCutsFromMoves(op.toolpathMoves!, tool, frame),
+): OperationStockInputs {
   const frame = operationStockWorldFrame(ctx.epoch)
   const b = ctx.stockBounds
   const operations: StockOperationInput[] = (ctx.setup?.operations ?? []).map(op => {
@@ -331,7 +393,7 @@ export function buildOperationStockInputs(ctx: OperationStockContext): Operation
     const inputRevision = `${opSerial(ctx.epoch, op)}`
     const toolRev = toolRevision(tool)
     return { id: op.id, enabled: op.enabled !== false, stockId: ctx.stockIdOf(op), inputRevision,
-      toolRevision: toolRev, removal: op.enabled === false ? { status: 'missing' } : removalOf(ctx, op, frame, inputRevision, toolRev, tool) }
+      toolRevision: toolRev, removal: op.enabled === false ? { status: 'missing' } : removalOf(ctx, op, frame, inputRevision, toolRev, tool, cutsOf) }
   })
   operations.push({ id: STOCK_END_OPERATION_ID, enabled: false, stockId: ctx.stockId,
     inputRevision: 'end', toolRevision: 'end', removal: { status: 'missing' } })
@@ -351,6 +413,37 @@ export function buildOperationStockInputs(ctx: OperationStockContext): Operation
     },
     operations,
   }
+}
+
+const preparedCuts = new WeakMap<MoveWitness, Map<string, Promise<readonly StockCut[] | string>>>()
+
+async function prepareOperationStockInputs(ctx: OperationStockContext): Promise<OperationStockInputs> {
+  const pending = new Map<string, Promise<readonly StockCut[] | string>>()
+  const inputs = buildOperationStockInputs(ctx, (op, tool, frame) => {
+    const witness = moveWitness(op.toolpathMoves, moveOwner(ctx.epoch, ctx.setup!.id, op.id))!
+    const replay = stockCutterOf(tool)
+    const key = JSON.stringify([frame, replay])
+    let tasks = preparedCuts.get(witness)
+    if (!tasks) preparedCuts.set(witness, tasks = new Map())
+    let task = tasks.get(key)
+    if (!task) {
+      task = prepareStockCutsOffPage(witness.moves, replay, frame)
+      tasks.set(key, task)
+      // A transport/backend failure may be retried on the next dirty snapshot.
+      void task.catch(() => tasks!.delete(key))
+    }
+    pending.set(op.id, task)
+    return []
+  })
+  const operations = await Promise.all(inputs.operations.map(async op => {
+    const task = pending.get(op.id)
+    if (!task || op.removal.status !== 'ready') return op
+    const cuts = await task
+    return { ...op, removal: typeof cuts === 'string'
+      ? { status: 'unsupported' as const, reason: `'${ctx.setup?.operations.find(item => item.id === op.id)?.name}': ${cuts}` }
+      : { ...op.removal, cuts } }
+  }))
+  return { ...inputs, operations }
 }
 
 /** Resolve on the authority's next settlement/invalidation (or a 1 s safety tick). */

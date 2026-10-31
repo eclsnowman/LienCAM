@@ -24,6 +24,7 @@
 // Deterministic: pure geometry, fixed fixture, no RNG (see determinism.test.ts).
 
 import { describe, it, expect, beforeAll, vi } from 'vitest'
+import { typedMock } from '../../support/typedMock'
 import * as fs from 'fs'
 import {
   ensureEngineClipperReady, diskPath, capsulePath, offsetOpenRound,
@@ -31,6 +32,22 @@ import {
 } from '../../../lib/cam/adaptiveClearing2d/engine/clipperEngine'
 import { processFeature, planStopShortKeepDown, type AdaptivePass, type ProcessParams } from '../../../lib/cam/adaptiveClearing2d/engine/processFeature'
 import { emitFeature, type EmitContext } from '../../../lib/cam/adaptiveClearing2d/engine/emit'
+
+// WO-3067 (architect oracle ruling 2026-10-27 8:12 PM CT): steering smoothing ships ON, and ON
+// leaves BootL with no lift landing to measure, so the BootL case pins the switch OFF to keep
+// measuring the lift-landing gate; the ON default is still held to the same landing safety.
+type PolicyModule = typeof import('../../../kernel/ops/adaptive/policy')
+const switchState = vi.hoisted(() => ({ steeringSmoothing: true }))
+vi.mock('../../../kernel/ops/adaptive/policy', async (importOriginal) => {
+  const real = await importOriginal<PolicyModule>()
+  return typedMock<PolicyModule>({
+    ...real,
+    ADAPTIVE_MOTION_SWITCHES: {
+      ...real.ADAPTIVE_MOTION_SWITCHES,
+      get steeringSmoothing() { return switchState.steeringSmoothing },
+    },
+  })
+})
 
 // ---- fixture: the B8 repro (120x120 pocket, centered 40mm-dia island, 6mm tool, 25% load)
 const SIZE = 120
@@ -362,18 +379,31 @@ describe('lift-landing gate (B8 follow-up: plunge lands over cleared stock)', ()
   }, 300_000)
 
   it('BootL gt fixture: every over-cap landing descends via helix (no straight plunge into uncut)', () => {
-    const warns: string[] = []
-    const spy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warns.push(args.map(String).join(' ')) })
-    let res
-    try {
-      const { boundary, holes, helixDiameter } = loadGtFixture(5) // BootL
-      res = processFeature({ boundary, holes }, {
-        toolRadius: 2.0, stepOver: 0.2, tolerance: 0.1, helixDiameter, stockToLeave: 0.5,
-        integralWallFollow: true, wallCleanupAsWeGo: true, loopbackFilletPct: 25,
-      })
-    } finally {
-      spy.mockRestore()
+    const runBootL = (steeringSmoothing: boolean) => {
+      const warns: string[] = []
+      const spy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warns.push(args.map(String).join(' ')) })
+      switchState.steeringSmoothing = steeringSmoothing
+      try {
+        const { boundary, holes, helixDiameter } = loadGtFixture(5) // BootL
+        const res = processFeature({ boundary, holes }, {
+          toolRadius: 2.0, stepOver: 0.2, tolerance: 0.1, helixDiameter, stockToLeave: 0.5,
+          integralWallFollow: true, wallCleanupAsWeGo: true, loopbackFilletPct: 25,
+        })
+        return { res, warns }
+      } finally {
+        switchState.steeringSmoothing = true
+        spy.mockRestore()
+      }
     }
+    // The shipped smoothing ON default: BootL lifts nowhere it would land over the cap without
+    // a helix, and never needs the straight-plunge fallback.
+    const smoothed = runBootL(true)
+    expect(smoothed.res.stats.aborted).toBeUndefined()
+    expect(measureLiftLandings(smoothed.res.passes, 2.0).filter(l => l.uncutFrac > LANDING_CAP_FRAC && !l.helix)).toEqual([])
+    expect(smoothed.warns.filter(w => w.includes('NO helix fits'))).toEqual([])
+
+    // WO-3067 ruling: smoothing OFF for the gate measurement, so BootL still lifts and lands.
+    const { res, warns } = runBootL(false)
     expect(res.stats.aborted).toBeUndefined()
 
     const landings = measureLiftLandings(res.passes, 2.0)

@@ -5,6 +5,17 @@
 import type { Translation } from '../../index'
 
 const controlScreens: Translation<'control-screens-not-probing'> = {
+  ProgramInsight: {
+    "title": "Programminfo",
+    "unknown": "Unbekannt",
+    "feed": "Schnittvorschub (programmiert)",
+    "spindle": "Spindel beim Schnitt (programmiert)",
+    "tools": "Werkzeuge im Schnitt",
+    "bounds": "Werkstückgrenzen",
+    "time": "Geschätzte Zeit",
+    "minutes": "{{value}} Min.",
+    "note": "Programmierte Werte, keine Rückmeldung. Zeit geschätzt; Werkzeugwechsel und Bedienerstopps können länger dauern."
+},
   "ControlTransportBar": {
     "programHeld": "Angehalten",
     "programRunning": "Läuft",
@@ -157,6 +168,8 @@ const controlScreens: Translation<'control-screens-not-probing'> = {
   },
   "ProgramPanel": {
     "setupNotesButton": "Notizen zur Aufspannung",
+    "setupNotesInsightButton": "Notizen",
+    "setupNotesInsightTitle": "Aufspannungsnotizen und Programminfo - {{value1}}",
     "setupNotesTitle": "Notizen zur Aufspannung - {{value1}}",
     "setupNotesClose": "Notizen schließen",
     "setupNotesEmpty": "Noch keine Notizen zu dieser Aufspannung.",

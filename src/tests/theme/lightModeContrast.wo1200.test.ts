@@ -200,11 +200,14 @@ it('restores cross-theme identity separation', () => {
 })
 
 // WO-1257: dark declarations are outside this light-only color-presence pass. Hash repinned after WO-2357 (comment-only name scrub, no declaration changed).
+// WO-3312 RE-PIN: WO-3200 added the loaded-program plunge/retract color roles to the
+// dark token block - a token-only change reviewed against the app; every contrast and
+// role assertion in this file still measures the real declarations.
 it('preserves the complete dark token source byte for byte (LF normalized)', () => {
   const dark = readFileSync('src/theme/tokens.css', 'utf8').replaceAll('\r\n', '\n')
     .split(':root[data-color-mode="light"]')[0]
   expect(createHash('sha256').update(dark).digest('hex'))
-    .toBe('bf1cd36e24734feebe8309763519e1c307a43a5fdb18f3ce26bcc0a555e7533a')
+    .toBe('94adc38ef031dc5422b640b4cdf77931110454af5bb0cc9b8595bfefdb8cb1b7')
 })
 for (const theme of ['default', 'amber']) {
   describe(`${theme} light WO-1257 identity presence`, () => {

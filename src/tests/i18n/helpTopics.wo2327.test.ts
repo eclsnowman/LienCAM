@@ -155,6 +155,7 @@ it('keeps the offline wiki loader English and independent of the active app lang
   // WO-2648: WO-2628 (landed 10-06) added a machine Help topic.
   // WO-2707: WO-2704 3248a88c7 added control-simulator and control-tool-setter;
   // WO-2707 added modal:new-model for WO-2700's New Model window.
-  expect(offline.topics).toHaveLength(145)
+  // WO-2883 added updating-liencam (Settings) to main's 146.
+  expect(offline.topics).toHaveLength(147)
   expect(offline.categories[0].label).toBe('Getting started')
 }, 30000)

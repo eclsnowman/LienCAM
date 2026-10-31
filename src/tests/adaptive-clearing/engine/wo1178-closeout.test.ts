@@ -12,7 +12,8 @@
 //
 // Run: npx vitest run src/tests/adaptive-clearing/engine/wo1178-closeout.test.ts
 
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, vi } from 'vitest'
+import { typedMock } from '../../support/typedMock'
 import * as fs from 'fs'
 import {
   ensureEngineClipperReady, diskPath, offsetOpenRound, union, difference, intersection, netArea, totalArea,
@@ -25,6 +26,22 @@ import {
 import { createToolGeometry } from '../../../lib/cam/adaptiveClearing2d/engine/toolGeometry'
 import { buildSideEntrySeed } from '../../../cam3d/rough/sideSeed'
 import { ensureGeom2dReady, type Ring } from '../../../cam3d/geom2d'
+
+// WO-3067 (architect oracle ruling 2026-10-27 8:12 PM CT): steering smoothing ships ON, and ON
+// removes the lift landings item 0's routed-landing accounting counts, so item 0 pins the switch
+// OFF for that accounting; the ON default is still held to the same routed-lead bite.
+type PolicyModule = typeof import('../../../kernel/ops/adaptive/policy')
+const switchState = vi.hoisted(() => ({ steeringSmoothing: true }))
+vi.mock('../../../kernel/ops/adaptive/policy', async (importOriginal) => {
+  const real = await importOriginal<PolicyModule>()
+  return typedMock<PolicyModule>({
+    ...real,
+    ADAPTIVE_MOTION_SWITCHES: {
+      ...real.ADAPTIVE_MOTION_SWITCHES,
+      get steeringSmoothing() { return switchState.steeringSmoothing },
+    },
+  })
+})
 
 const PROJECT = 'Example Projects/Adaptive Clearing Shapes.camproject'
 const SHAPES = ['CommaSpiral', 'Kidney', 'SquareIsland', 'Tee', 'Bar', 'BootL', 'Triangle', 'Barbell', 'Boomerang']
@@ -76,16 +93,17 @@ function projectFixtureAtProjectSettings(name: string): Fixture {
 }
 
 const plans = new Map<string, { fx: Fixture; res: FeatureResult; warnings: string[] }>()
-function plan(name: string, canonical = false): { fx: Fixture; res: FeatureResult; warnings: string[] } {
-  const key = canonical ? `${name}@canonical` : name
+function plan(name: string, canonical = false, steeringSmoothing = true): { fx: Fixture; res: FeatureResult; warnings: string[] } {
+  const key = `${canonical ? `${name}@canonical` : name}${steeringSmoothing ? '' : '@smoothing-off'}`
   const cached = plans.get(key)
   if (cached) return cached
   const fx = projectFixture(name, canonical)
   const warnings: string[] = []
   const warn = console.warn
   console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) }
+  switchState.steeringSmoothing = steeringSmoothing
   let res: FeatureResult
-  try { res = processFeature({ boundary: fx.boundary, holes: fx.holes }, fx.params) } finally { console.warn = warn }
+  try { res = processFeature({ boundary: fx.boundary, holes: fx.holes }, fx.params) } finally { console.warn = warn; switchState.steeringSmoothing = true }
   const entry = { fx, res, warnings }
   plans.set(key, entry)
   return entry
@@ -298,7 +316,7 @@ describe('WO-1178 adaptive close-out', () => {
     for (const e of res.entries) expect(e.mode).toBe('helix')
   }, 120_000)
 
-  it('item 0 (WO-1141B): Tee starts once and drills no second helix; every routed keep-down landing lead on the corpus, at both banks, is measured under the configured engagement', () => {
+  it('item 0 (WO-1141B): Tee starts once and drills no second helix; every routed keep-down landing lead on the corpus, at both banks, is measured under the configured engagement', async () => {
     const tee = plan('Tee')
     expect(tee.res.entries.filter(e => e.mode === 'helix')).toHaveLength(1)
     expect(tee.res.passes.filter(p => p.type === 'link' && p.helixDescent), 'no lift landing drills a helix').toHaveLength(0)
@@ -320,20 +338,39 @@ describe('WO-1178 adaptive close-out', () => {
     // sentinel, no padding.
     let leads = 0
     let routedLines = 0
-    for (const canonical of [false, true]) for (const name of SHAPES) {
-      const { fx, res, warnings } = plan(name, canonical)
+    const measureRoutedLeads = (name: string, fx: Fixture, res: FeatureResult): number => {
       const R = fx.params.toolRadius
       const arcTol = Math.max(fx.params.tolerance * 0.25, 0.01)
       const stepOverDistance = 2 * R * fx.params.stepOver
       const routed = new Set(res.routedLoopbackPassIndices ?? [])
+      let measured = 0
       replay(res, R, arcTol, (pass, index, before) => {
         if (pass.type !== 'lead' || !routed.has(index - 1)) return
-        leads++
+        measured++
         const load = contourOverCap(pass.points, before, R, stepOverDistance, arcTol, true)
         expect(load.maxStep, `${name} routed lead #${index} deepest sub-step bite`).toBeLessThanOrEqual(stepOverDistance + 0.05)
         expect(load.peak, `${name} routed lead #${index} windowed peak`).toBeLessThanOrEqual(stepOverDistance + 0.05)
         expect(load.maxStep, `${name} routed lead #${index} really cuts`).toBeGreaterThan(0)
       })
+      return measured
+    }
+    // WO-3067: the corpus is planned at both banks and both switch settings (~70 s), so the
+    // case yields between plans; one synchronous block past 60 s starves Vitest's worker RPC
+    // ('Timeout calling "onTaskUpdate"', an unhandled error that voids the whole run).
+    const yieldToWorker = () => new Promise<void>(resolve => setImmediate(resolve))
+    // The shipped smoothing ON default: every routed lead it emits is held to the same bite.
+    let smoothedLeads = 0
+    for (const canonical of [false, true]) for (const name of SHAPES) {
+      await yieldToWorker()
+      const { fx, res } = plan(name, canonical)
+      smoothedLeads += measureRoutedLeads(name, fx, res)
+    }
+    // WO-3067 ruling: smoothing OFF for the accounting, so the corpus still reaches routed landings.
+    for (const canonical of [false, true]) for (const name of SHAPES) {
+      await yieldToWorker()
+      const { fx, res, warnings } = plan(name, canonical, false)
+      const stepOverDistance = 2 * fx.params.toolRadius * fx.params.stepOver
+      leads += measureRoutedLeads(name, fx, res)
       // The routed-landing console line names a measured peak and the bound it met, and the
       // bound is the configured engagement whenever no tangent lead was refused on load alone.
       for (const w of warnings.filter(w => w.includes('STAYING DOWN via'))) {
@@ -346,7 +383,7 @@ describe('WO-1178 adaptive close-out', () => {
       }
     }
     expect(routedLines).toBe(leads)
-    console.log(`[wo1178] routed keep-down landing leads measured on the corpus (both banks): ${leads}`)
+    console.log(`[wo1178] routed keep-down landing leads measured on the corpus (both banks): ${leads} smoothing OFF, ${smoothedLeads} smoothing ON`)
   }, 600_000)
 
   it('item 6 (Operator\'s Bar finding, attempt 3): the path meets and leaves every wall on a tangent -- no join on a wall turns by 20 degrees or more, away from the apexes', () => {

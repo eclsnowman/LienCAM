@@ -44,6 +44,9 @@ import { create } from 'zustand'
 // holderClearance3d.wo278.test.ts).
 import { typedMock } from '../support/typedMock'
 import { SpindlePanel } from '../../components/machine/SpindlePanel'
+// WO-3191: the commanded direction now lives in the shared store; the mock below
+// keeps that store REAL across tests, so each case must start from 'off'.
+import { useMachineControl } from '../../store/machineControlStore'
 import type { MachineActionResult, SpindleCommandResult, SpindleRoute } from '../../lib/machine/machineSession'
 import type {
   ConnectionPhase, LoadOutcome, MachineController, MachineState, MachineStatus, StreamerProgress,
@@ -179,6 +182,7 @@ const litCount = (sel: string) =>
 afterEach(cleanup)
 beforeEach(() => {
   reportedRunning = null
+  useMachineControl.setState({ commandedSpindle: 'off' })
   pushConsole.mockReset()
   commandSpindle.mockReset()
   commandSpindle.mockReturnValue({ ok: true, route: 'calls' })

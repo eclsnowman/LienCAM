@@ -78,6 +78,13 @@ function payloadOf<K extends OperationType>(_type: K, params: Record<string, unk
   return params as unknown as OpPayloadByType[K]
 }
 
+/** WO-3250: what the Slot (centerline) shortcut replaced, so leaving it restores
+ *  the Engrave form, and whether the name field shows the preset's name. */
+export interface SlotShortcutState {
+  priorEngrave: Pick<EngraveParams, 'mode' | 'side' | 'useWidthForDepth' | 'engraveStyle'>
+  presetName: string | null
+}
+
 /** WO-2211: the tool record's library stepover (mm), read from the same entry
  *  defaultFeedrateOverride seeds feeds from ('default', else the first material);
  *  undefined when the tool has none. */
@@ -132,6 +139,10 @@ export function useNewOperationModalState() {
   // WO-2437: a Machine actions type chosen instead of a machining type (null = none).
   const [machineActionKind, setMachineActionKind] = useState<MachineActionKind | null>(null)
   const [opName,       setOpName]       = useState('')
+  // WO-3250: the "Slot (centerline)" type shortcut, live only while it is the
+  // chosen card of a NEW operation. It remembers the Engrave fields the preset
+  // replaced (and whether it filled the name) so leaving the card puts them back.
+  const [slotShortcut, setSlotShortcut] = useState<SlotShortcutState | null>(null)
   const [toolId,       setToolId]       = useState('')
   const [heights,      setHeights]      = useState<HeightParams>(defaultHeights)
   const [customEndCondition, setCustomEndCondition] = useState(false)
@@ -160,6 +171,10 @@ export function useNewOperationModalState() {
   const [drillBreakthroughSetByUser, setDrillBreakthroughSetByUser] = useState(false)
   const [threadMill,   setThreadMill]   = useState<ThreadMillParams>(defaultThreadMillParams)
   const [chamfer,      setChamfer]      = useState<ChamferParams>(defaultChamferParams)
+  // WO-3188: false until the operator picks a Chamfer reference plane or offset
+  // (or opens a chamfer saved with one). Only an unchosen datum on a heightless
+  // 2D outline starts at the material top; a chosen Geometry plane stays put.
+  const [chamferDatumChosen, setChamferDatumChosen] = useState(false)
   const [face,         setFace]         = useState<FaceParams>(defaultFaceParams)
   const [engrave,      setEngrave]      = useState<EngraveParams>(defaultEngraveParams)
   const [engraveExplicitDepthMm, setEngraveExplicitDepthMm] = useState(1)
@@ -285,6 +300,8 @@ export function useNewOperationModalState() {
   const [modelBoreBinding, setModelBoreBinding] = useState<{
     modelItemId?: string; bodyId: string; faceStableId: string
     derived?: { loop: Loop2D; cylinder: CylinderFeature }
+    boreFeatures?: import('../../lib/cam/types').ModelBoreFeatureBinding[]
+    targets?: Array<{ loop: Loop2D; cylinder: CylinderFeature }>
   } | null>(null)
   // WO-208: a picked modeled-body edge chain is bound to the compound Model
   // Item/body identity it came from; raw body ids are not project-global.
@@ -355,6 +372,7 @@ export function useNewOperationModalState() {
     setEditLoadError(null)
     setHeightRepairMessage(null)
     if (activeModal !== 'edit-operation' || !editingOpPayload) return
+    setSlotShortcut(null)
     const { setupId, opId } = editingOpPayload
     const state = useCamStore.getState()
     const editSetup = state.project.setups.find(s => s.id === setupId)
@@ -391,11 +409,12 @@ export function useNewOperationModalState() {
     setMachiningBoundaryPickError(null)
     const boreRef = op.modelReferences?.find(r => r.role === 'bore-target')
     setModelBoreBinding(
-      boreRef && boreRef.stableIds.length === 1
+      boreRef && (boreRef.stableIds.length === 1 || !!boreRef.boreFeatures?.length)
         ? {
             modelItemId: boreRef.modelItemId,
             bodyId: boreRef.bodyId,
             faceStableId: boreRef.stableIds[0],
+            boreFeatures: boreRef.boreFeatures,
           }
         : null,
     )
@@ -509,12 +528,17 @@ export function useNewOperationModalState() {
       const validatedAuthority = op.smartHeight === undefined
         ? undefined
         : validatePersistedSmartHeightState(op.smartHeight)
+      setChamferDatumChosen(true)
       if (validatedAuthority && !validatedAuthority.ok) {
         setHeightRepairMessage(validatedAuthority.message)
         setChamfer({ ...defaultChamferParams, ...cp })
       } else if (validatedAuthority?.ok && validatedAuthority.state.kind === 'smart_v2') {
         try {
           const draft = chamferSmartHeightDraftFromIntent(validatedAuthority.state.intent)
+          const savedEnd = validatedAuthority.state.intent.machining.end.value
+          setChamferDatumChosen(!(savedEnd.kind === 'geometry_tool_formula' &&
+            savedEnd.formula.kind === 'chamfer_edge' &&
+            savedEnd.formula.datumPlane.owner.kind === 'operation_policy'))
           const datumReference = uiReferenceForIntentReference(draft.datumReference)
           if (!datumReference) {
             throw new Error(tx('useNewOperationModalState.Chamfer_datum_reference_is_not_editable_in_this_UI', { p1: draft.datumReference }))
@@ -838,6 +862,7 @@ export function useNewOperationModalState() {
   useEffect(() => {
     if (activeModal !== 'new-operation') return
     setUserClearedLoops(true)
+    setSlotShortcut(null)
     const setup = useCamStore.getState().project.setups.find(
       (candidate) => candidate.id === useCamStore.getState().project.activeSetupId,
     )
@@ -905,6 +930,7 @@ export function useNewOperationModalState() {
     // Width/tip/thread/mesh-derived families deliberately retain their own
     // depth contracts; the pure projector returns no automatic patch for them.
     setChamfer(projectFamily('chamfer', defaultChamferParams).params)
+    setChamferDatumChosen(false)
     setThreadMill(projectFamily('thread_mill', defaultThreadMillParams).params)
     setModelDrillBinding(null)
     setModelBoreBinding(null)
@@ -1291,12 +1317,12 @@ export function useNewOperationModalState() {
     activeModal, closeModal, project, toolLibrary, toolLibraries, addOperation, updateOperation, editingOpPayload,
     machineActionKind, setMachineActionKind,
     computeToolpath, previewAdaptive3dSmartHeights, previewParallel3dSmartHeights, previewWaterline3dSmartHeights, previewFaceSmartHeights, previewPlanarRoughSmartHeights, previewContourSmartHeights, previewDrillBoreSmartHeights, previewThreadMillSmartHeights, previewChamferSmartHeights, previewEngraveSmartHeights, deriveBrepLayer, displayUnits, savedReviewCameraRef, tab, setTab, opType,
-    setOpType, opName, setOpName, toolId, setToolId, heights, setHeights, customEndCondition,
+    setOpType, slotShortcut, setSlotShortcut, opName, setOpName, toolId, setToolId, heights, setHeights, customEndCondition,
     setCustomEndCondition, passes, setPasses, linking, setLinking, contour, setContour,
     contourHeightDraft, setContourHeightDraft, contourHeightAuthority, setContourHeightAuthority, pocket,
     setPocket, drill, setDrill, bore, setBore, drillBoreHeightDraft, setDrillBoreHeightDraft,
     drillBoreHeightAuthority, setDrillBoreHeightAuthority, drillBreakthroughSetByUser, setDrillBreakthroughSetByUser, threadMill, setThreadMill, chamfer,
-    setChamfer, face, setFace, engrave, setEngrave, engraveExplicitDepthMm, setEngraveExplicitDepthMm,
+    setChamfer, chamferDatumChosen, setChamferDatumChosen, face, setFace, engrave, setEngrave, engraveExplicitDepthMm, setEngraveExplicitDepthMm,
     engraveDepthConfirmed, setEngraveDepthConfirmed, vcarve, setVCarve, vcarveClearingToolId, setVCarveClearingToolId,
     adaptive, setAdaptive, parallel3d,
     setParallel3d, parallel3dPartId, setParallel3dPartId, parallel3dHeightAuthority, setParallel3dHeightAuthority,

@@ -23,6 +23,92 @@ const help: CatalogTree = {
     'troubleshooting': 'Fehlersuche',
   },
   topics: {
+    "height-references": {
+    "title": "Höhen erklärt",
+    "summary": "Fünf Bezugsebenen und die tatsächlichen stockabhängigen Eintritts- und Verfahrhöhen.",
+    "keywords": "Höhenbezüge Sicherheitshöhe Rückzug Vorschubhöhe oben unten Restmaterial Spannmittel",
+    "sections": {
+        "0": {
+            "text": "Die fünf Werte sind Bezugsebenen in WKS-Z, nicht jede besuchte Werkzeughöhe. Sicherheitshöhe gilt beim ersten Anfahren und letzten Ausfahren. Rückzug ist die normale Sprunghöhe zwischen Merkmalen. Nachgewiesene lokale Verbindungen können tiefer bleiben; über modellierten Spannmitteln kann die Bahn sogar über die Sicherheitshöhe steigen. Vorschubhöhe ist eine Eintrittsreferenz, oft durch einen rohteilabhängigen Start ersetzt. Oben ist der gewünschte Bearbeitungsbeginn, nicht unbedingt die Restmaterialoberfläche; unten ist das gewünschte Bearbeitungsende. Die Standardhöhen der Aufspannung liefern die Ausgangsreferenzen für neue Arbeitsschritte."
+        },
+        "1": {
+            "steps": {
+                "0": "Öffnen Sie den Reiter Höhen im Arbeitsschritteditor. Jede der fünf Zeilen zeigt ihre Berechnung, ihren WKS-Z-Wert und ob sie automatisch oder manuell vorgegeben ist.",
+                "1": "Öffnen Sie eine Zeile mit dem Pfeil. Wählen Sie den Bezug, etwa Rückzug, Rohteiloberseite, Modelloberseite, Rohteilunterseite, Modellunterseite, Geometrieebene, gewählte Fläche oder absolutes WKS-Z; danach Vorzeichen und Versatz.",
+                "2": "Obere und untere Höhe folgen zunächst der automatischen Regel des Arbeitsschritts. Bei 2D-Tasche und adaptivem 2D-Schruppen bietet die geöffnete Zeile auch die Endbedingung: Tiefe ab Rohteiloberseite, Geometriebezug, Rohteilunterseite, durch das Rohteil, oberhalb der Rohteilunterseite, gewählte Fläche oder eigener Bezug mit Versatz.",
+                "3": "Das Diagramm zeigt fünf Bezugsebenen und separat eine beispielhafte lokale Bahn über Restmaterial. Öffnen Sie „So werden diese Höhen verwendet“ für die Kurzfassung oder drücken Sie ? für diese Hilfe."
+            }
+        },
+        "2": {
+            "text": "In Eigenschaften zeigt die Gruppe Höhen die WKS-Bezugswerte und ihre automatische oder manuelle Herkunft. Sicherheitshöhe, Rückzug und Vorschubhöhe können dort überschrieben werden. „Sicherheitshöhen auf Aufspannung zurücksetzen“ stellt die Vorgaben der Aufspannung wieder her."
+        },
+        "3": {
+            "text": "Bezogene Höhen folgen ihrer Quelle: Eine untere Höhe relativ zur Rohteilunterseite folgt einer geänderten Rohteildicke; ein absolutes WKS-Z tut das nicht."
+        },
+        "5": {
+            "text": "Z-Bewegungen minimieren ist standardmäßig aktiviert, auch bei Arbeitsschritten, die vor Einführung dieser Option gespeichert wurden. Aktiviert bleiben die bisherigen, anhand des Restmaterials nachgewiesenen tiefen Verbindungen und niedrigen lokalen Verbindungen erhalten. Deaktivieren Sie die Option, um XY-Verbindungen ohne Schnitt auf die aufgelöste Rückzugsebene zurückzuführen. Deaktiviert nutzt sie Sicherheitshöhe für das erste Anfahren und letzte Ausfahren, Rückzug für Sprünge zwischen Elementen und Vorschubhöhe für den Übergang vom Eilgang zum Vorschub. Höhere Spannmittelquerungen bleiben höher und die Schnittgeometrie bleibt erhalten. Dieselbe Option steht in Eigenschaften. Natives G98 startet und kehrt auf Rückzug zurück, mit R auf Vorschubhöhe; G99 nutzt R auf Vorschubhöhe, bei Bedarf mit ausdrücklichen Rückzugssprüngen. Aktiviert beziehungsweise standardmäßig bleiben restmaterialabhängige Eintritte erhalten."
+        },
+        "6": {
+            "text": "Die meisten 2D-Eintritte beginnen etwa 1 mm über dem nachgewiesenen Material unter der Eintrittsfläche. Eine niedrigere Vorschubhöhe kann den Abstand verkürzen, solange sie über dem Material bleibt; eine höhere vergrößert ihn meist nicht. Der Nachweis kann eine ganze Fläche statt nur den Eintauchpunkt umfassen. Normale Sprünge nutzen Rückzug; freie Bodenverbindungen können tiefer bleiben, Spannmittelquerungen steigen höher. Sicherheitshöhe ist keine Obergrenze für die Spannmittelvermeidung."
+        },
+        "7": {
+            "text": "Tasche verwendet Verbindungen > Helixstart über Material (normal 1 mm) statt Vorschubhöhe für den Eintrittsabstand. Gravieren nutzt Vorschubhöhe direkt. Muster folgen dem untergeordneten Arbeitsschritt; die Flachräumung beim V-Gravieren folgt Tasche."
+        },
+        "8": {
+            "text": "Beim Bohren hängen Rückkehrebene und Zyklus vom Controller ab. Natives G98 nutzt als Anfangs-/Rückkehrebene normalerweise die Rückzugs-Sprungebene; die gemeinsame R-Ebene ist rohteilabhängig, meist Material + 1 mm. Bei nativem G99 nutzen R-Ebene und Rückkehr direkt die Vorschubhöhe, auch wenn sie von Rückzug abweicht. Expandiertes oder gestreamtes Bohren nutzt den vorgegebenen Rückzug zwischen Bohrungen. Erstes Anfahren und letztes Ausfahren nutzen Sicherheitshöhe; Wiederanfahren beim Tiefbohren und Spanbrechen haben eigene Regeln."
+        },
+        "9": {
+            "text": "3D-Schruppen kann bei späteren Eintritten näher anfahren (etwa 0.05 mm über nachgewiesenem Material); Schlichten kann freie lokale Verbindungen tief halten. Bestimmte 3D-Routen begrenzen Eintritte mit Vorschubhöhe und Querungen mit Sicherheitshöhe. Bearbeitungsart und Spannmittelprüfung bestimmen die tatsächliche Bahn; die fünf Ebenen allein beschreiben nicht jede Bewegung."
+        }
+    },
+    "images": {
+        "heights-tab": {
+            "alt": "Höhenreiter mit geschlossener Erklärung, fünf WKS-Bezugswerten und zwei Diagrammen"
+        }
+    }
+},
+    "height-truthfulness": {
+    "title": "Aufgelöste Bezugsebenen",
+    "summary": "Gespeicherte Bezugsebenen sind nicht jede Höhe der erzeugten Bahn.",
+    "keywords": "Höhenbezüge Sicherheitshöhe Rückzug Vorschubhöhe oben unten Restmaterial Spannmittel",
+    "sections": {
+        "0": {
+            "text": "Bei der Berechnung werden die Vorgaben sowie WKS-Z und Maschinen-Z jeder Bezugsebene gespeichert. Eigenschaften zeigt aufgelöste WKS-Bezugswerte, nicht das Z jedes Eintritts oder jeder Verbindung. Restmaterial, Bearbeitungsart und modellierte Spannmittel bestimmen ebenfalls die tatsächliche Bahn."
+        },
+        "1": {
+            "text": "Ändern sich abhängige Eingaben wie Höhen, Werkzeug, Geometrie, Rohteil, WKS oder Maschine, wird der Arbeitsschritt als veraltet markiert und gespeicherte Bewegungen werden verworfen. Das wird auch beim Öffnen einer Datei geprüft. Berechnen Sie den Werkzeugweg mit den aktuellen Eingaben neu."
+        }
+    },
+    "images": {
+        "resolved-heights": {
+            "alt": "Höhengruppe in Eigenschaften mit aufgelösten WKS-Bezugswerten"
+        }
+    }
+},
+    "height-planes-viewport": {
+    "title": "Höhenebenen anzeigen",
+    "summary": "Die Ansicht zeigt fünf Bezugsebenen mit einzeln schaltbaren Farben.",
+    "keywords": "Höhenbezüge Sicherheitshöhe Rückzug Vorschubhöhe oben unten Restmaterial Spannmittel",
+    "sections": {
+        "0": {
+            "steps": {
+                "0": "Wählen Sie einen berechneten Arbeitsschritt im Baum. Die farbigen Flächen zeigen seine aufgelösten Bezugsebenen, nicht jede Eintritts-, Verbindungs- oder Spannmittelquerungshöhe.",
+                "1": "Öffnen Sie den Anzeigemodus über den Würfel mit Zahnrad neben dem Ansichtswürfel.",
+                "2": "Aktivieren Sie Höhenebenen. Jede Ebene erscheint als getönte Fläche mit gestricheltem Rand und farbigem Mittelkreuz.",
+                "3": "Wählen Sie die einzelnen Ebenen: Sicherheitshöhe, Rückzug, Vorschubhöhe, Rohteiloberseite und Bearbeitungsende, jeweils mit Farbpunkten."
+            }
+        },
+        "1": {
+            "text": "Nur Rohteiloberseite und Bearbeitungsende einzublenden erleichtert die Orientierung am Bearbeitungsbereich."
+        }
+    },
+    "images": {
+        "planes-viewport": {
+            "alt": "Bezugsebenen in der Ansicht mit geöffnetem Anzeigemodus"
+        }
+    }
+},
+
     'welcome-overview': {
       title: 'Was LienCAM ist',
       summary: 'Ein CAM- und CAD-Programm, das Zeichnungen und Modelle in G-Code umsetzt und in sich geschlossene Projektdateien speichert.',
@@ -84,7 +170,6 @@ const help: CatalogTree = {
     'setup-wcs': { title: 'Aufspannung und WKS', summary: 'Eine Aufspannung benennt das bearbeitete Rohteil, seine Nullpunktverschiebung und seinen Werkstücknullpunkt, die Spannmittel darunter und die Standardhöhen, mit denen ihre Arbeitsschritte beginnen.' },
     'wcs-origin-placement': { title: 'Den Werkstücknullpunkt festlegen', summary: 'Das Setup-Fenster bietet fünf Wege, den Werkstücknullpunkt festzulegen: eine Rohteilecke, einen gefangenen Modell-Eckpunkt, eingegebene Koordinaten, einen ziehbaren Griff in der Ansicht oder den Mittelpunkt eines runden Elements.' },
     'workholding': { title: 'Spannmittel: Schraubstöcke und Spanneisen', summary: 'Importieren Sie Schraubstock, Backen oder Spanneisen als Teil und schalten Sie Workholding ein: Der Körper wird als Spannmittel gezeichnet, ist nie Rohteil oder Schnitt, Werkzeugwege halten Abstand, und Seat in vise legt Teile daran an.' },
-    'height-references': { title: 'Höhen erklärt', summary: 'Jeder Arbeitsschritt verwendet fünf Höhenebenen - Sicherheitshöhe, Rückzugshöhe, Vorschubhöhe, obere und untere Höhe - jeweils von einer gewählten Bezugsebene aus gemessen; der Reiter Heights zeigt, auf welchem WKS-Z jede liegt.' },
     'creating-operations': { title: 'Einen Arbeitsschritt anlegen', summary: 'Das Fenster New Operation führt Sie auf einem Satz Reiter durch Art, Werkzeug, Geometrie, Durchgänge, Höhen, Verbindungen und Vorschub.' },
     'contour': { title: '2D-Kontur', summary: '2D-Kontur fräst entlang eines Profils in einer oder mehreren Tiefen, mit vier Strategien, offenen Pfaden, Haltestegen und pendelndem Eintauchen.' },
     'pocket': { title: '2D-Tasche', summary: '2D-Tasche räumt einen geschlossenen Bereich in Ringen aus, lässt Inseln stehen, taucht helikal, pendelnd oder senkrecht ein und schlichtet die Wand.' },

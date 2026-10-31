@@ -76,6 +76,10 @@ vi.mock('../../lib/viewport/CNCViewport', async (importOriginal) => {
         fitToolpath: vi.fn(),
         fitToolpathPreservingView: vi.fn(),
         fitBoundsPreservingView: vi.fn(),
+        // WO-3265's automatic fit at Load asks for this before it falls back
+        // to fitToolpath; the stub keeps the real camera code (this fixture has
+        // no camera) out of the render, as its fit neighbours above do.
+        fitProgramPointsIso: vi.fn(() => true),
         setCameraView: vi.fn(),
         dispose: vi.fn(),
       })

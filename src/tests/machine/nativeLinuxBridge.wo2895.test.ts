@@ -85,7 +85,7 @@ function harness(options: { platform?: string; arch?: string; prefix?: string; e
   let signalCleanup!: () => void
   const cleanupRequested = new Promise<void>((resolve) => { signalCleanup = resolve })
   const processValue = { ...process, platform: options.platform ?? 'linux', arch: options.arch ?? 'x64', argv: [], resourcesPath: resources,
-    env: { ...process.env, LIENCAM_BRIDGE_EXECUTABLE: '', LIENCAM_BRIDGE_ARGS_JSON: '', LIENCAM_USER_DATA_DIR: '', LIENCAM_UCCNC_SEARCH_ROOT: '', LIENCAM_BRIDGE_NATIVE: '', WINEPREFIX: prefix, ...options.env } }
+    env: { ...process.env, LIENCAM_BRIDGE_EXECUTABLE: '', LIENCAM_BRIDGE_ARGS_JSON: '', LIENCAM_USER_DATA_DIR: '', LIENCAM_UCCNC_SEARCH_ROOT: '', LIENCAM_BRIDGE_NATIVE: '', LIENCAM_BRIDGE_WINE: '', WINEPREFIX: prefix, ...options.env } }
   const events = new Map<string, (event: { preventDefault: () => void }) => unknown>()
   const app = { isPackaged: options.packaged ?? true, getPath: () => userData, on: (event: string, fn: (event: { preventDefault: () => void }) => unknown) => events.set(event, fn), quit: vi.fn(), whenReady: () => ({ then: () => Promise.resolve() }) }
   const module = { exports: {} as Api }
@@ -123,20 +123,12 @@ function harness(options: { platform?: string; arch?: string; prefix?: string; e
 const flush = async () => { for (let n = 0; n < 12; n++) await Promise.resolve() }
 
 describe('WO-2895 native Linux bridge', () => {
-  // WO-3059: route B is opt-in until its real-board check (O61) passes.
-  it('uses Wine by default even when the native bundle is present', async () => {
-    const h = harness()
+  it.each(['x64', 'arm64'])('uses native by default on %s after O61 passed', async (arch) => {
+    const h = harness({ arch })
     expect(await h.api.initializeMachineBridge()).not.toBeNull()
-    expect(h.calls[0].executable, 'The unproven native bridge must not be the default route').toBe('wine')
-    expect(h.calls[0].args).toContain(`Z:${h.installRoot.replaceAll('/', '\\')}`)
+    expect(h.calls[0].executable).toContain('machine-bridge-native')
     await h.api.stopMachineBridge()
-    expect(h.cleanups.map(c => c.args)).toEqual([['-k'], ['-w']])
-  })
-  it('does not select native without opt-in on ARM, where Wine cannot run', async () => {
-    const h = harness({ arch: 'arm64' })
-    expect(await h.api.initializeMachineBridge()).toBeNull()
-    expect(h.calls).toHaveLength(0)
-    expect(h.api.machineBridgeStatus().setup.error).toMatch(/requires x86-64 Linux/)
+    expect(h.cleanups).toHaveLength(0)
   })
   it.each(['x64', 'arm64'])('selects native over Wine on %s when opted in, with profile-only install and POSIX arguments', async (arch) => {
     const h = harness({ arch, env: { WINEPREFIX: '', LIENCAM_BRIDGE_NATIVE: '1' } })
@@ -172,13 +164,11 @@ describe('WO-2895 native Linux bridge', () => {
     expect(h.disk.readFileSync(path.join(target, 'liencam-bridge.definition.json'), 'utf8')).toBe('saved definition')
     await h.api.stopMachineBridge()
   })
-  it('uses Wine when the matching native bundle is absent', async () => {
+  it('refuses when the matching native bundle is absent', async () => {
     const h = harness({ native: false })
-    expect(await h.api.initializeMachineBridge()).not.toBeNull()
-    expect(h.calls[0].executable).toBe('wine')
-    expect(h.calls[0].args).toContain(`Z:${h.installRoot.replaceAll('/', '\\')}`)
-    await h.api.stopMachineBridge()
-    expect(h.cleanups.map(c => c.args)).toEqual([['-k'], ['-w']])
+    expect(await h.api.initializeMachineBridge()).toBeNull()
+    expect(h.calls).toHaveLength(0)
+    expect(h.api.machineBridgeStatus().setup.error).toMatch(/native executable is missing/)
   })
   it('honors an explicit Wine executable even when a native bundle exists and native is opted in', async () => {
     const h = harness({ env: { LIENCAM_BRIDGE_NATIVE: '1' } })

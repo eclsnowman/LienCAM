@@ -375,7 +375,8 @@ export async function runHeroLoop({ build, evidence = 'src/tests/evidence/WO-239
       return `[0:v]trim=start=${s.start - offset}:end=${end - offset},setpts=${movingSeconds / (end - s.start)}*(PTS-STARTPTS),fps=${scene.fps},tpad=stop_mode=clone:stop_duration=${(s.finishedHoldSeconds || 0) + 1},trim=duration=${s.seconds},setsar=1[v${i}]`
     }).join(';') + ';[v0][v1][v2]concat=n=3:v=1:a=0[out]'
     ffmpeg([...(frozenCommit ? ['-f', 'concat', '-safe', '0'] : []), '-i', raw, '-filter_complex', filters, '-map', '[out]', '-an', '-c:v', 'libx264', '-threads', '2', '-preset', 'medium', '-crf', '22', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-metadata', 'title=S01 hero-loop', '-metadata', `comment=${JSON.stringify(provenance)}`, path.join(output, 'S01.mp4')])
-    ffmpeg(['-i', path.join(output, 'S01.mp4'), '-vf', 'fps=12,scale=1280:720', '-an', '-c:v', 'libwebp_anim', '-quality', '65', '-compression_level', '4', '-loop', '0', fileFor('S01.webp')])
+    // WO-3091: q90 - at q65 libwebp_anim (no keyframes after frame 1) left ghost streaks on the stock.
+    ffmpeg(['-i', path.join(output, 'S01.mp4'), '-vf', 'fps=12,scale=1280:720', '-an', '-c:v', 'libwebp_anim', '-quality', '90', '-compression_level', '4', '-loop', '0', fileFor('S01.webp')])
     embedProvenance(fileFor('S01.webp'), provenance)
     embedProvenance(fileFor('S01.png'), provenance)
     if (statSync(fileFor('S01.webp')).size >= 8_000_000) throw new Error('Animated WebP must be under 8 MB')

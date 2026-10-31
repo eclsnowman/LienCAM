@@ -46,6 +46,7 @@ import {
   toolChangeHoldActive,
 } from '../../lib/machine/machineSession'
 import { outputReadbackOn, watchOutputPins } from '../../lib/machine/outputPinWatch'
+import { recordCommandedSpindle } from '../../lib/machine/commandedSpindle'
 import type { MachineStatus } from '../../lib/machine/controller'
 import type { MachineConfig, MachineOutputDefinition } from '../../types'
 import {
@@ -164,7 +165,11 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
   const rpm = rpmWithin(useUiPrefs((s) => s.machineSpindleRpm), minRpm, maxRpm)
   const accessories = useMachineControl((s) => s.reportedAccessories)
 
-  const [commandedDir, setCommandedDir] = useState<SpindleDir>('off')
+  // WO-3191: the last M3/M4/M5 actually sent to the controller by ANY route -
+  // the program stream, MDI or these buttons - recorded in one place by the
+  // session (lib/machine/commandedSpindle). This panel's own state saw only its
+  // own presses, so a spindle the program started lit Off at 10000 rpm.
+  const commandedDir: SpindleDir = useMachineControl((s) => s.commandedSpindle)
   const [commandedAccessories, setCommandedAccessories] =
     useState<AccessoryRunState>(ACCESSORIES_STOPPED)
   // WO-1650: the local latch of each listed output button, keyed by its on
@@ -383,6 +388,9 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
    * reports the opposite direction from the one commanded while rotating
    * correctly (VFD-COMMISSIONING.md 4.9). Running/stopped comes from the
    * machine. Each fact from the source that is honest about it.
+   *
+   * WO-3191: "what we commanded" is every route's last M3/M4/M5 that went -
+   * the program, MDI or this panel - not only this panel's own presses.
    */
   const reportedRunning = telemetry?.running ?? null
   const latched: SpindleDir | null =
@@ -855,7 +863,9 @@ export function SpindlePanel({ onOpenActions }: { onOpenActions: () => void }) {
     )
     if (result.ok) {
       // Latch ONLY on a command that actually went. This is the whole fix.
-      setCommandedDir(direction)
+      // WO-3191: into the one record every route writes - commandSpindle has
+      // already written the same direction; this press is never a second truth.
+      recordCommandedSpindle(direction)
       return
     }
     // Refused. Say why, in the operator's terms - and say what the command

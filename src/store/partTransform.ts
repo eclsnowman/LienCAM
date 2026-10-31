@@ -24,10 +24,12 @@
 //   Both upgrades are additive and driven purely by membership ids on the
 //   children (guardrail c) - no `members[]` aggregate on the parent.
 //
-// This module is intentionally dependency-light: types only, no store / viewport
-// imports, no side effects. It is a PURE function.
+// This module is intentionally dependency-light: pure math only, no store /
+// viewport imports, no side effects. Its functions are PURE.
 
 import type { ImportedGeometry, PhysicalStock, Vec3 } from '../types'
+import { rotationMatrixXYZ } from '../lib/geometry/rotationMatrixXYZ'
+import { turnWorldPointForSecondSide, type SecondSideTurn } from '../lib/cam/flipSetup'
 
 /** A part's resolved world (machine-frame) placement. */
 export interface PartWorldTransform {
@@ -58,4 +60,87 @@ export function partWorldTransform(
   // `noUnusedParameters`.
   void stocks
   return { position: geo.position, rotation: geo.rotation }
+}
+
+/**
+ * WO-3196: a part's world placement as a second side holds it. The 3D engine
+ * machines the part turned inside its block (turnWorldPointForSecondSide);
+ * whatever draws or compares against that part must place it with the same
+ * turn, or the toolpath and the part disagree. The turn is applied after the
+ * part's own pose: position goes through the same point turn, rotation is the
+ * half turn times the pose's rotation, read back as XYZ degrees (the order the
+ * viewport applies). No turn (a first side) returns the placement unchanged.
+ */
+export function partWorldTransformAsSetupHoldsIt(
+  placement: PartWorldTransform,
+  turn: SecondSideTurn | null,
+): PartWorldTransform {
+  if (!turn) return placement
+  return {
+    position: turnWorldPointForSecondSide(placement.position, turn),
+    rotation: eulerXYZDegrees(turned(turn, matrixOf(placement.rotation))),
+  }
+}
+
+/**
+ * WO-3196: the stored rotation after a viewport gesture on a part a second
+ * side draws turned. A gesture that did not rotate the drawn part (a drag)
+ * carries `stored` through untouched - un-turning its drawn rotation in
+ * floating point would store a tilt of 7e-15 degrees, which every 3D route
+ * refuses. A rotate composes its delta (drawn after times drawn before
+ * inverse), un-turned, onto `stored`, each component snapped to 1e-9 degrees
+ * so 90 stays 90 and 0 stays 0. A first side: the drop as dropped.
+ */
+export function storedRotationAfterGesture(
+  stored: Vec3,
+  drawnBefore: Vec3,
+  drawnAfter: Vec3,
+  turn: SecondSideTurn | null,
+): Vec3 {
+  if (!turn) return drawnAfter
+  const [before, after] = [matrixOf(drawnBefore), matrixOf(drawnAfter)]
+  const moved = after.some((row, i) => row.some((v, j) => Math.abs(v - before[i][j]) > 1e-9))
+  if (!moved) return stored
+  const delta = multiply(after, transpose(before))
+  const composed = multiply(turned(turn, transpose(turned(turn, transpose(delta)))), matrixOf(stored))
+  const r = eulerXYZDegrees(composed)
+  return { x: snapDegrees(r.x), y: snapDegrees(r.y), z: snapDegrees(r.z) }
+}
+
+type Matrix3 = number[][]
+
+/** The rotation's 3x3, row-major. */
+function matrixOf(rotation: Vec3): Matrix3 {
+  const { col1, col2, col3 } = rotationMatrixXYZ(rotation)
+  return [[col1.x, col2.x, col3.x], [col1.y, col2.y, col3.y], [col1.z, col2.z, col3.z]]
+}
+
+/** The half turn times `m`: about X it negates the Y and Z rows; about Y, the X and Z rows. */
+function turned(turn: SecondSideTurn, m: Matrix3): Matrix3 {
+  const sign = turn.axis === 'x' ? [1, -1, -1] : [-1, 1, -1]
+  return m.map((row, i) => row.map(v => sign[i] * v))
+}
+
+function transpose(m: Matrix3): Matrix3 {
+  return m[0].map((_, j) => m.map(row => row[j]))
+}
+
+function multiply(a: Matrix3, b: Matrix3): Matrix3 {
+  return a.map(row => b[0].map((_, j) => row[0] * b[0][j] + row[1] * b[1][j] + row[2] * b[2][j]))
+}
+
+/** three.js Euler.setFromRotationMatrix, order 'XYZ', in degrees. */
+function eulerXYZDegrees(m: Matrix3): Vec3 {
+  const y = Math.asin(Math.max(-1, Math.min(1, m[0][2])))
+  const gimbal = Math.abs(m[0][2]) >= 0.9999999
+  const x = gimbal ? Math.atan2(m[2][1], m[1][1]) : Math.atan2(-m[1][2], m[2][2])
+  const z = gimbal ? 0 : Math.atan2(-m[0][1], m[0][0])
+  const deg = 180 / Math.PI
+  return { x: x * deg, y: y * deg, z: z * deg }
+}
+
+/** Nearest 1e-9 degree; never -0. */
+function snapDegrees(v: number): number {
+  const s = Math.round(v * 1e9) / 1e9
+  return s === 0 ? 0 : s
 }

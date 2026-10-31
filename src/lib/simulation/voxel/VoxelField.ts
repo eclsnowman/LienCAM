@@ -257,11 +257,28 @@ export class VoxelField {
    * Copy `snap` into the field and mark the whole field dirty. `snap` must match
    * the field length; a mismatch is a programmer error and fails loud (ADR-0003).
    */
-  restore(snap: Float32Array): void {
+  restore(snap: Float32Array, region?: DirtyBox): void {
     if (snap.length !== this.data.length) {
       throw new Error(
         `VoxelField.restore: snapshot length ${snap.length} != field length ${this.data.length}`,
       )
+    }
+    if (region) {
+      // WO-2929: undoing an elapsed prefix only changes the box that prefix
+      // touched. Re-uploading the whole stock here stalls foreground playback.
+      // The caller must retain that box BEFORE the texture sync clears dirty.
+      const { nx, ny, nz } = this.dims
+      for (let z = region.iz0; z <= region.iz1; z++) {
+        for (let y = region.iy0; y <= region.iy1; y++) {
+          const start = z * nx * ny + y * nx + region.ix0
+          this.data.set(snap.subarray(start, start + region.ix1 - region.ix0 + 1), start)
+        }
+      }
+      for (let y = region.iy0; y <= region.iy1; y++) {
+        this.columnTop.fill(nz - 1, y * nx + region.ix0, y * nx + region.ix1 + 1)
+      }
+      this.markDirty(region.ix0, region.iy0, region.iz0, region.ix1, region.iy1, region.iz1)
+      return
     }
     this.data.set(snap)
     // data was bulk-replaced; re-establish the HWM conservatively (all solid).

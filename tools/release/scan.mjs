@@ -89,17 +89,10 @@ function addPatternHits(hits, file, lineNumber, line, rules) {
   }
 }
 
-function scanText(hits, file, text, scanAllowlist) {
-  const lines = text.split(/\r?\n/)
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]
+export function scanPersonalText(file, text, scanAllowlist = manifestFromDisk().scan) {
+  const hits = []
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
     const lineNumber = index + 1
-    COMMERCIAL_PATTERN.lastIndex = 0
-    for (const match of line.matchAll(COMMERCIAL_PATTERN)) {
-      const name = match[0].replace(/\s+/g, ' ')
-      const ruleName = COMMERCIAL_RULES.get(name.toLowerCase())
-      hits.push({ file, line: lineNumber, rule: `commercial:${ruleName}`, detail: `forbidden ${name}` })
-    }
     addPatternHits(hits, file, lineNumber, line, PERSONAL_RULES)
 
     EMAIL_PATTERN.lastIndex = 0
@@ -115,6 +108,22 @@ function scanText(hits, file, text, scanAllowlist) {
         hits.push({ file, line: lineNumber, rule: 'personal:rfc1918-ip', detail: 'private RFC1918 IP address' })
       }
     }
+  }
+  return hits
+}
+
+function scanText(hits, file, text, scanAllowlist) {
+  const lines = text.split(/\r?\n/)
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const lineNumber = index + 1
+    COMMERCIAL_PATTERN.lastIndex = 0
+    for (const match of line.matchAll(COMMERCIAL_PATTERN)) {
+      const name = match[0].replace(/\s+/g, ' ')
+      const ruleName = COMMERCIAL_RULES.get(name.toLowerCase())
+      hits.push({ file, line: lineNumber, rule: `commercial:${ruleName}`, detail: `forbidden ${name}` })
+    }
+    hits.push(...scanPersonalText(file, line, scanAllowlist).map(hit => ({ ...hit, line: lineNumber })))
 
     SECRET_ASSIGNMENT_PATTERN.lastIndex = 0
     for (const _match of line.matchAll(SECRET_ASSIGNMENT_PATTERN)) {

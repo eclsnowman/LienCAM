@@ -21,6 +21,7 @@ import type { Project, Setup } from '../../types'
 import { buildPostInput, resolveMachineActions, resolveOperatorStops } from './buildPostInput'
 import { postCombined, postProgram } from './index'
 import { nothingToCutLine } from './emit'
+import { sequenceNumberLines } from './sequenceNumbers'
 import type {
   PostConfig,
   PostDiagnostic,
@@ -141,6 +142,7 @@ export function postProject(
   setups: Setup[],
   config: PostConfig,
   options: PostProjectOptions,
+  onResolvedInput?: (setup: Setup, input: PostInput) => void,
 ): PostProjectResult {
   // Resolve every selected setup's own controller frame before uniqueness
   // checks or output. Stock binding still proves which physical block is cut;
@@ -226,6 +228,8 @@ export function postProject(
     // tied to the geometry-producing setup state. buildPostInput resolves the
     // owning stock's G54-G59 slot onto the emitted copy independently.
     let input = buildPostInput(project, sourceSetupById.get(setup.id) ?? setup)
+    // Request-local reuse only, before selection/filtering changes emission.
+    onResolvedInput?.(sourceSetupById.get(setup.id) ?? setup, input)
     const sel = options.selectedOpIds?.[setup.id]
     if (sel !== undefined) {
       input = filterOps(input, sel)
@@ -264,7 +268,7 @@ export function postProject(
   // WO-2870: an export in which nothing is left to cut is its comment lines
   // only - no program start or end, so no motion (the end's retract included).
   const nothingToCutProgram = (names: string[]): PostResult => {
-    const lines = names.map((name) => nothingToCutLine(name, config))
+    const lines = sequenceNumberLines(names.map((name) => nothingToCutLine(name, config)), config)
     return {
       gcode: lines.join('\n') + '\n', ok: true, diagnostics: [],
       meta: { opCount: 0, lineCount: lines.length }, operationSpans: [],

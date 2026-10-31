@@ -1,0 +1,11 @@
+.ui2-icon {
+  display: block;
+  flex: none;
+  overflow: visible;
+  width: var(--ic-size-ribbon);
+  height: var(--ic-size-ribbon);
+}
+.ui2-icon[width] {
+  width: auto;
+  height: auto;
+}

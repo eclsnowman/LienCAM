@@ -109,7 +109,11 @@ const { UCCNC_CONFIG } = await import('../../lib/post/dialects/uccnc')
 const { createGeometryService, faceAdapter, selfIntersects } = await import('../../kernel/geometry')
 const faceClipper = await import('../../lib/cam/face2d/clipperOffset')
 
-const GOLDEN = 'src/tests/evidence/WO-2996/contour-before.json'
+const STARTER_GOLDEN = 'src/tests/evidence/WO-2996/contour-before.json'
+// Full-revision bisect: 219165a483fc6ff0a19e10bc148dd809ea72198c
+// (WO-3123) intentionally changed post start/restart framing. Keep the
+// starter's exact cut/offset/error invariants alongside the new full post pin.
+const GOLDEN = 'src/tests/evidence/WO-3213/contour-approved-approach.json'
 const RECORD = process.env.WO2996_RECORD === '1'
 
 const stock = {
@@ -282,10 +286,14 @@ beforeAll(async () => {
   const operation = useCamStore.getState().project.setups[0].operations[0]
   expect(operation.type).toBe('contour_2d')
   operationId = operation.id
+  // WO-3213: Create starts a real asynchronous computation. Finish it before
+  // changing the first case; the single in-process worker recorder models
+  // sequential cases, not two concurrent requests sharing one message sink.
+  await waitFor(() => expect(useCamStore.getState().project.setups[0].operations[0].status).toBe('ready'))
   cleanup()
   for (const c of CASES) results.push(await runCase(c))
   if (RECORD) {
-    mkdirSync('src/tests/evidence/WO-2996', { recursive: true })
+    mkdirSync('src/tests/evidence/WO-3213', { recursive: true })
     writeFileSync(GOLDEN, JSON.stringify({
       source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       command: 'WO2996_RECORD=1 WRITE_EVIDENCE=1 npx vitest run src/tests/cam/contourGeometryService.wo2996.test.ts',
@@ -314,9 +322,12 @@ describe('WO-2996 Contour closed offsets through the kernel geometry service', (
     expect(by('native offset exception').moveCount).toBe(0)
   })
 
-  it('offset calls, rings, moves, posted G-code and errors are identical to the starter', () => {
+  it('offsets, moves and errors match the starter; G-code matches the approved WO-3123 approach', () => {
     const before = golden()
     expect(before.cases.map(c => c.name)).toEqual(CASES.map(c => c.name))
+    const starter = JSON.parse(readFileSync(STARTER_GOLDEN, 'utf8')) as { cases: CaseResult[] }
+    const cutInvariants = (cases: CaseResult[]) => cases.map(c => ({ ...c, gcodeSha: null, gcodeLines: 0 }))
+    expect(cutInvariants(results)).toEqual(cutInvariants(starter.cases))
     expect(results).toEqual(before.cases)
   })
 

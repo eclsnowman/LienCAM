@@ -97,6 +97,10 @@ async function connect(kind: 'serial' | 'simulator') {
     await vi.advanceTimersByTimeAsync(3000)
     ctrl.jogToMachineZ(-5, 6000)
     await vi.advanceTimersByTimeAsync(1000)
+    // WO-3189 seeds the setup's stock box at every simulator connect; these
+    // touches run over the machine's flat pad, so the fixture says no part is
+    // placed (a placed part replaces the pad by design, WO-416).
+    session.setSimulatedPart(null)
   }
   session.loadMachineProgram('preserve-wo2609.nc', PROGRAM)
   await vi.advanceTimersByTimeAsync(100)

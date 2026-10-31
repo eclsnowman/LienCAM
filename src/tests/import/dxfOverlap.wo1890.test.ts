@@ -11,10 +11,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { typedMock } from '../support/typedMock'
+import { dxfGeometryFingerprint } from './dxfGeometryFingerprint.wo3154'
 
 const mem = new Map<string, string>()
 const memStorage: Storage = {
@@ -268,8 +268,7 @@ describe('WO-1890 acceptance 3: a clean DXF imports identical to main', () => {
       // Numbers rounded to 1e-9 before hashing: curve tessellation differs in the
       // last bits between x86 (dev box) and arm64 (the Spark gate) - not a geometry
       // change. Any real change still moves the digest. (architect 2026-09-23)
-      const stable = JSON.stringify(rest, (_k, v) => typeof v === 'number' ? Math.round(v * 1e9) / 1e9 : v)
-      expect(createHash('sha256').update(stable).digest('hex').slice(0, 16)).toBe(digest)
+      expect(dxfGeometryFingerprint(rest)).toBe(digest)
       expect(report.overlapsMerged).toBe(0)
       expect(report.branchPoints).toBe(0)
     })

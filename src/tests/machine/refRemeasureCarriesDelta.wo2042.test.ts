@@ -37,6 +37,7 @@ const {
   cancelGuidedToolChange,
   connectMachine,
   disconnectMachine,
+  setSimulatedPart,
   getMachineController,
 } = await import('../../lib/machine/machineSession')
 
@@ -111,6 +112,10 @@ beforeEach(async () => {
   __resetEstopInterlockForTest()
   getMachineController().home()
   await vi.advanceTimersByTimeAsync(2000)
+  // WO-3189 seeds the setup's stock box at every simulator connect; these
+  // measures run on the machine's fixed pad, so the fixture says no part is
+  // placed (a placed part replaces the pad by design, WO-416).
+  setSimulatedPart(null)
   useMachineToolTable.getState().setProbeConfig(SIM_ID, { maxTravel: 50 })
 })
 

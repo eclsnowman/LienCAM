@@ -2,11 +2,10 @@ import type { PostConfig, PostInput } from '../types'
 import { resolveCoolantWord, resolveVacuum } from '../resolve'
 import { fmtNum } from '../format'
 
-/** A lines-only vendor post can still post a ready operation containing arcs.
- * Subdivide in canonical mm before the existing unit/coordinate formatter.
- * R posts split explicit full circles, since one R block has no unique centre. */
+/** R posts split explicit full circles, since one R block has no unique centre.
+ * Lines-only vendor posts use the common emitter sampler (WO-3107). */
 export function vendorPostInput(input: PostInput, config: PostConfig): PostInput {
-  if (!config.options.vendorPost || (config.capabilities.arcs && config.capabilities.arcCenterMode !== 'r')) return input
+  if (!config.options.vendorPost || !config.capabilities.arcs || config.capabilities.arcCenterMode !== 'r') return input
   return { ...input, setup: { ...input.setup, operations: input.setup.operations.map((op) => {
     let previous: typeof op.moves[number] | undefined
     const moves = op.moves.flatMap((move) => {
@@ -18,15 +17,14 @@ export function vendorPostInput(input: PostInput, config: PostConfig): PostInput
       const to = Math.atan2(move.y - move.cy, move.x - move.cx)
       const direction = move.type === 'arc_cw' ? -1 : 1
       const sweep = ((direction * (to - from) + Math.PI * 2) % (Math.PI * 2)) || Math.PI * 2
-      const tolerance = Number(config.options.arcTolerance ?? 0.05)
-      const step = config.capabilities.arcs ? Math.PI : 2 * Math.acos(Math.max(-1, 1 - Math.max(0.0001, tolerance) / Math.max(radius, 0.0001)))
+      const step = Math.PI
       const count = Math.max(1, Math.ceil(sweep / Math.max(0.001, step)))
       return Array.from({ length: count }, (_, index) => {
         const fraction = (index + 1) / count
         const angle = from + direction * sweep * fraction
         return {
           ...move,
-          type: config.capabilities.arcs ? move.type : 'feed' as const,
+          type: move.type,
           x: index === count - 1 ? move.x : move.cx! + radius * Math.cos(angle),
           y: index === count - 1 ? move.y : move.cy! + radius * Math.sin(angle),
           z: start.z + (move.z - start.z) * fraction,
@@ -59,7 +57,6 @@ export function vendorOutputLines(lines: string[], config: PostConfig, inputs: r
   }
   const endLines = config.options.programEndMode === 'custom'
     ? String(config.options.programEndCustom ?? '').split('\n').filter((line) => line.trim()).length : 0
-  let sequence = 0
   let x = 0
   let y = 0
   let motion = ''
@@ -85,10 +82,6 @@ export function vendorOutputLines(lines: string[], config: PostConfig, inputs: r
         translated = translated.replace(/\bI-?\d+(?:\.\d+)?\s+J-?\d+(?:\.\d+)?/, `R${fmtNum(radius, config.format.xyzDecimals)}`)
       }
       x = endX; y = endY
-    }
-    if (config.format.lineNumbers && translated.trim() && translated.trim() !== '%') {
-      sequence += config.format.lineNumberStep || 10
-      translated = `N${sequence} ${translated}`
     }
     return translated
   })

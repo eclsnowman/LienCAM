@@ -1,14 +1,207 @@
-import type { ToolpathMove } from '../types'
+import type { ToolpathMove, ToolpathStockBlock } from '../types'
 import type { MoveRole, Vec2 } from '../../../types'
+import type { StockState } from '../stockState'
+import { highestMaterialOver } from '../smartHeights/earlierMaterial'
 
-/** Rapid to point `p` at clearanceZ → retractZ → feedZ. */
+// -- WO-3083: where every entry starts - one rule for every operation ------------------------
+// The owner, 2026-10-23 release review: "chamfer start height helix entry is really high ...
+// This is a common theme across several operations." Operations used to start their helix,
+// ramp or plunge at three different heights (the Feed plane Top + 5, the material itself, or
+// Pocket's material + 1). Now every entry starts ENTRY_CLEARANCE_MM above the highest material
+// under its footprint (Pocket's WO-1972 rule, moved here): the tool rapids down to there and
+// feeds from there.
+
+/** Pocket's "Helix start above material" default, mm: every entry starts this far above the
+ *  material it meets. */
+export const ENTRY_CLEARANCE_MM = 1
+
+/** What an operation knows about the material its entries meet, in the moves' frame. */
+export interface EntryMaterial {
+  /** What the earlier operations of the setup left (the store's replay). */
+  readonly remaining?: StockState
+  /** The stock block as loaded. */
+  readonly stockBlock?: ToolpathStockBlock
+  /** The operation's resolved Top. */
+  readonly topZ: number
+  /** The operation's Feed plane. An operator who set it lower than the rule's start (but still
+   *  above the material) keeps it: the rule never adds air the operator took out. */
+  readonly feedZ?: number
+}
+
+/** A replayed stock state the lookup can read; undefined when it is empty or malformed. */
+export function usableStock(stock: StockState | undefined): StockState | undefined {
+  if (!stock || !(stock.resolutionMm > 0) || !(stock.nx > 0) || !(stock.ny > 0)) return undefined
+  return stock.topZ?.length === stock.nx * stock.ny ? stock : undefined
+}
+
+/** The operation's entry material: remaining stock (when usable), the block, and Top. */
+export function entryMaterialOf(
+  payload: { stockBlock?: ToolpathStockBlock }, topZ: number, feedZ?: number,
+): EntryMaterial {
+  // Every 2D request carries the reach inputs (ToolReachInputs.remainingStock) beside its own fields.
+  const remaining = usableStock((payload as { remainingStock?: StockState }).remainingStock)
+  return { ...(remaining ? { remaining } : {}), ...(payload.stockBlock ? { stockBlock: payload.stockBlock } : {}),
+    topZ, ...(feedZ !== undefined && Number.isFinite(feedZ) ? { feedZ } : {}) }
+}
+
+/** `clearance` above `materialZ`, or the operator's lower Feed plane when it is still above it. */
+export function entryAbove(materialZ: number, clearance = ENTRY_CLEARANCE_MM, feedZ?: number): number {
+  const start = materialZ + clearance
+  return feedZ !== undefined && feedZ > materialZ && feedZ < start ? feedZ : start
+}
+
+/**
+ * The highest material under a footprint of radius `reach` around `centre`: the remaining
+ * stock's highest column over the footprint's square padded by one cell (reads too high,
+ * never too low); with no remaining stock, the block as loaded where the footprint is over
+ * it; with neither, Top. `ceilingZ` is what this operation already cut there (the level
+ * above) - the material is never above it.
+ */
+export function materialUnder(src: EntryMaterial, centre: Vec2, reach: number, ceilingZ?: number): number {
+  let surfaceZ: number | undefined
+  if (src.remaining) {
+    const pad = Math.max(0, reach) + src.remaining.resolutionMm
+    surfaceZ = highestMaterialOver(src.remaining, {
+      minX: centre.x - pad, minY: centre.y - pad, maxX: centre.x + pad, maxY: centre.y + pad,
+    })
+  } else if (src.stockBlock) {
+    const b = src.stockBlock
+    const over = centre.x + reach >= b.min.x && centre.x - reach <= b.max.x &&
+      centre.y + reach >= b.min.y && centre.y - reach <= b.max.y
+    if (over && Number.isFinite(b.max.z)) surfaceZ = b.max.z
+  }
+  let materialZ = surfaceZ ?? ceilingZ ?? src.topZ
+  if (ceilingZ !== undefined) materialZ = Math.min(materialZ, ceilingZ)
+  return materialZ
+}
+
+/** WO-3083: one entry height for a whole operation - `clearance` above the highest material
+ *  over the bounding square of `points` grown by `reach` (reads too high, never too low). For
+ *  operations whose entries all sit on or beside one footprint (a contour, a faced region). */
+export function entryStartOver(
+  src: EntryMaterial, points: readonly Vec2[], reach: number, clearance = ENTRY_CLEARANCE_MM,
+): number {
+  if (points.length === 0) return src.topZ + clearance
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of points) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+  const centre = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+  return entryAbove(materialUnder(src, centre, Math.max(maxX - minX, maxY - minY) / 2 + reach), clearance, src.feedZ)
+}
+
+/** WO-3083: one entry height for entries that all start on (or within `reach` of) a path - a
+ *  contour's loops: `clearance` above the highest material under the paths' own footprint.
+ *  Every segment is read along its length (a closed path's closing segment too), at no more
+ *  than one stock cell apart, so material standing between two vertices is never missed. */
+export function entryStartAlong(
+  src: EntryMaterial, paths: readonly { readonly points: readonly Vec2[]; readonly closed?: boolean }[],
+  reach: number, clearance = ENTRY_CLEARANCE_MM,
+): number {
+  const step = src.remaining ? src.remaining.resolutionMm : Math.max(reach, 0.5)
+  let highest = -Infinity
+  const read = (p: Vec2) => { highest = Math.max(highest, materialUnder(src, p, reach)) }
+  for (const { points, closed } of paths) {
+    const n = points.length
+    for (let i = 0; i < n; i++) {
+      const a = points[i]
+      read(a)
+      const b = i + 1 < n ? points[i + 1] : closed && n > 2 ? points[0] : undefined
+      if (!b) continue
+      const k = Math.min(100_000, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step))
+      for (let j = 1; j < k; j++) read({ x: a.x + (b.x - a.x) * j / k, y: a.y + (b.y - a.y) * j / k })
+    }
+  }
+  return entryAbove(highest === -Infinity ? src.topZ : highest, clearance, src.feedZ)
+}
+
+/** WO-3083: where an entry descending to `floorZ` starts - `clearance` above the material
+ *  under its footprint, never below `floorZ` + `clearance`. */
+export function entryStartZ(
+  src: EntryMaterial, centre: Vec2, reach: number, floorZ: number,
+  opts: { ceilingZ?: number; clearance?: number } = {},
+): number {
+  const clearance = opts.clearance ?? ENTRY_CLEARANCE_MM
+  return entryAbove(Math.max(materialUnder(src, centre, reach, opts.ceilingZ), floorZ), clearance, src.feedZ)
+}
+
+/** Rapid to point `p` at clearanceZ → retractZ → feedZ. The Retract stop is skipped when it
+ *  would sit below the entry height (it would dip and climb again). */
 export function rapidEntryAt(
   moves: ToolpathMove[], p: Vec2,
   feedZ: number, retractZ: number, clearanceZ: number
 ) {
   moves.push({ type: 'rapid', x: p.x, y: p.y, z: clearanceZ,   role: 'rapid' })
-  moves.push({ type: 'rapid', x: p.x, y: p.y, z: retractZ, role: 'rapid' })
+  if (retractZ >= feedZ) moves.push({ type: 'rapid', x: p.x, y: p.y, z: retractZ, role: 'rapid' })
   moves.push({ type: 'rapid', x: p.x, y: p.y, z: feedZ,    role: 'rapid' })
+}
+
+/** WO-3083 rule 2: carry the tool to `p` ready to enter from `startZ`. The operation's first
+ *  entry (nothing emitted yet) comes down through Clearance; every later hop between the
+ *  features of one operation rises only to Retract, crosses there and drops to `startZ`. A
+ *  hop whose own corridor crosses workholding is lifted by the reach trim (raiseTraverses),
+ *  not here. The builder makes the final exit to Clearance. */
+export function hopTo(
+  moves: ToolpathMove[], p: Vec2, startZ: number, retractZ: number, clearanceZ: number,
+): void {
+  const last = moves[moves.length - 1]
+  if (!last) {
+    rapidEntryAt(moves, p, startZ, retractZ, clearanceZ)
+    return
+  }
+  // An entry that starts above Retract (an operator Retract set below the material) crosses at
+  // its own start height: the hop never ends below where the entry begins.
+  const travelZ = Math.max(retractZ, last.z, startZ)
+  if (last.z < travelZ) moves.push({ type: 'rapid', x: last.x, y: last.y, z: travelZ, role: 'rapid' })
+  moves.push({ type: 'rapid', x: p.x, y: p.y, z: travelZ, role: 'rapid' })
+  if (startZ < travelZ) moves.push({ type: 'rapid', x: p.x, y: p.y, z: startZ, role: 'rapid' })
+}
+
+/** WO-3083 rule 2 for builders whose links all ride Clearance (contour, face): every hop
+ *  between the operation's first entry and its last cut crosses at Retract instead. Only rapids
+ *  AT Clearance are lowered; the first entry and the final exit keep Clearance; a hop that
+ *  would leave below Retract lifts straight up first (never a climbing XY rapid); a lowered
+ *  move that would not move at all is dropped. Workholding a hop's corridor crosses is lifted
+ *  later by the reach trim (raiseTraverses), as for every other operation. */
+export function hopsAtRetract(moves: ToolpathMove[], retractZ: number, clearanceZ: number): ToolpathMove[] {
+  const EPS = 1e-9
+  if (!(clearanceZ > retractZ + EPS)) return moves
+  const isCut = (m: ToolpathMove) => m.type !== 'rapid'
+  const first = moves.findIndex(isCut)
+  let lastCut = -1
+  for (let i = moves.length - 1; i >= 0; i--) if (isCut(moves[i])) { lastCut = i; break }
+  if (first < 0) return moves
+  const out: ToolpathMove[] = moves.slice(0, first)
+  let changed = false
+  for (let i = first; i < moves.length; i++) {
+    const m = moves[i]
+    const prev = out[out.length - 1]
+    const lower = i < lastCut && m.type === 'rapid' && Math.abs(m.z - clearanceZ) <= EPS
+    if (!lower) {
+      // A rapid down to where a lowered hop already stands adds nothing.
+      if (changed && prev && m.type === 'rapid' && prev.x === m.x && prev.y === m.y && Math.abs(prev.z - m.z) <= EPS) continue
+      out.push(m)
+      continue
+    }
+    changed = true
+    if (!prev) { out.push({ ...m, z: retractZ }); continue }
+    const moved = Math.hypot(m.x - prev.x, m.y - prev.y) > EPS
+    if (moved && prev.z < retractZ - EPS) out.push({ ...m, x: prev.x, y: prev.y, z: retractZ })
+    const at = out[out.length - 1]
+    if (at.x === m.x && at.y === m.y && Math.abs(at.z - retractZ) <= EPS) continue
+    out.push({ ...m, z: retractZ })
+  }
+  return changed ? out : moves
+}
+
+/** WO-3083 rule 2: rise straight up to Retract after a feature (the next hop crosses there). */
+export function liftTo(moves: ToolpathMove[], z: number): void {
+  const last = moves[moves.length - 1]
+  if (!last || last.z >= z) return
+  moves.push({ type: 'rapid', x: last.x, y: last.y, z, role: 'rapid' })
 }
 
 /** Rapid to path[0] at clearanceZ → retractZ → feedZ. */

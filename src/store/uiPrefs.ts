@@ -28,6 +28,15 @@ import {
 } from './persistedKeys'
 import { isAvailableLanguage, SOURCE_LANGUAGE } from '../i18n/catalogs'
 import {
+  editCamShortcut,
+  restoreAllCamShortcuts,
+  type CamShortcutBinding,
+  type CamShortcutEdit,
+  type CamShortcutId,
+  type CamShortcutOverrides,
+} from '../lib/shortcuts/camShortcutRegistry'
+import type { GamepadJogPrefs } from '../lib/machine/gamepadJogInput'
+import {
   BRIDGE_DEFAULT_PORT,
   installVfdPortMemory,
   noteBridgeMachineId,
@@ -605,6 +614,26 @@ interface UiPrefsState {
    *  nothing (same refusal shape as setUiTheme). */
   setLanguage: (language: string) => void
 
+  /** WO-3257: the operator's remaps of the three non-motion CAM shortcuts. A row with no
+   *  entry inherits its default, null is unassigned. What is stored may be hand-edited or
+   *  malformed; read it only through effectiveCamBindings(), which falls back to every
+   *  default without touching this value until the operator deliberately edits a row. */
+  camShortcutOverrides: CamShortcutOverrides | null
+  /** WO-3257: remap, clear (null) or restore ('default') one row. A chord another row already
+   *  uses writes nothing and names that row. */
+  setCamShortcutBinding: (id: CamShortcutId, change: CamShortcutBinding | null | 'default') => CamShortcutEdit
+  /** WO-3257: every CAM shortcut row back to its default. */
+  restoreCamShortcutDefaults: () => void
+
+  /** WO-3259: the gamepad step-jog mapping, one versioned object (schemaVersion,
+   *  device fingerprint, raw mappings, dead zone, inversion, speed scale). Never
+   *  a slot index, the session Enable, the arm, a handle or a sample. Kept as
+   *  stored; read it only through readGamepadJogPrefs(), which reads an absent
+   *  value as unmapped and an unknown version as inactive until edited or reset. */
+  gamepadJog: GamepadJogPrefs | null
+  /** WO-3259: Settings' Apply (the whole object) or Reset (null). */
+  setGamepadJog: (prefs: GamepadJogPrefs | null) => void
+
   /** Live-set a panel width (clamped to its bounds). */
   setPanelWidth: (side: 'left' | 'right', width: number) => void
   /** Reset one panel to its default width (double-click handle). */
@@ -837,6 +866,8 @@ export const useUiPrefs = create<UiPrefsState>()(
       mcpServerEnabled: false,
       setMcpServerEnabled: (on) => set({ mcpServerEnabled: on === true }),
       language: SOURCE_LANGUAGE,
+      camShortcutOverrides: null,
+      gamepadJog: null,
 
       setPanelWidth: (side, width) =>
         set(side === 'left'
@@ -1101,6 +1132,16 @@ export const useUiPrefs = create<UiPrefsState>()(
       setLanguage: (language) =>
         set(isAvailableLanguage(language) ? { language } : {}),
 
+      setCamShortcutBinding: (id, change) => {
+        const edit = editCamShortcut(get().camShortcutOverrides, id, change)
+        if (edit.ok) set({ camShortcutOverrides: edit.overrides })
+        return edit
+      },
+      restoreCamShortcutDefaults: () => set({ camShortcutOverrides: restoreAllCamShortcuts() }),
+
+      setGamepadJog: (prefs) =>
+        set({ gamepadJog: prefs !== null && typeof prefs === 'object' ? prefs : null }),
+
     }),
     {
       version: UI_PREFS_VERSION,
@@ -1222,6 +1263,18 @@ export const useUiPrefs = create<UiPrefsState>()(
           mcpServerEnabled: p.mcpServerEnabled === true,
           // WO-2319: absent, or a language whose catalog is gone, shows English.
           language: isAvailableLanguage(p.language) ? p.language : SOURCE_LANGUAGE,
+          // WO-3257: kept as stored, even if malformed, so the operator's blob survives until a
+          // deliberate edit; effectiveCamBindings() reads it and falls back to the defaults.
+          camShortcutOverrides:
+            p.camShortcutOverrides !== null && typeof p.camShortcutOverrides === 'object'
+              ? p.camShortcutOverrides
+              : null,
+          // WO-3259: kept as stored (an unknown version survives for its edit or
+          // reset); readGamepadJogPrefs() decides what is usable.
+          gamepadJog:
+            p.gamepadJog !== null && typeof p.gamepadJog === 'object' && !Array.isArray(p.gamepadJog)
+              ? p.gamepadJog
+              : null,
           // WO-137: a non-number, out-of-range, or absent persisted value
           // falls back to the 60% default -- the trap WO-117's audit named
           // (an undeclared field survived only because merge spreads ...p).

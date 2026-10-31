@@ -65,7 +65,8 @@ describe('WO-2444 production-built taped and tabbed name sign', () => {
     // for byte to the refreshed shipped result.
     expect(carve.toolpathMoves).toHaveLength(12036)
     expect(createHash('sha256').update(JSON.stringify(carve.toolpathMoves)).digest('hex'))
-      .toBe('45bff6e13bdce1ebdced2c1138f4bc6b8e84c5bbb364ca2ec96288eeec81fd08')
+      // WO-3212 re-pin: ff961e3d58 (10-23) regenerated the shipped example on the WO-3083 entry/hop rule.
+      .toBe('f1bcd4e689b0e9fec26ea966ff73140b2894d4bc81bedb5421c20533fbe554c4')
     const contour = p.setups[0].operations[1], oldContour = baseline.setups[0].operations[1]
     const { tabShape, ...params } = stableParams(p, contour)
     expect(params).toEqual(stableParams(baseline, oldContour))
@@ -85,7 +86,8 @@ describe('WO-2444 production-built taped and tabbed name sign', () => {
     expect(sheet).toContain('Method: Tape and glue')
     expect(sheet).toMatch(/4 tabs.*6(?:\.0+)?mm wide x 1\.5(?:0+)?mm high, triangular/)
     expect(sheet).toContain('cut the 4 tabs and sand the stubs')
-    const nc = readFileSync(join(evidence, 'name-sign.nc'))
+    // Byte count of the file as posted (LF); a Windows checkout may add CR to every line.
+    const nc = readFileSync(join(evidence, 'name-sign.nc'), 'utf8').replace(/\r\n/g, '\n')
     // Export and Setup Sheet each stage their own fresh post. A main-example
     // production control also yields different hashes across those two clicks
     // (WO-2444/main-sheet-control/comparison.json). This order checks holding

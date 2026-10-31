@@ -58,11 +58,11 @@ const STEPS: Record<Exclude<SketchToolId, 'select'>, readonly ToolStep[]> = {
   ],
   'rect-corner': [
     { id: 'corner-a', prompt: 'Click the first corner (Tab: angled rectangle)', expects: 'point-click', count: 1 },
-    { id: 'corner-b', prompt: 'Click the opposite corner', expects: 'point-click', count: 1 },
+    { id: 'corner-b', prompt: 'Click the opposite corner, or type W, Tab, H, Enter', expects: 'point-click', count: 1 },
   ],
   'rect-center': [
     { id: 'center', prompt: 'Click the rectangle center (Tab: angled rectangle)', expects: 'point-click', count: 1 },
-    { id: 'corner', prompt: 'Click a corner', expects: 'point-click', count: 1 },
+    { id: 'corner', prompt: 'Click a corner, or type W, Tab, H, Enter', expects: 'point-click', count: 1 },
   ],
   'circle-center': [
     { id: 'center', prompt: 'Click the circle center', expects: 'point-click', count: 1 },

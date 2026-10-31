@@ -654,6 +654,7 @@ const words = {
     "currently": " (currently \"{{name}}\")"
   },
   "PostProcessModal": {
+    "no_operations_selected": "No operations selected. Select the operations to post.",
     "controller_not_declared": "Controller not declared",
     "built_in_templates": "Built-in templates",
     "saved_posts": "Saved posts",

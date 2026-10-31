@@ -29,10 +29,17 @@
 // so an edited legacy Fillet must be able to clear obsolete edge refs while
 // preserving the edge IDs in its replay payload. Omission preserves every
 // existing caller's refs exactly; an explicit [] clears them undo-safely.
+//
+// WO-3244 (audit): remove-then-restore skips the cycle check setConsumes
+// applies, so a `nextConsumes` naming this feature itself or anything already
+// built from its result (a Mirror re-pointed at a plane made from the Mirror)
+// committed a graph topoOrder could not walk. do() now refuses such an edge
+// first, with the same named DagCycleError setConsumes throws, and changes
+// nothing - for every dialog that rewires dependencies, not only Mirror's.
 
 import { textFor } from '../../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
-import type { Command, DagNodeSnapshot, FeatureDag, FeatureRef } from '../../../doc'
+import { DagCycleError, type Command, type DagNodeSnapshot, type FeatureDag, type FeatureRef } from '../../../doc'
 
 export class EditFeaturePayloadCommand implements Command {
   readonly label = 'editFeaturePayload'
@@ -50,6 +57,14 @@ export class EditFeaturePayloadCommand implements Command {
   }
 
   do(dag: FeatureDag): void {
+    // WO-3244: refuse a self-dependency before anything is removed.
+    if (this.nextConsumes !== undefined && dag.has(this.id)) {
+      const downstream = new Set(dag.transitiveConsumersOf(this.id))
+      const producer = this.nextConsumes.find((p) => p === this.id || downstream.has(p))
+      if (producer !== undefined) {
+        throw new DagCycleError({ code: 'DAG_CYCLE', severity: 'error', params: { consumer: this.id, producer } })
+      }
+    }
     // WO UI-12-R1 (Finding 1, instance 3): capture the node's featureOrder()
     // slot BEFORE removeNode drops it, and restore-at-that-index -- a plain
     // restoreNode (the pre-R1 shape) re-appends to the END of featureOrder()

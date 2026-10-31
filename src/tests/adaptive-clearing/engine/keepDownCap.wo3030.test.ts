@@ -46,6 +46,17 @@ const planWith = async (on: boolean, tolerance: number) => {
   }
 }
 const metric = (row: { metrics: Record<string, unknown> }, key: string) => row.metrics[key] as number
+/** M-LINK-4, or 0 when the row kept no link down (declared not applicable with that exact
+ *  reason): no keep-down detour exists to bound. Any other non-number throws. */
+const worstDetour = (row: { metrics: Record<string, unknown> }): number => {
+  const value = row.metrics['M-LINK-4']
+  if (typeof value === 'number') return value
+  const reason = (value as { reason?: string } | undefined)?.reason ?? String(value)
+  if (!reason.includes('no keep-down links with distinct endpoints')) {
+    throw new Error(`M-LINK-4 is not applicable for an unexpected reason: ${reason}`)
+  }
+  return 0
+}
 
 describe('WO-3030 keep-down cap: S/4 + 4a at both sites (switch, ships OFF)', () => {
   it('ships OFF', async () => {
@@ -89,6 +100,11 @@ describe('WO-3030 keep-down cap: S/4 + 4a at both sites (switch, ships OFF)', ()
     const on = await planWith(true, 0.01)
     expect(on.planned.steps[0].status).toBe('ready')
     expect(metric(on.row, 'M-SAFE-2'), 'M-SAFE-2 ON vs OFF').toBeLessThanOrEqual(metric(off.row, 'M-SAFE-2'))
-    expect(metric(on.row, 'M-LINK-4'), `M-LINK-4 (OFF ${metric(off.row, 'M-LINK-4')})`).toBeLessThanOrEqual(LINK_TARGET)
+    // WO-3316: at tolerance 0.01 this H-pocket now keeps no link down at either switch
+    // setting (the router's clearance certificate sends every level change the long way),
+    // so the scorecard declares M-LINK-4 'no keep-down links with distinct endpoints'. The
+    // target is then met by there being no detour to bound - never by a missing measurement:
+    // any other not-applicable reason throws in worstDetour().
+    expect(worstDetour(on.row), `M-LINK-4 (OFF ${JSON.stringify(off.row.metrics['M-LINK-4'])})`).toBeLessThanOrEqual(LINK_TARGET)
   }, 600_000)
 })

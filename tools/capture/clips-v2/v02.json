@@ -1,57 +1,65 @@
 {
   "version": 1,
-  "id": "V02",
+  "durationSeconds": 215,
   "viewport": {
     "width": 1920,
     "height": 1080
   },
   "project": "examples/01-fixture-plate/fixture-plate.camproject",
-  "holdMs": 800,
   "steps": [
     {
-      "action": "open"
+      "at": 1,
+      "action": "zoom",
+      "duration": 3,
+      "deltaY": -120
     },
     {
-      "action": "setup"
+      "at": 6,
+      "action": "play",
+      "duration": 1.1
     },
     {
-      "action": "tools"
-    },
-    {
-      "action": "operation",
-      "index": 0,
-      "tab": "Heights"
-    },
-    {
-      "action": "operation",
-      "index": 1,
-      "tab": "Geometry"
-    },
-    {
-      "action": "operation",
-      "index": 2,
-      "tab": "Geometry"
-    },
-    {
-      "action": "regen"
-    },
-    {
-      "action": "simulate"
-    },
-    {
-      "action": "post",
-      "tools": [
-        "T2",
-        "T3",
-        "T4",
-        "T6"
+      "at": 12,
+      "action": "orbit",
+      "duration": 4,
+      "from": [
+        0.59,
+        0.48
+      ],
+      "to": [
+        0.65,
+        0.5
       ]
     },
     {
-      "action": "export"
+      "at": 200,
+      "action": "zoom",
+      "duration": 1.5,
+      "deltaY": 500
     },
     {
-      "action": "hold"
+      "at": 203.5,
+      "action": "orbit",
+      "duration": 1.2,
+      "from": [
+        0.59,
+        0.48
+      ],
+      "to": [
+        0.64,
+        0.62
+      ],
+      "finished": true
+    },
+    {
+      "at": 205,
+      "action": "compare",
+      "duration": 0.8
+    },
+    {
+      "at": 206,
+      "action": "opacity",
+      "duration": 3
     }
   ]
 }

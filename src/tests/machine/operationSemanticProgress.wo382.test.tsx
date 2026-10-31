@@ -138,19 +138,24 @@ describe('WO-382: deriveOperationProgress over a real posted program (pure)', ()
     // Pin the emitted layout the table below relies on; a post change must
     // fail HERE with a plain reason, not silently shift every expectation.
     // WO-2023 inserted only `G0 Z5`: line 8 after T1 and line 21 after the T2
-    // change. The repinned spans, bounds and cases below still name the same
-    // comments, cut moves and phase boundaries as before those two insertions.
+    // change. WO-3123 then inserted its start-height notice as line 2 - this
+    // fixture's machine states no safe Z, so the post says which clearance it
+    // starts from. The repinned spans, bounds and cases below still name the
+    // same comments, cut moves and phase boundaries as before those insertions.
     expect(context.operations.map((o) => [o.name, o.startLine, o.endLine])).toEqual([
-      ['Face 1', 4, 11],
-      ['Pocket 2', 12, 24],
-      ['Contour 3', 25, 28],
+      ['Face 1', 5, 12],
+      ['Pocket 2', 13, 25],
+      ['Contour 3', 26, 29],
     ])
-    expect(rawLines[3]).toBe('( Face 1 )') // a comment opens every span
-    expect(rawLines[16]).toBe('M0') // the tool-change pause sits inside Pocket 2
+    expect(rawLines[1]).toBe(
+      '( Machine safe Z is missing or rounds to zero; using work clearance for start/restart )',
+    ) // WO-3123's notice
+    expect(rawLines[4]).toBe('( Face 1 )') // a comment opens every span
+    expect(rawLines[17]).toBe('M0') // the tool-change pause sits inside Pocket 2
     expect(operationExecutableBounds(context, gcode)).toEqual([
-      { firstExecutableLine: 5, lastExecutableLine: 11 },
-      { firstExecutableLine: 13, lastExecutableLine: 24 },
-      { firstExecutableLine: 26, lastExecutableLine: 28 },
+      { firstExecutableLine: 6, lastExecutableLine: 12 },
+      { firstExecutableLine: 14, lastExecutableLine: 25 },
+      { firstExecutableLine: 27, lastExecutableLine: 29 },
     ])
   })
 
@@ -159,15 +164,15 @@ describe('WO-382: deriveOperationProgress over a real posted program (pure)', ()
   // active from its first executable line and completed AT its last one, at
   // which moment the next is current as pending; footer -> past the last.
   const table: Array<[line: number, current: number | null, status: string | null, completed: number]> = [
-    [1, 1, 'pending', 0], [3, 1, 'pending', 0],
-    [5, 1, 'active', 0], [6, 1, 'active', 0], [7, 1, 'active', 0], [8, 1, 'active', 0], [9, 1, 'active', 0], [10, 1, 'active', 0],
-    [11, 2, 'pending', 1],
-    [13, 2, 'active', 1], [14, 2, 'active', 1], [15, 2, 'active', 1], [17, 2, 'active', 1], [18, 2, 'active', 1],
-    [19, 2, 'active', 1], [20, 2, 'active', 1], [21, 2, 'active', 1], [22, 2, 'active', 1], [23, 2, 'active', 1],
-    [24, 3, 'pending', 2],
-    [26, 3, 'active', 2], [27, 3, 'active', 2],
-    [28, null, null, 3],
-    [29, null, null, 3], [30, null, null, 3], [31, null, null, 3], [32, null, null, 3],
+    [1, 1, 'pending', 0], [4, 1, 'pending', 0],
+    [6, 1, 'active', 0], [7, 1, 'active', 0], [8, 1, 'active', 0], [9, 1, 'active', 0], [10, 1, 'active', 0], [11, 1, 'active', 0],
+    [12, 2, 'pending', 1],
+    [14, 2, 'active', 1], [15, 2, 'active', 1], [16, 2, 'active', 1], [18, 2, 'active', 1], [19, 2, 'active', 1],
+    [20, 2, 'active', 1], [21, 2, 'active', 1], [22, 2, 'active', 1], [23, 2, 'active', 1], [24, 2, 'active', 1],
+    [25, 3, 'pending', 2],
+    [27, 3, 'active', 2], [28, 3, 'active', 2],
+    [29, null, null, 3],
+    [30, null, null, 3], [31, null, null, 3], [32, null, null, 3], [33, null, null, 3],
   ]
 
   it('the table covers every executable line of the program and nothing else', () => {
@@ -209,16 +214,16 @@ describe('WO-382: deriveOperationProgress over a real posted program (pure)', ()
   })
 
   it('comment, blank and % lines inside a span cannot complete or activate it (they are never acked)', () => {
-    // Line 4 "( Face 1 )" is inside the Face span but before its first
+    // Line 5 "( Face 1 )" is inside the Face span but before its first
     // executable line: were a comment ever handed in as the cursor, Face is
     // still only pending - a comment cannot advance the plan.
-    expect(deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 4 })!.current).toMatchObject({ index: 1, status: 'pending' })
-    // Line 25 "( Contour 3 )": Pocket is complete (24 acked is not implied - the
-    // derivation is a pure function of the cursor, and 25 > 24), Contour pending.
-    expect(deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 25 })!.current).toMatchObject({ index: 3, status: 'pending' })
-    expect(operationAtSourceLine(context, 4)).toMatchObject({ index: 1 })
-    expect(operationAtSourceLine(context, 17)).toMatchObject({ index: 2 })
-    expect(operationAtSourceLine(context, 29)).toBeNull()
+    expect(deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 5 })!.current).toMatchObject({ index: 1, status: 'pending' })
+    // Line 26 "( Contour 3 )": Pocket is complete (25 acked is not implied - the
+    // derivation is a pure function of the cursor, and 26 > 25), Contour pending.
+    expect(deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 26 })!.current).toMatchObject({ index: 3, status: 'pending' })
+    expect(operationAtSourceLine(context, 5)).toMatchObject({ index: 1 })
+    expect(operationAtSourceLine(context, 18)).toMatchObject({ index: 2 })
+    expect(operationAtSourceLine(context, 30)).toBeNull()
     expect(operationAtSourceLine(context, 0)).toBeNull()
   })
 
@@ -228,32 +233,32 @@ describe('WO-382: deriveOperationProgress over a real posted program (pure)', ()
     expect(top.headline).toBe(`Next: ${LABEL.op1}`)
     expect(top.entries.map((e) => e.status)).toEqual(['pending', 'pending', 'pending'])
 
-    const mid = deriveOperationProgress(context, gcode, { phase: 'ready', ackedSourceLine: 0, armedFromLine: 22 })!
+    const mid = deriveOperationProgress(context, gcode, { phase: 'ready', ackedSourceLine: 0, armedFromLine: 23 })!
     expect(mid.headline).toBe(`Next: ${LABEL.op2}`)
     expect(mid.entries.map((e) => e.status)).toEqual(['skipped', 'pending', 'pending'])
 
-    const late = deriveOperationProgress(context, gcode, { phase: 'ready', ackedSourceLine: 0, armedFromLine: 26 })!
+    const late = deriveOperationProgress(context, gcode, { phase: 'ready', ackedSourceLine: 0, armedFromLine: 27 })!
     expect(late.headline).toBe(`Next: ${LABEL.op3}`)
     expect(late.entries.map((e) => e.status)).toEqual(['skipped', 'skipped', 'pending'])
 
     // Prelude lines ack with sourceLine 0 - the hint still holds until a
     // PROGRAM line is acked; once it is, the acked line wins over the hint.
-    const prelude = deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 0, armedFromLine: 22 })!
+    const prelude = deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 0, armedFromLine: 23 })!
     expect(prelude.headline).toBe(`Next: ${LABEL.op2}`)
-    const acked = deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 22, armedFromLine: 22 })!
+    const acked = deriveOperationProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 23, armedFromLine: 23 })!
     expect(acked.headline).toBe(`Running ${LABEL.op2}`)
     expect(acked.entries.map((e) => e.status)).toEqual(['skipped', 'active', 'pending'])
   })
 
   it.each([
-    ['ready', 13, 'armed', `Next: ${LABEL.op2}`],
-    ['streaming', 13, 'running', `Running ${LABEL.op2}`],
-    ['paused', 13, 'held', `Held in ${LABEL.op2}`],
-    ['paused', 11, 'held', `Held before ${LABEL.op2}`],
-    ['failed', 13, 'failed', `Failed in ${LABEL.op2}`],
-    ['failed', 11, 'failed', `Failed before ${LABEL.op2}`],
-    ['failed', 32, 'failed', 'Failed after the last operation (3 of 3)'],
-    ['complete', 32, 'complete', 'All 3 operations complete'],
+    ['ready', 14, 'armed', `Next: ${LABEL.op2}`],
+    ['streaming', 14, 'running', `Running ${LABEL.op2}`],
+    ['paused', 14, 'held', `Held in ${LABEL.op2}`],
+    ['paused', 12, 'held', `Held before ${LABEL.op2}`],
+    ['failed', 14, 'failed', `Failed in ${LABEL.op2}`],
+    ['failed', 12, 'failed', `Failed before ${LABEL.op2}`],
+    ['failed', 33, 'failed', 'Failed after the last operation (3 of 3)'],
+    ['complete', 33, 'complete', 'All 3 operations complete'],
   ] as const)('phase %s at line %i reads as %s: "%s"', (phase, line, state, headline) => {
     // 'ready' ignores the acked line when it is 0 only; here a re-armed
     // 'ready' with a stale acked line is not a real streamer state, so the
@@ -268,11 +273,11 @@ describe('WO-382: deriveOperationProgress over a real posted program (pure)', ()
 
   it('has nothing to say for an empty streamer, a null context, or an operation-free context', () => {
     expect(deriveOperationProgress(context, gcode, { phase: 'empty', ackedSourceLine: 0 })).toBeNull()
-    expect(deriveOperationProgress(null, gcode, { phase: 'streaming', ackedSourceLine: 5 })).toBeNull()
-    expect(deriveOperationProgress(context, null, { phase: 'streaming', ackedSourceLine: 5 })).toBeNull()
-    expect(deriveOperationProgress({ ...context, operations: [] }, gcode, { phase: 'streaming', ackedSourceLine: 5 })).toBeNull()
-    expect(describeOperationAtProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 30 })).toBeNull()
-    expect(describeOperationAtProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 13 })).toBe(LABEL.op2)
+    expect(deriveOperationProgress(null, gcode, { phase: 'streaming', ackedSourceLine: 6 })).toBeNull()
+    expect(deriveOperationProgress(context, null, { phase: 'streaming', ackedSourceLine: 6 })).toBeNull()
+    expect(deriveOperationProgress({ ...context, operations: [] }, gcode, { phase: 'streaming', ackedSourceLine: 6 })).toBeNull()
+    expect(describeOperationAtProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 31 })).toBeNull()
+    expect(describeOperationAtProgress(context, gcode, { phase: 'streaming', ackedSourceLine: 14 })).toBe(LABEL.op2)
   })
 
   it('names every operation kind in plain words', () => {
@@ -496,12 +501,12 @@ describe('WO-382: operation-semantic progress through the real simulator session
     mount()
     act(() => { setMachineSingleBlock(true) })
     const ctrl = getMachineController()
-    // Step into Face 1 (line 5 is its first executable line): header 1, 3, then 5, 6, 7.
+    // Step into Face 1 (line 6 is its first executable line): header 1, 4, then 6, 7, 8.
     for (let i = 0; i < 5; i++) {
       act(() => { expect(ctrl.stepJob()).toBe(true) })
       await settle(600)
     }
-    expect(useMachineControl.getState().job.ackedSourceLine).toBe(7)
+    expect(useMachineControl.getState().job.ackedSourceLine).toBe(8)
     expect(operationText()).toBe(`Held in ${LABEL.op1}`)
     let result: Awaited<ReturnType<typeof stepBackOneLine>> | null = null
     await act(async () => {
@@ -512,7 +517,7 @@ describe('WO-382: operation-semantic progress through the real simulator session
     expect(result).toMatchObject({ ok: true })
     await settle(100)
     expect(ctrl.jobProgress().phase).toBe('ready')
-    expect(useMachineControl.getState().armedFromLine).toBe(6)
+    expect(useMachineControl.getState().armedFromLine).toBe(7)
     expect(screen.getByTestId('control-runfrom-operation').textContent).toBe(`Starts in ${LABEL.op1}.`)
     expect(operationText()).toBe(`Next: ${LABEL.op1}`)
   }, 30_000)
@@ -575,11 +580,11 @@ describe('WO-382: operation-semantic progress through the real simulator session
     act(() => {
       useMachineControl.getState().applyJobProgress({
         phase: 'failed', totalLines: 25, sentLines: 12, ackedLines: 12,
-        ackedSourceLine: 13, sentSourceLine: 14, bytesInFlight: 0,
+        ackedSourceLine: 14, sentSourceLine: 15, bytesInFlight: 0,
       })
       // WO-423: the store carries the contract's JobFault - `line` for a text
       // backend, `moveId` for a geometry one.
-      useMachineControl.getState().applyJobEvent('failed', { code: 20, message: 'Unsupported command (M9)', line: 13, moveId: null })
+      useMachineControl.getState().applyJobEvent('failed', { code: 20, message: 'Unsupported command (M9)', line: 14, moveId: null })
     })
     expect(operationText()).toBe(`Failed in ${LABEL.op2}`)
     expect(screen.getByTestId('control-operation').getAttribute('data-state')).toBe('failed')

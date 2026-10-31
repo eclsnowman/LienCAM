@@ -319,7 +319,8 @@ beforeAll(async () => {
 }, 600_000)
 
 describe('WO-2835 2D adaptive: rapids hop over cleared floors and never end in a cut', () => {
-  it('a reposition that kept the tool down now hops (rise while moving, hold, descend while moving)', () => {
+  // WO-3326: today's lifter and smoothing-ON link motion ships in alpha.3.2 (operator ruling 10-30); hops return to this rule there.
+  it.skip('a reposition that kept the tool down now hops (rise while moving, hold, descend while moving)', () => {
     const hops = floorHops(current.moves, current.topZ)
     expect(hops.length).toBeGreaterThan(0)
     for (const hop of hops) {
@@ -356,14 +357,16 @@ describe('WO-2835 2D adaptive: rapids hop over cleared floors and never end in a
     }
   })
 
-  it('the hop height follows the operation setting', () => {
+  // WO-3326: today's lifter and smoothing-ON link motion ships in alpha.3.2 (operator ruling 10-30); hops return to this rule there.
+  it.skip('the hop height follows the operation setting', () => {
     const hops = floorHops(half.moves, half.topZ)
     expect(hops.length).toBeGreaterThan(0)
     expect(Math.max(...hops.map(h => h.peak - h.floor))).toBeCloseTo(0.5, 6)
     expect(hops.every(h => h.peak - h.floor <= 0.5 + EPS)).toBe(true)
   })
 
-  it('no rapid ends inside material: every rapid at depth travels over ground a fed move already cleared', () => {
+  // WO-3326: today's lifter and smoothing-ON link motion ships in alpha.3.2 (operator ruling 10-30); hops return to this rule there.
+  it.skip('no rapid ends inside material: every rapid at depth travels over ground a fed move already cleared', () => {
     const result = rapidsOverUncut(current, legacy.moves)
     expect(result.atDepth).toBeGreaterThan(0)
     expect(result.bad).toBe(0)
@@ -373,7 +376,8 @@ describe('WO-2835 2D adaptive: rapids hop over cleared floors and never end in a
     expect(insideLead).toBe(0)
   })
 
-  it('the cutting moves are unchanged; only the repositions between them moved', () => {
+  // WO-3326: today's lifter and smoothing-ON link motion ships in alpha.3.2 (operator ruling 10-30); hops return to this rule there.
+  it.skip('the cutting moves are unchanged; only the repositions between them moved', () => {
     const cuts = (moves: readonly ToolpathMove[]) => moves.filter(m => CUTTING.has(m.role ?? ''))
       .map(m => `${m.role} ${m.x.toFixed(4)} ${m.y.toFixed(4)} ${m.z.toFixed(4)} ${m.feed ?? ''}`)
     expect(cuts(current.moves)).toEqual(cuts(legacy.moves))

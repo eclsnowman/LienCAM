@@ -1,0 +1,48 @@
+/* WO-3282: the command search panel. Only New UI tokens (src/theme/tokens.ts, under [data-ui2]). */
+.ui2-cmd-search {
+  width: 420px;
+  max-width: calc(100vw - 2 * var(--sp4, 16px));
+  padding: var(--sp2, 6px);
+  background: var(--panel);
+  color: var(--tx);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+  font: var(--f-body) / 1.35 var(--sans);
+}
+.ui2-cmd-search input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--h-ctl);
+  padding: 0 var(--sp2, 6px);
+  background: var(--ctl);
+  color: var(--tx);
+  border: 1px solid var(--ctl-bd);
+  border-radius: var(--r-sm);
+  font: inherit;
+}
+.ui2-cmd-search input:focus { outline: 2px solid var(--acc); outline-offset: -1px; }
+.ui2-cmd-search__empty { margin: var(--sp2, 6px) var(--sp1, 4px) 0; color: var(--tx2); }
+.ui2-cmd-search__list { list-style: none; margin: var(--sp2, 6px) 0 0; padding: 0; max-height: 360px; overflow-y: auto; }
+.ui2-cmd-search__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  column-gap: var(--sp2, 6px);
+  min-height: var(--min-hit);
+  padding: 2px var(--sp2, 6px);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.ui2-cmd-search__row[aria-selected='true'] { background: var(--acc-soft); }
+.ui2-cmd-search__row[aria-disabled='true'] { cursor: default; }
+.ui2-cmd-search__row[aria-disabled='true'] .ui2-cmd-search__label { color: var(--tx2); }
+.ui2-cmd-search__place { color: var(--tx2); font-size: var(--f-cap); }
+.ui2-cmd-search__key {
+  padding: 0 4px;
+  border: 1px solid var(--b1);
+  border-radius: var(--r-sm);
+  color: var(--tx2);
+  font: var(--f-cap) var(--mono);
+}
+.ui2-cmd-search__reason { grid-column: 1 / -1; color: var(--tx3); font-size: var(--f-cap); }

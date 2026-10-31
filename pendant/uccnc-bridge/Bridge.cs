@@ -1187,6 +1187,10 @@ namespace LienCAM
             // banner, Machine.Open and hello.uccnc.board - so what the browser is
             // told is what was actually opened. With no --board at all the
             // configured value wins, and its default is still the demo board.
+            // WO-3088: a controller that never answers is pointed at the cable
+            // the board this computer last connected actually uses.
+            ControllerStartupWait.ExpectedDeviceType = DllPin.LastConnectedDeviceType();
+
             if (discover)
             {
                 // WO-926: ListDevices and DeviceInfo are UC100 calls like any
@@ -2136,8 +2140,11 @@ namespace LienCAM
                     try
                     {
                         string panicRefusal;
+                        // Capture BEFORE queuing: Run may time out while its
+                        // stop remains queued and a new session accepts a load.
+                        long departingStaging = machine.CaptureStagingGeneration();
                         if (!BoardOwner.Run(BoardOwner.Class.StopNow, "the socket-loss stop",
-                                            delegate { machine.PanicStop(); StopBoardSpindleAfter("the socket-loss stop"); }, 5000, out panicRefusal))
+                                            delegate { machine.PanicStop(departingStaging); StopBoardSpindleAfter("the socket-loss stop"); }, 5000, out panicRefusal))
                             Log("*** THE SOCKET-LOSS STOP HAS NOT LANDED *** " + panicRefusal);
                     }
                     catch (Exception ex) { Log("panic stop failed: " + ex.Message); }
@@ -3813,6 +3820,15 @@ namespace LienCAM
                     {
                         machine.Reset();
                         SafeOk(w, s, null, false);
+                        // A soft-limit trip: reopen the controller in its own Long
+                        // call (only a fresh Open restored buffered motion on the
+                        // real board), so the operator's Stop/Reset is enough.
+                        if (machine.SoftLimitLatched)
+                        {
+                            string healRefusal;
+                            BoardOwner.Post(BoardOwner.Class.Long, "soft-limit recovery after Stop/Reset",
+                                delegate { machine.HealSoftLimitAfterReset(); }, out healRefusal);
+                        }
                     });
                     return;
                 case "unlock":

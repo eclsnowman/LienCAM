@@ -292,3 +292,178 @@ export function revolveSurfId(featureId: string, srcId: string): string {
 export function revolveCapId(featureId: string, sketchId: string, which: 'start' | 'end'): string {
   return `${featureId}:REV:${sketchId}:cap${which === 'start' ? 'Start' : 'End'}`
 }
+
+// ---- right-corner chain sweep (WO-3229) -------------------------------------
+/**
+ * A planar line/arc path swept with explicit right-miter corners. On a planar
+ * path the transported profile frame only ever rotates about the path plane
+ * normal N, so a profile point is fully described by two numbers taken in the
+ * START frame: `q`, its offset along the left normal (N x tangent), and `h`, its
+ * offset along N. Everywhere along the chain that point sits at
+ * centerline(s) + q * leftNormal(s) + h * N. Corners are cut by the bisector
+ * plane of the two tangents, so the inner side of a left turn (q > 0) loses
+ * q * tan(phi / 2) on each leg; an arc at offset q runs on radius R - sign * q.
+ * Everything below is pure 2D math in path-plane coordinates.
+ */
+export interface ChainLeg {
+  srcId: string
+  kind: 'line' | 'arc'
+  start: P2
+  end: P2
+  tStart: P2
+  tEnd: P2
+  /** line: length; arc: R * |sweep| */
+  length: number
+  /** arc only: centre, radius, start angle and signed sweep (ccw positive) */
+  c?: P2
+  r?: number
+  a0?: number
+  sweep?: number
+  /** signed corner turn into this leg (0 at the chain start) and out of it */
+  turnIn: number
+  turnOut: number
+}
+
+/** Signed angle (radians, ccw positive) that turns unit 2D vector a onto b. */
+export function signedTurn(a: P2, b: P2): number {
+  return Math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1])
+}
+
+/** Left normal of a 2D travel direction (ccw by 90 degrees). */
+export function leftNormal2d(t: P2): P2 { return [-t[1], t[0]] }
+
+/** Path segments as legs with their corner turns. Pure. */
+export function chainLegs(segs: ProfileSeg[]): ChainLeg[] {
+  const legs: ChainLeg[] = segs.map((s) => {
+    const g = segGeom2d(s)
+    if (s.kind === 'line') {
+      return { srcId: s.srcId, kind: 'line', start: g.start, end: g.end, tStart: g.tStart, tEnd: g.tEnd, length: Math.hypot(g.end[0] - g.start[0], g.end[1] - g.start[1]), turnIn: 0, turnOut: 0 }
+    }
+    let sweep = s.a1 - s.a0
+    if (s.ccw && sweep <= 0) sweep += Math.PI * 2
+    if (!s.ccw && sweep >= 0) sweep -= Math.PI * 2
+    return { srcId: s.srcId, kind: 'arc', start: g.start, end: g.end, tStart: g.tStart, tEnd: g.tEnd, length: s.r * Math.abs(sweep), c: s.c, r: s.r, a0: s.a0, sweep, turnIn: 0, turnOut: 0 }
+  })
+  for (let i = 0; i + 1 < legs.length; i++) {
+    const phi = signedTurn(legs[i].tEnd, legs[i + 1].tStart)
+    // A tangent joint is exactly straight: keep it 0 so tangent chains stay exact.
+    const turn = Math.abs(phi) < 1e-12 ? 0 : phi
+    legs[i].turnOut = turn
+    legs[i + 1].turnIn = turn
+  }
+  return legs
+}
+
+/** Total signed turn from the chain start to the START of leg `i`. */
+export function turnBeforeLeg(legs: ChainLeg[], i: number): number {
+  let a = 0
+  for (let j = 0; j < i; j++) a += (legs[j].kind === 'arc' ? legs[j].sweep! : 0) + legs[j].turnOut
+  return a
+}
+
+/**
+ * The part of leg `leg` that the profile point at left offset `q` sweeps, as a
+ * parameter span [u0, u1]: distance along a line, or unsigned angle from the
+ * arc start along an arc. A line's ends are where the corner bisector planes
+ * (or the perpendicular end planes at the chain ends) cross its offset line.
+ * Arcs only ever meet tangent joints here (chainDefect refuses an arc at a
+ * corner), so an arc's span is its whole sweep. Returns null for an arc whose
+ * offset radius is not positive, or an arc with a corner.
+ */
+export function legSpanAt(leg: ChainLeg, q: number): { u0: number; u1: number } | null {
+  if (leg.kind === 'line') {
+    return { u0: q * Math.tan(leg.turnIn / 2), u1: leg.length - q * Math.tan(leg.turnOut / 2) }
+  }
+  if (leg.turnIn !== 0 || leg.turnOut !== 0) return null
+  if (!(leg.r! - Math.sign(leg.sweep!) * q > 0)) return null
+  return { u0: 0, u1: Math.abs(leg.sweep!) }
+}
+
+/** 2D point and unit tangent at parameter u (see legSpanAt) on the leg centreline. */
+export function legPointAt(leg: ChainLeg, u: number): { p: P2; t: P2 } {
+  if (leg.kind === 'line') {
+    return { p: [leg.start[0] + leg.tStart[0] * u, leg.start[1] + leg.tStart[1] * u], t: leg.tStart }
+  }
+  const sigma = Math.sign(leg.sweep!)
+  const a = leg.a0! + sigma * u
+  const t: P2 = sigma > 0 ? [-Math.sin(a), Math.cos(a)] : [Math.sin(a), -Math.cos(a)]
+  return { p: [leg.c![0] + leg.r! * Math.cos(a), leg.c![1] + leg.r! * Math.sin(a)], t }
+}
+
+/** Where the profile point (q, h) sits at parameter u of a leg, in 3D. */
+export function chainPoint3d(basis: PlaneBasis, leg: ChainLeg, u: number, q: number, h: number): Vec3T {
+  const { p, t } = legPointAt(leg, u)
+  const n = leftNormal2d(t)
+  return add(lift(basis, [p[0] + q * n[0], p[1] + q * n[1]]), scale(basis.normal, h))
+}
+
+/** The profile point (q, h) at the mid-span of a leg: a point on exactly the
+ *  side face that point's profile entity generates along that leg. */
+export function chainRepPoint(basis: PlaneBasis, leg: ChainLeg, q: number, h: number): Vec3T | null {
+  const span = legSpanAt(leg, q)
+  if (!span) return null
+  return chainPoint3d(basis, leg, (span.u0 + span.u1) / 2, q, h)
+}
+
+/** Offset range [qMin, qMax] that a profile loop covers along `g`, where
+ *  q(p2) = p2 . g is the left-normal offset of a profile 2D point. Lines take
+ *  their endpoints; arcs add the extreme angles that lie inside their sweep. */
+export function profileOffsetRange(loop: ProfileSeg[], g: P2): { qMin: number; qMax: number } {
+  let qMin = Infinity, qMax = -Infinity
+  const take = (p: P2): void => { const q = p[0] * g[0] + p[1] * g[1]; qMin = Math.min(qMin, q); qMax = Math.max(qMax, q) }
+  for (const s of loop) {
+    if (s.kind === 'line') { take(s.a); take(s.b); continue }
+    let sweep = s.a1 - s.a0
+    if (s.ccw && sweep <= 0) sweep += Math.PI * 2
+    if (!s.ccw && sweep >= 0) sweep -= Math.PI * 2
+    const at = (a: number): P2 => [s.c[0] + s.r * Math.cos(a), s.c[1] + s.r * Math.sin(a)]
+    take(at(s.a0)); take(at(s.a0 + sweep))
+    const star = Math.atan2(g[1], g[0])
+    for (const cand of [star, star + Math.PI]) {
+      const u = ((cand - s.a0) * Math.sign(sweep)) % (Math.PI * 2)
+      const uu = u < 0 ? u + Math.PI * 2 : u
+      if (uu <= Math.abs(sweep)) take(at(cand))
+    }
+  }
+  return { qMin, qMax }
+}
+
+/**
+ * Why a chain cannot give one correct right-corner solid, or null. Each reason
+ * is a geometric fact of the request, not a threshold: a zero-length segment,
+ * a gap between segments, a corner that reverses travel (its bisector plane
+ * collapses), an arc whose inner offset radius reaches zero, or a leg whose two
+ * cut planes cross inside the profile so the leg turns inside out.
+ */
+export function chainDefect(legs: ChainLeg[], range: { qMin: number; qMax: number }, tol = 1e-6): string | null {
+  for (let i = 0; i < legs.length; i++) {
+    const leg = legs[i]
+    if (!(leg.length > tol)) return `path segment ${leg.srcId} has zero length`
+    if (i + 1 < legs.length) {
+      const nxt = legs[i + 1]
+      if (Math.hypot(leg.end[0] - nxt.start[0], leg.end[1] - nxt.start[1]) > tol) {
+        return `path segments ${leg.srcId} and ${nxt.srcId} do not connect`
+      }
+      if (leg.turnOut !== 0 && (leg.kind === 'arc' || nxt.kind === 'arc')) {
+        const [x, y] = [leg.kind === 'arc' ? `arc ${leg.srcId}` : leg.srcId, nxt.kind === 'arc' ? `arc ${nxt.srcId}` : nxt.srcId]
+        return `${x} meets ${y} at a corner; the kernel's right-corner joint at an arc is not a true mitre, so only lines may meet at corners (join an arc tangentially)`
+      }
+      if (Math.PI - Math.abs(leg.turnOut) < 1e-9) {
+        return `the path reverses direction between ${leg.srcId} and ${nxt.srcId}, so the swept profile folds back onto itself`
+      }
+    }
+    const qs = [range.qMin, (range.qMin + range.qMax) / 2, range.qMax]
+    for (const q of qs) {
+      if (leg.kind === 'arc' && !(leg.r! - Math.sign(leg.sweep!) * q > tol)) {
+        return `the profile reaches past the centre of arc ${leg.srcId} (radius ${round3(leg.r!)} mm), so the swept solid would cross itself`
+      }
+      const span = legSpanAt(leg, q)
+      if (!span || !(span.u1 - span.u0 > 1e-9)) {
+        return `path segment ${leg.srcId} is too short for the profile at its corners, so the mitred solid would turn inside out`
+      }
+    }
+  }
+  return null
+}
+
+function round3(v: number): number { return Math.round(v * 1000) / 1000 }

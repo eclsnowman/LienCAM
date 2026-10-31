@@ -292,8 +292,16 @@ function observeBatchClears() {
   return { get clears() { return clears }, unsubscribe }
 }
 
-async function flushMicrotasks(turns = 6): Promise<void> {
-  for (let i = 0; i < turns; i++) await Promise.resolve()
+// WO-3126: every batch dispatch leaves a 16 ms renderer frame before planning
+// the next job, so draining microtasks alone no longer reaches the dispatch.
+// Give the queue a few frames too, on whichever clock the test is running.
+async function flushMicrotasks(turns = 6, frames = 3): Promise<void> {
+  for (let frame = 0; frame <= frames; frame++) {
+    for (let i = 0; i < turns; i++) await Promise.resolve()
+    if (frame === frames) break
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(20)
+    else await new Promise<void>(resolve => setTimeout(resolve, 20))
+  }
 }
 
 beforeEach(() => {

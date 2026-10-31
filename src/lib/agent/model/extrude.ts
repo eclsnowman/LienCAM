@@ -11,6 +11,13 @@
 // Covers the dialog's Blind and Symmetric end conditions (direction up / down / midplane,
 // operation New body / Add / Remove / Intersect, the whole sketch as the profile). The other
 // end conditions, a region pick and a bound distance expression stay on the screen.
+// WO-3234: Thin too -- wallMode 'thin' with wallThickness and wallSide (default Inside, as
+// the dialog). Without wallMode 'thin' the payload is the ordinary solid's, key for key,
+// and a stray wallThickness / wallSide is not read (the dialog ignores them the same way).
+// WO-3237: `openChain` names one open chain of the sketch by its ordered curves and travel
+// directions (the dialog's saved sketch-chain selector). It is built only as a Thin wall,
+// side left / right / center of travel (default Left, as the dialog); without Thin the
+// builder refuses it in the dialog's words. The chain resolves through the same authority.
 // One call, one history step labelled "Agent: Extrude".
 
 import { CompositeCommand } from '../../../doc'
@@ -18,9 +25,21 @@ import { textFor } from '../../../i18n'
 import { createFeatureCommand } from '../../../components/model3d/dialogs/createFeatureCommand'
 import { nextId } from '../../../components/model3d/dialogs/nextId'
 import { liveBodyFeatureIds } from '../../../components/model3d/bodyLineage'
-import { buildExtrudeRequest, EXTRUDE_BOOL_MODES, EXTRUDE_DIRECTIONS, type ExtrudeBoolMode, type ExtrudeDirection } from '../../../components/model3d/workbench/extrudeParams'
-import { resolveProfileSelector } from '../../../components/model3d/workbench/regionSelector'
-import type { BodyHandle, ProfileRegion } from '../../../geom/geom-service'
+import {
+  buildExtrudeRequest,
+  DEFAULT_THIN_OPEN_WALL_SIDE,
+  DEFAULT_THIN_WALL_SIDE,
+  EXTRUDE_BOOL_MODES,
+  EXTRUDE_DIRECTIONS,
+  EXTRUDE_WALL_MODES,
+  THIN_OPEN_WALL_SIDES,
+  THIN_WALL_SIDES,
+  type ExtrudeBoolMode,
+  type ExtrudeDirection,
+  type ExtrudeWallMode,
+} from '../../../components/model3d/workbench/extrudeParams'
+import { resolveExtrudeSelection, type ProfileSelector } from '../../../components/model3d/workbench/regionSelector'
+import type { BodyHandle, ProfileRegion, ThinExtrudeSide, ThinOpenSide } from '../../../geom/geom-service'
 import type { ModelSession } from '../../../doc/modelSession'
 import { refuse, type ModelEditSpec } from '../registry'
 
@@ -37,6 +56,16 @@ export interface ExtrudeInput {
   operation?: ExtrudeBoolMode
   /** The body Add / Remove / Intersect works on. */
   targetFeatureId?: string
+  /** The dialog's Thin toggle. Default 'solid'. */
+  wallMode?: ExtrudeWallMode
+  /** Thin wall thickness in mm; read only with wallMode 'thin'. */
+  wallThickness?: number
+  /** Where the thin wall sits on the sketch outline; read only with wallMode 'thin'. Default 'inside'.
+   *  With openChain: left / right / center of the chain's travel, default 'left'. */
+  wallSide?: ThinExtrudeSide | ThinOpenSide
+  /** WO-3237: one open chain of the sketch, its curves in travel order, each walked
+   *  start -> end (forward) or reversed. Built only with wallMode 'thin'. */
+  openChain?: { steps: Array<{ entityId: string; forward: boolean }> }
 }
 
 export interface ExtrudeResult {
@@ -62,6 +91,25 @@ export const extrudeSpec: ModelEditSpec<ExtrudeInput, ExtrudeResult> = {
       direction: { type: 'string', enum: EXTRUDE_DIRECTIONS },
       operation: { type: 'string', enum: EXTRUDE_BOOL_MODES },
       targetFeatureId: { type: 'string' },
+      wallMode: { type: 'string', enum: EXTRUDE_WALL_MODES },
+      wallThickness: { type: 'number' },
+      wallSide: { type: 'string', enum: [...THIN_WALL_SIDES, ...THIN_OPEN_WALL_SIDES.filter((side) => side !== 'center')] },
+      openChain: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['steps'],
+        properties: {
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['entityId', 'forward'],
+              properties: { entityId: { type: 'string' }, forward: { type: 'boolean' } },
+            },
+          },
+        },
+      },
     },
   },
   output: {
@@ -90,7 +138,10 @@ export const extrudeSpec: ModelEditSpec<ExtrudeInput, ExtrudeResult> = {
     if (sketch === undefined || sketch.kind !== 'sketch') {
       return refuse('missing-target', `There is no sketch "${input.sketchId}" in this model. Create the sketch first, or use the id of an existing one.`)
     }
-    const profiles = resolveProfileSelector(sketch.payload.regions as ProfileRegion[] | undefined, undefined)
+    const profileSelector: ProfileSelector | undefined = input.openChain === undefined
+      ? undefined
+      : { kind: 'sketch-chain', sketchId: input.sketchId, steps: input.openChain.steps.map(({ entityId, forward }) => ({ entityId, forward })) }
+    const profiles = resolveExtrudeSelection(input.sketchId, sketch.payload.regions as ProfileRegion[] | undefined, profileSelector, (id) => dag.getNode(id))
     if (!profiles.ok) return refuse('refused', profiles.message)
 
     const boolMode = input.operation ?? 'newBody'
@@ -103,11 +154,15 @@ export const extrudeSpec: ModelEditSpec<ExtrudeInput, ExtrudeResult> = {
     const payload = {
       opType: 'extrude',
       sketchId: input.sketchId,
+      ...(profileSelector === undefined ? {} : { profileSelector }),
       distance: input.distance,
       direction,
       endCondition,
       boolMode,
       ...(targetFeatureId === undefined ? {} : { targetFeatureId }),
+      ...(input.wallMode === 'thin'
+        ? { wallMode: 'thin', wallThickness: input.wallThickness, wallSide: input.wallSide ?? (profiles.openChain ? DEFAULT_THIN_OPEN_WALL_SIDE : DEFAULT_THIN_WALL_SIDE) }
+        : {}),
       name: workbenchText('ExtrudeDialog.extrude2', { id: featureId }),
     }
 
@@ -119,6 +174,7 @@ export const extrudeSpec: ModelEditSpec<ExtrudeInput, ExtrudeResult> = {
       featureId,
       payload,
       profiles: profiles.profiles,
+      openChain: profiles.openChain,
       distance: input.distance,
       lookupTarget: (id) => (live.has(id) ? (PLACEHOLDER_BODY as BodyHandle) : undefined),
       modelItemId: session.modelItemId,

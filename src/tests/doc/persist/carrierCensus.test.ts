@@ -60,8 +60,8 @@ describe('WO UI-80-R3 C1: the migration rewire set is a superset of the executor
         `executor calls lookupLiveBody(p.${field}) but the v3->v4 migration does not rewire it -- add it to BODY_IDENTITY_PAYLOAD_CARRIERS or rule it out`,
       ).toBe(true)
     }
-    // Today the direct read-set is exactly {ownerId, targetFeatureId, toolFeatureId}.
-    expect(uniqueDirect).toEqual(['ownerId', 'targetFeatureId', 'toolFeatureId'])
+    // Today the direct read-set is exactly {ownerId, sourceBodyId, targetFeatureId, toolFeatureId} (WO-3244 Mirror replace reads sourceBodyId).
+    expect(uniqueDirect).toEqual(['ownerId', 'sourceBodyId', 'targetFeatureId', 'toolFeatureId'])
   })
 
   it('the ONLY indirect lookupLiveBody consumer is buildExtrudeRequest.lookupTarget, reading a rewired carrier', () => {

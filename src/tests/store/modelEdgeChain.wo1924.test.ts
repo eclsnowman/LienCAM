@@ -47,7 +47,13 @@ let workerRequests: CapturedRequest[] = []
 class CapturingWorker {
   onmessage: ((e: { data: unknown }) => void) | null = null
   onerror: ((e: unknown) => void) | null = null
-  postMessage(data: CapturedRequest): void {
+  postMessage(data: CapturedRequest | { request: unknown }): void {
+    // The off-page post-process worker (store/toolpathPostprocess.ts): report
+    // "cannot start a module worker" so it runs its own in-page fallback.
+    if ('request' in data) {
+      queueMicrotask(() => this.onerror?.({ preventDefault() {} }))
+      return
+    }
     workerRequests.push(data)
     queueMicrotask(() => this.onmessage?.({
       data: {

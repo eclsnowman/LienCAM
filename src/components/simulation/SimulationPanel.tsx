@@ -28,6 +28,7 @@ import { isStockCuttingRole, effectiveMoveRole } from '../../lib/cam/stockCuttin
 import { requireFinitePositiveFeed } from '../../lib/cam/runtime'
 import { resolveFeedrates } from '../../lib/cam/feedrates'
 import { selectEnabledOperations } from '../../lib/cam/operationSuppression'
+import { operationDependsOnPredecessors, operationRegenerationInputsKey } from '../../lib/cam/generationFingerprint'
 import { ToolpathFeedEstimatePanel } from '../toolpath/ToolpathFeedEstimatePanel'
 import { clearanceAllowanceMmOf } from '../../lib/cam/holderClearanceGate'
 import {
@@ -37,7 +38,7 @@ import {
   workholdingContactShapes,
   type ClearanceMesh,
 } from '../../lib/simulation/workholdingContact'
-import type { Tool, ToolpathMove, ToolType, Units, Vec3, WCS } from '../../types'
+import type { Operation, Project, Setup, Tool, ToolpathMove, ToolType, Units, Vec3, WCS } from '../../types'
 
 // Total voxel-cell budget. A dense R32F field is 4 bytes/cell. planVoxelGrid
 // coarsens (logged, ADR-0003) to fit this. SAFETY STOPGAP: capped at 8M (~32MB)
@@ -346,6 +347,20 @@ export function formatPositionReadout(position: Vec3 | null, units: Units): stri
   return tx('SimulationPanel.WCS_X_Y_Z_2', { p1: fmtDim(position.x, units), p2: fmtDim(position.y, units), p3: fmtDim(position.z, units), p4: unitLabel(units) })
 }
 
+// WO-2929: textContent replacement and same-value setAttribute both emit
+// mutation records. The dev attach guard correctly rescans the entire cascade
+// for those records, so do not manufacture them for unchanged readout strings.
+// Read the live DOM rather than caching strings: remounts, units and resets
+// must still publish the current value. Changed text/aria always reaches the
+// guard; it can affect selectors, :empty, direction and container layout.
+function writeReadoutText(element: HTMLElement, text: string): void {
+  if (element.textContent !== text) element.textContent = text
+}
+
+function writeScrubberTime(element: HTMLInputElement, text: string): void {
+  if (element.getAttribute('aria-valuetext') !== text) element.setAttribute('aria-valuetext', text)
+}
+
 function formatTime(ms: number): string {
   const s = Math.floor(ms / 1000)
   const m = Math.floor(s / 60)
@@ -392,6 +407,17 @@ const RES_OPTIONS     = [
 // rAF loop advances small deltas) so it stays continuous, never async-stuttered.
 const CARVE_SYNC_MAX = 64
 const CARVE_CHUNK_BUDGET_MS = 16
+
+// WO-3153: each object a store write produces gets a number, so a selector can
+// say "an input of a regeneration changed" without hashing anything.
+const objectVersions = new WeakMap<object, number>()
+let nextObjectVersion = 0
+function objectVersion(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return String(value)
+  let version = objectVersions.get(value)
+  if (version === undefined) objectVersions.set(value, version = ++nextObjectVersion)
+  return `#${version}`
+}
 
 export function SimulationPanel() {
   useText('cam-operations-new-operation')
@@ -448,6 +474,61 @@ export function SimulationPanel() {
       .join('|')
   })
 
+  // WO-3153: Simulate plays what Control would post. An operation marked
+  // outdated (File Open found its saved path no longer current, or an edit
+  // outdated it) is regenerated here as Control's staging does before Post,
+  // with its normal progress - never played stale. One attempt per outdated
+  // operation and set of inputs. Only an attempt that left the very operation
+  // it ran on outdated, on the same inputs, is remembered - keyed by that
+  // operation object, never by its id, so the memory cannot outlive the
+  // document: File Open (even of the same file), a new project, undo/redo or
+  // an edit puts a new outdated object in the store, and that one is tried.
+  // An attempt whose inputs changed while it ran (an edit during the compute,
+  // which the compute discards) tried nothing, so its operation stays due. A
+  // successful attempt leaves nothing to remember.
+  const renewingRef = useRef(false)
+  const triedRef = useRef(new WeakMap<Operation, string>())
+  const [renewPass, setRenewPass] = useState(0)
+  // An edit to an outdated operation keeps it outdated, so toolpathKey alone
+  // does not see it; any changed regeneration input re-checks the renewal.
+  const renewalInputs = useCamStore(s => {
+    const setup = s.project.setups.find(st => st.id === s.project.activeSetupId)
+    return [
+      s.toolLibrary, s.project.geometry, s.project.stocks, s.project.sceneStock, s.project.machine,
+      setup?.wcs, setup?.stock, ...(setup?.operations.filter(op => op.status === 'outdated') ?? []),
+    ].map(objectVersion).join(',')
+  })
+  useEffect(() => {
+    if (viewer.mode !== 'simulation' || renewingRef.current) return
+    const { project, toolLibrary, regenerateOutdatedForSimulation } = useCamStore.getState()
+    const setup = project.setups.find(st => st.id === project.activeSetupId)
+    if (!setup) return
+    const inputsOf = (proj: Project, tools: readonly Tool[], st: Setup, op: Operation) =>
+      operationRegenerationInputsKey(proj, st, op, toolId => tools.find(t => t.id === toolId))
+    // An operation that reads earlier results needs those current first.
+    const shown = new Set(selectEnabledOperations(setup.operations, project.activeOperationId).map(op => op.id))
+    const last = setup.operations.findLastIndex(op => shown.has(op.id))
+    const readsEarlier = last >= 0 && operationDependsOnPredecessors(setup.operations[last])
+    const before = new Map(setup.operations
+      .filter((op, i) => op.enabled && op.status === 'outdated' && (shown.has(op.id) || (readsEarlier && i < last)))
+      .map(op => [op.id, { op, inputs: inputsOf(project, toolLibrary, setup, op) }] as const)
+      .filter(([, tried]) => triedRef.current.get(tried.op) !== tried.inputs))
+    if (before.size === 0) return
+    const stale = [...before.keys()]
+    renewingRef.current = true
+    void regenerateOutdatedForSimulation(setup.id, stale).finally(() => {
+      renewingRef.current = false
+      const now = useCamStore.getState()
+      const after = now.project.setups.find(st => st.id === setup.id)
+      for (const op of after?.operations ?? []) {
+        const tried = before.get(op.id)
+        if (!tried || op.status !== 'outdated') continue
+        if (inputsOf(now.project, now.toolLibrary, after!, op) === tried.inputs) triedRef.current.set(tried.op, tried.inputs)
+      }
+      setRenewPass(pass => pass + 1)
+    }).catch(err => console.error('Simulate could not regenerate an outdated operation', err))
+  }, [toolpathKey, viewer.mode, renewPass, renewalInputs])
+
   // Simulation playback state
   const framesRef           = useRef<SimFrame[]>([])
   const currentFrameRef     = useRef<SimFrame | null>(null)
@@ -485,6 +566,7 @@ export function SimulationPanel() {
   // was carved, restored before any other carve so a later seek (backward within
   // the frame, or on to its end) starts from completed frames only.
   const partialIdxRef       = useRef(-1)
+  const restorePrefixRef = useRef<(() => void) | null>(null)
   const activeBaseRef       = useRef<Float32Array | null>(null)
 
   // Keyframe scrub cache. keyframesRef holds field snapshots ascending by frame
@@ -575,10 +657,10 @@ export function SimulationPanel() {
 
   useEffect(() => {
     if (moveReadoutRef.current) {
-      moveReadoutRef.current.textContent = formatMoveReadout(currentFrameRef.current, displayUnits)
+      writeReadoutText(moveReadoutRef.current, formatMoveReadout(currentFrameRef.current, displayUnits))
     }
     if (positionReadoutRef.current) {
-      positionReadoutRef.current.textContent = formatPositionReadout(currentPositionRef.current?.work ?? null, displayUnits)
+      writeReadoutText(positionReadoutRef.current, formatPositionReadout(currentPositionRef.current?.work ?? null, displayUnits))
     }
   }, [displayUnits])
 
@@ -669,6 +751,7 @@ export function SimulationPanel() {
       lastCarvedIdxRef.current = -1
       partialIdxRef.current = -1
       activeBaseRef.current = null
+      restorePrefixRef.current = null
       keyframesRef.current = []
       nextKeyframeIdxRef.current = 0
       keyframeIntervalRef.current = Infinity
@@ -685,9 +768,9 @@ export function SimulationPanel() {
       getVp()?.disposeVoxelSim?.()
       getVp()?.showToolMarker?.(false)
       setTotalMsState(0)
-      if (scrubberRef.current) { scrubberRef.current.value = '0'; scrubberRef.current.max = '0'; scrubberRef.current.setAttribute('aria-valuetext', formatTime(0)) }
-      if (moveReadoutRef.current) moveReadoutRef.current.textContent = formatMoveReadout(null, displayUnits)
-      if (positionReadoutRef.current) positionReadoutRef.current.textContent = formatPositionReadout(null, displayUnits)
+      if (scrubberRef.current) { scrubberRef.current.value = '0'; scrubberRef.current.max = '0'; writeScrubberTime(scrubberRef.current, formatTime(0)) }
+      if (moveReadoutRef.current) writeReadoutText(moveReadoutRef.current, formatMoveReadout(null, displayUnits))
+      if (positionReadoutRef.current) writeReadoutText(positionReadoutRef.current, formatPositionReadout(null, displayUnits))
     }
 
     // Everything below builds the simulation frames + stock-sim baseline. Any throw
@@ -875,6 +958,7 @@ export function SimulationPanel() {
     lastCarvedIdxRef.current = -1
     partialIdxRef.current = -1
     activeBaseRef.current = null
+    restorePrefixRef.current = null
     // The ring is re-seeded with the baseline once the stock sim inits below.
     keyframesRef.current = []
     nextKeyframeIdxRef.current = 0
@@ -888,13 +972,13 @@ export function SimulationPanel() {
     if (scrubberRef.current) {
       scrubberRef.current.value = '0'
       scrubberRef.current.max   = String(cumulativeMs)
-      scrubberRef.current.setAttribute('aria-valuetext', formatTime(0))
+      writeScrubberTime(scrubberRef.current, formatTime(0))
     }
     if (moveReadoutRef.current) {
-      moveReadoutRef.current.textContent = formatMoveReadout(currentFrameRef.current, displayUnits)
+      writeReadoutText(moveReadoutRef.current, formatMoveReadout(currentFrameRef.current, displayUnits))
     }
     if (positionReadoutRef.current) {
-      positionReadoutRef.current.textContent = formatPositionReadout(currentPositionRef.current?.work ?? null, displayUnits)
+      writeReadoutText(positionReadoutRef.current, formatPositionReadout(currentPositionRef.current?.work ?? null, displayUnits))
     }
 
     // ── Init stock simulation (simulation mode ONLY - B9) ──────────────────
@@ -1189,6 +1273,7 @@ export function SimulationPanel() {
     carvePrefix: (fi: number, fraction: number) => void,
     frameCuts: (fi: number) => boolean,
     syncGpu: () => void,
+    capturePrefixRestore?: (base: Float32Array) => () => void,
   ) => {
     const frames = framesRef.current
     // Frames before the target are complete; the target itself only once its
@@ -1199,10 +1284,12 @@ export function SimulationPanel() {
 
     // The previous seek's prefix is never kept: it belongs to one playhead time.
     if (partialIdxRef.current >= 0 && activeBaseRef.current) {
-      restore(activeBaseRef.current)
+      if (restorePrefixRef.current) restorePrefixRef.current()
+      else restore(activeBaseRef.current)
       lastCarvedIdxRef.current = partialIdxRef.current - 1
     }
     partialIdxRef.current = -1
+    restorePrefixRef.current = null
 
     const kfs = keyframesRef.current
     // Nearest keyframe at or before the target (idx -1 = baseline always qualifies).
@@ -1269,6 +1356,7 @@ export function SimulationPanel() {
       if (!base || base.length !== live.length) base = activeBaseRef.current = new Float32Array(live.length)
       base.set(live)
       carvePrefix(targetIdx, fraction)
+      restorePrefixRef.current = capturePrefixRestore?.(base) ?? null
       partialIdxRef.current = targetIdx
     }
 
@@ -1387,6 +1475,13 @@ export function SimulationPanel() {
         // drag restore) so the receding stock updates live without a trailing
         // sync here that would miss the async chunks.
         () => getVp()?.syncVoxelSim?.(voxelSim.field),
+        // Retain the prefix's dirty box before sync clears it. It can include
+        // completed moves too, which is conservative. Only this prefix rollback
+        // uses a bounded restore; keyframe/baseline/drag restores remain whole.
+        (base) => {
+          const box = voxelSim.field.dirty
+          return () => { if (box) voxelSim.field.restore(base, box) }
+        },
       )
     } else if (sim) {
       const heightCuts = (fi: number) => isStockCuttingRole(frames[fi].role)
@@ -1413,14 +1508,14 @@ export function SimulationPanel() {
 
     if (scrubberRef.current) {
       scrubberRef.current.value = String(currentMsRef.current)
-      scrubberRef.current.setAttribute('aria-valuetext', formatTime(currentMsRef.current))
+      writeScrubberTime(scrubberRef.current, formatTime(currentMsRef.current))
     }
-    if (timeNowRef.current)  timeNowRef.current.textContent  = formatTime(currentMsRef.current)
+    if (timeNowRef.current)  writeReadoutText(timeNowRef.current, formatTime(currentMsRef.current))
     if (moveReadoutRef.current) {
-      moveReadoutRef.current.textContent = formatMoveReadout(f, displayUnits)
+      writeReadoutText(moveReadoutRef.current, formatMoveReadout(f, displayUnits))
     }
     if (positionReadoutRef.current) {
-      positionReadoutRef.current.textContent = formatPositionReadout(currentPositionRef.current?.work ?? null, displayUnits)
+      writeReadoutText(positionReadoutRef.current, formatPositionReadout(currentPositionRef.current?.work ?? null, displayUnits))
     }
   }, [applyToolCfg, displayUnits, seekCarve, syncToolpathLayerPreview])
 
@@ -1431,7 +1526,7 @@ export function SimulationPanel() {
   // the DOM; seekTo owns it thereafter on every scrub/playback tick.
   useEffect(() => {
     if (scrubberRef.current) {
-      scrubberRef.current.setAttribute('aria-valuetext', formatTime(currentMsRef.current))
+      writeScrubberTime(scrubberRef.current, formatTime(currentMsRef.current))
     }
   }, [totalMsState])
 

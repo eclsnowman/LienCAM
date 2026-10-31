@@ -32,7 +32,8 @@ Governing: ADR-0021; design docs/planning/POSTPROCESSOR-DESIGN.md (phases C-P0..
   G1. Pure; deterministic.
 - Emission: emit.ts runs collapse per op when caps.arcs, emits G2/G3 with toWork endpoint
   + frame-invariant I/J = cx-prevWorldX (WCS offset cancels in the difference) + modal F.
-  Fail-loud ARC_UNSUPPORTED (arcs off) / ARC_MALFORMED (missing center/predecessor).
+  Arcs off sample native arcs as G1 at arcTolerance (WO-3107).
+  Fail-loud ARC_MALFORMED (missing center/predecessor).
   UCCNC + GRBL flipped arcs:true; labels dropped "(linear)" suffix.
 - Linter: ARC_NO_CENTER (error) + ARC_R_AND_IJK (warning) IJK well-formedness rules.
 - Formatter fix: fmtNum normalizes any zero-valued result (tiny-negative -> "J0" not "J-0").

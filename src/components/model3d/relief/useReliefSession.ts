@@ -12,7 +12,7 @@ import { fileDataUrl } from '../../../referenceImage/imageData'
 // editing that feature from the tree reopens relief mode on its picture and
 // values, and Apply then edits the same node. Cancel leaves no trace.
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import { ArrowDownToLine, ArrowUpFromLine, Contrast, ImagePlus, Layers, Map as MapIcon, MousePointerClick, Scan, WandSparkles } from 'lucide-react'
 import type { CommandHistory, FeatureDag } from '../../../doc'
@@ -35,6 +35,8 @@ import {
 import type { ReliefPoles } from '../../../relief/reliefStep'
 import { ReliefPreview, RELIEF_PREVIEW_CELLS } from './reliefPreview'
 import { useReliefStore, type ReliefFaceTarget } from './reliefStore'
+import { reliefModePort } from './reliefModePort'
+import { railSignature } from '../form/modePort'
 
 export type ReliefFaceLookup =
   | { flat: true; face: FaceFrame; bodyName: string }
@@ -429,5 +431,10 @@ export function useReliefSession(deps: ReliefSessionDeps): ReliefSession {
 
   const settled = useCallback(() => settledRef.current, [])
 
-  return { active, open, apply, cancel: leave, openFile, fileInputRef, pickAt, settled, railSections }
+  const session: ReliefSession = { active, open, apply, cancel: leave, openFile, fileInputRef, pickAt, settled, railSections }
+  // WO-3301: the New UI ribbon reaches this session through the port; the page's own rail still reads the return value
+  const [owner] = useState(() => ({}))
+  useEffect(() => { reliefModePort.update(session, railSignature(active, railSections), owner) })
+  useEffect(() => () => reliefModePort.release(owner), [owner])
+  return session
 }

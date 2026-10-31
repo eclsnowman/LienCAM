@@ -323,7 +323,9 @@ describe('WO-2128: a held Cont jog on the simulator prints nothing false', () =>
     }
   }, 60_000)
 
-  it('step jogs are unchanged: a 50 mm step past the end still says why and moves nothing', async () => {
+  // The real board, 2026-10-30: a step sent past a stated soft limit latched
+  // the controller. A step past the end now stops just inside it and says so.
+  it('a 50 mm step past the end stops just inside the soft limit and says so', async () => {
     const ctrl = await connectHomedAt({ x: 20, z: 100 })
     useUiPrefs.setState({ machineJogContinuous: false, machineJogFeedMmMin: FEED, machineJogStepMm: 50 })
     render(createElement(JogPanel))
@@ -331,13 +333,14 @@ describe('WO-2128: a held Cont jog on the simulator prints nothing false', () =>
     act(() => { fireEvent.pointerDown(xMinus) })
     act(() => { fireEvent.pointerUp(xMinus) })
     await settle(2_000)
-    expect(ctrl.status().machinePos!.x).toBeCloseTo(20, 3)
-    expect(consoleLines().join('\n')).toContain('Jog X: refused - this -50.00 mm step would end at machine X -30.00 mm')
+    expect(ctrl.status().machinePos!.x).toBeCloseTo(0.01, 3)
+    expect(consoleLines().join('\n')).toContain('Jog stopped at the X soft limit (')
     // An in-travel step still moves exactly its step.
     act(() => { useUiPrefs.setState({ machineJogStepMm: 10 }) })
-    act(() => { fireEvent.pointerDown(xMinus) })
-    act(() => { fireEvent.pointerUp(xMinus) })
+    const xPlus = screen.getByTestId('control-jog-x-plus') as HTMLButtonElement
+    act(() => { fireEvent.pointerDown(xPlus) })
+    act(() => { fireEvent.pointerUp(xPlus) })
     await settle(2_000)
-    expect(ctrl.status().machinePos!.x).toBeCloseTo(10, 3)
+    expect(ctrl.status().machinePos!.x).toBeCloseTo(10.01, 3)
   }, 60_000)
 })

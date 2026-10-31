@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "fps": 30,
+  "sourceDurationSeconds": 215,
+  "fadeSeconds": 0.5,
+  "segments": [
+    [
+      0,
+      18
+    ],
+    [
+      31,
+      47
+    ],
+    [
+      77,
+      90
+    ],
+    [
+      173,
+      188
+    ],
+    [
+      199,
+      215
+    ]
+  ],
+  "reason": "Approved 2026-10-29: shorten repeats with cross-fades; retain each first operation, every tool change and finished part"
+}

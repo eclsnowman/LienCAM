@@ -21,13 +21,16 @@ beforeEach(async () => {
 })
 
 describe('WO-2914 actual screen uses the common authoring outcome', () => {
-  it.each(types)('%s keeps the existing missing-tool refusal and words', type => {
+  it.each(types)('%s explains its first unmet authoring prerequisite', type => {
     render(<NewOperationModal />)
     act(() => useCamStore.getState().openModal('new-operation'))
     fireEvent.click(screen.getByText(tx(`NewOperationModalBody.${type}`)))
     const button = screen.getByTestId('op-create') as HTMLButtonElement
     expect(button.disabled).toBe(true)
-    expect(button.getAttribute('data-tooltip')).toBe(tx('NewOperationModalBody.Go_to_the_Tool_tab_and_select_a_tool'))
+    // WO-3137 (92480ccd92): these families need closed profiles before a preview can start.
+    expect(button.getAttribute('data-tooltip')).toBe(tx(type === 'V_Carve' || type === 'Thread_Mill'
+      ? 'NewOperationModalBody.No_closed_profiles_to_machine'
+      : 'NewOperationModalBody.Go_to_the_Tool_tab_and_select_a_tool'))
     const before = useCamStore.getState().project
     fireEvent.click(button)
     expect(useCamStore.getState().project).toBe(before)

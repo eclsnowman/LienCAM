@@ -129,7 +129,7 @@ describe('AC #6: parameter persistence round-trip (existing DOC-3 serializer, no
     // extrude-less, faceEdits-less fixture -- migrationV4ToV5 only rewrites a
     // node whose payload.opType === 'extrude', and this fixture's sole node has
     // no payload at all).
-    expect(loaded.migrationsApplied).toEqual([1, 2, 3, 4])
+    expect(loaded.migrationsApplied).toEqual([1, 2, 3, 4, 6]) // WO-3234 adds the v6->v7 step
     expect(loaded.document.documentKind).toBe('liencam-3d-document')
     expect(loaded.parameters).toEqual({})
 

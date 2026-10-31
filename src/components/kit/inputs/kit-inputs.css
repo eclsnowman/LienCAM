@@ -1,0 +1,247 @@
+/* WO-3278: looks of the six kit inputs (spec 6.5, 7, 10). Only token custom properties from
+   src/theme/tokens.ts: no colour, font size or radius is written here. */
+[data-ui2] .kit-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-ctl);
+  max-width: 100%;
+  font: var(--f-body) / 1.2 var(--sans);
+  color: var(--tx);
+}
+
+/* ---- text-like fields: number, text, select */
+[data-ui2] .kit-number,
+[data-ui2] .kit-text,
+[data-ui2] .kit-select {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--h-ctl);
+  padding: 0 var(--sp4);
+  gap: var(--sp2);
+  background: var(--ctl);
+  border: 1px solid var(--ctl-bd);
+  border-radius: var(--r-md);
+}
+[data-ui2] .kit-number:hover,
+[data-ui2] .kit-text:hover,
+[data-ui2] .kit-select:hover { background: var(--ctl-hover); }
+[data-ui2] .kit-number:focus-within,
+[data-ui2] .kit-text:focus-within,
+[data-ui2] .kit-select:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px var(--acc-soft);
+}
+[data-ui2] .kit-number input,
+[data-ui2] .kit-text input,
+[data-ui2] .kit-select select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+[data-ui2] .kit-number input,
+[data-ui2] .kit-mono input {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+[data-ui2] .kit-number input { text-align: left; }
+[data-ui2] .kit-text input::placeholder { color: var(--tx3); font-style: italic; }
+[data-ui2] .kit-unit {
+  flex: 0 0 auto;
+  color: var(--tx3);
+  font: var(--f-cap) / 1 var(--mono);
+}
+[data-ui2] .kit-select select {
+  appearance: none;
+  padding-right: var(--sp6);
+  cursor: pointer;
+}
+[data-ui2] .kit-select select option { background: var(--panel); color: var(--tx); }
+[data-ui2] .kit-chevron {
+  position: absolute;
+  right: var(--sp4);
+  top: 50%;
+  width: var(--sp3);
+  height: var(--sp3);
+  margin-top: calc(var(--sp3) / -2 - 2px);
+  border-right: 1.5px solid var(--tx2);
+  border-bottom: 1.5px solid var(--tx2);
+  transform: rotate(45deg) scale(0.6);
+  pointer-events: none;
+}
+
+/* ---- segmented: 2 to 4 exclusive choices in one field */
+[data-ui2] .kit-segmented { height: var(--h-ctl); }
+[data-ui2] .kit-segments {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 1px;
+  gap: 1px;
+  background: var(--ctl);
+  border: 1px solid var(--ctl-bd);
+  border-radius: var(--r-md);
+}
+[data-ui2] .kit-segment {
+  min-width: var(--min-hit);
+  padding: 0 var(--sp5);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--tx2);
+  font: inherit;
+  cursor: pointer;
+}
+[data-ui2] .kit-segment:hover { background: var(--ctl-hover); }
+[data-ui2] .kit-segment[aria-checked='true'] {
+  background: var(--acc-soft);
+  box-shadow: inset 0 0 0 1px var(--acc);
+  color: var(--acc-ink);
+  font-weight: 600;
+}
+[data-ui2] .kit-segment:focus-visible {
+  outline: 2px solid var(--acc-soft);
+  outline-offset: 0;
+  box-shadow: inset 0 0 0 1px var(--acc);
+}
+
+/* ---- toggle: the 14 square checkbox */
+[data-ui2] .kit-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp3);
+  min-height: var(--h-ctl);
+  cursor: pointer;
+}
+[data-ui2] .kit-toggle input {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+[data-ui2] .kit-box {
+  position: relative;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  background: var(--ctl);
+  border: 1px solid var(--ctl-bd);
+  border-radius: var(--r-sm);
+}
+[data-ui2] .kit-toggle-label:hover .kit-box { background: var(--ctl-hover); }
+[data-ui2] .kit-toggle input:checked + .kit-box { background: var(--acc); border-color: var(--acc); }
+[data-ui2] .kit-toggle input:checked + .kit-box::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 7px;
+  border-right: 2px solid var(--on-acc);
+  border-bottom: 2px solid var(--on-acc);
+  transform: rotate(45deg);
+}
+[data-ui2] .kit-toggle input:focus-visible + .kit-box {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px var(--acc-soft);
+}
+
+/* ---- slider */
+[data-ui2] .kit-slider {
+  box-sizing: border-box;
+  gap: var(--sp4);
+  padding: 0 var(--sp4);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+}
+[data-ui2] .kit-slider input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--h-ctl);
+  margin: 0;
+  accent-color: var(--acc);
+  background: transparent;
+  cursor: pointer;
+}
+[data-ui2] .kit-slider input[type='range']:focus-visible {
+  outline: 2px solid var(--acc-soft);
+  outline-offset: 0;
+}
+[data-ui2] .kit-readout {
+  flex: 0 0 auto;
+  min-width: var(--w-big-min);
+  color: var(--tx2);
+  font: var(--f-body) / 1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---- unavailable: no fill, dashed edge, hint text; the reason is a tooltip (spec 7) */
+[data-ui2] .kit-field[data-unavailable] { color: var(--tx3); }
+[data-ui2] .kit-number[data-unavailable],
+[data-ui2] .kit-text[data-unavailable],
+[data-ui2] .kit-select[data-unavailable],
+[data-ui2] .kit-slider[data-unavailable] {
+  background: transparent;
+  border: 1px dashed var(--b1);
+}
+[data-ui2] .kit-segmented[data-unavailable] .kit-segments { background: transparent; border: 1px dashed var(--b1); }
+[data-ui2] .kit-segmented[data-unavailable] .kit-segment { color: var(--tx3); cursor: default; }
+[data-ui2] .kit-segmented[data-unavailable] .kit-segment[aria-checked='true'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--b1);
+  color: var(--tx2);
+}
+[data-ui2] .kit-toggle[data-unavailable] .kit-box { background: transparent; border: 1px dashed var(--b1); }
+[data-ui2] .kit-toggle[data-unavailable] input:checked + .kit-box { background: transparent; }
+[data-ui2] .kit-toggle[data-unavailable] input:checked + .kit-box::after { border-color: var(--tx3); }
+[data-ui2] .kit-field[data-unavailable] input,
+[data-ui2] .kit-field[data-unavailable] select,
+[data-ui2] .kit-field[data-unavailable] .kit-toggle-label { cursor: default; }
+[data-ui2] .kit-field[data-unavailable] input[type='range'] { opacity: 0.5; }
+
+/* ---- invalid entry */
+[data-ui2] .kit-number[data-invalid] { border-color: var(--err); }
+[data-ui2] .kit-number[data-invalid]:focus-within { box-shadow: 0 0 0 2px var(--acc-soft); }
+
+/* ---- reason and error popovers */
+[data-ui2] .kit-reason,
+[data-ui2] .kit-error {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: calc(100% + var(--sp2));
+  box-sizing: border-box;
+  max-width: calc(var(--w-props) - var(--sp6));
+  width: max-content;
+  padding: var(--sp3) var(--sp4);
+  background: var(--head);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+  color: var(--tx);
+  font: var(--f-cap) / 1.3 var(--sans);
+  pointer-events: none;
+}
+[data-ui2] .kit-error { border-color: var(--err); }
+[data-ui2] .kit-reason { opacity: 0; }
+[data-ui2] .kit-field:hover > .kit-reason,
+[data-ui2] .kit-field:focus-within > .kit-reason { opacity: 1; }
+[data-ui2] .kit-field[data-unavailable]:focus-within { outline: 2px solid var(--acc-soft); outline-offset: 1px; border-radius: var(--r-md); }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-ui2] .kit-reason { transition: opacity 120ms ease-out; }
+}
+
+/* room under an example that shows a popover (gallery) */
+[data-ui2] .kit-example-pad { padding-bottom: var(--sp7); }

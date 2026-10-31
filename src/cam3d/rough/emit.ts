@@ -37,6 +37,7 @@
 
 import type { AdaptivePass, EnginePt as Pt } from './engineEntry';
 import { MIN_DESCENT_HELIX_RADIUS } from '../../lib/cam/adaptiveClearing2d/engine/processFeature';
+import { ENTRY_CLEARANCE_MM } from '../../lib/cam/moves';
 import { formatStraightPlungeRefusal, type PlungeRefusalWhere } from './entryRefusal';
 import type { CutterSpec } from '../kernel/types';
 import type { IrMove, IrMoveRole } from '../ir/types';
@@ -402,15 +403,16 @@ export function emitLevelPasses(
     targetZ: number,
     firstEntry: boolean,
   ): number => {
-    // Feed Height remains the authored first-entry transition. Once the tool
-    // has a real position, the carved stock becomes the re-entry authority.
-    if (firstEntry) return feedZ;
+    // WO-3083: the first entry starts ENTRY_CLEARANCE_MM above the stock it meets (the one
+    // entry rule, src/lib/cam/moves) instead of at Feed Height; once the tool has a real
+    // position, the carved stock is the re-entry authority at its own small clearance.
     const points = entryRing(center, radius);
     const contact = entriesAtMaterial
       ? highestSweptContactAlong(points, targetZ)
       : highestContactAlong(points, targetZ);
     if (contact === undefined) return feedZ;
-    return Math.max(targetZ, Math.min(feedZ, contact + STOCK_AWARE_RAMP_CLEARANCE_MM));
+    const clearance = firstEntry ? ENTRY_CLEARANCE_MM : STOCK_AWARE_RAMP_CLEARANCE_MM;
+    return Math.max(targetZ, Math.min(feedZ, contact + clearance));
   };
 
   /**

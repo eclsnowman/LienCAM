@@ -7,6 +7,7 @@
 // formatting lands in C-P1.
 
 import { emitCombinedProgram, emitProgram } from './emit'
+import { sequenceNumberLines } from './sequenceNumbers'
 import { vendorOutputLines, vendorPostInput } from './vendorPostImport/output'
 import type { PostConfig, PostDiagnostic, PostInput, PostResult } from './types'
 import {
@@ -231,7 +232,7 @@ export function postProgram(input: PostInput, config: PostConfig): PostResult {
   }
 
   // Validation clean -> emit. The engine appends its own diagnostics (e.g.
-  // ARC_UNSUPPORTED); any error among them fails the run loud (ADR-0003).
+  // ARC_MALFORMED); any error among them fails the run loud (ADR-0003).
   const emitted = emitProgram(vendorPostInput(input, config), config)
   diagnostics.push(...emitted.diagnostics)
 
@@ -239,7 +240,7 @@ export function postProgram(input: PostInput, config: PostConfig): PostResult {
     return { gcode: '', ok: false, diagnostics }
   }
 
-  const outputLines = vendorOutputLines(emitted.lines, config, [input])
+  const outputLines = sequenceNumberLines(vendorOutputLines(emitted.lines, config, [input]), config)
   const gcode = outputLines.length > 0 ? outputLines.join('\n') + '\n' : ''
 
   return {
@@ -295,7 +296,7 @@ export function postCombined(
     return { gcode: '', ok: false, diagnostics }
   }
 
-  const outputLines = vendorOutputLines(emitted.lines, config, inputs)
+  const outputLines = sequenceNumberLines(vendorOutputLines(emitted.lines, config, inputs), config)
   const gcode = outputLines.length > 0 ? outputLines.join('\n') + '\n' : ''
 
   return {

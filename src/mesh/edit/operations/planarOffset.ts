@@ -347,6 +347,13 @@ function carriedChamferFacets(
   const carried = new Set<number>();
   for (const blend of recognizeEdgeBlends(mesh).blends) {
     if (blend.kind !== 'chamfer') continue;
+    // WO-3113: a vertical corner bevel beside a plate's top is a wall along
+    // this move, not a top-edge band to carry. Carrying it also lifts its
+    // bottom vertices, and its full-thickness slab can grow across the bottom
+    // face until that face falsely meets a counterbore shoulder. Let these
+    // facets stretch with the other swept walls; keep carrying rim chamfers
+    // whose normals lean into the move (WO-2082 / WO-2119).
+    if (blend.sourceFacetIds.every((facet) => runsAlongMove(facetNormal(w, facet), face.normal))) continue;
     const band = new Set(blend.sourceFacetIds);
     if (regionsShareEdge(w, selected, band)) for (const facet of band) carried.add(facet);
   }
@@ -674,6 +681,22 @@ function rayHitsTriangle(from: Vec3, along: Vec3, corners: readonly Vec3[]): num
 
 // ---------------------------------------------------------------- the edit
 
+/** A computed limit can lie just past a hundredth because STL coordinates
+ *  are Float32. Check the geometry that will actually be stored, so rounding
+ *  a legal double-precision gap cannot close or invert a wall in the result. */
+function foldsWhenStored(prepared: PreparedFaceMove, distanceMm: number): boolean {
+  for (const facet of prepared.touched) {
+    // Facets already below the rebuild's area floor are not caused by this move.
+    if (prepared.welded.areas[facet] <= DEGENERATE_AREA_MM2) continue;
+    const { at, by } = facetMotion(prepared, facet);
+    const corners = at.map((point, corner) => point.map((value, axis) =>
+      Math.fround(value + by[corner][axis] * distanceMm)) as Vec3);
+    const raw = cross(sub(corners[1], corners[0]), sub(corners[2], corners[0]));
+    if (length(raw) / 2 <= DEGENERATE_AREA_MM2 || dot(raw, facetNormal(prepared.welded, facet)) <= 0) return true;
+  }
+  return false;
+}
+
 interface DetailedMove extends FlatFaceMoveOutcome {
   result: MeshEditApplyResult;
 }
@@ -710,13 +733,20 @@ function moveDetailed(
   // of exactly the room measured - 8.00 mm into an 8.00 mm plate, the plate
   // thickness read straight off a drawing - is the likeliest number an
   // operator types, and it has to stop short like every larger one.
-  if (Math.abs(distanceMm) >= limitMm) {
+  if (Math.abs(distanceMm) >= limitMm || (Number.isFinite(limitMm) && foldsWhenStored(prepared, distanceMm))) {
     // As far as it ACTUALLY goes, and said with the number (WO-1849 audit item
     // 3). It stops a hundredth of a millimetre short of the meeting, because
     // AT the meeting the facets there have no area left and the part is no
     // longer a solid - and because a number an operator reads is a number he
     // can type back in.
-    const room = Math.floor((limitMm - 1e-9) / STOP_SHORT_MM) * STOP_SHORT_MM;
+    let room = Math.floor((limitMm - 1e-9) / STOP_SHORT_MM) * STOP_SHORT_MM;
+    // WO-3113: the real plate's 2.200000047 mm double-precision limit rounds
+    // a 2.20 mm move onto its shoulder in Float32, leaving degenerate walls.
+    // Step back only while the stored geometry actually folds; do not widen
+    // a tolerance or remove the analytical fold/pierce constraints.
+    while (room > 0 && foldsWhenStored(prepared, sign * room)) {
+      room = Number((room - STOP_SHORT_MM).toFixed(2));
+    }
     if (!(room > 0)) {
       throw new Error(
         `There is no room to move this face: ${meets} ${limitMm.toFixed(3)} mm away, which is less ` +

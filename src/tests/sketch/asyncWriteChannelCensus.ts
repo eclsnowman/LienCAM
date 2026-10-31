@@ -743,6 +743,18 @@ export const ASYNC_WRITE_CHANNEL_CENSUS: readonly ChannelCensusEntry[] = [
       'reason.',
   },
   {
+    id: 'dimensionPlacement',
+    file: 'src/store/index.ts',
+    name: 'dimensionPlacement',
+    class: 'channel',
+    note:
+      'WO-3133\'s initial dimension-placement transaction carries the exact history top and its ' +
+      'pre-transaction stack pair until the asynchronous solve verdict arrives. On a rejected ' +
+      'placement, the verdict handler can restore that pair only while the same top is still live; ' +
+      'on a history restore this latch must be dropped, otherwise a pre-restore placement can ' +
+      'later authorize its rollback against the restored document. The shared seam assigns it null.',
+  },
+  {
     id: 'pendingAppendApply',
     file: 'src/store/index.ts',
     name: 'pendingAppendApply',
@@ -905,6 +917,18 @@ export const CHANNEL_NAMED_EXCLUSIONS: readonly ChannelNamedExclusion[] = [
       'only compares it BY REFERENCE against the top of projectHistory, so a restore that swaps ' +
       'the stacks makes the comparison fail and the next authored edit simply pushes its own ' +
       'undo step - nothing minted before the restore can be written through it.',
+  },
+  {
+    id: 'lastSketchHistoryPush',
+    file: 'src/store/index.ts',
+    name: 'lastSketchHistoryPush',
+    reason:
+      'WO-3133\'s synchronous bookkeeping for the most recent pushHistory() result. append() reads ' +
+      'it only to prove, by reference equality, that both the current activeSketch and current ' +
+      'projectHistory top are still the pair that push produced; it neither schedules nor performs ' +
+      'a write itself. A history restore changes the live stack top, so the comparison fails and a ' +
+      'later append takes its own fresh pushHistory() path. The asynchronous rollback state is the ' +
+      'separately censused dimensionPlacement latch, which the seam clears.',
   },
   {
     id: 'sketchWorker',

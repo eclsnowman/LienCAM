@@ -1,4 +1,4 @@
-// WO-2023: a posted program lifts Z alone before its first XY travel, and again
+// WO-2023 / WO-3123: approach at authored machine safe Z before XY, and again
 // after every tool change. Rehearsal 09-26: the first line `G0 X126.841 Y20.267
 // Z15`, run from the tool-change park at Z 20, and the first line after a guided
 // M6 measure at the setter, each travelled diagonally across the table.
@@ -12,7 +12,7 @@ import type { PostInput, PostOperation } from '../../lib/post/types'
 import type { ToolpathMove } from '../../types'
 import { makeMachine, makeOp, makeTool, makeWcs, move } from './helpers'
 
-const machine = makeMachine({ coolant: false })
+const machine = makeMachine({ coolant: false, safeZMachine: 120 })
 
 function postOp(id: string, toolNumber: number, moves: ToolpathMove[]): PostOperation {
   const tool = makeTool({ id: `t${toolNumber}`, toolNumber })
@@ -61,7 +61,7 @@ function openingAfterEachToolLoad(lines: string[]): string[][] {
 }
 
 describe('WO-2023 program starts by lifting Z before it travels', () => {
-  it('the first motion is a Z-only rapid to clearance, then the unchanged first move', () => {
+  it('the first motion is to authored machine safe Z, then XY, then the unchanged first move', () => {
     const { lines } = emitProgram(input([postOp('a', 1, cutAt(10))]), UCCNC_CONFIG)
     expect(lines).toEqual([
       'G90 G94 G17 G21 G64',
@@ -69,7 +69,8 @@ describe('WO-2023 program starts by lifting Z before it travels', () => {
       '( a )',
       'T1',
       'M3 S12000',
-      'G0 Z15',
+      'G53 G0 Z120',
+      'G0 X10 Y20',
       'G0 X10 Y20 Z15',
       'G1 Z-5 F300',
       'X15 Y25 F1200',
@@ -88,28 +89,28 @@ describe('WO-2023 program starts by lifting Z before it travels', () => {
     ]
     const { lines } = emitProgram(input([postOp('a', 1, moves)]), UCCNC_CONFIG)
     const start = lines.indexOf('M3 S12000') + 1
-    expect(lines.slice(start, start + 4)).toEqual(['G0 Z25', 'G0 X10 Y20', 'G0 X10 Y20 Z5', 'G1 Z-5 F300'])
+    expect(lines.slice(start, start + 4)).toEqual(['G53 G0 Z120', 'G0 X10 Y20', 'G0 X10 Y20 Z5', 'G1 Z-5 F300'])
   })
 
   it('a first move that is a feed still gets the lift and the XY travel first', () => {
     const moves = [move({ type: 'feed', x: 10, y: 20, z: 2, feed: 300, role: 'plunge' }), ...cutAt(10)]
     const { lines } = emitProgram(input([postOp('a', 1, moves)]), UCCNC_CONFIG)
     const start = lines.indexOf('M3 S12000') + 1
-    expect(lines.slice(start, start + 3)).toEqual(['G0 Z15', 'G0 X10 Y20', 'G1 X10 Y20 Z2 F300'])
+    expect(lines.slice(start, start + 3)).toEqual(['G53 G0 Z120', 'G0 X10 Y20', 'G1 X10 Y20 Z2 F300'])
   })
 
   it('every tool change lifts Z alone before the first XY travel after the M6', () => {
     const ops = [postOp('a', 1, cutAt(10)), postOp('b', 2, cutAt(40)), postOp('c', 3, cutAt(70))]
     const { lines } = emitProgram(input(ops), UCCNC_CONFIG)
     const afterM6 = lines.indexOf('T2 M6')
-    expect(lines.slice(afterM6, afterM6 + 5)).toEqual([
-      'T2 M6', 'G54', 'M3 S12000', 'G0 Z15', 'G0 X40 Y20 Z15',
+    expect(lines.slice(afterM6, afterM6 + 6)).toEqual([
+      'T2 M6', 'G54', 'M3 S12000', 'G53 G0 Z120', 'G0 X40 Y20', 'G0 X40 Y20 Z15',
     ])
     const openings = openingAfterEachToolLoad(lines)
     expect(openings).toHaveLength(3)
     for (const opening of openings) {
-      expect(opening[0]).toBe('G0 Z15')
-      expect(opening[1]).toMatch(/^G0 X\d+ Y20 Z15$/)
+      expect(opening[0]).toBe('G53 G0 Z120')
+      expect(opening[1]).toMatch(/^G0 X\d+ Y20$/)
     }
   })
 
@@ -117,15 +118,15 @@ describe('WO-2023 program starts by lifting Z before it travels', () => {
     const { lines } = emitProgram(input([postOp('a', 1, cutAt(10)), postOp('b', 1, cutAt(40))]), UCCNC_CONFIG)
     const second = lines.indexOf('( b )')
     expect(lines.slice(second, second + 3)).toEqual(['( b )', 'G0 X40 Y20 Z15', 'G1 Z-5 F300'])
-    expect(lines.filter((l) => l === 'G0 Z15')).toHaveLength(4) // lift, a's out, b's out, program end
+    expect(lines.filter((l) => l === 'G0 Z15')).toHaveLength(3) // a's out, b's out, program end; opening uses machine safe Z
   })
 
   it('a controller without M6 (GRBL pause) lifts the same way after its change', () => {
     const ops = [postOp('a', 1, cutAt(10)), postOp('b', 2, cutAt(40))]
     const { lines } = emitProgram(input(ops), GRBL_CONFIG)
     for (const opening of openingAfterEachToolLoad(lines)) {
-      expect(opening[0]).toBe('G0 Z15')
-      expect(opening[1]).toMatch(/^G0 X\d+ Y20 Z15$/)
+      expect(opening[0]).toBe('G53 G0 Z120')
+      expect(opening[1]).toMatch(/^G0 X\d+ Y20$/)
     }
   })
 
@@ -138,19 +139,19 @@ describe('WO-2023 program starts by lifting Z before it travels', () => {
     )
     const openings = openingAfterEachToolLoad(lines)
     expect(openings).toEqual([
-      ['G0 Z15', 'G0 X10 Y20 Z15'],
-      ['G0 Z10', 'G0 X40 Y20 Z10'],
+      ['G53 G0 Z120', 'G0 X10 Y20'],
+      ['G53 G0 Z120', 'G0 X40 Y20'],
     ])
   })
 
-  it('removing the lift lines gives back exactly the program without them', () => {
+  it('removing only the approach lines preserves every original move and stop', () => {
     const ops = [postOp('a', 1, cutAt(10)), postOp('b', 2, cutAt(40))]
     const { lines } = emitProgram(input(ops), UCCNC_CONFIG)
     const lifts = lines
       .map((l, i) => ({ l, i }))
-      .filter(({ l, i }) => l === 'G0 Z15' && /^M3 /.test(lines[i - 1]))
+      .filter(({ l, i }) => l === 'G53 G0 Z120' && /^M3 /.test(lines[i - 1]))
     expect(lifts.map(({ i }) => i)).toEqual([lines.indexOf('T1') + 2, lines.indexOf('T2 M6') + 3])
-    const without = lines.filter((_, i) => !lifts.some((x) => x.i === i))
+    const without = lines.filter((_, i) => !lifts.some((x) => x.i === i || x.i + 1 === i))
     expect(without).toEqual([
       'G90 G94 G17 G21 G64', 'G54',
       '( a )', 'T1', 'M3 S12000',

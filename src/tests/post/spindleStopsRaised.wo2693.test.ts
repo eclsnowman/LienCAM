@@ -33,7 +33,6 @@
 // and 07 Relief medallion; the branch passes all 12 covered examples.
 
 import * as fs from 'node:fs'
-import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import * as path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -381,29 +380,21 @@ describe.skipIf(!ACCEPT)('WO-2693: the spindle stops only with the tool raised',
   })
 })
 
-// Cached-project route: immutable legacy-output fixtures prove that the post
-// lifts a path which really ends low. Current examples separately prove their
-// own Open -> verify -> stage -> post route, without assuming a low endpoint.
-// Provenance documents the legacy moves and unchanged saved machining inputs;
-// neither this test nor its fixture builder calculates a generation stamp.
+// Cached-project route: the current examples prove their own Open -> verify ->
+// stage -> post route, without assuming a low endpoint.
+// WO-3322: the WO-2934 legacy knob/medallion cases are retired under ADR-0040 (no
+// legacy before 1.0: an old saved project opening outdated and refusing to post is correct).
 interface StoredCase {
   label: string
   file: string
   rough: string
-  legacy: boolean
-  sha256?: string
 }
-const legacyInputs = JSON.parse(fs.readFileSync(path.join(ROOT,
-  'src/tests/fixtures/WO-2934/provenance.json'), 'utf8')) as Array<{
-    file: string; rough: string; sha256: string
-  }>
 const STORED_KITS: StoredCase[] = [
-  ...legacyInputs.map(input => ({ ...input, label: input.file.includes('knob') ? 'legacy knob' : 'legacy medallion', legacy: true })),
-  { label: 'current medallion', file: 'examples/07-relief-medallion/relief-medallion.camproject', rough: '3D Rough 2', legacy: false },
-  { label: 'current knob', file: 'examples/06-knob-handwheel/knob-handwheel.camproject', rough: '3D Rough 1', legacy: false },
+  { label: 'current medallion', file: 'examples/07-relief-medallion/relief-medallion.camproject', rough: '3D Rough 2' },
+  { label: 'current knob', file: 'examples/06-knob-handwheel/knob-handwheel.camproject', rough: '3D Rough 1' },
 ]
 describe('WO-2693: stored paths through Open, stage and post', () => {
-  it.each(STORED_KITS)('$label ($file)', { timeout: 600_000 }, async ({ file, rough, legacy, sha256 }) => {
+  it.each(STORED_KITS)('$label ($file)', { timeout: 600_000 }, async ({ file, rough }) => {
     stlBytes.clear(); stepBytes.clear(); stepDisplay.clear(); mem.clear()
     // New Project preserves shop libraries. Each independent File Open fixture
     // needs a cold shop: a previous kit's identical cutter can otherwise be
@@ -420,7 +411,6 @@ describe('WO-2693: stored paths through Open, stage and post', () => {
     try {
       const bytes = fs.readFileSync(path.join(ROOT, file))
       const text = file.endsWith('.gz') ? gunzipSync(bytes).toString('utf8') : bytes.toString('utf8')
-      if (legacy) expect(createHash('sha256').update(text).digest('hex'), `${file}: frozen input`).toBe(sha256)
       const saved = JSON.parse(text) as import('../../types').Project
       const storedPaths = (project: import('../../types').Project) => project.setups.flatMap(s => s.operations)
         .map(op => ({ id: op.id, toolId: op.toolId, status: op.status, fingerprint: op.generationFingerprint, moves: op.toolpathMoves }))
@@ -447,13 +437,9 @@ describe('WO-2693: stored paths through Open, stage and post', () => {
         expect(storedPaths(useCamStore.getState().project), `${file}: staging preserves saved paths and stamps`).toEqual(originalPaths)
         const state = useCamStore.getState()
         const project = { ...state.project, toolLibrary: state.toolLibrary }
-        // Only the dedicated legacy inputs promise an endpoint below clearance.
         const roughOp = project.setups.flatMap(s => s.operations).find(o => o.name === rough)!
         const facts = opFacts(roughOp.name, roughOp.toolpathMoves ?? [])
         expect(facts.traverseZ, `${file}: ${rough} has a traverse plane`).toBeDefined()
-        if (legacy) {
-          expect(facts.lastZ, `${file}: ${rough}'s stored path ends at depth (not regenerated)`).toBeLessThan(facts.traverseZ! - 1)
-        }
         const factsById = new Map(project.setups.flatMap(s => s.operations)
           .map(o => [o.id, opFacts(o.name, o.toolpathMoves ?? [])] as const))
         const lows: string[] = []
@@ -479,7 +465,7 @@ describe('WO-2693: stored paths through Open, stage and post', () => {
         // kit exactly as tools/examples/post-all.mjs does (same Open -> stage ->
         // postProject combined route, same header line, all five dialects).
         const kitDir = process.env.WO2693_KIT_DIR
-        if (kitDir && !legacy) {
+        if (kitDir) {
           const version = (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version: string }).version
           const stem = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '')
           const dialects = { uccnc: post.UCCNC_CONFIG, grbl: post.GRBL_CONFIG, grblhal: post.GRBLHAL_CONFIG, linuxcnc: post.LINUXCNC_CONFIG, generic: post.GENERIC_CONFIG }

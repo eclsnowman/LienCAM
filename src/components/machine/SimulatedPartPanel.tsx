@@ -11,16 +11,15 @@ import { useDisplayUnits } from './useDisplayUnits'
 // (slides the part so its bore centre sits under the probe's current XY,
 // nothing moves on the machine) and "Reset" (back to the default
 // placement). Presentational - all state lives in the connected
-// SimulatedGrblTransport via machineSession's thin pass-through; this
-// component just mirrors it locally so the numbers redraw after an action.
+// SimulatedController via machineSession's thin pass-through. WO-3189: the
+// simulator connect seeds the part; this card only shows and edits it, and
+// redraws on the store's simulatedPartRevision.
 
-import { useEffect, useState } from 'react'
 import { useMachineControl } from '../../store/machineControlStore'
 import {
-  buildDefaultSimulatedPart,
   getSimulatedPart,
+  resetSimulatedPart,
   setSimulatedPart,
-  type SimulatedPart,
 } from '../../lib/machine/machineSession'
 
 export function SimulatedPartPanel() {
@@ -29,34 +28,11 @@ export function SimulatedPartPanel() {
   const fmt = (mm: number): string => Number.isFinite(mm) ? `${fmtMachineLength(mm, units)} ${unitLabel(units)}` : '-'
   const connectionKind = useMachineControl((s) => s.connectionKind)
   const mpos = useMachineControl((s) => s.mpos)
-  const [part, setPart] = useState<SimulatedPart | null>(null)
-
-  // Re-sync from the transport whenever the simulator (re)connects; the
-  // first time this card is seen with nothing placed yet, seed the default
-  // part so there is something to probe against without an extra click.
-  useEffect(() => {
-    if (connectionKind !== 'simulator') {
-      setPart(null)
-      return
-    }
-    const existing = getSimulatedPart()
-    if (existing) {
-      setPart(existing)
-      return
-    }
-    const seeded = buildDefaultSimulatedPart()
-    setSimulatedPart(seeded)
-    setPart(seeded)
-  }, [connectionKind])
+  // Subscribed only so a seed, placement or reset redraws the card.
+  useMachineControl((s) => s.simulatedPartRevision)
 
   if (connectionKind !== 'simulator') return null
-
-  const applyAndShow = (next: SimulatedPart) => {
-    setSimulatedPart(next)
-    setPart(next)
-  }
-
-  const reset = () => applyAndShow(buildDefaultSimulatedPart())
+  const part = getSimulatedPart()
 
   const placeUnderProbe = () => {
     if (!part || !mpos) return
@@ -64,7 +40,7 @@ export function SimulatedPartPanel() {
     const boreCy = part.bore?.cy ?? part.origin.y + part.sizeY / 2
     const dx = mpos.x - boreCx
     const dy = mpos.y - boreCy
-    applyAndShow({
+    setSimulatedPart({
       ...part,
       origin: { x: part.origin.x + dx, y: part.origin.y + dy },
       bore: part.bore ? { ...part.bore, cx: part.bore.cx + dx, cy: part.bore.cy + dy } : part.bore,
@@ -106,7 +82,7 @@ export function SimulatedPartPanel() {
             type="button"
             className="panel-action-btn"
             data-testid="simulated-part-reset"
-            onClick={reset}
+            onClick={() => resetSimulatedPart()}
             data-tooltip={controlText('SimulatedPartPanel.text010')}
           >{controlText('SimulatedPartPanel.text011')}</button>
         </div>

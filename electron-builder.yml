@@ -10,6 +10,8 @@ files:
   - electron/main.cjs
   - electron/agentChannel.cjs
   - electron/preload.cjs
+  # WO-2883: the update route main.cjs loads.
+  - electron/update/**/*
   # WO-3010: the MCP server and the stdio shim an MCP client launches.
   - electron/mcp/**/*
   - package.json
@@ -76,11 +78,16 @@ portable:
 mac:
   # WO-3064: arm64 and Intel are separate builds (one set of files per CPU),
   # not a universal binary: the universal merge doubles the download and the
-  # app has no native code that would need it. Both are unsigned and untested.
+  # native bridge is arm64 only. Both installers are unsigned and untested.
   icon: build/icons/icon.icns
   target:
     - dmg
     - zip
+  # WO-2897: osx-x64 is deliberately absent. electron-builder skips a missing
+  # source; Intel packages never borrow the arm64 runtime. CI checks both.
+  extraResources:
+    - from: pendant/uc100net/publish/osx-${arch}
+      to: pendant/uccnc-bridge/native/osx-${arch}
   category: public.app-category.productivity
 
 linux:

@@ -100,12 +100,38 @@ const rekeyWorkbenchSplit = (row: Finding): Finding => (
     : row
 )
 
+// WO-3213 Model/style-path bisect plus immediate-parent control:
+// d8a8e748cded111ab0d7a42087833867b2a42c49 (WO-2994) inserts Drawings
+// before Parameters and Inspect. Carry those existing rows one section down;
+// any additional escaped control still fails the unchanged signature gate.
+const rekeyDrawingsSection = (row: Finding): Finding => {
+  if (!['Part', 'Model'].includes(row.surface) || !row.selector?.startsWith(WORKBENCH_LEFT_PANEL_NOW)) return row
+  const suffix = row.selector.slice(WORKBENCH_LEFT_PANEL_NOW.length)
+    .replace(/^(div:nth-of-type\(2\)>div:nth-of-type\()([34])(\))/, (_, prefix: string, index: string, end: string) => `${prefix}${Number(index) + 1}${end}`)
+  return { ...row, selector: WORKBENCH_LEFT_PANEL_NOW + suffix }
+}
+
+// WO-3213 bisect: 851f073592d8481428777cd7790653267932af74
+// (WO-2841) interleaves the same two park and eight custom buttons in one
+// grid. Carry only the old grid's recorded debt to its new selector; custom
+// button N now follows the two parks at N+2. No new finding is accepted.
+const MACRO_GRID_BEFORE = '#root>div>div:nth-of-type(2)>div>div:nth-of-type(2)>aside:nth-of-type(2)>div>section:nth-of-type(4)>div:nth-of-type(2)>div:nth-of-type(2)'
+const MACRO_GRID_NOW = '#root>div>div:nth-of-type(2)>div>div:nth-of-type(2)>aside:nth-of-type(2)>div>section:nth-of-type(4)>div:nth-of-type(2)>div'
+const rekeyMacroGrid = (row: Finding): Finding => {
+  if (!['Control', 'Tool Library', 'Post Process'].includes(row.surface) || !row.selector?.startsWith(MACRO_GRID_BEFORE)) return row
+  const suffix = row.selector.slice(MACRO_GRID_BEFORE.length)
+    .replace(/^>button:nth-of-type\((\d+)\)/, (_, index: string) => `>button:nth-of-type(${Number(index) + 2})`)
+  return { ...row, selector: MACRO_GRID_NOW + suffix }
+}
+
 describe('WO-1116 fit sweep gate', () => {
   it('measures every surface at both widths and has no finding signatures beyond the committed WO-1142 baseline', async () => {
     const baseline = JSON.parse(readFileSync(baselinePath, 'utf8')) as Finding[]
     const accepted = new Set(baseline
       .filter((row) => !row.status && isActionable(row) && !isResolvedByThisWorkOrder(row))
       .map(rekeyWorkbenchSplit)
+      .map(rekeyDrawingsSection)
+      .map(rekeyMacroGrid)
       .map(signature))
 
     await execFileAsync(process.execPath, [sweepPath], {

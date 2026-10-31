@@ -4,6 +4,7 @@
 // Each returns PostDiagnostic[]; an empty array means "nothing to report".
 // postProgram aggregates these and short-circuits on any 'error'.
 
+import { operatorText } from '../../i18n/locales/en/console-and-operator-messages'
 import type { MachineConfig, Operation, ToolpathMove, WCS } from '../../types'
 import { LEGACY_MODEL_ITEM_ID } from '../../doc/documentHolder'
 import type { PostDiagnostic, PostOperation } from './types'
@@ -29,7 +30,7 @@ export function validateToolNumbers(ops: PostOperation[]): PostDiagnostic[] {
       diags.push({
         level: 'info',
         code: 'TOOL_NUMBER_ASSIGNED',
-        message: `Tool "${tool.name}" has no tool number, so it posts as T${n}. Give it a number in the tool library to choose another.`,
+        message: operatorText('postToolNumberAssigned', { number: n, name: tool.name }),
         opId: op.id,
       })
     }

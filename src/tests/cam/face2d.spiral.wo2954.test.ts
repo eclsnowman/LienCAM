@@ -165,7 +165,9 @@ describe('Face inward spiral (WO-2954)', () => {
       // An affine 3D rapid stays above stock along its ENTIRE segment iff
       // both endpoint heights do. This catches the audit's interior crossing,
       // not just a destination at safe Z or sparse samples of the rapid.
-      expect(Math.min(a.z, b.z), 'lateral rapid must follow a vertical lift above uncut stock').toBeGreaterThanOrEqual(1)
+      // WO-3083 rule 2: the transfer crosses at Retract (0.5, above the stock top 0), not
+      // Clearance (1); it still lifts straight up first.
+      expect(Math.min(a.z, b.z), 'lateral rapid must follow a vertical lift above uncut stock').toBeGreaterThanOrEqual(0.5)
     }
     expect(transfers).toBe(3)
     const entries = moves.flatMap((m, i) => m.role === 'plunge' ? [i] : [])

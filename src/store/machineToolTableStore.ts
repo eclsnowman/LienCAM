@@ -299,14 +299,7 @@ export function saveMachineToolRecord(machine: MachineConfig): void {
   // Patch the stored records instead of spreading a connection-start snapshot
   // across them. Controller, limits, spindle and I/O remain receipt/reconnect
   // bound while operator-owned tool rows and removable pads change immediately.
-  if (cam.machineLibrary.some((m) => m.id === machine.id)) cam.updateMachineInLibrary(machine.id, updates)
-  if (cam.project.machine.id === machine.id) cam.setProjectMachine({ ...cam.project.machine, ...updates })
-  cam.updateControlSessionToolRecord(machine.id, {
-    toolTable: updates.toolTable,
-    probeOverrides,
-    probePads: updates.probePads,
-    activeProbePadId: updates.activeProbePadId,
-  })
+  cam.persistMachineToolRecord(machine.id, updates)
 }
 
 function formatDia(dia: number): string {
@@ -325,8 +318,8 @@ function formatDia(dia: number): string {
  * no tool, or only tools already complete in the table, changes and says
  * nothing.
  */
-export function fillToolTableFromProgram(name: string, text: string): void {
-  const calls = programToolCalls(text)
+export function fillToolTableFromProgram(name: string, text: string, prepared?: { sourceText: string; toolCalls?: ProgramToolCall[] }): void {
+  const calls = prepared?.sourceText === text && prepared.toolCalls ? prepared.toolCalls : programToolCalls(text)
   if (calls.length === 0) return
   const machine = controlMachine(useCamStore.getState())
   const seed: MachineToolRecord = {

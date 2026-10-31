@@ -35,6 +35,10 @@ export const WORKBENCH_BODY_OP_DEFINITIONS = Object.freeze([
   // (payload = the picture + every control); replays through the geometry
   // worker's relief op (editFeature kind 'relief') and supersedes its owner.
   { opType: 'relief', historyRole: 'feature' },
+  // WO-3244 Mirror (replace original): ONE consumed body moved by an exact
+  // transform (src/doc/features/bodyTransform.ts); the reflection replaces
+  // its source, which carries the body's identity forward.
+  { opType: 'bodyTransform', historyRole: 'feature' },
 ] as const)
 
 export type WorkbenchBodyOpType = (typeof WORKBENCH_BODY_OP_DEFINITIONS)[number]['opType']
@@ -137,6 +141,9 @@ function bodyEdgeCarriesMaterial(dag: FeatureDag, consumerId: string, producerId
     case 'form':
     case 'relief':
       return true
+    // The source body is the material; the plane is only where it reflects.
+    case 'bodyTransform':
+      return payload.sourceBodyId === producerId
     default:
       return false
   }

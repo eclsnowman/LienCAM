@@ -60,54 +60,41 @@ function census(): { hints: number; disabled: number } {
 /** THE PIN. Post-WO-1182 numbers; every entry is a surface the operator sees.
  *  Raising a number here is the defect this file exists to catch. */
 const PINNED: Record<string, { hints: number; disabled: number }> = {
-  'modal:settings': { hints: 1, disabled: 0 },
-  // disabled 1 -> 2 (architect, 2026-09-23): WO-1842's "Setup Sheet" button, which Operator
-  // approved on its picture, is disabled with its reason exactly when Export is - a sheet
-  // cannot describe a program that cannot be built (rule 11: it cannot do it). Raised
-  // under rule 3 with an MC card Operator can reverse; reversal = fold the sheet into Export.
-  'modal:post-process': { hints: 1, disabled: 2 },
+  // WO-3317 (Operator answer, 2026-10-29 12:08 PM CT MC card: "Keep the hints, update the
+  // test (recommended)"): the hints below are the authored ones from WO-3086 (4fd05db640:
+  // the op-create reason, Post Process Expand disabled), WO-3103 (3a128bee16: the
+  // heights-explained details and Reference planes), WO-3256 (063acb833f), WO-3257
+  // (509745d10a: remappable CAM shortcut hints) and WO-3259 (3171065174: Settings hints).
+  // The numbers are raised to what those approved landings render; the census still fails
+  // on the NEXT unasked hint, which is the whole point of the file.
+  'modal:settings': { hints: 6, disabled: 0 },
+  'modal:post-process': { hints: 1, disabled: 3 },
   'modal:setup': { hints: 1, disabled: 0 },
-  'operation:2d-contour': { hints: 6, disabled: 7 },
-  'operation:2d-pocket': { hints: 7, disabled: 7 },
-  'operation:drill': { hints: 6, disabled: 7 },
-  'operation:bore': { hints: 6, disabled: 7 },
-  'operation:2d-chamfer': { hints: 6, disabled: 7 },
-  // disabled 8 -> 7 (WO-1920, 2026-09-23): WO-1820 (8098041dc, landed 06:49) made
-  // the Facing "Rest (soon)" button a working Rest toggle, deleting the one
-  // disabled-with-a-reason control this surface carried (it was
-  // button[disabled][data-tooltip]). A product deletion lowers the pin; the census
-  // forbids only raising it (COHESION-STANDARD 13.1.d; same move as WO-1511).
-  'operation:2d-face': { hints: 6, disabled: 7 },
-  'operation:engrave-trace': { hints: 6, disabled: 7 },
-  'operation:v-carve': { hints: 6, disabled: 6 },
-  'operation:2d-adaptive-clearing': { hints: 7, disabled: 7 },
-  'operation:thread-mill': { hints: 9, disabled: 6 },
-  'operation:parallel-finish-3d': { hints: 6, disabled: 6 },
-  'operation:waterline-finish-3d': { hints: 6, disabled: 6 },
-  // New WO-1192 surface, pinned at creation. This does not raise any existing surface.
-  'operation:scallop-finish-3d': { hints: 6, disabled: 6 },
-  // New WO-1193 surface, pinned at creation. This does not raise any existing surface.
-  'operation:pencil-cleanup-3d': { hints: 6, disabled: 6 },
-  // New WO-1196 surface, pinned at creation. This does not raise any existing surface.
-  // New WO-1190 surface, pinned at creation. This does not raise any existing surface.
-  'operation:steep-and-shallow-3d': { hints: 6, disabled: 6 },
-  // WO-1368: "Reduce stair steps" toggle adds one op-hint explaining the
-  // rough/near-net tradeoff (Operator's authority requires it stay explained,
-  // not deleted to dodge this pin).
-  'operation:adaptive-rough-3d': { hints: 7, disabled: 6 },
-  // WO-2437 (Operator ruling 2026-10-03, card Q-OPERATOR-STOP-AS-AN-OPERATION-TY): the Machine actions
-  // group's Operator stop is a new type in this dialog. A new surface, zero hints, zero disabled.
+  'operation:2d-contour': { hints: 15, disabled: 7 },
+  'operation:2d-pocket': { hints: 16, disabled: 7 },
+  'operation:drill': { hints: 15, disabled: 7 },
+  'operation:bore': { hints: 15, disabled: 7 },
+  'operation:2d-chamfer': { hints: 15, disabled: 7 },
+  'operation:2d-face': { hints: 15, disabled: 7 },
+  'operation:engrave-trace': { hints: 15, disabled: 7 },
+  // WO-3250 (5b6790a0de) added the Slot (centerline) card as a new surface. Pinned at
+  // creation, like every other new surface in this table.
+  'operation:slot-centerline': { hints: 16, disabled: 7 },
+  'operation:v-carve': { hints: 14, disabled: 6 },
+  'operation:2d-adaptive-clearing': { hints: 16, disabled: 7 },
+  'operation:thread-mill': { hints: 17, disabled: 6 },
+  'operation:parallel-finish-3d': { hints: 14, disabled: 6 },
+  'operation:waterline-finish-3d': { hints: 14, disabled: 6 },
+  'operation:scallop-finish-3d': { hints: 14, disabled: 6 },
+  'operation:pencil-cleanup-3d': { hints: 14, disabled: 6 },
+  'operation:steep-and-shallow-3d': { hints: 14, disabled: 6 },
+  'operation:adaptive-rough-3d': { hints: 15, disabled: 6 },
   'operation:operator-stop': { hints: 0, disabled: 0 },
-  // WO-2478 adds Run macro; this fixture has no callable macro to select.
-  'operation:run-macro': { hints: 0, disabled: 1 },
+  'operation:run-macro': { hints: 1, disabled: 1 },
   'control:offsets-panel': { hints: 0, disabled: 0 },
   'control:offsets-workspace': { hints: 1, disabled: 6 },
-  // WO-2063 (Probing screen v2, 2026-09-27) mounts the shared JogPanel in the probing tab's
-  // right column. In this fixture the software stop is latched, so its ten buttons (Goto XY0,
-  // X/Y/Z jogs, Home All, Safe Z, Unlock) each carry the one stop-latched reason the Control
-  // tab's own JogPanel already shows - the same component, not a new hint or a per-step
-  // explanation. Pinned at what main renders; Start probing is the eleventh.
-  'control:probing': { hints: 0, disabled: 11 },
+  // +1 disabled: the JOG header's gamepad step toggle (owner ask 2026-10-30: "an icon next to the jog wording up in its title bar"); disabled with its reason until a deadman is mapped.
+  'control:probing': { hints: 0, disabled: 12 },
 }
 
 function ensureSetup(): void {

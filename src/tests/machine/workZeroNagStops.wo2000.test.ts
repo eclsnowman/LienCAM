@@ -25,6 +25,7 @@ const {
   getMachineController,
   loadMachineProgram,
   runZProbeCycle,
+  setSimulatedPart,
   __resetEstopInterlockForTest,
   setWorkOffsetValue,
   transferReview,
@@ -99,12 +100,18 @@ describe.each(['uccnc', 'grbl'] as const)('WO-2000 (%s simulator): the work-zero
       project: { ...state.project, machine: camMachine },
       machineLibrary: [camMachine, target],
       control: { activeMachineId: target.id },
+      // WO-3184: a G54 stored by an earlier test is handed to the simulator at connect.
+      machineWorkOffsets: {},
     }))
     useMachineControl.setState({ activeWcs: 'G54', offsets: {}, consoleLines: [] })
     const pending = connectMachine('simulator', 115200)
     await vi.advanceTimersByTimeAsync(350)
     await pending
     await vi.advanceTimersByTimeAsync(50)
+    // WO-3189 seeds the setup's stock box at every simulator connect; this
+    // fixture probes the machine's flat pad, so it says no part is placed (a
+    // placed part replaces the pad by design, WO-416).
+    setSimulatedPart(null)
   })
 
   afterEach(async () => {
@@ -185,6 +192,8 @@ describe.each(['uccnc', 'grbl'] as const)('WO-2000 (%s simulator): Probe work Z0
       project: { ...state.project, machine: { ...target, id: 'cam-machine', name: 'LienCNC V2' } },
       machineLibrary: [{ ...target, id: 'cam-machine', name: 'LienCNC V2' }, target],
       control: { activeMachineId: target.id },
+      // WO-3184: a G54 stored by an earlier test is handed to the simulator at connect.
+      machineWorkOffsets: {},
     }))
     useMachineControl.setState({ activeWcs: 'G54', offsets: {}, consoleLines: [] })
     const pending = connectMachine('simulator', 115200)
@@ -192,6 +201,10 @@ describe.each(['uccnc', 'grbl'] as const)('WO-2000 (%s simulator): Probe work Z0
     await pending
     __resetEstopInterlockForTest()
     await vi.advanceTimersByTimeAsync(50)
+    // WO-3189 seeds the setup's stock box at every simulator connect; this
+    // fixture probes the machine's flat pad, so it says no part is placed (a
+    // placed part replaces the pad by design, WO-416).
+    setSimulatedPart(null)
   })
 
   afterEach(async () => {

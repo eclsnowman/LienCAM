@@ -54,6 +54,11 @@ export type SketchHistoryCensusClass =
   /** pushHistory(): appends the CURRENT project/sketch snapshot onto history
    *  and clears future -- a forward write, never a restore FROM history. */
   | 'push-forward'
+  /** WO-3133's rejected initial-dimension transaction restores the two stack
+   *  values captured immediately before its own push, only while the exact
+   *  transaction top remains live. It cancels that forward transaction; it is
+   *  not an undo/redo restore of geometry from either stack. */
+  | 'transaction-rollback'
   /** restoreSketchFromHistorySeam: the ONE choke point undo() and redo()
    *  both delegate to -- enforces both invariant halves (invalidate +
    *  re-solve) the DECISIONS ruling requires. */
@@ -443,6 +448,31 @@ export const SKETCH_HISTORY_RESTORE_CENSUS: readonly SketchHistoryCensusEntry[] 
     text: 'sketchFuture: []',
     class: 'push-forward',
     note: 'pushHistory: a fresh edit branches history -- the redo stream is cleared, never restored.',
+  },
+  {
+    id: 'pushHistory-dimension-transaction-history-rollback',
+    file: 'src/store/index.ts',
+    enclosingFunction: 'pushHistory',
+    text: 'sketchHistory: prior.sketchHistory',
+    class: 'transaction-rollback',
+    note:
+      'WO-3133: a rejected initial dimension cancels only its own forward transaction. The ' +
+      'asynchronous verdict copies the pre-push sketchHistory back only when pending.history.top ' +
+      'is still the current projectHistory top, so it cannot roll back a later authored step or ' +
+      'a history-restored stack. This is stack repair for the rejected transaction, not a live ' +
+      'geometry restore from history and not undo/redo traffic.',
+  },
+  {
+    id: 'pushHistory-dimension-transaction-future-rollback',
+    file: 'src/store/index.ts',
+    enclosingFunction: 'pushHistory',
+    text: 'sketchFuture: prior.sketchFuture',
+    class: 'transaction-rollback',
+    note:
+      'WO-3133: the paired redo-stack half of the same rejected initial-dimension transaction. ' +
+      'It restores the pre-push future only under the exact live-top identity guard alongside ' +
+      'sketchHistory, preserving the pair as one cancellation and never restoring geometry by ' +
+      'itself.',
   },
   {
     id: 'seam-undo-sketchHistory-pop',

@@ -28,6 +28,7 @@ const { loadEnglishHelpCatalog } = await import('../../help/registry')
 const { withoutContextStamp } = await import('../../components/gcode/gcodeEditing')
 const fr = await loadCatalog('fr')
 const de = await loadCatalog('de')
+const englishHelp = await loadEnglishHelpCatalog()
 
 function leaves(tree: CatalogTree, prefix = ''): Record<string, string> {
   return Object.fromEntries(Object.entries(tree).flatMap(([key, value]) =>
@@ -36,7 +37,7 @@ function leaves(tree: CatalogTree, prefix = ''): Record<string, string> {
 const tokens = (value: string, pattern: RegExp) => [...value.matchAll(pattern)].map(match => match[0]).sort()
 const placeholders = (value: string) => tokens(value, /{{[^}]+}}/g)
 const tags = (value: string) => tokens(value, /<\/?[\w]+(?:\s[^>]*)?\s*\/?>/g)
-const commands = (value: string) => tokens(value.replaceAll(/{{[^}]+}}/g, ''), /\$[A-Z]|\b[GMT]\d+(?:\.\d+)?\b|\b(?:Ctrl\+|Shift\+)[A-Za-z+]+|\b(?:Enter|Escape|Esc|rpm|deg)\b|\.[a-z]+\b/g)
+const commands = (value: string) => tokens(value.replaceAll(/{{[^}]+}}/g, ''), /\$[A-Z]|\b[GMT]\d+(?:\.\d+)?\b|\b(?:Ctrl\+|Shift\+)[A-Za-z+]+|\b(?:Enter|Escape|Esc|rpm|deg)\b|\.(?:camproject|nc|tap|ngc|step|stp|stl|dxf|svg|tools|md|exe|json|py|tsx|pro|pp|cps|scpost|pst|lienpost|ttf|otf)\b/g)
 
 function seedProject() {
   useCamStore.getState().newProject()
@@ -54,6 +55,19 @@ afterEach(async () => {
   await applyLanguage('en')
 })
 
+// WO-3317 repin: WO-3257 (509745d10a) and WO-3280 (81a6d082b3) authored the French text
+// beside its English key. French names the physical keys as a French keyboard prints
+// them ("Entrée" for Enter, "Échap" for Esc), so exactly these leaves carry a different
+// literal-command set -- listed BY NAME, one token at a time. Every other literal token
+// (G-code words, dialects, units, file extensions), every placeholder and every tag is
+// still compared exactly, and a new unasked deviation still fails.
+const LOCALIZED_LITERALS: Readonly<Record<string, Readonly<Record<string, { missing?: readonly string[]; extra?: readonly string[] }>>>> = {
+  'cam-shortcuts.wo3257': { hint: { missing: ['Enter', 'Escape'] } },
+  'ui2-actions.wo3280': { escKey: { missing: ['Esc'] } },
+}
+const without = (list: string[], removed?: readonly string[]): string[] =>
+  list.filter(token => !(removed ?? []).includes(token))
+
 describe('WO-2939 French catalog', () => {
   it.each(Object.keys(de))('%s matches German coverage and current English keys, placeholders, tags and literal command tokens', async area => {
     const english = leaves(area === 'help' ? await loadEnglishHelpCatalog() : ENGLISH_CATALOG[area])
@@ -64,7 +78,29 @@ describe('WO-2939 French catalog', () => {
       expect(value.trim(), `${area}.${key}: nonempty`).not.toBe('')
       expect(placeholders(value), `${area}.${key}: placeholders`).toEqual(placeholders(english[key]))
       expect(tags(value), `${area}.${key}: tags`).toEqual(tags(english[key]))
-      expect(commands(value), `${area}.${key}: literal tokens`).toEqual(commands(english[key]))
+      const localized = LOCALIZED_LITERALS[area]?.[key] ?? {}
+      expect(without(commands(value), localized.extra), `${area}.${key}: literal tokens`)
+        .toEqual(without(commands(english[key]), localized.missing))
+    }
+  })
+  it('every named localization still describes a real difference in the shipped catalogs', () => {
+    // Non-vacuity: an allowance that no longer matches a real difference is stale and
+    // must be deleted, so the table cannot quietly excuse anything later.
+    for (const [area, allowances] of Object.entries(LOCALIZED_LITERALS)) {
+      for (const [key, allow] of Object.entries(allowances)) {
+        const label = `${area}.${key}`
+        const value = leaves(fr[area])[key]
+        expect(value, label).toBeTypeOf('string')
+        const englishValue = leaves(area === 'help' ? englishHelp : ENGLISH_CATALOG[area])[key]
+        for (const token of allow.missing ?? []) {
+          expect(commands(englishValue), label).toContain(token)
+          expect(commands(value), label).not.toContain(token)
+        }
+        for (const token of allow.extra ?? []) {
+          expect(commands(value), label).toContain(token)
+          expect(commands(englishValue), label).not.toContain(token)
+        }
+      }
     }
   })
 

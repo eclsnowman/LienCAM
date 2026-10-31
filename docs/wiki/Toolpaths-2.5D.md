@@ -256,6 +256,67 @@ Advanced also has the tool position (On the line, Left or Right, with a Side off
 
 Trace with the tool on the line has a Style: Plain (one pass along the line, the default) or Trochoidal, which cuts a slot wider than the tool, centred on the line, in overlapping orbits so a deep slot or keyway takes a light side load. Trochoidal shows Slot width (1.15 to 2.5 x the tool diameter) and Advance per orbit. The slot along an open line ends round at the end points of the line, around a closed loop it closes with no ridge, and a curve too short for one orbit is cut Plain.
 
+Add operation also offers Slot (centerline). It makes this same Engrave, set to Trace with the tool on the line and the Plain style, and names it Slot; it saves and edits as Engrave. A centerline slot follows the line you pick: the tool centre rides the line, so the slot is one tool wide with Plain, or the Slot width with Trochoidal, with round ends. It never clears the inside of a closed shape: around a closed loop it cuts a ring along the loop. To clear a region, such as a slot drawn as a closed outline, use 2D Pocket or 2D Adaptive Clearing on that outline.
+
+<a id="engrave-fields"></a>
+
+### What each field changes
+
+Hover a field for its meaning. The labelled pictures below show the real dialog; the cut sketches are explanatory cross-sections, not simulated toolpaths. The same meanings apply in Properties. Some fields appear only after you select their mode or open Advanced.
+
+| Field | What it changes |
+| --- | --- |
+| Name | Names this operation in the tree and posted program. |
+| Tool / tool search | Chooses the cutter; its diameter, tip angle and flute length determine the cut it can make. |
+| Tip angle | The included angle is twice the angle from the tool axis; a narrower V-bit reaches deeper for the same groove width. |
+| Geometry / curves / Pick edges | Chooses the drawing curves or model edges to cut; V-Carve needs closed outlines and Engrave can also follow open paths. |
+| All loops / None / loop selection | Includes or removes individual curves from this operation without changing the drawing. |
+| Mode / Trace / V-engrave | Trace follows a curve at the entered depth; V-engrave can work out depth from the requested line width and bit shape. |
+| Style | Plain follows the line once per depth pass; Trochoidal uses overlapping circular cuts to make a wider slot. |
+| Slot width | Sets the total width of the trochoidal slot, including the cutter diameter. |
+| Advance per orbit | Sets how far each trochoidal circle advances along the line; smaller values overlap more. |
+| Depth from line width | Calculates engraving depth from Target line width and the selected bit angle and tip flat instead of an entered depth. |
+| Target line width | Sets the desired groove width at the surface; a wider groove makes the same V-bit cut deeper. |
+| Engraving depth | Sets how far the tip cuts below the chosen datum in Flat depth or below the modeled part surface in Follow the surface. |
+| Flat depth (Engrave) | Keeps the cut at one Z below the selected reference plane, rather than following a curved part. |
+| Follow the surface | Samples the modeled part under the selected curves and cuts the entered depth below it; it does not sample stock or remaining material. |
+| Stepdown | Limits the depth added by each pass; V-Carve also accepts 0 for a single depth pass. |
+| Axial offset | Shifts the engraving cut along Z; a positive offset raises it and a negative offset lowers it. |
+| Open paths | Includes curves whose ends do not meet, such as single-stroke lettering. |
+| Closed loops | Includes curves whose ends meet. |
+| On the line / Left / Right | Places the tool centre on the curve or on its left or right side, measured along the curve direction. |
+| Side offset | Sets the sideways distance of the tool centre from the curve when Left or Right is selected. |
+| As drawn / Climb / Conventional | Uses the drawn curve direction or chooses the cutting direction for climb or conventional milling. |
+| Lead-in radius | Sets the radius of the arc that joins the engraving curve; 0 removes the entry arc. |
+| Lead-out radius | Sets the radius of the arc that leaves the engraving curve; 0 removes the exit arc. |
+| Tolerance | Sets how closely the calculated path follows the outline; a smaller value allows less geometric error. |
+| Shank clearance | Sets the gap kept between the part or remaining stock and the non-cutting neck, shank or holder. |
+| Clearance Height | Sets the high reference used for initial positioning and final exit; it is not a promise about every link move. |
+| Retract Height | Sets the reference height for approach and retract moves between cuts; actual links depend on the operation. |
+| Feed Height | Sets the reference where approach changes from rapid travel to cutting feed; it is not a local surface air gap. |
+| Top Height / Material Start | Shows the resolved start of material for the selected depth policy; expand the row to see its source. |
+| Bottom Height / Target End | Shows the resolved deepest cut for the selected depth policy; curved engraving can cut at many Z values. |
+| Reference plane / height source | Chooses the datum from which the displayed height or depth is measured, such as stock top, model top or WCS zero. |
+| Z offset from plane / height offset | Adds a signed Z distance to the selected reference: positive is above it and negative is below it. |
+| Minimize Z travel | Lets the path use shorter vertical links where the operation can do so instead of always rising to the full retract reference. |
+| Override tool feeds & speeds for this operation | Uses the feed and spindle values entered here for this operation instead of the tool library defaults. |
+| Spindle speed | Sets cutter revolutions per minute for this operation. |
+| Cutting feed | Sets how fast the tool travels while making ordinary cutting moves. |
+| Plunge feed | Sets how fast the tool feeds down into material. |
+| Ramp feed | Sets the feed for a sloping entry where the operation uses one. |
+| Lead-in feed | Sets the feed along entry moves that join the cut. |
+| Lead-out feed | Sets the feed along exit moves that leave the cut. |
+| Fast traverse feed | Sets the feed for non-cutting feed moves, capped by the machine rapid rate. |
+| Finish feed | Sets the feed for moves marked as finishing cuts where the operation produces them. |
+| Entry type / Plunge / Ramp / Helix | Plunge enters directly; Ramp can use a helical entry for a trochoidal slot when the orbit is large enough, otherwise engraving plunges. |
+| Ramp angle | Sets the slope of a supported ramp entry; a smaller angle takes longer to reach depth. |
+| Helix diameter | Sets the diameter of a supported helical entry. |
+| Edit depth settings / Edit carve settings | Opens the operation dialog to edit the depth policy and its related fields. |
+| Search tools | Filters the tool list by name, tool number, type or diameter. |
+| Tool library | Shows tools from the selected library without changing the chosen cutter. |
+| Used in project | Filters the list to tools already used by an operation in this project. |
+| Hold the part with tabs / Tab width / Tab height / Tab count / Tab shape | These contour holding-tab settings (width, height, count and shape) are shown here but do not change an Engrave toolpath. |
+
 See also: [2D chamfer](Toolpaths-2.5D#chamfer-op), [What an operation cuts](Toolpaths-2.5D#operation-sources).
 
 <a id="vcarve"></a>
@@ -277,6 +338,52 @@ V-Carve has no Linking tab. It refuses by name when the tool has no usable tip a
 ![Toolpath tab with example 05 name sign open: V-carve 1 selected, its path drawn over the sign lettering, and Properties showing type vcarve, status ready, tool 6 mm 60 deg V-bit](images/vcarve/result.webp)
 
 V-carve finishes nearby cuts of each letter together and follows connected corner grooves without retracting for each branch. Short links over already carved space lift only as far as needed and run at feed; links across uncut space or farther away rise to Retract. Clearance is used for the first entry and final exit. This reduces repositioning without changing the carved shape.
+
+<a id="vcarve-fields"></a>
+
+### What each field changes
+
+Hover a field for its meaning. The labelled pictures below show the real dialog; the cut sketches are explanatory cross-sections, not simulated toolpaths. The same meanings apply in Properties. Some fields appear only after you select their mode or open Advanced.
+
+| Field | What it changes |
+| --- | --- |
+| Name | Names this operation in the tree and posted program. |
+| Tool / tool search | Chooses the cutter; its diameter, tip angle and flute length determine the cut it can make. |
+| Tip angle | The included angle is twice the angle from the tool axis; a narrower V-bit reaches deeper for the same groove width. |
+| Geometry / curves / Pick edges | Chooses the drawing curves or model edges to cut; V-Carve needs closed outlines and Engrave can also follow open paths. |
+| All loops / None / loop selection | Includes or removes individual curves from this operation without changing the drawing. |
+| Stepdown | Limits the depth added by each pass; V-Carve also accepts 0 for a single depth pass. |
+| Bit's own limit | Limits V-Carve depth to the depth supported by the bit diameter, angle, tip flat and flute length. |
+| Flat depth (V-Carve) | Limits tip depth below Material Start and leaves a flat floor where the outline is too wide for that depth. |
+| Start depth | Starts carving this far below the chosen datum, for example at the bottom of an existing pocket. |
+| Clear with this bit | Uses the V-bit to clear the flat floors, with the spacing set by Floor stepover. |
+| Separate end mill / Clearing tool | Creates a separate flat-clearing operation with the chosen milling tool and keeps it before the V-carve. |
+| Leave floors | Cuts the V-shaped detail and leaves the broad flat floors uncleared. |
+| Floor stepover | Sets the sideways spacing between adjacent flat-floor clearing cuts; smaller spacing makes more cuts. |
+| Allowance | Offsets the outlines before carving: positive grows the carved region and negative shrinks it. |
+| Tolerance | Sets how closely the calculated path follows the outline; a smaller value allows less geometric error. |
+| Shank clearance | Sets the gap kept between the part or remaining stock and the non-cutting neck, shank or holder. |
+| Clearance Height | Sets the high reference used for initial positioning and final exit; it is not a promise about every link move. |
+| Retract Height | Sets the reference height for approach and retract moves between cuts; actual links depend on the operation. |
+| Feed Height | Sets the reference where approach changes from rapid travel to cutting feed; it is not a local surface air gap. |
+| Top Height / Material Start | Shows the resolved start of material for the selected depth policy; expand the row to see its source. |
+| Bottom Height / Target End | Shows the resolved deepest cut for the selected depth policy; curved engraving can cut at many Z values. |
+| Reference plane / height source | Chooses the datum from which the displayed height or depth is measured, such as stock top, model top or WCS zero. |
+| Z offset from plane / height offset | Adds a signed Z distance to the selected reference: positive is above it and negative is below it. |
+| Minimize Z travel | Lets the path use shorter vertical links where the operation can do so instead of always rising to the full retract reference. |
+| Override tool feeds & speeds for this operation | Uses the feed and spindle values entered here for this operation instead of the tool library defaults. |
+| Spindle speed | Sets cutter revolutions per minute for this operation. |
+| Cutting feed | Sets how fast the tool travels while making ordinary cutting moves. |
+| Plunge feed | Sets how fast the tool feeds down into material. |
+| Ramp feed | Sets the feed for a sloping entry where the operation uses one. |
+| Lead-in feed | Sets the feed along entry moves that join the cut. |
+| Lead-out feed | Sets the feed along exit moves that leave the cut. |
+| Fast traverse feed | Sets the feed for non-cutting feed moves, capped by the machine rapid rate. |
+| Finish feed | Sets the feed for moves marked as finishing cuts where the operation produces them. |
+| Edit depth settings / Edit carve settings | Opens the operation dialog to edit the depth policy and its related fields. |
+| Search tools | Filters the tool list by name, tool number, type or diameter. |
+| Tool library | Shows tools from the selected library without changing the chosen cutter. |
+| Used in project | Filters the list to tools already used by an operation in this project. |
 
 See also: [Engraving](Toolpaths-2.5D#engrave), [2D chamfer](Toolpaths-2.5D#chamfer-op), [What an operation cuts](Toolpaths-2.5D#operation-sources).
 

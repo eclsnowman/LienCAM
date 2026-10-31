@@ -600,6 +600,35 @@ export const SANCTIONED_AUTHORING: readonly SanctionedAuthoring[] = [
     claims: { setsDisplayNone: false, removesNode: false },
     censusStatus: 'Outside the census domain: the function returns a console string and authors no document, element or floating surface.',
   },
+  // WO-3324: sanction the sites added since the last census pass (WO-3279 tooltip, WO-3116 sketch doc, WO-3285 gallery).
+  {
+    key: 'components/kit/surfaces/tooltip.tsx:Tooltip > own[name]?.(e)',
+    route: 'UNRESOLVED', authorsOutOfFlow: false,
+    reason: 'WO-3279: Tooltip forwards the wrapped child own handler for each name in a fixed six-name tuple of React event handlers before running its own. The computed call invokes an event callback, not a DOM-authoring method.',
+    claims: { setsDisplayNone: false, removesNode: false },
+    censusStatus: 'Outside the census domain: the call authors no document, element or floating surface; the tooltip it helps show is sanctioned and censused at its own portal key.',
+  },
+  {
+    key: 'components/kit/surfaces/tooltip.tsx:useTooltip > createPortal( <span ref={tipRef} id={id} role="tooltip" className="kit-tooltip" data-ki...',
+    route: 'BODY-PORTAL', authorsOutOfFlow: true,
+    reason: 'WO-3279: the kit Tooltip portals one position:fixed span into its [data-ui2] host (document.body when none) so a clipped toolbar cannot cut it off; it exists only while shown, is pointer-events:none, and places itself from its measured box. Moving it is outside this grant.',
+    claims: { setsDisplayNone: false, removesNode: false },
+    censusStatus: 'Whole-document fixed positioning sees the .kit-tooltip span (data-kit Tooltip); it is transient hover chrome, absent from every recipe resting state, and authored at this one named site.',
+  },
+  {
+    key: 'lib/sketch/sketcher/toolController.ts:commitCreationSizeAt > doc.append(res.commit, inferred)',
+    route: 'UNRESOLVED', authorsOutOfFlow: false,
+    reason: 'WO-3116: doc is the sketch document model and append(commit, constraints) records a drawn entity in the sketch history. It is not Element.append; the lint only cannot prove the receiver origin inside this file.',
+    claims: { setsDisplayNone: false, removesNode: false },
+    censusStatus: 'Outside the census domain: the call mutates the sketch document model and authors no DOM, element or floating surface.',
+  },
+  {
+    key: 'ui2/gallery/index.tsx:KitGallery/KIT_PARTS.map(...) > <Sample />',
+    route: 'UNRESOLVED', authorsOutOfFlow: false,
+    reason: 'WO-3285: the kit gallery renders the per-part sample component picked from a module-local samples record by part name, so the tag does not resolve statically. The samples are in-flow gallery cards.',
+    claims: { setsDisplayNone: false, removesNode: false },
+    censusStatus: 'Outside the census domain: the gallery is a reference page no recipe mounts, and every sample is in-flow kit DOM; any floating kit part it shows is sanctioned at its own authoring key.',
+  },
   {
     key: 'form/remesh.ts:r > home[i](q)',
     route: 'UNRESOLVED', authorsOutOfFlow: false,
@@ -829,6 +858,16 @@ export const SANCTIONED_AUTHORING: readonly SanctionedAuthoring[] = [
       'The sketch document port, not the DOM -- see the `end` entry for the full reasoning. This is the click path that commits with inferred constraints and asks the document to open the dimension editor afterwards.',
     censusStatus:
       'Outside the census domain by construction: this call authors no DOM node, so no census has anything to enumerate.',
+  },
+  {
+    key: 'lib/sketch/sketcher/toolController.ts:placeDimensionForTyping > doc.append({ entities: [], constraints: [], dimensions: [{ ...placement.plan, id: uuid(...',
+    route: 'UNRESOLVED',
+    authorsOutOfFlow: false,
+    claims: NO_CLAIMS,
+    reason:
+      'WO-3110 typed dimension commit uses the same SketchDocumentPort as the adjacent click and commitDrawValueAt sites. The twice-written doc binding is ambiguous to this method-name walk; append commits a parametric dimension and requests its existing editor. It creates no DOM element, shadow root or browsing context. This exact site alone is sanctioned; the recognizer and every refusal assertion remain unchanged.',
+    censusStatus:
+      'Outside the census domain by construction: this call writes sketch document data, not DOM nodes. The existing dimension editor remains governed at its own authoring site.',
   },
   {
     key: 'lib/sketch/sketcher/toolController.ts:commitDrawValueAt > doc.append(res.commit, [])',

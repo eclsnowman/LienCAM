@@ -6,7 +6,8 @@
 //      the flag ON at least one such lift becomes a 'wallfollow' pass that rides cutRegion
 //      and whose endpoints equal the original link's endpoints.
 
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, vi } from 'vitest'
+import { typedMock } from '../../support/typedMock'
 import { ensureEngineClipperReady, type Loop, type Pt } from '../../../lib/cam/adaptiveClearing2d/engine/clipperEngine'
 import {
   processFeature,
@@ -15,6 +16,26 @@ import {
   type ProcessParams,
 } from '../../../lib/cam/adaptiveClearing2d/engine/processFeature'
 import { boundaryArcBetween } from '../../../lib/cam/adaptiveClearing2d/engine/engagementPoint'
+
+// WO-3067 (architect oracle ruling 2026-10-27 8:12 PM CT): steering smoothing ships ON, and ON
+// removes the lifts the FLAG ON case converts, so that case pins the switch OFF to keep measuring
+// wall-follow; the ON default is still held to the same direction-correct ride below.
+type PolicyModule = typeof import('../../../kernel/ops/adaptive/policy')
+const switchState = vi.hoisted(() => ({ steeringSmoothing: true }))
+vi.mock('../../../kernel/ops/adaptive/policy', async (importOriginal) => {
+  const real = await importOriginal<PolicyModule>()
+  return typedMock<PolicyModule>({
+    ...real,
+    ADAPTIVE_MOTION_SWITCHES: {
+      ...real.ADAPTIVE_MOTION_SWITCHES,
+      get steeringSmoothing() { return switchState.steeringSmoothing },
+    },
+  })
+})
+const withSmoothing = <T>(on: boolean, run: () => T): T => {
+  switchState.steeringSmoothing = on
+  try { return run() } finally { switchState.steeringSmoothing = true }
+}
 
 function circle(cx: number, cy: number, r: number, n = 120): Loop {
   const p: Loop = []
@@ -200,12 +221,17 @@ describe('integral wall-follow in processFeature', () => {
     // runs, so every ride this rung can ever emit is already direction-correct by construction.
     // Assert that guarantee directly (every wallfollow point rides the cutRegion boundary)
     // instead of the stale zero-count.
-    const on = processFeature({ boundary: square, holes: [island] }, { ...baseParams, stepOver: 0.25, integralWallFollow: true })
+    // WO-3067 ruling: smoothing OFF here, so the conversion this case measures still happens.
+    const on = withSmoothing(false, () => processFeature({ boundary: square, holes: [island] }, { ...baseParams, stepOver: 0.25, integralWallFollow: true }))
     expect(on.stats.aborted).toBeUndefined()
 
     const wallfollows = on.passes.filter((p): p is Extract<AdaptivePass, { type: 'wallfollow' }> => p.type === 'wallfollow')
     expect(wallfollows.length).toBeGreaterThan(0)
     for (const wf of wallfollows) for (const p of wf.points) expect(distToLoops(p, on.cutRegion)).toBeLessThan(0.6)
+    // The shipped smoothing ON default: any ride it still substitutes rides the cut region too.
+    const smoothed = processFeature({ boundary: square, holes: [island] }, { ...baseParams, stepOver: 0.25, integralWallFollow: true })
+    expect(smoothed.stats.aborted).toBeUndefined()
+    for (const wf of smoothed.passes) if (wf.type === 'wallfollow') for (const p of wf.points) expect(distToLoops(p, smoothed.cutRegion)).toBeLessThan(0.6)
     // WO-438 (891de640; re-pinned 2026-08-24): this fixture's full-clearance connections
     // descended to tier-1 loopbacks, so require that fallback rung instead of jumpType-2.
     expect(on.passes.some(p => p.type === 'loopback')).toBe(true)

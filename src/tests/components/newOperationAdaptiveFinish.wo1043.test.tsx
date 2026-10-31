@@ -197,6 +197,10 @@ describe('WO-1043: Adaptive "Finish pass at final depth (cuts to size)"', () => 
     fireEvent.change(modeSelect(), { target: { value: 'final_to_size' } })
     expect(modeSelect().value).toBe('final_to_size')
 
+    // WO-3137 (7ce28356a7) invalidates the resolved Smart Height preview whenever a
+    // draft field changes, so Create is disabled until the preview re-resolves. Wait
+    // for the modal's own contract; the payload assertions below are unchanged.
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByTestId('op-create'))
 
     await waitFor(() => {

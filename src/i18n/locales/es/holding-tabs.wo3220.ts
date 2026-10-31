@@ -1,0 +1,42 @@
+// WO-3220: Spanish, machine-translated and checked against docs/i18n/GLOSSARY.md.
+import type { Translation } from '../../index'
+
+const holdingTabs: Translation<'holding-tabs.wo3220'> = {
+  suggest: 'Sugerir posiciones de puentes',
+  suggestTooltip: 'Propone centros de puentes lejos de esquinas, tramos cortos, agujeros cercanos y sujeciones. Nada cambia hasta que pulse Aplicar. Los contornos con puentes colocados a mano no se tocan.',
+  foundOf: 'Encontradas {{found}} de {{requested}} sugerencias',
+  loopLine: 'Contorno {{index}}: {{found}} de {{requested}} a {{positions}} mm a lo largo del corte',
+  loopNone: 'Contorno {{index}}: ninguna posición cabe, así que al aplicar queda sin puentes',
+  loopHandPlaced: 'Contorno {{index}}: los puentes colocados a mano se mantienen',
+  avoided: 'Evitado: {{reasons}}',
+  notChecked: 'No comprobado: {{items}}',
+  apply: 'Aplicar',
+  applyPartial: 'Aplicar {{count}}',
+  cancel: 'Cancelar',
+  applied: 'Se aplicaron {{count}} posiciones de puentes. Genere para cortarlas.',
+  appliedWithNone: 'Se aplicaron {{count}} posiciones de puentes; contornos sin puentes: {{none}}. Genere para cortarlas.',
+  outlinesWithoutTabs: 'Contornos sin puentes: {{count}}',
+  reasonCorner: 'esquinas y tramos cortos',
+  reasonEntry: 'la entrada y la salida',
+  reasonOppositeWall: 'la pared opuesta',
+  reasonOtherOutline: 'otros contornos y agujeros',
+  reasonFixture: 'sujeciones',
+  reasonMaterial: 'lugares sin material alrededor',
+  reasonOther: 'otros límites',
+  omittedHolder: 'holgura del portaherramientas',
+  omittedFixtures: 'sujeciones sin forma legible',
+  diagnosticThinWeb: 'El puente no es más ancho que la fresa, así que deja casi nada de material.',
+  diagnosticOther: 'No se pudo sugerir para un contorno ({{code}}).',
+  refuseMissing: 'Esta operación ya no existe.',
+  refuseNotContour: 'Sugerir posiciones de puentes solo funciona en operaciones de contorno.',
+  refuseOpen: 'Sugerir posiciones de puentes funciona en contornos cerrados; este está abierto.',
+  refuseRoughing: 'Sugerir posiciones de puentes funciona en contornos solo de acabado; este desbasta primero, así que no se ofrece.',
+  refuseTabsOff: 'Active primero los puentes de sujeción.',
+  refuseGenerateFirst: 'Genere primero esta operación: las sugerencias se colocan sobre su trayectoria de acabado.',
+  refuseStale: 'La operación cambió desde que se generó. Genere de nuevo para obtener sugerencias.',
+  refuseAllHandPlaced: 'Todos los contornos ya tienen puentes colocados a mano. Restablezca el espaciado uniforme primero.',
+  refuseChanged: 'Algo cambió, así que las sugerencias se calcularon de nuevo. Revíselas y aplique otra vez.',
+  refuseNothingFound: 'Ninguna posición cabe, así que no hay nada que aplicar.',
+}
+
+export default holdingTabs

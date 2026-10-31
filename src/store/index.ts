@@ -1,13 +1,15 @@
+import { enforceOperationTravel } from '../lib/cam/minimumTravelZ'
 import { frameRef, worldRingsToDisplayLocalMm, type FrameRef } from '../lib/geometry/coordinateFrames'
 import { prepareCamCommands } from '../kernel/camCommands'
 import type { CamCommand, CamCommandResult, CamAuthoringCheck, CamCommandServices } from '../kernel/camCommands'
 import { textFor } from '../i18n'
 import { installOperatorTextLookup } from '../i18n/locales/en/console-and-operator-messages'
 const operatorText = textFor('console-and-operator-messages')
+const tabRemovalText = textFor('tab-removal.wo3221')
 installOperatorTextLookup(operatorText)
 import type { ReferenceImage2d } from '../referenceImage/referenceImage'
 import { create } from 'zustand'
-import { createJSONStorage } from 'zustand/middleware'
+import { createJSONStorage, type PersistStorage } from 'zustand/middleware'
 import type {
   Project, Tool, ToolLibrary, ToolHolder, Setup, Operation, OperationFolder, MachineAction, MachineActionKind, MachineConfig,
   ImportedGeometry, GeometryFolder, ModelItemRecord, ModelItemPlacementRecord, ViewerState, ShadingMode, PanelId, SceneStock, Vec3, Layer2D, Loop2D, FixedStockItem, AutoStockItem, Workspace, WCS,
@@ -39,10 +41,10 @@ import {
 } from '../lib/cam/modelOrigin'
 import {
   deriveModelBodyProfile, deriveModelBodySection, deriveModelBodyFace, deriveModelBodyDrillTargets,
-  deriveModelBodyBoreTarget, deriveModelBodyCircularOrigin, deriveModelBodyCircularEdgeOrigin,
+  deriveModelBodyBoreCandidates, deriveModelBodyBoreTarget, deriveModelBodyCircularOrigin, deriveModelBodyCircularEdgeOrigin,
   ModelBodyDeriveError,
 } from '../lib/cam/modelBodyDerive'
-import { readModelBodyFaceFacts, recognizeModelBodyHoles } from '../lib/cam/modelBodyHoleRecognition'
+import { readModelBodyBoreFeatureResult, readModelBodyFaceFacts, recognizeModelBodyHoles } from '../lib/cam/modelBodyHoleRecognition'
 import { narrowToPickedMeshChainInstances, type MeshChainSources } from '../lib/cam/meshChainInstances'
 import {
   deriveModelBodyEdges, modelEdgeChainBodyMismatch, modelEdgeChainMismatchMessage,
@@ -53,7 +55,7 @@ import {
 import {
   cacheModelBodyDisplay, removeCachedModelBodyDisplay, pruneModelBodyDisplayCache,
 } from '../lib/modelBodyDisplayCache'
-import type { ContourParams, PocketParams, DrillParams, BoreParams, ChamferParams, FaceParams, FaceBoundarySource, EngraveParams, VCarveParams, ACParams, ACWorkerPayload, ThreadMillParams, WorkerResponseMsg, WorkerRequestMsg, LoopData, NestWorkerPayload } from '../lib/cam/types'
+import type { ContourParams, ContourTabLocations, PocketParams, DrillParams, BoreParams, ChamferParams, FaceParams, FaceBoundarySource, EngraveParams, VCarveParams, ACParams, ACWorkerPayload, ThreadMillParams, WorkerResponseMsg, WorkerRequestMsg, LoopData, NestWorkerPayload } from '../lib/cam/types'
 import type { NestPart, NestStyle, Spacing, SolverMode, NestResult } from '../lib/cam/nesting/types'
 import { groupLoopsByTopLevelOuter, nestPartGeometryFromLoops } from '../lib/cam/nesting/partGroups'
 import { seedPlacementIds } from '../lib/cam/nesting/seedSelectors'
@@ -62,6 +64,7 @@ import { estimateRuntimeMsOrError } from '../lib/cam/runtime'
 import { machineCutTimeMotion } from '../lib/simulation/machineCutTimeMotion'
 import {
   operationGenerationIsCurrent,
+  operationRegenerationInputsKey,
   projectOperationFingerprint,
   projectOperationFingerprintMatches,
   reconcileProjectGenerationFreshness,
@@ -69,6 +72,10 @@ import {
 } from '../lib/cam/generationFingerprint'
 import { createEngineRouter, createEngineSelector, kernelPlanners } from '../kernel/planning'
 import type { FacePilotEnvelope } from '../kernel/planners/face'
+import { stockBottomWcsZ } from '../kernel/world'
+import type { KeepOutLevel, Obstacle, ObstacleOmission } from '../kernel/workholding/contracts'
+import { suggestTabFractions, type TabSourceRing } from '../lib/viewport/tabPlacement'
+import { pointInPolygon } from '../lib/cam/geometry'
 import { ADAPTIVE_OPERATION_RECORDS, adaptiveShadowRecord, createAdaptivePlanner,
   type AdaptiveKernelPlan, type AdaptivePilotEnvelope, type AdaptiveShadowRecord } from '../kernel/ops/adaptive'
 import {
@@ -140,6 +147,11 @@ import {
 import { uiReferenceForIntentReference } from '../lib/cam/heightReference'
 import { reresolveModelReferences as reresolveModelRefs, referenceStableIds, type BodyResolution } from '../lib/cam/modelReferenceResolution'
 import { computeContourTabPreviewLoop } from '../lib/cam/contour2d'
+import {
+  hasTabRemovalBinding, planContourTabRemoval, reviewContourTabRemoval, tabRemovalComputeRefusal,
+  type ContourTabRemovalComputeRefusal, type ContourTabRemovalRefusal,
+} from '../lib/cam/contourTabRemoval'
+import type { ContourTabRemovalTarget } from '../lib/cam/types'
 import { ensureClipperReady } from '../lib/cam/face2d/clipperOffset'
 // WO-1820: the Facing 'rest' boundary is a polygon difference, resolved here (the
 // face builder itself stays source-agnostic - ADR 0015 s1).
@@ -288,12 +300,14 @@ import {
   adaptive3dStockEdgeReach, resolvePartBoundsEntryFallback,
   type Adaptive3dParams, type RetainedRoughField,
 } from '../cam3d/integration/adaptive3dOperation'
-import { resolveAdaptive3dPartSource } from '../cam3d/integration/adaptive3dPartSource'
-import { lowerFinishLinksOverRemovedStock } from '../cam3d/integration/finishLinksOverRemovedStock'
+import { partSourceAsSetupHoldsIt, resolveAdaptive3dPartSource } from '../cam3d/integration/adaptive3dPartSource'
+import { secondSideTurn, type SecondSideTurn } from '../lib/cam/flipSetup'
+import {
+  partWorldTransform, partWorldTransformAsSetupHoldsIt, storedRotationAfterGesture, type PartWorldTransform,
+} from './partTransform'
 import { rapidAirFeedsOverRemovedStock } from '../cam3d/integration/airFeedOverRemovedStock'
 import { ADAPTIVE_ENTRY_POLICY } from '../cam3d/rough/emit'
 import type { Box3 } from '../cam3d/stock'
-import type { ClearanceMesh } from '../lib/cam/holderClearance'
 import type { StockState } from '../lib/cam/stockState'
 import { disposeCam3dClient, getCam3dClient } from '../cam3d/integration/appClient'
 import type { Ring } from '../cam3d/geom2d'
@@ -316,7 +330,7 @@ import {
   geometryWorldBounds,
   effectiveZRotationDeg, tiltAngleDeg, rotationMatrixXYZ,
   classifyRotationOffZ, TILT_TOLERANCE_DEG,
-  resolveTopZ, planeOrderingError,
+  resolveTopZ, planeOrderingError, sourcesAreHeightlessOutlines,
   deriveAutoStockBounds,
   // computeGeometryScope is no longer imported here: INT-17A-R3 C1 moved this
   // file's only use of it behind guardOperationModelOrigin, which owns the
@@ -394,8 +408,8 @@ import {
   type BooleanMeshOutcome,
 } from '../lib/cam/booleanMeshModel'
 import { resolveModelReferenceFrame, modelReferenceFrameFingerprint } from '../lib/cam/modelReferenceFrame'
-import { remainingStockBefore, resolveToolReachInputs, trimToToolReachInPartFrame, stockCutterOf } from './toolReachInputs'
-import { clearanceAllowanceMmOf, type OperationReachShortfall } from '../lib/cam/holderClearanceGate'
+import { remainingStockBefore, resolveToolReachInputs, stockCutterOf } from './toolReachInputs'
+import { type OperationReachShortfall } from '../lib/cam/holderClearanceGate'
 import {
   outdateOperationsForWorkholding, resolveWorkholdingObstacles, withWorkholdingModel, workholdingInPartFrame,
 } from './fixtureObstacles'
@@ -417,6 +431,7 @@ import {
   runSerializedCam3dCompute,
   runToolpathBatchQueue,
 } from './toolpathBatchScheduler'
+import { trimToToolReachOffPage, lowerFinishLinksOffPage } from './toolpathPostprocess'
 import { createInactivityWatchdog } from './computeWatchdog'
 import { collectOperationFolderTreeIds } from '../lib/tree/operationFolders'
 import { createUserSpaceStateStorage, installUserSpaceUnloadJournal } from './userSpaceStorage'
@@ -436,8 +451,9 @@ function getViewportHandle(): ReloadableViewport | null {
 }
 
 import {
-  buildOperationStockInputs, observeOperationStockState, operationStockAuthorityFor,
+  observeOperationStockState, operationStockAuthorityFor,
   operationStockWorldFrame, nextOperationStockChange, STOCK_END_OPERATION_ID,
+  primeOperationStockMoves,
 } from './operationStockInputs'
 import type { OperationStockAuthority, StockToken, StockRead } from '../lib/cam/operationStockAuthority'
 
@@ -450,6 +466,18 @@ const DERIVED_LAYER_COLORS = ['#00e5ff', '#ff9d2e', '#4cff88', '#ff80ab', '#ffd7
 // Keep Regen All responsive without fanning every operation worker out at once.
 // Both CAM3D families are additionally serialized by toolpathBatchScheduler.
 const TOOLPATH_REGEN_ALL_CONCURRENCY = 3
+const toolpathProgressProjects = new WeakSet<Project>()
+let progressOnlyState: CamStore | undefined
+const progressPersistenceSnapshots = new WeakSet<object>()
+// Skip only snapshots produced by a pure progress write. The observer clears
+// progressOnlyState on every other write, including reentrant authored writes.
+function withoutProgressSnapshots<T>(storage: PersistStorage<T> | undefined): PersistStorage<T> | undefined {
+  if (!storage) return storage
+  return { ...storage, setItem: (name, value) => {
+    if (value.state && typeof value.state === 'object' && progressPersistenceSnapshots.has(value.state)) return
+    return storage.setItem(name, value)
+  } }
+}
 const CAM3D_PREPROCESS_STALL_TIMEOUT_MS = 600_000
 const CAM3D_COMPUTE_STALL_TIMEOUT_MS = 180_000
 
@@ -463,7 +491,7 @@ const generationEngineId = (type: Operation['type']) => type === 'face'
   ? faceEngineId(type)
   : type === 'adaptive_clearing_2d' || type === 'adaptive_3d' ? adaptiveEngineId(type) : engineRouter.engineId(type)
 setGenerationEngineResolver(generationEngineId)
-// A newer Face request owns publication even when its authored inputs match.
+// A newer Face/Bore request owns publication even when its authored inputs match.
 const faceComputeRequests = new Map<string, symbol>()
 
 // Default display color stored on a freshly imported B-rep (STEP) part so the
@@ -643,7 +671,12 @@ async function redrawEditedStl(geoId: string): Promise<void> {
     if (!bytes) return
     const resolved = resolveEditedStlMesh(bytes, stlEditJournal(row))
     const drawable = resolved.appliedCount > 0 ? exportBinaryStl(resolved.mesh).bytes : bytes
-    await vp.addSTL(drawable, geoId, row.name, row.position, row.rotation, row.color)
+    // WO-3196: drawn as the active setup holds it (a second side turns it).
+    const { position, rotation } = partWorldTransformAsSetupHoldsIt(
+      { position: row.position, rotation: row.rotation },
+      activeSetupPartTurn(useCamStore.getState().project, row),
+    )
+    await vp.addSTL(drawable, geoId, row.name, position, rotation, row.color)
   } catch {
     // Silent: see the header. The console already carries the edit event.
   }
@@ -3006,6 +3039,207 @@ function resolveProvenCam3dStockBounds(
 }
 
 /**
+ * WO-3196: the part a 3D operation machines, as its setup holds it. A first
+ * side (no flipOf) gets the source back untouched. A second side gets the part
+ * turned over inside its proven block - the same world box both sides share -
+ * so every 3D strategy cuts what is now facing up. Every 3D compute and Smart
+ * Height preview resolves its part through here and nowhere else. A second
+ * side with no proven block has nothing to turn the part inside: it says so.
+ */
+function cam3dPartAsSetupHoldsIt(
+  source: ReturnType<typeof resolveAdaptive3dPartSource>,
+  setup: Setup,
+  geo: ImportedGeometry,
+  project: Project,
+  operationLabel: string,
+): ReturnType<typeof resolveAdaptive3dPartSource> {
+  const turn = setupPartTurn(setup, geo, project)
+  if (turn === 'no-block') throw new Error(operatorText('index182', { value1: operationLabel }))
+  return partSourceAsSetupHoldsIt(source, turn)
+}
+
+/**
+ * WO-3196: the turn a setup holds `geo` under - null for a first side,
+ * 'no-block' for a second side with no proven block to turn it inside. The 3D
+ * engine's part (cam3dPartAsSetupHoldsIt) and anything that draws or compares
+ * against that part (partWorldTransformAsSetupHoldsIt) read it from here, so
+ * the toolpath and the part it is shown on can never disagree.
+ */
+export function setupPartTurn(
+  setup: Setup,
+  geo: ImportedGeometry,
+  project: Project,
+): ReturnType<typeof secondSideTurn> {
+  return secondSideTurn(setup, setup.flipOf ? resolveProvenCam3dStockBounds(setup, geo, project) : null)
+}
+
+/**
+ * WO-3196: the turn `setup` draws and compares `geo` under. Only a part the 3D
+ * engine turns is turned (an STL, STEP or modeled solid inside the setup's
+ * block); a drawing, a workholding body and a part with no block stay where
+ * they are, as their toolpaths do. Null for a first side.
+ */
+export function setupDisplayPartTurn(
+  project: Project,
+  setup: Setup | undefined,
+  geo: ImportedGeometry,
+): SecondSideTurn | null {
+  if (!setup?.flipOf || geo.workholding) return null
+  if (geo.format !== 'stl' && geo.format !== 'step' && geo.format !== 'model') return null
+  if (workholdingComponentGeometryIds(project.workholding).has(geo.id)) return null
+  const turn = setupPartTurn(setup, geo, project)
+  return turn === 'no-block' ? null : turn
+}
+
+/** WO-3196: the turn the ACTIVE setup draws `geo` under (viewport, scene restore). */
+export function activeSetupPartTurn(project: Project, geo: ImportedGeometry): SecondSideTurn | null {
+  return setupDisplayPartTurn(project, project.setups.find(s => s.id === project.activeSetupId), geo)
+}
+
+/**
+ * WO-3196: where the viewport draws every part the active setup turns - empty
+ * on a first side. The pose is the part's own (its Model Item placement for a
+ * modeled body) with the turn its 3D toolpaths were computed under.
+ */
+export function activeSetupTurnedPartPlacements(project: Project): Array<{ id: string } & PartWorldTransform> {
+  const setup = project.setups.find(s => s.id === project.activeSetupId)
+  if (!setup?.flipOf) return []
+  const placed: Array<{ id: string } & PartWorldTransform> = []
+  for (const geo of project.geometry) {
+    const turn = setupDisplayPartTurn(project, setup, geo)
+    const pose = turn ? partBasePlacement(project, geo) : null
+    if (turn && pose) placed.push({ id: geo.id, ...partWorldTransformAsSetupHoldsIt(pose, turn) })
+  }
+  return placed
+}
+
+/**
+ * WO-3196: the pose a viewport drop of `geo` stores. What was dragged is the
+ * part as the active setup draws it; a second side draws it turned, so the
+ * stored pose is the one that is drawn where it was dropped once the move is
+ * committed (a half turn is its own inverse, about the stock's centre after
+ * the move). A first side's turn is null: the drop as dropped.
+ */
+export function storedPoseForActiveSetupDrop(
+  project: Project,
+  geo: ImportedGeometry,
+  drop: PartWorldTransform,
+): PartWorldTransform {
+  const turn = activeSetupPartTurn(project, geo)
+  if (!turn) return drop
+  // The half turn's rotation does not depend on where its centre is. A drag
+  // keeps the stored rotation exactly; a rotate composes its un-turned delta
+  // onto it (storedRotationAfterGesture) - never re-derived from the drop.
+  const base = partBasePlacement(project, geo)
+  const from = base?.rotation ?? { x: 0, y: 0, z: 0 }
+  const rotation = storedRotationAfterGesture(
+    from, partWorldTransformAsSetupHoldsIt({ position: drop.position, rotation: from }, turn).rotation,
+    drop.rotation, turn,
+  )
+  // The turn centre is the centre of the stock AFTER the move: an auto stock
+  // re-wraps around the moved part, so its centre moves with it; a fixed
+  // stock's does not. Draw each candidate the way the store will once it is
+  // committed, and keep the one drawn where it was dropped.
+  const drawnAt = (position: Vec3): Vec3 => {
+    const moved = projectWithPartPlacedAt(project, geo, { position, rotation })
+    const row = moved.geometry.find(g => g.id === geo.id) ?? geo
+    const base = partBasePlacement(moved, row)
+    return base ? partWorldTransformAsSetupHoldsIt(base, activeSetupPartTurn(moved, row)).position : position
+  }
+  const axes = ['x', 'y', 'z'] as const
+  const axesVec = (f: (a: typeof axes[number]) => number): Vec3 => ({ x: f('x'), y: f('y'), z: f('z') })
+  const miss = (shown: Vec3) => Math.max(...axes.map(a => Math.abs(shown[a] - drop.position[a])))
+  // Fixed stock: the drop un-turned about today's centre lands exactly.
+  let p = partWorldTransformAsSetupHoldsIt(drop, turn).position
+  let shownP = drawnAt(p)
+  let best = { position: p, error: miss(shownP) }
+  // Auto stock: the drawn part moves WITH the stored one, so the stored pose
+  // moves by the drag itself. Anything else (a rotate that resizes the stock,
+  // a stock several parts share) is solved along each axis on the measured
+  // slope - the three axes are independent under a half turn - keeping the
+  // closest pose tried where the drawn part cannot reach the drop.
+  const shownNow = base && partWorldTransformAsSetupHoldsIt(base, turn).position
+  let q = base && shownNow
+    ? axesVec(a => base.position[a] + (drop.position[a] - shownNow[a]))
+    : axesVec(a => p[a] + drop.position[a] - shownP[a])
+  for (let i = 0; i < 4 && best.error > 1e-9; i++) {
+    const shownQ = drawnAt(q)
+    if (miss(shownQ) < best.error) best = { position: q, error: miss(shownQ) }
+    const next = { ...q }
+    for (const a of axes) {
+      // No second point on this axis yet: step as auto stock moves (slope 1).
+      const slope = q[a] === p[a] ? 1 : (shownQ[a] - shownP[a]) / (q[a] - p[a])
+      if (Math.abs(slope) > 1e-6) next[a] = q[a] + (drop.position[a] - shownQ[a]) / slope
+    }
+    ;[p, shownP, q] = [q, shownQ, next]
+  }
+  return { position: best.position, rotation }
+}
+
+/** WO-3196: `project` as the store leaves it once `geo` is placed at `pose` -
+ *  the same move (and stock re-derivation) its geometry or Model Item
+ *  placement action commits. */
+function projectWithPartPlacedAt(project: Project, geo: ImportedGeometry, pose: PartWorldTransform): Project {
+  if (!isModelOriginGeometry(geo)) {
+    return { ...project, ...projectAfterGeometryMove(project, geo.id, pose.position, pose.rotation) }
+  }
+  const existing = project.modelItemPlacements ?? []
+  const itemId = geo.modelItemId ?? LEGACY_MODEL_ITEM_ID
+  const placements = withModelItemPlacement(existing, itemId,
+    modelPlacementTargetBodyId(existing, itemId, geo.modelBody?.ref.bodyId), pose.position, pose.rotation)
+  return {
+    ...project,
+    modelItemPlacements: placements,
+    stocks: rederiveDerivedStockBounds(project.stocks, project.geometry, project.sceneStock, placements),
+  }
+}
+
+/** Write granularity mirrors resolveModelItemPlacement's OWN read precedence:
+ *  if this specific body already owns an independent Placement record (the
+ *  v12-migration legacy case), keep writing THAT record so one legacy body's
+ *  move never drags an unrelated sibling that merely happened to share the
+ *  same old document. Otherwise land on the item's whole-item record (bodyId
+ *  omitted), which is what every Stage-C2-native Model Item has exactly one of. */
+function modelPlacementTargetBodyId(
+  existing: readonly ModelItemPlacementRecord[],
+  modelItemId: string,
+  bodyId: string | undefined,
+): string | undefined {
+  return bodyId !== undefined && existing.some((p) => p.modelItemId === modelItemId && p.bodyId === bodyId)
+    ? bodyId
+    : undefined
+}
+
+/** The placement records with `modelItemId`'s (`targetBodyId`'s) record set to the pose. */
+function withModelItemPlacement(
+  current: readonly ModelItemPlacementRecord[],
+  modelItemId: string,
+  targetBodyId: string | undefined,
+  position: Vec3,
+  rotation: Vec3,
+): ModelItemPlacementRecord[] {
+  const idx = current.findIndex((p) => p.modelItemId === modelItemId && p.bodyId === targetBodyId)
+  const record: ModelItemPlacementRecord =
+    targetBodyId !== undefined
+      ? { modelItemId, bodyId: targetBodyId, position, rotation }
+      : { modelItemId, position, rotation }
+  return idx >= 0 ? current.map((p, i) => (i === idx ? record : p)) : [...current, record]
+}
+
+/** WO-3196: a part's own world pose, before any setup turn - what the viewport
+ *  draws it at on a first side. Null for a modeled body with no placement. */
+export function partBasePlacement(project: Project, geo: ImportedGeometry): PartWorldTransform | null {
+  if (geo.format !== 'model' || !geo.modelBody) return partWorldTransform(geo, project.stocks ?? [])
+  try {
+    return resolveModelReferenceFrame(
+      project.modelItemPlacements ?? [], geo.modelItemId ?? LEGACY_MODEL_ITEM_ID, geo.modelBody.ref.bodyId,
+    )
+  } catch {
+    return null
+  }
+}
+
+/**
  * Resolve the active stock AABB for open-contour stock-edge linking. The
  * viewport API falls back to its whole stock-group AABB when an id is absent or
  * not rendered, so it is trusted only after proving the scene has one
@@ -3310,48 +3544,6 @@ function worldPlaceParallel3dMoves(
  * No proven block, nothing earlier cut, or any failure: the moves come back as
  * they were - never the reason a compute fails.
  */
-function lowerFinishLinksAfterEarlierOperations(input: {
-  op: Operation
-  tool: Tool
-  moves: ToolpathMove[]
-  /** What the earlier operations left, in the moves' frame (earlierMaterialInPartFrame). */
-  remaining: StockState | undefined
-  preceding?: Parameters<typeof rapidAirFeedsOverRemovedStock>[0]['preceding']
-  clearanceZ: number
-  workholding: readonly ClearanceMesh[]
-  operationLabel: string
-}): { moves: ToolpathMove[]; dependsOnEarlierOperations: boolean } {
-  const { op, tool, moves, remaining } = input
-  const unchanged = { moves, dependsOnEarlierOperations: false }
-  if (!remaining) return unchanged
-  try {
-    const lowered = lowerFinishLinksOverRemovedStock({
-      moves, tool, remaining, clearanceZ: input.clearanceZ,
-      ...(input.workholding.length > 0
-        ? { workholding: input.workholding, workholdingAllowanceMm: clearanceAllowanceMmOf(op.params) }
-        : {}),
-    })
-    if (lowered.candidates > 0) {
-      console.info(
-        operatorText('index40', { value1: String(input.operationLabel), value2: String(lowered.lowered), value3: String(lowered.candidates) }),
-      )
-    }
-    // WO-1641: and no fed move travels through material that is already gone.
-    const air = rapidAirFeedsOverRemovedStock({
-      moves: lowered.moves, tool, remaining, preceding: input.preceding,
-    })
-    if (air.rapided > 0) {
-      console.info(
-        operatorText('index41', { value1: String(input.operationLabel), value2: String(air.rapided), value3: String(air.candidates) }),
-      )
-    }
-    // Either change is only safe given what the earlier operations removed.
-    return { moves: air.moves, dependsOnEarlierOperations: lowered.lowered > 0 || air.rapided > 0 }
-  } catch (err) {
-    console.warn(operatorText('index42', { value1: String(input.operationLabel) }), err)
-    return unchanged
-  }
-}
 
 /**
  * What the earlier operations of the setup left, in a 3D operation's
@@ -3382,6 +3574,7 @@ function earlierMaterialInPartFrame(input: {
       toolpathMoves: candidate.toolpathMoves
         ? worldMovesToLocalFrame(candidate.toolpathMoves, input.position, input.rotZDeg)
         : candidate.toolpathMoves,
+      operationType: candidate.type,
     }))
     const remaining = remainingStockBefore(preceding, {
       min: { x: stockBounds.minX, y: stockBounds.minY, z: stockBounds.minZ },
@@ -3578,8 +3771,11 @@ async function computeParallel3dToolpath(
     // offset), STEP is left as-is (addBrepModel does not recentre), and a
     // modeled body is its display tessellation placed by its Model Item.
     const { partMesh, position: partPosition, rotation: partRotation } =
-      resolveAdaptive3dPartSource(
-        geo, state.project.modelItemPlacements ?? [], importedMesh, operationLabel,
+      cam3dPartAsSetupHoldsIt(
+        resolveAdaptive3dPartSource(
+          geo, state.project.modelItemPlacements ?? [], importedMesh, operationLabel,
+        ),
+        setup, geo, state.project, operationLabel,
       )
     if (partRotation.x !== 0 || partRotation.y !== 0) {
       throw new Error(
@@ -3727,18 +3923,20 @@ async function computeParallel3dToolpath(
     const earlier = earlierMaterialInPartFrame({
       state, setup, op, position: partPosition, rotZDeg: partRotation.z, stockBounds: crashStockBounds, operationLabel,
     })
-    const reach = trimToToolReachInPartFrame({
-      operation: operationLabel, moves: finished.moves, tool, holder: crashHolder, stockBounds: crashStockBounds,
+    const reach = await trimToToolReachOffPage({
+      operation: operationLabel, moves: enforceOperationTravel(finished.moves, op.heights, setup.wcs.origin.z, partPosition.z, resolvedHeights), tool, holder: crashHolder, stockBounds: crashStockBounds,
       plungeRate: resolveFeedrates(tool, op.feedrateOverride).plungeRate,
       part: partMesh, partToleranceMm: params.tolerance, params: op.params, workholding: localWorkholding,
       remainingStock: earlier.remaining, noEarlierOperations: earlier.noEarlierOperations,
       wcsLabel: setup.wcs.label,
-    })
+    }, aborter.signal)
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     // WO-1620: links stay low over what earlier operations removed (rest machining plans its own).
-    const linked = lowerFinishLinksAfterEarlierOperations({
+    const linked = await lowerFinishLinksOffPage({
       op, tool, moves: reach.moves, remaining: earlier.remaining, preceding: earlier.preceding,
       clearanceZ: resolvedHeights.clearanceZ, workholding: localWorkholding, operationLabel,
-    })
+    }, aborter.signal)
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     const moves = linked.moves
     // The trim, links or feeds that rely on what earlier operations removed go
     // stale when those operations change.
@@ -3757,7 +3955,9 @@ async function computeParallel3dToolpath(
 
     // Place the display-local moves into world space (group transform) so the
     // preview polyline and the exported g-code sit on the displayed part.
-    const worldMoves = worldPlaceParallel3dMoves(moves, partPosition, partRotation.z)
+    const worldMoves = worldPlaceParallel3dMoves(
+      enforceOperationTravel(moves, op.heights, setup.wcs.origin.z, partPosition.z, resolvedHeights),
+      partPosition, partRotation.z)
 
     const proj = get().project
     const currentSetup = proj.setups.find((candidate) => candidate.id === setupId)
@@ -3914,7 +4114,10 @@ async function previewParallel3dSmartHeightRuntime(
       ])
     }
     const { partMesh, position: partPosition, rotation: partRotation } =
-      resolveAdaptive3dPartSource(geo, state.project.modelItemPlacements ?? [], importedMesh, operatorText('index73'))
+      cam3dPartAsSetupHoldsIt(
+        resolveAdaptive3dPartSource(geo, state.project.modelItemPlacements ?? [], importedMesh, operatorText('index73')),
+        setup, geo, state.project, operatorText('index73'),
+      )
     if (partRotation.x !== 0 || partRotation.y !== 0) {
       throw new Error(operatorText('index74'))
     }
@@ -4156,8 +4359,11 @@ async function computeWaterline3dToolpath(
     // STL is recentred, STEP is left as-is, and a modeled body is its display
     // tessellation placed by its Model Item - one adapter for all three.
     const { partMesh, position: partPosition, rotation: partRotation } =
-      resolveAdaptive3dPartSource(
-        geo, state.project.modelItemPlacements ?? [], importedMesh, operatorText('index85'),
+      cam3dPartAsSetupHoldsIt(
+        resolveAdaptive3dPartSource(
+          geo, state.project.modelItemPlacements ?? [], importedMesh, operatorText('index85'),
+        ),
+        setup, geo, state.project, operatorText('index85'),
       )
     if (partRotation.x !== 0 || partRotation.y !== 0) {
       throw new Error(
@@ -4244,19 +4450,21 @@ async function computeWaterline3dToolpath(
       state, setup, op, position: partPosition, rotZDeg: partRotation.z, stockBounds: crashStockBounds,
       operationLabel: operatorText('index90'),
     })
-    const reach = trimToToolReachInPartFrame({
-      operation: operatorText('index91'), moves: waterline.moves, tool, holder: crashHolder, stockBounds: crashStockBounds,
+    const reach = await trimToToolReachOffPage({
+      operation: operatorText('index91'), moves: enforceOperationTravel(waterline.moves, op.heights, setup.wcs.origin.z, partPosition.z, resolvedHeights), tool, holder: crashHolder, stockBounds: crashStockBounds,
       plungeRate: resolveFeedrates(tool, op.feedrateOverride).plungeRate,
       part: partMesh, partToleranceMm: heightResolution.strategyParams.tolerance, params: op.params,
       workholding: localWorkholding,
       remainingStock: earlier.remaining, noEarlierOperations: earlier.noEarlierOperations,
       wcsLabel: setup.wcs.label,
-    })
+    }, aborter.signal)
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     // WO-1620: links stay low over what earlier operations removed.
-    const linked = lowerFinishLinksAfterEarlierOperations({
+    const linked = await lowerFinishLinksOffPage({
       op, tool, moves: reach.moves, remaining: earlier.remaining, preceding: earlier.preceding,
       clearanceZ: resolvedHeights.clearanceZ, workholding: localWorkholding, operationLabel: operatorText('index92'),
-    })
+    }, aborter.signal)
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     const moves = linked.moves
     // The trim, links or feeds that rely on what earlier operations removed go
     // stale when those operations change.
@@ -4268,7 +4476,9 @@ async function computeWaterline3dToolpath(
     const notices = [...workholding.notices, ...(waterline.notices ?? []), ...reach.notices]
     for (const limit of reach.uncheckedLimits) console.warn(operatorText('index93', { value1: String(limit) }))
 
-    const worldMoves = worldPlaceParallel3dMoves(moves, partPosition, partRotation.z)
+    const worldMoves = worldPlaceParallel3dMoves(
+      enforceOperationTravel(moves, op.heights, setup.wcs.origin.z, partPosition.z, resolvedHeights),
+      partPosition, partRotation.z)
 
     const proj = get().project
     const currentSetup = proj.setups.find((candidate) => candidate.id === setupId)
@@ -4403,7 +4613,10 @@ async function previewWaterline3dSmartHeightRuntime(
       ])
     }
     const { partMesh, position: partPosition, rotation: partRotation } =
-      resolveAdaptive3dPartSource(geo, state.project.modelItemPlacements ?? [], importedMesh, operatorText('index106'))
+      cam3dPartAsSetupHoldsIt(
+        resolveAdaptive3dPartSource(geo, state.project.modelItemPlacements ?? [], importedMesh, operatorText('index106')),
+        setup, geo, state.project, operatorText('index106'),
+      )
     if (partRotation.x !== 0 || partRotation.y !== 0) {
       throw new Error(operatorText('index107'))
     }
@@ -4867,7 +5080,10 @@ async function previewAdaptive3dSmartHeightRuntime(
       ])
     }
     const { partMesh, position: partPosition, rotation: partRotation } =
-      resolveAdaptive3dPartSource(geo, state.project.modelItemPlacements ?? [], importedMesh)
+      cam3dPartAsSetupHoldsIt(
+        resolveAdaptive3dPartSource(geo, state.project.modelItemPlacements ?? [], importedMesh),
+        setup, geo, state.project, operatorText('index278'),
+      )
     if (partRotation.x !== 0 || partRotation.y !== 0) {
       throw new Error(operatorText('index122'))
     }
@@ -5260,7 +5476,7 @@ export function getOperationStockDomain(setupId: string, stockId: string): {
   const authority = operationStockAuthorityFor(epoch, setupId, stockId, () => {
     const live = useCamStore.getState()
     const liveSetup = live.project.setups.find(candidate => candidate.id === setupId)
-    return buildOperationStockInputs({ epoch: operationStockEpoch(), project: live.project,
+    return { epoch: operationStockEpoch(), project: live.project,
       setup: liveSetup, toolLibrary: live.toolLibrary, stockId,
       stockBounds: smartHeightStockBounds(live.project, stockId),
       stockIdOf: candidate => liveSetup ? operationMaterialStockId(live.project, liveSetup, candidate) : null,
@@ -5275,7 +5491,7 @@ export function getOperationStockDomain(setupId: string, stockId: string): {
         }
         return true
       },
-    })
+    }
   })
   const frame = operationStockWorldFrame(epoch)
   return { authority, frame, finalOperationId: STOCK_END_OPERATION_ID }
@@ -5285,13 +5501,12 @@ function faceMaterialBefore(setup: Setup, op: Operation, stockId: string,
   stockBounds: { min: Vec3; max: Vec3 }, region: MaterialRegionXY | undefined) {
   if (!region) throw new Error('Face material region is unavailable.')
   const { authority, frame, finalOperationId } = getOperationStockDomain(setup.id, stockId)
-  const read = authority.readBefore({ beforeOperationId: setup.operations.some(candidate => candidate.id === op.id)
-    ? op.id : finalOperationId, frame, maxCellMm: Number.MAX_VALUE })
+  const { read, query } = authority.readBeforeAndQuery({ beforeOperationId: setup.operations.some(candidate => candidate.id === op.id)
+    ? op.id : finalOperationId, frame, maxCellMm: Number.MAX_VALUE }, { kind: 'highest-material', frame,
+    bounds: { ...region, minZ: stockBounds.min.z, maxZ: stockBounds.max.z } })
   if (read.status === 'recomputing') throw new FaceStockPending(authority, read)
   if (read.status !== 'ready') throw new Error(read.reason)
-  const query = authority.query(read.token, { kind: 'highest-material', frame,
-    bounds: { ...region, minZ: stockBounds.min.z, maxZ: stockBounds.max.z } })
-  if (query.status !== 'ready') throw new Error(query.reason)
+  if (!query || query.status !== 'ready') throw new Error(query?.reason ?? 'Stock query is unavailable.')
   if (typeof query.value !== 'number') throw new Error('No remaining material intersects the Face region.')
   const material: EarlierMaterialStart = {
     evidence: { stockId, artifactId: `shared-stock:${read.snapshotId}`,
@@ -5325,7 +5540,20 @@ async function readyFaceSmartRuntime(get: () => CamStore, setupId: string, draft
     try { return resolveFaceSmartRuntime({ state, setup, op }) } catch (error) {
       if (!(error instanceof FaceStockPending)) throw error
       const id = error.read.waitingFor[0]
-      if (!id) { await nextOperationStockChange(error.authority); continue }
+      if (!id) {
+        // WO-3206: edited inputs are first prepared off the renderer (WO-3126),
+        // so this read names no predecessor yet. One computing now is one this
+        // request waits on, as a synchronous read would have named it: if it
+        // ends without current removal (cancelled or stale) it is not restarted.
+        for (const candidate of setup.operations) {
+          if (candidate.id !== op.id && toolpathComputesInFlightByOp.get(candidate.id)?.size) attempted.add(candidate.id)
+        }
+        await nextOperationStockChange(error.authority)
+        // WO-3126: do not concatenate authority publication and the retry's
+        // exact live material scan in the same renderer turn.
+        await new Promise<void>(resolve => setTimeout(resolve, 16))
+        continue
+      }
       const running = toolpathComputesInFlightByOp.get(id)
       if (running?.size) {
         await Promise.allSettled([...running])
@@ -5972,6 +6200,36 @@ function sameStableFeature(
     left.stableId === right.stableId &&
     left.sourceVersion === right.sourceVersion &&
     left.sourceFingerprint === right.sourceFingerprint
+}
+
+/** Carry authored planes/overrides across a proven one-to-one wall binding.
+ * Physical dimensions may change; the saved topology selection is the authority.
+ * Never relax the ordinary Drill/Bore stable-feature scope check. */
+function rebindBoreFeatureIntent(
+  op: Operation,
+  pairs: { before: StableFeatureReference; after: StableFeatureReference }[],
+): Operation {
+  const validated = validatePersistedSmartHeightState(op.smartHeight)
+  if (!validated.ok) throw new ModelBodyDeriveError('Bore: invalid saved height authority.')
+  const intent = validated.state.intent
+  if (intent.policy.variant !== 'detected_features') return op
+  const scope = intent.machining.scope.value
+  if (scope.kind !== 'selected_features' || scope.features.length !== pairs.length) {
+    throw new ModelBodyDeriveError('Bore: saved feature scope does not match selected walls.')
+  }
+  const carry = (feature: StableFeatureReference) => {
+    const matches = pairs.filter(pair => sameStableFeature(pair.before, feature))
+    if (matches.length !== 1) throw new ModelBodyDeriveError('Bore: saved feature identity does not match its selected wall.')
+    return matches[0].after
+  }
+  return { ...op, smartHeight: { kind: 'smart_v2', intent: {
+    ...intent,
+    machining: { ...intent.machining, scope: { ...intent.machining.scope,
+      value: { kind: 'selected_features', features: scope.features.map(carry) } } },
+    ...(intent.featureOverrides ? { featureOverrides: intent.featureOverrides.map(override => ({
+      ...override, feature: carry(override.feature),
+    })) } : {}),
+  } } }
 }
 
 /** One Contour authority adapter shared by preview and dispatch. It rebuilds
@@ -6805,6 +7063,17 @@ function resolveChamferSmartRuntime(input: {
   const edgeChainGeo = edgeChainRef !== undefined && uiReference === 'geometry_face'
     ? state.project.geometry.find(geometry => geometry.id === params.geometryId)
     : undefined
+  // WO-3188 (owner request 2026-10-27, gap S2D-01): a plain DXF/SVG outline carries no
+  // height, so its "geometry" plane is wherever the import put it - usually the
+  // stock bottom, which ran the chamfer under the part. When no datum was
+  // chosen (policy-owned, Smart start) it is the stock top instead; the
+  // earlier-material lookup below then lowers it to the material actually left
+  // there. A chosen or saved reference - Geometry included, at any offset -
+  // keeps meaning exactly what it says (WO-3188 audit F1).
+  const heightlessOutlineDefault = edgeChainRef === undefined &&
+    uiReference === 'geometry_face' && plane.owner.kind === 'operation_policy' &&
+    !intent.planeOverrides?.top && intent.machining.start.owner.kind !== 'user_override' &&
+    sourcesAreHeightlessOutlines(geoSources, selectedLoopIds)
   const datumWcsMm = edgeChainRef !== undefined && edgeChainGeo !== undefined && isModelOriginGeometry(edgeChainGeo)
     ? modelEdgeChainPlaneWcsZ({
         opType: op.type,
@@ -6817,7 +7086,7 @@ function resolveChamferSmartRuntime(input: {
         placementRecords: state.project.modelItemPlacements ?? [],
       }) + plane.offsetMm
     : resolveTopZ(
-        uiReference,
+        heightlessOutlineDefault ? 'stock_top' : uiReference,
         plane.offsetMm,
         setup,
         state.project.sceneStock,
@@ -6956,8 +7225,45 @@ interface ModelOriginDerivation {
   geoSources: ImportedGeometry[]
   /** Drill: the live stamped hole loop ids compute must select. */
   drillLoopIds?: string[]
+  boreOp?: Operation
   /** Edge chain: the derived chain loop ids compute must select. */
   edgeChainLoopIds?: string[]
+}
+
+class BoreSourceSupersededError extends Error {}
+
+/** A closed-model replay may continue in the shared kernel for other readers,
+ * but this compute must stop waiting as soon as its source revision leaves.
+ * Do not let a late success OR error write into the restored project. */
+async function readCurrentBoreFeatures(
+  state: CamStore, op: Operation, refGeo: ImportedGeometry, setupId: string,
+  bodyId: string, modelItemId: string,
+) {
+  const isCurrent = () => {
+    const live = useCamStore.getState()
+    return live.project.id === state.project.id &&
+      live.project.geometry.find(g => g.id === refGeo.id) === refGeo &&
+      live.project.modelItems?.find(m => m.id === modelItemId) === state.project.modelItems?.find(m => m.id === modelItemId) &&
+      live.project.modelItemPlacements === state.project.modelItemPlacements &&
+      live.project.setups.find(s => s.id === setupId)?.operations.find(o => o.id === op.id) === op
+  }
+  let rejectChanged!: (error: Error) => void
+  const changed = new Promise<never>((_, reject) => { rejectChanged = reject })
+  const check = () => { if (!isCurrent()) rejectChanged(new BoreSourceSupersededError()) }
+  const unsubscribe = useCamStore.subscribe(check)
+  try {
+    const read = async () => {
+      if (!isCurrent()) throw new BoreSourceSupersededError()
+      await ensureDocumentArchiveHydrated(
+        state.project.id, modelItemId, state.project.modelItems?.find(m => m.id === modelItemId),
+      )
+      if (!isCurrent()) throw new BoreSourceSupersededError()
+      return readModelBodyBoreFeatureResult(bodyId, modelItemId)
+    }
+    const result = await Promise.race([changed, read()])
+    if (!isCurrent()) throw new BoreSourceSupersededError()
+    return result
+  } finally { unsubscribe() }
 }
 
 interface ModelOriginDerivationHooks {
@@ -6966,6 +7272,8 @@ interface ModelOriginDerivationHooks {
   refreshStaleSections?: (opLoopIds: string[]) => { state: CamStore; opLoopIds: string[] }
   /** Compute only: persist the edge-chain migration note on the op. */
   onEdgeChainNote?: (note: string | undefined) => void
+  readBoreFeatures?: typeof readModelBodyBoreFeatureResult
+  onBoreRefresh?: (geometry: ImportedGeometry, op: Operation) => void
 }
 
 async function deriveModelOriginGeoSources(args: {
@@ -7034,6 +7342,7 @@ async function deriveModelOriginGeoSources(args: {
   // op has no such selection (op.params.loopIds empty) keeps
   // Stage 2's existing behavior byte-identical for every
   // model-origin profile op that never ran Section-at-Z.
+  let boreOp: Operation | undefined
   let opLoopIds = (op.params as { loopIds?: string[] }).loopIds ?? []
   if (opLoopIds.length > 0 && hooks.refreshStaleSections) {
     const refreshed = hooks.refreshStaleSections(opLoopIds)
@@ -7114,12 +7423,30 @@ async function deriveModelOriginGeoSources(args: {
         operatorText('index479', { value1: String(opLabel), value2: String(subject) }),
       )
     }
+    if (!isThreadMillTarget) {
+      const selectedWalls = new Set(boreTargetRef?.boreFeatures?.map(b => b.loopId) ?? [])
+      const unresolved = (refGeo.layers2d ?? []).filter(layer => layer.id.startsWith('bore_detect:'))
+        .flatMap(layer => (layer.cylinders ?? []).filter(c => c.loopId && opLoopIds.includes(c.loopId) && !selectedWalls.has(c.loopId))
+          .map(c => {
+            const local = layer.frame === 'geometry_local'
+            const pose = local ? resolveModelReferenceFrame(state.project.modelItemPlacements ?? [],
+              resolveOwningModelItemId(refGeo) ?? LEGACY_MODEL_ITEM_ID, bodyId) : refGeo
+            const center = local ? transformLoopPoints([{ x: c.center[0], y: c.center[1] }], pose)[0]
+              : { x: c.center[0], y: c.center[1] }
+            const number = (n: number) => Number(n.toFixed(3)).toString()
+            return `d${number(c.diameter)} at X${number(center.x)} Y${number(center.y)}`
+          }))
+      if (unresolved.length) throw new ModelBodyDeriveError(
+        `Bore: selected detected target(s) ${unresolved.join(', ')} could not be carried to the modeled body.`,
+      )
+    }
     if (!boreTargetRef) {
       throw new ModelBodyDeriveError(
         operatorText('index480', { value1: String(opLabel), value2: String(subject), value3: String(wallLabel) }),
       )
     }
-    if (boreTargetRef.stableIds.length !== 1) {
+    if (boreTargetRef.stableIds.length === 0 ||
+        ((isThreadMillTarget || !boreTargetRef.boreFeatures) && boreTargetRef.stableIds.length !== 1)) {
       throw new ModelBodyDeriveError(
         operatorText('index481', { value1: String(opLabel), value2: String(subject), value3: String(boreTargetRef.stableIds.length), value4: String(wallLabel) }),
       )
@@ -7127,10 +7454,18 @@ async function deriveModelOriginGeoSources(args: {
     const faceStableId = boreTargetRef.stableIds[0]
     // WO-365: same self-heal as the drill-targets branch above.
     const modelItemId = resolveOwningModelItemId(refGeo) ?? LEGACY_MODEL_ITEM_ID
-    await ensureDocumentArchiveHydrated(
-      state.project.id, modelItemId, state.project.modelItems?.find((m) => m.id === modelItemId),
-    )
-    const { snapshot, verdicts } = await readModelBodyFaceFacts(bodyId, faceStableId, modelItemId)
+    if (!hooks.readBoreFeatures || isThreadMillTarget || !boreTargetRef.boreFeatures) {
+      await ensureDocumentArchiveHydrated(
+        state.project.id, modelItemId, state.project.modelItems?.find((m) => m.id === modelItemId),
+      )
+    }
+    const boreResult = !isThreadMillTarget && boreTargetRef.boreFeatures
+      ? await (hooks.readBoreFeatures ?? readModelBodyBoreFeatureResult)(bodyId, modelItemId)
+      : undefined
+    const { snapshot, verdicts } = boreResult
+      ? { snapshot: boreResult.snapshots[faceStableId], verdicts: boreResult.verdicts }
+      : await readModelBodyFaceFacts(bodyId, faceStableId, modelItemId)
+    if (!snapshot) throw new ModelBodyDeriveError(`Bore: selected wall "${faceStableId}" is unavailable.`)
     if (isThreadMillTarget) {
       const derived = deriveModelThreadMillTarget(
         refGeo, state.project.modelItemPlacements ?? [], faceStableId, snapshot, verdicts,
@@ -7148,19 +7483,91 @@ async function deriveModelOriginGeoSources(args: {
         }],
       }]
     } else {
-      const derived = deriveModelBodyBoreTarget(
-        refGeo, state.project.modelItemPlacements ?? [], faceStableId, snapshot, verdicts,
-      )
+      // WO-3169: replay only the saved walls, never all newly recognized holes.
+      // Keep the legacy one-wall reference and Thread Mill's single-wall meaning.
+      const selections = boreTargetRef.boreFeatures
+      const faces = selections?.map(binding => binding.faceStableId) ?? [faceStableId]
+      if (faces.length === 0 || new Set(faces).size !== faces.length ||
+          faces.length !== boreTargetRef.stableIds.length ||
+          faces.some(face => !boreTargetRef.stableIds.includes(face)) ||
+          (selections && (new Set(selections.map(binding => binding.loopId)).size !== selections.length ||
+            selections.some(binding => !binding.loopId.trim())))) {
+        throw new ModelBodyDeriveError('Bore: selected feature bindings do not match their saved walls.')
+      }
+      const targets = faces.map((selectedFace, i) => {
+        const selectedSnapshot = boreResult?.snapshots[selectedFace] ?? (selectedFace === faceStableId ? snapshot : undefined)
+        if (!selectedSnapshot) throw new ModelBodyDeriveError(`Bore: selected wall "${selectedFace}" is unavailable.`)
+        const target = deriveModelBodyBoreTarget(
+          refGeo, state.project.modelItemPlacements ?? [], selectedFace, selectedSnapshot, verdicts, selections?.[i].wallRim, boreResult?.snapshots,
+        )
+        // Imported discovery loops can already belong to other CAM consumers.
+        // The stable wall controls identity; retain the saved routing id.
+        const loopId = selections?.[i].loopId ?? target.loop.id
+        return { ...target, loop: { ...target.loop, id: loopId }, cylinder: { ...target.cylinder, loopId } }
+      })
+      if (selections) {
+        const fresh = deriveDrillBoreFeatureBindings([{
+          ...refGeo, loops: targets.map(t => t.loop),
+          layers2d: [{ id: 'model_bore_target', name: 'Bores', color: '#888888', visible: true,
+            cylinders: targets.map(t => t.cylinder) }],
+        }], targets.map(t => t.loop.id), 'bore')
+        if (!fresh.ok) throw new ModelBodyDeriveError(fresh.refusals.map(r => r.message).join(' '))
+        boreOp = rebindBoreFeatureIntent(op, selections.map((binding, i) => ({
+          before: { modelItemId, bodyId: binding.bodyId ?? boreTargetRef.bodyId, featureKind: 'detected_bore',
+            stableId: binding.sourceKey, sourceVersion: 1, sourceFingerprint: binding.sourceFingerprint },
+          after: fresh.bindings[i].feature,
+        })))
+        boreOp = { ...boreOp, modelReferences: boreOp.modelReferences?.map(ref => ref !== boreTargetRef ? ref : {
+          ...ref, boreFeatures: selections.map((binding, i) => ({ ...binding,
+            bodyId, sourceKey: targets[i].target.featureKey,
+            sourceFingerprint: targets[i].cylinder.sourceIdentity!.sourceFingerprint,
+          })),
+        }) }
+        // Update only discovery layers carrying explicit wall provenance. Sections,
+        // manual cylinders and other consumers remain point-in-time snapshots.
+        const replacements = new Map<string, ReturnType<typeof deriveModelBodyBoreTarget>>()
+        for (const layer of refGeo.layers2d ?? []) {
+          for (const binding of layer.modelBoreFeatures ?? []) {
+            const face = boreResult?.snapshots[binding.faceStableId]
+            if (!face) continue // selected lost walls already refuse above
+            try {
+              replacements.set(binding.loopId, deriveModelBodyBoreTarget(
+                refGeo, state.project.modelItemPlacements ?? [], binding.faceStableId, face, verdicts, binding.wallRim, boreResult?.snapshots,
+              ))
+            } catch {
+              // Selected walls were validated above. Another operation's or an
+              // unchecked discovery's refresh cannot veto this selected Bore.
+            }
+          }
+        }
+        hooks.onBoreRefresh?.({
+          ...refGeo,
+          loops: refGeo.loops?.map(loop => {
+            const target = replacements.get(loop.id)
+            return target ? { ...target.loop, id: loop.id, layerId: loop.layerId } : loop
+          }),
+          layers2d: refGeo.layers2d?.map(layer => !layer.modelBoreFeatures ? layer : {
+            ...layer, frame: undefined,
+            projectionPlane: layer.projectionPlane ? { ...layer.projectionPlane, origin: { ...layer.projectionPlane.origin,
+              z: Math.max(...(layer.cylinders ?? []).map(c => replacements.get(c.loopId ?? '')?.cylinder.topZ ?? c.topZ)) } } : undefined,
+            cylinders: layer.cylinders?.map(cylinder => {
+              const target = replacements.get(cylinder.loopId ?? '')
+              return target ? { ...target.cylinder, loopId: cylinder.loopId } : cylinder
+            }),
+          }),
+          loopsVersion: (refGeo.loopsVersion ?? 0) + (replacements.size ? 1 : 0),
+        }, boreOp)
+      }
       geoSources = [{
         ...refGeo,
-        loops: [derived.loop],
+        loops: targets.map(target => target.loop),
         layers2d: [{
           id: 'model_bore_target',
           name: operatorText('index483'),
           color: '#888888',
           visible: true,
           derived: true,
-          cylinders: [derived.cylinder],
+          cylinders: targets.map(target => target.cylinder),
         }],
       }]
     }
@@ -7208,7 +7615,7 @@ async function deriveModelOriginGeoSources(args: {
       ? modelEdgeChainSourceGeometry(op.type, refGeo, derivedLoops)
       : { ...refGeo, loops: derivedLoops }]
   }
-  return { geoSources, drillLoopIds, edgeChainLoopIds }
+  return { geoSources, drillLoopIds, edgeChainLoopIds, boreOp }
 }
 
 /** The Smart-Height preview's model-body source: the SAME derivation compute
@@ -7238,7 +7645,7 @@ async function previewModelOriginGeoSources(
       geoSources: derivation.geoSources,
       op: derivation.drillLoopIds
         ? { ...op, params: { ...op.params, loopIds: derivation.drillLoopIds } } as Operation
-        : op,
+        : derivation.boreOp ?? op,
     }
   } catch (err) {
     if (err instanceof ModelBodyDeriveError) throw new Error(err.message, { cause: err })
@@ -7987,10 +8394,13 @@ async function computeAdaptive3dToolpath(
     }
     if (computeGeneration !== cam3dComputeRuntime.generation) return
     const { partMesh, position: partPosition, rotation: partRotation } =
-      resolveAdaptive3dPartSource(
-        geo,
-        state.project.modelItemPlacements ?? [],
-        importedMesh,
+      cam3dPartAsSetupHoldsIt(
+        resolveAdaptive3dPartSource(
+          geo,
+          state.project.modelItemPlacements ?? [],
+          importedMesh,
+        ),
+        setup, geo, state.project, operatorText('index278'),
       )
     if (partRotation.x !== 0 || partRotation.y !== 0) {
       throw new Error(
@@ -8339,14 +8749,15 @@ async function computeAdaptive3dToolpath(
     } = strategyResult
     // WO-1678: the one tool-reach seam, straight after the strategy. The block is
     // the block as loaded (crashStockBounds), never the rougher's field box.
-    const reach = trimToToolReachInPartFrame({
-      operation: operatorText('index287'), moves: strategyMoves, tool, holder: resolveCrashGuardHolder(state, tool),
+    const reach = await trimToToolReachOffPage({
+      operation: operatorText('index287'), moves: enforceOperationTravel(strategyMoves, op.heights, setup.wcs.origin.z, partPosition.z, resolvedHeights), tool, holder: resolveCrashGuardHolder(state, tool),
       plungeRate: resolveFeedrates(tool, op.feedrateOverride).plungeRate,
       stockBounds: crashStockBounds, part: partMesh, partToleranceMm: planParams.tolerance, params: op.params,
       workholding: localWorkholding,
       remainingStock: earlier.remaining, noEarlierOperations: earlier.noEarlierOperations,
       wcsLabel: setup.wcs.label, dropEmptyVisits: ADAPTIVE_ENTRY_POLICY.entriesAtMaterial,
-    })
+    }, aborter.signal)
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     const moves = reach.moves
     const notices = [...(strategyNotices ?? []), ...reach.notices]
     for (const limit of reach.uncheckedLimits) console.warn(operatorText('index288', { value1: String(limit) }))
@@ -8361,8 +8772,12 @@ async function computeAdaptive3dToolpath(
       heightSnapshotIntent,
     )
 
-    const worldMoves = worldPlaceParallel3dMoves(moves, partPosition, partRotation.z)
+    const worldMoves = worldPlaceParallel3dMoves(
+      enforceOperationTravel(moves, op.heights, setup.wcs.origin.z, partPosition.z, resolvedHeights),
+      partPosition, partRotation.z)
 
+    await primeOperationStockMoves(worldMoves, aborter.signal)
+    if (computeGeneration !== cam3dComputeRuntime.generation) return
     const proj = get().project
     const currentSetup = proj.setups.find((candidate) => candidate.id === setupId)
     const currentOp = currentSetup?.operations.find((candidate) => candidate.id === opId)
@@ -8699,7 +9114,7 @@ function markModelBodyBoundOpsOutdated(
  *  neither the source's current leaf nor its lineage root (the rare path). No
  *  document, or one that will not decode, answers "unknown" - which leaves the
  *  compute guard's strict named refusal in place, never a guess. */
-function modelItemHistoricalLineageLookup(
+export function modelItemHistoricalLineageLookup(
   modelItemId: string | null | undefined,
 ): (bodyId: string) => string | undefined {
   const scope = modelItemId ?? LEGACY_MODEL_ITEM_ID
@@ -8849,12 +9264,25 @@ let pendingDimensionApply: {
   requestId: string
   dimId: string
   label: string
+  history?: DimensionPlacementHistory
   revert:
     | { kind: 'remove' }                    // fresh placement
     | { kind: 'restore'; value: number; expression?: string; d2?: number }  // value edit
                                             // (d2: the chamfer setback pair's second half)
     | { kind: 'toReference' }               // reference -> driving toggle
 } | null = null
+
+// WO-3133: placement and its initial value form ONE authored transaction.
+// Keep this identity past the measured solve; that verdict is not value acceptance.
+type DimensionHistoryState = Pick<CamStore,
+  'projectHistory' | 'sketchHistory' | 'toolSlicesHistory' |
+  'projectFuture' | 'sketchFuture' | 'toolSlicesFuture' | 'canUndo' | 'canRedo'>
+interface DimensionPlacementHistory {
+  top: Project
+  before: DimensionHistoryState
+}
+let lastSketchHistoryPush: (DimensionPlacementHistory & { sketch: Sketch | null }) | null = null
+let dimensionPlacement: (DimensionPlacementHistory & { dimId: string; epoch: number }) | null = null
 
 // In-flight append() commit awaiting its solve verdict, scoped to the case
 // that actually carries snap-INFERRED constraints (Point-on-object/H/V/etc
@@ -9441,7 +9869,8 @@ export function outdatedReasonText(reason: OperationOutdatedReason): string {
  * does not. Same shape as the persisted field generationFingerprint.ts reads.
  */
 function withRestStockDependency(operation: Operation, dependsOnRestStock: boolean): Operation {
-  return { ...operation, dependsOnPredecessors: dependsOnRestStock || undefined } as Operation
+  // WO-3221: a tab removal contour depends on its source whatever the reach trim read.
+  return { ...operation, dependsOnPredecessors: dependsOnRestStock || hasTabRemovalBinding(operation) || undefined } as Operation
 }
 
 /** The operation types the store sends to the 2D toolpath worker (the reach trim with remaining stock). */
@@ -9449,6 +9878,331 @@ const WORKER_2D_OPERATION_TYPES: ReadonlySet<Operation['type']> = new Set<Operat
   'face', 'contour_2d', 'pocket_2d', 'adaptive_clearing_2d', 'drill', 'bore',
   'thread_mill', 'engrave', 'vcarve', 'chamfer',
 ])
+
+// ── WO-3220: Suggest tab locations (Properties > Holding tabs) ──────────────
+// The command reads what the dispatch that derived contourTabPreview read: the
+// directed finish paths, the source loop rings, the setup's workholding and the
+// cutter. Those are captured here, transient and keyed by the preview's
+// sourceKey - never on the operation, so no saved form, undo snapshot or
+// fingerprint carries them. The key is the operation's regeneration inputs
+// with the tab PLACEMENT fields removed (count, width, shape and locations do
+// not move the finish path), plus the workholding placement: a moved WCS,
+// another tool or cut hand, an edited or deleted source, or a moved clamp each
+// leave the captured inputs not current, and the command says so. Apply writes
+// ordinary tabLocations fractions in one updateOperation (one undo step) and
+// only for loops that have none; hand-placed loops are never touched.
+
+export interface ContourTabLoopSuggestion {
+  loopId: string
+  /** The loop already has hand-placed tabs: Suggest leaves it exactly as is. */
+  skipped?: 'hand-placed'
+  fractions: number[]
+  /** Arc distance of each suggested center from the seam along the cut, mm. */
+  distances: number[]
+  perimeter: number
+  found: number
+  requested: number
+  /** Why candidate positions were rejected: reason -> how many positions. */
+  reasons: Record<string, number>
+  omissions: string[]
+  diagnostics: string[]
+}
+
+export interface ContourTabSuggestion {
+  projectId: string
+  setupId: string
+  opId: string
+  sourceKey: string
+  count: number
+  width: number
+  loops: ContourTabLoopSuggestion[]
+  /** Totals over the loops Suggest may seed (hand-placed loops excluded). */
+  found: number
+  requested: number
+}
+
+export type ContourTabSuggestRefusal =
+  | 'missing' | 'not-contour' | 'open' | 'roughing' | 'tabs-off'
+  | 'generate-first' | 'stale' | 'all-hand-placed'
+
+export type ContourTabSuggestOutcome =
+  | { ok: true; suggestion: ContourTabSuggestion }
+  | { ok: false; reason: ContourTabSuggestRefusal }
+
+export type ContourTabApplyOutcome =
+  | { ok: true; applied: number; loopIds: string[]; noneLoopIds: string[] }
+  | { ok: false; reason: ContourTabSuggestRefusal | 'changed' | 'nothing-found'; recomputed?: ContourTabSuggestion }
+
+interface ContourTabSuggestionSource {
+  projectId: string
+  setupId: string
+  opId: string
+  sourceKey: string
+  cutterRadius: number
+  loops: Array<{ loopId: string; path: Vec2[]; perimeter: number; sourceRings: TabSourceRing[] }>
+  fixtures: { obstacles: Obstacle[]; omissions: ObstacleOmission[] }
+  cuttingBand?: KeepOutLevel
+}
+
+const CONTOUR_TAB_SOURCE_LIMIT = 64
+const contourTabSuggestionSources = new Map<string, ContourTabSuggestionSource>()
+const contourTabSourceSlot = (projectId: string, setupId: string, opId: string, sourceKey: string) =>
+  `${projectId}\u0000${setupId}\u0000${opId}\u0000${sourceKey}`
+
+function rememberContourTabSuggestionSource(source: ContourTabSuggestionSource): void {
+  const slot = contourTabSourceSlot(source.projectId, source.setupId, source.opId, source.sourceKey)
+  contourTabSuggestionSources.delete(slot)
+  contourTabSuggestionSources.set(slot, source)
+  while (contourTabSuggestionSources.size > CONTOUR_TAB_SOURCE_LIMIT) {
+    contourTabSuggestionSources.delete(contourTabSuggestionSources.keys().next().value as string)
+  }
+}
+
+function fnv1aText(text: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(16)
+}
+
+/** What the finish paths a contour's tab preview shows were derived from. */
+export function contourTabSourceKey(
+  project: Project, setup: Setup, op: Operation, resolveTool: (toolId: string) => Tool | undefined,
+): string {
+  const { tabLocations: _locations, tabCount: _count, tabWidth: _width, tabShape: _shape, ...placementFree } =
+    op.params as unknown as ContourParams
+  const inputs = operationRegenerationInputsKey(
+    project, setup, { ...op, params: placementFree as unknown as Operation['params'] }, resolveTool,
+  )
+  return `${inputs}|wh:${fnv1aText(JSON.stringify({
+    workholding: project.workholding ?? null, placements: project.modelItemPlacements ?? null,
+  }))}`
+}
+
+/** Source rings for one target loop: what encloses it is material around it,
+ *  what it encloses is a hole; the target itself is a hole when enclosed. */
+function contourTabSourceRings(target: LoopData, closed: readonly LoopData[]): TabSourceRing[] {
+  const inside = (inner: LoopData, outer: LoopData) =>
+    inner.points.length > 0 && pointInPolygon(inner.points[0], outer.points)
+  return closed.map((loop) => {
+    if (loop.id === target.id) {
+      const enclosed = closed.some((other) => other.id !== target.id && inside(target, other))
+      return { loopId: loop.id, path: loop.points, kind: enclosed ? 'hole' : 'boundary' }
+    }
+    return { loopId: loop.id, path: loop.points, kind: inside(loop, target) ? 'hole' : 'boundary' }
+  })
+}
+
+/** Each workholding body as its world bounding box over its whole Z range:
+ *  a conservative footprint (never smaller than the body). */
+function contourTabFixtureObstacles(
+  workholding: Awaited<ReturnType<typeof resolveWorkholdingObstacles>>,
+): { obstacles: Obstacle[]; omissions: ObstacleOmission[] } {
+  const obstacles: Obstacle[] = []
+  const omissions: ObstacleOmission[] = []
+  workholding.meshes.forEach((mesh, i) => {
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    for (let k = 0; k + 2 < mesh.positions.length; k += 3) {
+      const x = mesh.positions[k], y = mesh.positions[k + 1], z = mesh.positions[k + 2]
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z)
+    }
+    const id = `workholding-${i + 1}`
+    if (![minX, minY, minZ, maxX, maxY, maxZ].every(Number.isFinite)) {
+      omissions.push({ id, reason: 'unreadable-mesh', line: id })
+      return
+    }
+    obstacles.push({ id, name: id, kind: 'fixture', footprint: { minX, minY, maxX, maxY }, bottomZ: minZ, topZ: maxZ })
+  })
+  for (const omission of workholding.availability?.omissions ?? []) {
+    omissions.push({ id: omission.instanceId, reason: 'unreadable-mesh', line: omission.instanceId })
+  }
+  return { obstacles, omissions }
+}
+
+const CONTOUR_TAB_STALE_PATCH = {
+  status: 'pending' as const,
+  toolpathMoves: undefined,
+  computeTimeMs: undefined,
+  estimatedCutTimeMs: undefined,
+  estimatedCutTimeMsError: undefined,
+  errorMessage: undefined,
+  diagnostics: undefined,
+  resolvedHeights: undefined,
+  resolvedHeightPlan: undefined,
+  generationFingerprint: undefined,
+}
+
+function suggestContourTabsFromState(
+  state: Pick<CamStore, 'project' | 'toolLibrary'>, setupId: string, opId: string,
+): ContourTabSuggestOutcome {
+  const setup = state.project.setups.find((candidate) => candidate.id === setupId)
+  const op = setup?.operations.find((candidate) => candidate.id === opId)
+  if (!setup || !op) return { ok: false, reason: 'missing' }
+  if (op.type !== 'contour_2d') return { ok: false, reason: 'not-contour' }
+  const params = op.params as unknown as ContourParams
+  if ((params.pathType ?? 'closed') === 'open') return { ok: false, reason: 'open' }
+  if ((op.passes?.stockToLeave ?? 0) > 0) return { ok: false, reason: 'roughing' }
+  if (params.tabs !== true) return { ok: false, reason: 'tabs-off' }
+  const preview = op.contourTabPreview
+  if (!preview || !Array.isArray(preview.loops) || preview.loops.length === 0) return { ok: false, reason: 'generate-first' }
+  const liveKey = contourTabSourceKey(state.project, setup, op, (toolId) => state.toolLibrary.find((t) => t.id === toolId))
+  const source = preview.sourceKey === liveKey
+    ? contourTabSuggestionSources.get(contourTabSourceSlot(state.project.id, setupId, opId, liveKey))
+    : undefined
+  if (!source) return { ok: false, reason: 'stale' }
+  const count = Math.max(1, Math.round(params.tabCount ?? DEFAULT_CONTOUR_TABS.count))
+  const width = params.tabWidth ?? DEFAULT_CONTOUR_TABS.width
+  const loops: ContourTabLoopSuggestion[] = source.loops.map((loop) => {
+    // A loop already set by hand, by an earlier Apply, or to 'none' by one is
+    // not reseeded (Reset to even spacing clears them all).
+    if (contourLoopHasTabLocations(params, loop.loopId)) {
+      return { loopId: loop.loopId, skipped: 'hand-placed', fractions: [], distances: [], perimeter: loop.perimeter,
+        found: 0, requested: 0, reasons: {}, omissions: [], diagnostics: [] }
+    }
+    const result = suggestTabFractions({
+      path: loop.path, loopId: loop.loopId, count, width, cutterRadius: source.cutterRadius,
+      sourceRings: loop.sourceRings, fixtures: source.fixtures, cuttingBand: source.cuttingBand,
+    })
+    const selected = result.candidates.filter((candidate) => candidate.selected)
+      .sort((a, b) => a.fraction - b.fraction)
+    const reasons: Record<string, number> = {}
+    for (const candidate of result.candidates) {
+      // 'separation' / 'not-selected' are the packing's own bookkeeping, not a place avoided.
+      for (const reason of candidate.reasons) {
+        if (reason !== 'separation' && reason !== 'not-selected') reasons[reason] = (reasons[reason] ?? 0) + 1
+      }
+    }
+    return {
+      loopId: loop.loopId, fractions: [...result.fractions].sort((a, b) => a - b),
+      distances: selected.map((candidate) => candidate.distance), perimeter: loop.perimeter,
+      found: result.found, requested: result.requested, reasons,
+      omissions: result.omissions, diagnostics: result.diagnostics,
+    }
+  })
+  const seeded = loops.filter((loop) => !loop.skipped)
+  if (seeded.length === 0) return { ok: false, reason: 'all-hand-placed' }
+  return { ok: true, suggestion: {
+    projectId: state.project.id, setupId, opId, sourceKey: liveKey, count, width, loops,
+    found: seeded.reduce((n, loop) => n + loop.found, 0),
+    requested: seeded.reduce((n, loop) => n + loop.requested, 0),
+  } }
+}
+
+function contourLoopHasTabLocations(params: ContourParams, loopId: string): boolean {
+  const at = params.tabLocations?.[loopId]
+  return at === 'none' || (Array.isArray(at) && at.length > 0)
+}
+
+function sameContourTabSuggestion(a: ContourTabSuggestion, b: ContourTabSuggestion): boolean {
+  return a.projectId === b.projectId && a.setupId === b.setupId && a.opId === b.opId
+    && a.sourceKey === b.sourceKey && a.count === b.count && a.width === b.width
+    && JSON.stringify(a.loops.map((l) => [l.loopId, l.skipped ?? '', l.fractions]))
+      === JSON.stringify(b.loops.map((l) => [l.loopId, l.skipped ?? '', l.fractions]))
+}
+
+// ── WO-3221: Create tab removal contour (Properties > Holding tabs) ──────────
+// The review and the creation read the same source tab plan the planner cuts
+// (contourTabRemoval.ts, through the preview the dispatch derived). Creation
+// is one typed 'operation.add' transaction: one undo step that removes only
+// the cleanup. The source operation is never written.
+
+export type ContourTabRemovalReviewOutcome =
+  | { ok: true; targets: ContourTabRemovalTarget[]; loopIds: string[]
+      holdingMethod?: Setup['holdingMethod']; notes: string }
+  | { ok: false; reason: ContourTabRemovalRefusal }
+
+export type ContourTabRemovalCreateOutcome =
+  | { ok: true; operationId: string; name: string }
+  | { ok: false; reason: ContourTabRemovalRefusal | 'rejected' }
+
+/** What the remaining stock before the cleanup says at the targeted tabs. An
+ *  upper envelope proves air above it, never that a tab is intact or strong. */
+export type ContourTabRemovalMaterial =
+  | { status: 'ready'; retained: number; count: number }
+  | { status: 'unavailable'; reason: string }
+
+function tabRemovalComputeText(reason: ContourTabRemovalComputeRefusal): string {
+  switch (reason) {
+    case 'binding-malformed': return tabRemovalText('computeBindingMalformed')
+    case 'source-missing': return tabRemovalText('computeSourceMissing')
+    case 'source-other-setup': return tabRemovalText('computeSourceOtherSetup')
+    case 'source-after': return tabRemovalText('computeSourceAfter')
+    case 'source-disabled': return tabRemovalText('computeSourceDisabled')
+    case 'source-changed': return tabRemovalText('computeSourceChanged')
+    case 'cleanup-changed': return tabRemovalText('computeCleanupChanged')
+  }
+}
+
+function tabRemovalRequest(state: Pick<CamStore, 'project' | 'toolLibrary'>, setupId: string, opId: string,
+  selectedLabels?: readonly string[]) {
+  const setup = state.project.setups.find((candidate) => candidate.id === setupId)
+  if (!setup) return null
+  const source = setup.operations.find((candidate) => candidate.id === opId)
+  const resolveTool = (toolId: string) => state.toolLibrary.find((t) => t.id === toolId)
+  // The preview names the finish paths; the generation claim names the tabs
+  // that were actually cut on them. Both must still describe the source.
+  const previewCurrent = !!source && source.type === 'contour_2d'
+    && source.contourTabPreview?.sourceKey === contourTabSourceKey(state.project, setup, source, resolveTool)
+    && operationGenerationIsCurrent({ ...state.project, toolLibrary: state.toolLibrary as Tool[] }, setup, source)
+  return { setup, source, tool: source ? resolveTool(source.toolId) : undefined, previewCurrent, selectedLabels }
+}
+
+function reviewTabRemovalFromState(state: Pick<CamStore, 'project' | 'toolLibrary'>, setupId: string, opId: string,
+  selectedLabels?: readonly string[]): ContourTabRemovalReviewOutcome {
+  const request = tabRemovalRequest(state, setupId, opId, selectedLabels)
+  if (!request) return { ok: false, reason: 'missing' }
+  const review = reviewContourTabRemoval(request)
+  if (!review.ok) return review
+  return { ok: true, targets: review.targets, loopIds: review.loopIds,
+    holdingMethod: request.setup.holdingMethod, notes: request.setup.notes ?? '' }
+}
+
+/**
+ * The remaining stock before the cleanup (after the source and every enabled
+ * operation between them), read through WO-2953's shared authority: the
+ * readBeforeAndQuery boundary, waiting for an asynchronous rebuild and never
+ * publishing a reading whose token went stale. Unavailable is said, not guessed.
+ */
+async function readTabRemovalMaterial(setupId: string, opId: string): Promise<ContourTabRemovalMaterial> {
+  const state = useCamStore.getState()
+  const review = reviewTabRemovalFromState(state, setupId, opId)
+  if (!review.ok) return { status: 'unavailable', reason: review.reason }
+  const setup = state.project.setups.find((candidate) => candidate.id === setupId)!
+  const source = setup.operations.find((candidate) => candidate.id === opId)!
+  const stockId = operationMaterialStockId(state.project, setup, source)
+  if (!stockId) return { status: 'unavailable', reason: 'no single stock' }
+  const bounds = smartHeightStockBounds(state.project, stockId)
+  if (!bounds) return { status: 'unavailable', reason: 'no stock bounds' }
+  let domain: ReturnType<typeof getOperationStockDomain>
+  try { domain = getOperationStockDomain(setupId, stockId) } catch (error) {
+    return { status: 'unavailable', reason: error instanceof Error ? error.message : String(error) }
+  }
+  const { authority, frame, finalOperationId } = domain
+  const index = setup.operations.findIndex((candidate) => candidate.id === opId)
+  const request = { beforeOperationId: setup.operations[index + 1]?.id ?? finalOperationId, frame, maxCellMm: Number.MAX_VALUE }
+  const floorZ = (source.contourTabPreview!.tabTopZ - review.targets[0].height) + 1e-3
+  const half = 0.25
+  for (let attempt = 0; attempt < 200; attempt++) {
+    let retained = 0
+    let pending = false
+    for (const target of review.targets) {
+      const { read, query } = authority.readBeforeAndQuery(request, { kind: 'highest-material', frame, bounds: {
+        minX: target.center.x - half, maxX: target.center.x + half, minY: target.center.y - half, maxY: target.center.y + half,
+        minZ: bounds.min.z, maxZ: bounds.max.z } })
+      if (read.status === 'recomputing') { pending = true; break }
+      if (read.status !== 'ready') return { status: 'unavailable', reason: read.reason }
+      if (!query || query.status !== 'ready') return { status: 'unavailable', reason: query?.reason ?? 'no query' }
+      if (typeof query.value === 'number' && query.value > floorZ) retained++
+    }
+    if (!pending) return { status: 'ready', retained, count: review.targets.length }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => { off(); resolve() }, 250)
+      const off = authority.subscribe(() => { clearTimeout(timer); off(); resolve() })
+    })
+  }
+  return { status: 'unavailable', reason: 'remaining stock is still recomputing' }
+}
 
 // One user action runs synchronously, but may reach updateOperation several
 // times, and a panel handler may already have called pushHistory() first. The
@@ -9610,6 +10364,18 @@ function restoreSketchFromHistorySeam(
   const sourceSketchStack = isUndo ? current.sketchHistory : current.sketchFuture
   if (sourceProjectStack.length === 0) return
   const restoredProject = sourceProjectStack[sourceProjectStack.length - 1]
+  // WO-3169: history carries authored inputs, never ownership of a worker.
+  // An unrelated edit may have captured a Bore mid-compute, and Redo stores
+  // the departing live project too. Heal BOTH directions at their common seam;
+  // keep the original snapshot identity for paired tool/sketch finish marks.
+  const resumedProject = restoredProject.setups.some(st => st.operations.some(op => op.type === 'bore' && op.status === 'computing'))
+    ? { ...restoredProject, setups: restoredProject.setups.map(st => ({ ...st,
+      operations: st.operations.map(op => op.type === 'bore' && op.status === 'computing' ? {
+        ...op, status: 'outdated' as const, toolpathMoves: undefined,
+        generationFingerprint: undefined, resolvedHeights: undefined, resolvedHeightPlan: undefined,
+        progress: undefined, progressPhase: undefined, outdatedReason: { kind: 'history' } as const,
+      } : op),
+    })) } : restoredProject
   const restoredSketch = sourceSketchStack.length > 0
     ? sourceSketchStack[sourceSketchStack.length - 1]
     : null
@@ -9662,6 +10428,7 @@ function restoreSketchFromHistorySeam(
   // keyed on `pending*.requestId`).
   pendingConstraintApply = null
   pendingDimensionApply = null
+  dimensionPlacement = null
   pendingAppendApply = null
   // The DRAG channels — the R2 audit's BLOCKER, in its two distinct failure
   // modes (both real, both needing their own line here):
@@ -9731,7 +10498,7 @@ function restoreSketchFromHistorySeam(
   const departingProject = get().project
   set((s) => isUndo
     ? {
-        project: restoredProject,
+        project: resumedProject,
         activeSketch: restoredSketch,
         projectHistory: s.projectHistory.slice(0, -1),
         sketchHistory: s.sketchHistory.slice(0, -1),
@@ -9746,7 +10513,7 @@ function restoreSketchFromHistorySeam(
         viewportRefreshTrigger: s.viewportRefreshTrigger + (projectChanged ? 1 : 0),
       }
     : {
-        project: restoredProject,
+        project: resumedProject,
         activeSketch: restoredSketch,
         projectHistory: [...s.projectHistory.slice(-HISTORY_KEEP), s.project],
         sketchHistory: [...s.sketchHistory.slice(-HISTORY_KEEP), s.activeSketch],
@@ -10964,6 +11731,12 @@ export interface StoredMachineWorkOffset {
   state: WorkOffsetSyncState
 }
 
+/** WO-3221: per setup, the enabled operations stageOperationsForEmission has
+ *  switched off only because this post/run leaves them out, from staging
+ *  until its restore(). A tab removal contour bound to one of them is not
+ *  refused as if its source were suppressed. */
+const emissionExcludedOps = new Map<string, ReadonlySet<string>>()
+
 /** One operation `stageOperationsForEmission` (WO-1653) recomputed, and why -
  *  what the post/run console line is built from. */
 export interface EmissionRecomputeEntry {
@@ -11073,6 +11846,8 @@ interface CamStore extends CarriedUserData {
     machineId: string,
     updates: Pick<MachineConfig, 'toolTable' | 'probeOverrides' | 'probePads' | 'activeProbePadId'>,
   ) => void
+  /** WO-3125: publish all copies of an operator-owned tool record together. */
+  persistMachineToolRecord: CamStore['updateControlSessionToolRecord']
   /** Null returns Control to following the project-local CAM setup record. */
   setControlMachineId: (id: string | null) => void
   /** Session lifecycle only. The clone preserves the connected definition if
@@ -11442,8 +12217,8 @@ interface CamStore extends CarriedUserData {
    *  AND reject the promise (ADR 0003). */
   deriveBrepLayer: (
     geoId: string,
-    kind: 'face' | 'edges' | 'holes' | 'cylinder' | 'section',
-    args?: { faceIndex?: number; edgeIndices?: number[]; faceIndices?: number[]; z?: number },
+    kind: 'face' | 'edges' | 'holes' | 'cylinder' | 'bore-holes' | 'section',
+    args?: { faceIndex?: number; edgeIndices?: number[]; faceIndices?: number[]; z?: number; isCurrent?: () => boolean },
   ) => Promise<void>
 
   // Scene stock
@@ -12013,6 +12788,21 @@ interface CamStore extends CarriedUserData {
     geoSourcesOverride?: ImportedGeometry[],
   ) => Promise<ResolvedHeightPlanV2>
   computeOperationToolpath: (setupId: string, opId: string, batchId?: string) => Promise<void>
+  /** WO-3220: Properties > Holding tabs > Suggest tab locations. Pure: reads the
+   *  inputs the current tab preview was derived from and writes nothing. */
+  suggestContourTabLocations: (setupId: string, opId: string) => ContourTabSuggestOutcome
+  /** WO-3220: Apply a reviewed suggestion as ordinary tabLocations, one undo
+   *  step, only on loops without hand locations. Recomputes first; if anything
+   *  it read changed, writes nothing and returns the recomputed suggestion. */
+  applyContourTabSuggestions: (setupId: string, opId: string, suggestion: ContourTabSuggestion) => ContourTabApplyOutcome
+  /** WO-3221: Properties > Holding tabs > Create tab removal contour, the
+   *  review. Pure: what would be removed and the setup's holding method. */
+  reviewContourTabRemoval: (setupId: string, opId: string, selectedLabels?: readonly string[]) => ContourTabRemovalReviewOutcome
+  /** WO-3221: create the separate cleanup Contour, one undo step. Refuses a
+   *  selection of only some tabs; never writes the source. */
+  createContourTabRemoval: (setupId: string, opId: string, selectedLabels?: readonly string[]) => ContourTabRemovalCreateOutcome
+  /** WO-3221: the remaining stock at the targeted tabs, for the review. */
+  readContourTabRemovalMaterial: (setupId: string, opId: string) => Promise<ContourTabRemovalMaterial>
   /**
    * WO-1653: the one check both ways code leaves the app (Post, Control run)
    * run at that moment, so neither can send an operation that assumed material
@@ -12045,7 +12835,15 @@ interface CamStore extends CarriedUserData {
   stageOperationsForEmission: (
     setupId: string,
     includedOpIds: readonly string[] | undefined,
+    prepareFreshness?: (project: Project, setup: Setup) => Promise<ReadonlyMap<string, boolean> | undefined>,
   ) => Promise<{ recomputed: EmissionRecomputeEntry[]; restore: () => void }>
+  /** WO-3153: what stageOperationsForEmission's first pass does before Post,
+   *  for Simulate. Each listed enabled operation marked 'outdated' (File Open
+   *  found its saved path no longer current, or an edit/reorder outdated it) is
+   *  regenerated in setup order through computeOperationToolpath with its
+   *  normal progress, so Simulate never plays a stale path. Resolves with the
+   *  ids it regenerated. */
+  regenerateOutdatedForSimulation: (setupId: string, opIds: readonly string[]) => Promise<string[]>
   /** Cancel an in-flight parallel_3d (3D finish) compute by aborting its
    *  controller. The compute's AbortError handler returns the op to 'pending'.
    *  No-op if the op is not currently computing (no tracked aborter). */
@@ -13949,7 +14747,7 @@ export const useCamStore = create<CamStore>()(
     // outdate operations (the nest and workholding followers at the bottom of
     // this file) record theirs explicitly.
     const set = recordingOutdatedReasons(rawSet)
-    const applyCamCommands = (commands: readonly CamCommand[], check?: CamAuthoringCheck, joinCurrentAction = false): CamCommandResult => {
+    const applyCamCommands = (commands: readonly CamCommand[], check?: CamAuthoringCheck, joinCurrentAction = false, derivedResult = false): CamCommandResult => {
         const state = get()
         const services: CamCommandServices = {
           normalizeOperation: (operation) => { ensureOperationSmartHeightAuthority(operation); return operation },
@@ -13976,7 +14774,7 @@ export const useCamStore = create<CamStore>()(
         if (!result.ok || result.project === state.project) return result
         // Explicit calls each own one snapshot, even in the same JS turn. Legacy
         // screen wrappers below retain their handler-level coalescing contract.
-        if (result.authored && !(joinCurrentAction && historyAlreadyPushedThisTurn(state.projectHistory))) get().pushHistory()
+        if (result.authored && !derivedResult && !(joinCurrentAction && historyAlreadyPushedThisTurn(state.projectHistory))) get().pushHistory()
         set(s => ({ project: result.project,
           ...(result.addedOperation ? { viewer: { ...s.viewer, selectedNestId: null } } : {}),
         }))
@@ -15117,6 +15915,45 @@ export const useCamStore = create<CamStore>()(
                 : s.control.appliedMachine,
             },
           }
+        }),
+
+      // WO-3125: subscribers must never observe a library tool edit while the
+      // project/session still have the old table. Buffer adoption notices too;
+      // legacy document migrations retain the ordinary entry-door semantics.
+      persistMachineToolRecord: (machineId, updates) =>
+        set((s) => {
+          let next = s
+          const stage: CamSet = (patch) => {
+            next = { ...next, ...(typeof patch === 'function' ? patch(next) : patch) }
+          }
+          const refreshMetadata = (adopted: MachineConfig) => {
+            if (next.control.sessionMachine?.id !== machineId) return
+            const metadata = { name: adopted.name, notes: adopted.notes, probing: adopted.probing }
+            stage({ control: { ...next.control,
+              sessionMachine: { ...next.control.sessionMachine, ...metadata },
+              appliedMachine: next.control.appliedMachine
+                ? { ...next.control.appliedMachine, ...metadata } : next.control.appliedMachine,
+            } })
+          }
+          const library = next.machineLibrary.find((m) => m.id === machineId)
+          if (library) {
+            const adopted = adoptMachineDocumentInto(stage, { ...library, ...updates })
+            stage({ machineLibrary: next.machineLibrary.map((m) => m.id === machineId ? adopted : m) })
+            refreshMetadata(adopted)
+          }
+          if (next.project.machine.id === machineId) {
+            const adopted = adoptMachineDocumentInto(stage, { ...next.project.machine, ...updates })
+            stage({ project: { ...next.project, machine: adopted } })
+            refreshMetadata(adopted)
+          }
+          if (next.control.sessionMachine?.id === machineId) {
+            stage({ control: { ...next.control,
+              sessionMachine: { ...next.control.sessionMachine, ...updates },
+              appliedMachine: next.control.appliedMachine
+                ? { ...next.control.appliedMachine, ...updates } : next.control.appliedMachine,
+            } })
+          }
+          return next
         }),
 
       setControlMachineId: (id) =>
@@ -16290,7 +17127,14 @@ export const useCamStore = create<CamStore>()(
         // MODEL-ROW-CITIZEN (defect c): also amber whole-body-bound contour/pocket
         // ops (no ModelReference) on the changed body - runs AFTER the drill pass so
         // drill ops keep their hole-specific note.
-        setups = markModelBodyBoundOpsOutdated(setups, geometry, touchedBodyIds)
+        // WO-3231: a REMOVED body's row is already gone from `geometry`, so its
+        // pre-sync row is passed too -- its bound operations go amber as well.
+        const removedBodyIds = new Set(result.removed)
+        setups = markModelBodyBoundOpsOutdated(
+          setups,
+          [...geometry, ...get().project.geometry.filter((g) => removedBodyIds.has(g.modelBody?.ref.bodyId ?? ''))],
+          touchedBodyIds,
+        )
         // WO-1576: a regen that reshapes, adds or removes workholding changes what
         // every operation keeps clear of.
         if ([...get().project.geometry, ...geometry].some((g) =>
@@ -16353,7 +17197,7 @@ export const useCamStore = create<CamStore>()(
           // parallel STEP-attribute path. Best-effort: a failed read degrades to
           // the filename + default swatch with a named console warning; the
           // geometry import itself is unaffected. See src/lib/import/stepAttributes.ts.
-          const display = await readStepDisplayAttributes(attrBytes, geoId)
+          const display = await readStepDisplayAttributes(attrBytes, geoId, undefined, payload.mesh)
           if (display.warning) {
             get().addConsoleEvent({
               severity: 'warning', source: 'import',
@@ -16399,10 +17243,10 @@ export const useCamStore = create<CamStore>()(
             // brep needs it set so a derived-layer (layers2d) part doesn't fall
             // through to the 'transparent' (empty-looking) swatch branch.
             // CAM-13: the file's embedded XCAF color when present, else the
-            // default swatch. (Today the shared reader does not surface STEP
-            // colors - see stepAttributes.ts - so this resolves to the default;
-            // the plumbing lights up the instant the reader gains color support.)
+            // default swatch. A mixed assembly retains its per-face palette;
+            // the swatch represents its first part (WO-3093).
             color: displayColor,
+            stepFaceColors: display.faceColors,
             loaded: true,
             // GEO-UNIFY Stage 4: persist the body count so the "Edit as model"
             // wrap can refuse a multi-body STEP BY NAME even on a cold reload
@@ -16518,9 +17362,17 @@ export const useCamStore = create<CamStore>()(
               sectionSource?: Layer2D['sectionSource']
             },
           ) => {
+            if (args.isCurrent && !args.isCurrent()) return
             const geo = get().project.geometry.find(g => g.id === geoId)
+            if (!geo) return
             const planeLayerCount = (geo?.layers2d ?? []).filter(l => l.projectionPlane).length
-            const layerId = crypto.randomUUID()
+            // WO-3169/B19c: layer identity participates in the loop hash. Own it
+            // by the source row, not the scan run, so a second operation's Detect
+            // holes cannot orphan an earlier Bore. Reuse saved legacy layer ids
+            // too: migrating them would invalidate their authored Smart Heights.
+            const layerId = kind === 'bore-holes'
+              ? geo.layers2d?.find(layer => layer.id.startsWith('bore_detect:'))?.id ?? `bore_detect:${geoId}`
+              : crypto.randomUUID()
             // Stable content-derived ids (assignStableLoopIds, no namespace here);
             // appendGeometryProjection re-stamps with the geoId namespace and relinks
             // the hole loopIds to the final ids. We compute pre-namespace ids now so
@@ -16669,9 +17521,16 @@ export const useCamStore = create<CamStore>()(
               return { points, closed: true, type: 'contour' as const, area: Math.PI * rr * rr }
             })
             appendDerivedLayer(operatorText('index400', { value1: String(holes.length) }), z, derived, { holes })
-          } else if (kind === 'cylinder') {
-            if (!args.faceIndices?.length) throw new Error(operatorText('index401'))
-            const cylinders = await deriveCylinders(geoId, args.faceIndices)
+          } else if (kind === 'cylinder' || kind === 'bore-holes') {
+            const cylinderSource = get().project.geometry.find(g => g.id === geoId)
+            if (kind === 'bore-holes' && cylinderSource &&
+                classifyRotationOffZ(cylinderSource.rotation) !== 'aligned' &&
+                !poseLevelsZPlanesOffUpright(cylinderSource.rotation)) {
+              throw new Error('Bore Detect holes requires cylinders parallel to world Z at this placement.')
+            }
+            if (kind === 'cylinder' && !args.faceIndices?.length) throw new Error(operatorText('index401'))
+            const detected = await deriveCylinders(geoId, kind === 'bore-holes' ? undefined : args.faceIndices)
+            const cylinders = kind === 'bore-holes' ? detected.filter(c => c.kind === 'bore') : detected
             // FAIL LOUD (ADR 0003): a picked face that is not a vertical cylinder
             // (non-Z axis, or a plane/cone/etc.) produces no feature. Do not land
             // an empty layer -- tell the user exactly what to pick instead.
@@ -17009,18 +17868,7 @@ export const useCamStore = create<CamStore>()(
       // separate store this action never imports or reaches).
       updateModelItemPlacement: (modelItemId, bodyId, position, rotation) => {
         const existing = get().project.modelItemPlacements ?? []
-        // Write granularity mirrors resolveModelItemPlacement's OWN read
-        // precedence: if this specific body already owns an independent
-        // Placement record (the v12-migration legacy case), keep writing
-        // THAT record so one legacy body's move never drags an unrelated
-        // sibling that merely happened to share the same old document.
-        // Otherwise land on the item's whole-item record (bodyId omitted),
-        // which is what every Stage-C2-native Model Item has exactly one of.
-        const targetBodyId =
-          bodyId !== undefined &&
-          existing.some((p) => p.modelItemId === modelItemId && p.bodyId === bodyId)
-            ? bodyId
-            : undefined
+        const targetBodyId = modelPlacementTargetBodyId(existing, modelItemId, bodyId)
 
         const prev = existing.find(
           (p) => p.modelItemId === modelItemId && p.bodyId === targetBodyId,
@@ -17036,17 +17884,9 @@ export const useCamStore = create<CamStore>()(
         // commits must NOT push, or Ctrl+Z appears dead.
         if (moved) get().pushHistory()
         set((s) => {
-          const current = s.project.modelItemPlacements ?? []
-          const idx = current.findIndex(
-            (p) => p.modelItemId === modelItemId && p.bodyId === targetBodyId,
+          const next = withModelItemPlacement(
+            s.project.modelItemPlacements ?? [], modelItemId, targetBodyId, position, rotation,
           )
-          const record: ModelItemPlacementRecord =
-            targetBodyId !== undefined
-              ? { modelItemId, bodyId: targetBodyId, position, rotation }
-              : { modelItemId, position, rotation }
-          const next = idx >= 0
-            ? current.map((p, i) => (i === idx ? record : p))
-            : [...current, record]
           // CAM-BINDING-S3b: a gizmo/panel placement move must re-derive stock
           // the SAME way syncModelBodies does on a model regen (Stage 3's own
           // live-update chain, index.ts ~5144-5170) -- otherwise a stock
@@ -17678,7 +18518,7 @@ export const useCamStore = create<CamStore>()(
           project: {
             ...s.project,
             geometry: s.project.geometry.map((g) =>
-              g.id === id ? { ...g, color } : g
+              g.id === id ? { ...g, color, stepFaceColors: undefined } : g
             ),
           },
         }))
@@ -18329,10 +19169,43 @@ export const useCamStore = create<CamStore>()(
               // Drop the empty 'default' placeholder if it has no loops assigned to it
               const usedLayerIds = new Set(existingLoops.map(l => l.layerId))
               const cleanedLayers = existingLayers.filter(l => l.id !== 'default' || usedLayerIds.has('default'))
+              // WO-3169: publish repeat Bore discovery in the same history
+              // transaction as append. Replace matching ids rather than append
+              // duplicates. An authored selection still owns its earlier loop
+              // and cylinder evidence even if a later scan omits that target.
+              // All other projection families retain their append semantics.
+              const boreDiscovery = layer.id.startsWith('bore_detect:')
+              const referenced = new Set(boreDiscovery ? s.project.setups.flatMap(setup =>
+                setup.operations.flatMap(op => [
+                  ...((op.params as { loopIds?: string[] }).loopIds ?? []),
+                  ...op.geometrySelections,
+                  ...(op.modelReferences?.flatMap(ref => ref.boreFeatures?.map(b => b.loopId) ?? []) ?? []),
+                ])) : [])
+              const incomingById = new Map(stableLoops.map(loop => [loop.id, loop]))
+              const incomingIds = new Set(incomingById.keys())
+              const keptLoops = boreDiscovery ? existingLoops.filter(loop =>
+                !loop.layerId.startsWith('bore_detect:') || (referenced.has(loop.id) && !incomingIds.has(loop.id))) : existingLoops
+              // Keep established row order too: Bore's unsorted traversal follows
+              // geometry order, so worker result reordering must not change NC.
+              const keptIds = new Set(keptLoops.map(loop => loop.id))
+              const existingIds = new Set(existingLoops.map(loop => loop.id))
+              const publishedLoops = boreDiscovery ? [
+                ...existingLoops.flatMap(loop => incomingById.has(loop.id) ? [incomingById.get(loop.id)!]
+                  : keptIds.has(loop.id) ? [loop] : []),
+                ...stableLoops.filter(loop => !existingIds.has(loop.id)),
+              ] : [...keptLoops, ...stableLoops]
+              const retainedIds = keptIds
+              const keptLayers = boreDiscovery ? cleanedLayers.filter(previous =>
+                previous.id !== layer.id && (!previous.id.startsWith('bore_detect:') || keptLoops.some(loop => loop.layerId === previous.id))) : cleanedLayers
+              const replacement = boreDiscovery ? { ...relinkedLayer,
+                cylinders: [...(relinkedLayer.cylinders ?? []),
+                  ...existingLayers.filter(previous => previous.id === layer.id).flatMap(previous =>
+                    (previous.cylinders ?? []).filter(c => c.loopId && retainedIds.has(c.loopId)))],
+              } : relinkedLayer
               return {
                 ...g,
-                loops: [...existingLoops, ...stableLoops],
-                layers2d: [...cleanedLayers, relinkedLayer],
+                loops: publishedLoops,
+                layers2d: [...keptLayers, replacement],
                 loopsVersion: (g.loopsVersion ?? 0) + 1,
                 projectionStale: false,
               }
@@ -18397,7 +19270,10 @@ export const useCamStore = create<CamStore>()(
       // the SKC-56-R2 invariant it enforces.)
 
       pushHistory: () => {
-        const { project } = get()
+        const prior = get()
+        const { project } = prior
+        // A subsequent authored step settles the measured placement (Escape semantics).
+        dimensionPlacement = null
         // Strip toolpath moves before storing — they can be large and are
         // recomputable. Operations are marked 'outdated' so the user knows
         // to regenerate after an undo.
@@ -18432,6 +19308,15 @@ export const useCamStore = create<CamStore>()(
           canUndo: true,
           canRedo: false,
         }))
+        lastSketchHistoryPush = {
+          top: snapshot, sketch: prior.activeSketch,
+          before: {
+            projectHistory: prior.projectHistory, sketchHistory: prior.sketchHistory,
+            toolSlicesHistory: prior.toolSlicesHistory, projectFuture: prior.projectFuture,
+            sketchFuture: prior.sketchFuture, toolSlicesFuture: prior.toolSlicesFuture,
+            canUndo: prior.canUndo, canRedo: prior.canRedo,
+          },
+        }
         rememberHistoryPushThisTurn(snapshot)
         // WO-1283: this push both DROPS the oldest snapshot and clears the redo
         // stack, so it is the one place where a deleted part's last chance of
@@ -19113,6 +19998,22 @@ export const useCamStore = create<CamStore>()(
       },
 
       updateOperation: (setupId, opId, updates) => {
+        // WO-3085: progress does not author a cut. The command transaction
+        // re-fingerprinted every predecessor and every saved result per tick.
+        const keys = Object.keys(updates)
+        if (keys.length > 0 && keys.every(key => key === 'progress' || key === 'progressPhase')) {
+          set(s => {
+            const setup = s.project.setups.find(item => item.id === setupId)
+            const op = setup?.operations.find(item => item.id === opId)
+            if (!setup || !op || keys.every(key => op[key as keyof Operation] === updates[key as keyof Operation])) return s
+            const project = { ...s.project, setups: s.project.setups.map(item => item !== setup ? item : {
+              ...item, operations: item.operations.map(itemOp => itemOp !== op ? itemOp : { ...itemOp, ...updates }),
+            }) }
+            toolpathProgressProjects.add(project)
+            return { project }
+          })
+          return
+        }
         // WO-1434: old panel handlers may push history themselves and make
         // several synchronous writes. Only that legacy wrapper coalesces;
         // explicit typed transactions always get one undo per call.
@@ -19614,6 +20515,56 @@ export const useCamStore = create<CamStore>()(
         }
       },
 
+      suggestContourTabLocations: (setupId, opId) => suggestContourTabsFromState(get(), setupId, opId),
+
+      reviewContourTabRemoval: (setupId, opId, selectedLabels) => reviewTabRemovalFromState(get(), setupId, opId, selectedLabels),
+
+      createContourTabRemoval: (setupId, opId, selectedLabels) => {
+        const request = tabRemovalRequest(get(), setupId, opId, selectedLabels)
+        if (!request) return { ok: false, reason: 'missing' }
+        const name = tabRemovalText('defaultName', { name: request.source?.name ?? '' })
+        const plan = planContourTabRemoval({ ...request, operationId: crypto.randomUUID(), name })
+        if (!plan.ok) return plan
+        const result = get().executeCamCommands([{ kind: 'operation.add', setupId, operation: plan.operation }])
+        return result.ok ? { ok: true, operationId: plan.operation.id, name } : { ok: false, reason: 'rejected' }
+      },
+
+      readContourTabRemovalMaterial: (setupId, opId) => readTabRemovalMaterial(setupId, opId),
+
+      applyContourTabSuggestions: (setupId, opId, suggestion) => {
+        const fresh = suggestContourTabsFromState(get(), setupId, opId)
+        if (!fresh.ok) return { ok: false, reason: fresh.reason }
+        if (!sameContourTabSuggestion(fresh.suggestion, suggestion)) {
+          return { ok: false, reason: 'changed', recomputed: fresh.suggestion }
+        }
+        const op = get().project.setups.find((s) => s.id === setupId)?.operations.find((o) => o.id === opId)
+        if (!op) return { ok: false, reason: 'missing' }
+        const params = op.params as unknown as ContourParams
+        const map: { [loopId: string]: ContourTabLocations } = { ...(params.tabLocations ?? {}) }
+        const loopIds: string[] = []
+        const noneLoopIds: string[] = []
+        let applied = 0
+        for (const loop of fresh.suggestion.loops) {
+          if (loop.skipped || contourLoopHasTabLocations(params, loop.loopId)) continue
+          if (loop.fractions.length === 0) {
+            noneLoopIds.push(loop.loopId)
+            continue
+          }
+          map[loop.loopId] = [...loop.fractions]
+          loopIds.push(loop.loopId)
+          applied += loop.fractions.length
+        }
+        if (applied === 0) return { ok: false, reason: 'nothing-found' }
+        // An outline the accepted (partial) plan found no place on gets no
+        // tabs - never the even-spacing default an absent entry means (brief A1).
+        for (const loopId of noneLoopIds) map[loopId] = 'none'
+        get().updateOperation(setupId, opId, {
+          params: { ...op.params, tabLocations: map } as Record<string, unknown>,
+          ...CONTOUR_TAB_STALE_PATCH,
+        })
+        return { ok: true, applied, loopIds, noneLoopIds }
+      },
+
       computeOperationToolpath: (setupId, opId, batchId) => trackToolpathCompute(opId, (async () => {
         // WO-1401: reassigned after a mid-compute stale-section refresh
         // (below) commits fresh geometry to the store, so every read after
@@ -19638,7 +20589,7 @@ export const useCamStore = create<CamStore>()(
         }
 
         const faceRequestKey = `${state.project.id}:${setupId}:${opId}`
-        const faceRequestToken = op.type === 'face' ? Symbol(opId) : undefined
+        const faceRequestToken = op.type === 'face' || op.type === 'bore' ? Symbol(opId) : undefined
         if (faceRequestToken) faceComputeRequests.set(faceRequestKey, faceRequestToken)
 
         // Smart Height V2 is the only runtime authority. Refuse a missing,
@@ -19670,11 +20621,29 @@ export const useCamStore = create<CamStore>()(
           return
         }
 
+        // WO-3221: a tab removal contour is generated only while it still
+        // names an earlier, enabled source it was made from. Otherwise one
+        // line, no toolpath: never an unbound contour cut in its place.
+        if (op.type === 'contour_2d') {
+          const removalRefusal = tabRemovalComputeRefusal(setup, op, (toolId) => state.toolLibrary.find((t) => t.id === toolId),
+            emissionExcludedOps.get(setupId))
+          if (removalRefusal) {
+            get().updateOperation(setupId, opId, {
+              status: 'error', errorMessage: tabRemovalComputeText(removalRefusal),
+              toolpathMoves: undefined, generationFingerprint: undefined,
+              progress: undefined, progressPhase: undefined, estimatedCutTimeMs: undefined,
+            })
+            completeBatchOperation()
+            return
+          }
+        }
+
         if (op.type === 'face') {
           const owns = () => computeGeneration === cam3dComputeRuntime.generation &&
             faceComputeRequests.get(faceRequestKey) === faceRequestToken && get().project.id === state.project.id
           try {
             await readyFaceSmartRuntime(get, setupId, op, owns)
+            await new Promise<void>(resolve => setTimeout(resolve, 16))
           } catch (error) {
             if (owns()) setOperationComputeError(get, setupId, opId,
               error instanceof Error ? error.message : String(error))
@@ -19871,6 +20840,8 @@ export const useCamStore = create<CamStore>()(
                 const derivation = await deriveModelOriginGeoSources({
                   state, op, refGeo, subject, modelBindingCapability, modelEdgeChainRef,
                   hooks: {
+                    ...(op.type === 'bore' ? { readBoreFeatures: (bodyId: string, modelItemId?: string) =>
+                      readCurrentBoreFeatures(state, op!, refGeo, setupId, bodyId, modelItemId ?? LEGACY_MODEL_ITEM_ID) } : {}),
                     refreshStaleSections: (opLoopIds) => {
                       // WO-1401: a persisted Section-at-Z selection can point at a
                       // layer the model has since moved past (`sectionStale`). Refresh
@@ -19971,6 +20942,22 @@ export const useCamStore = create<CamStore>()(
                       }
                       return { state: refreshed.state ?? state, opLoopIds }
                     },
+                    onBoreRefresh: (geometry, reboundOp) => {
+                      if (computeGeneration !== cam3dComputeRuntime.generation || get().project.id !== state.project.id ||
+                          get().project.setups.find(s => s.id === setupId)?.operations.find(o => o.id === opId) !== op ||
+                          get().project.geometry.find(g => g.id === refGeo.id) !== refGeo) {
+                        throw new ModelBodyDeriveError('Bore inputs changed during model replay; regenerate from the current selection.')
+                      }
+                      set(s => ({ project: { ...s.project,
+                        geometry: s.project.geometry.map(g => g.id === geometry.id ? geometry : g),
+                        setups: s.project.setups.map(st => st.id !== setupId ? st : { ...st,
+                          operations: st.operations.map(o => o.id === opId ? reboundOp : o),
+                        }),
+                      } }))
+                      refreshed.state = get()
+                      refreshed.setup = refreshed.state.project.setups.find(s => s.id === setupId)!
+                      refreshed.op = refreshed.setup.operations.find(o => o.id === opId)!
+                    },
                     onEdgeChainNote: (note) => {
                       get().updateOperation(setupId, opId, { modelReferenceNote: note })
                     },
@@ -19981,10 +20968,15 @@ export const useCamStore = create<CamStore>()(
                   setup = refreshed.setup
                   op = refreshed.op
                 }
+                op = derivation.boreOp ?? op
                 modelDerivedGeoSources = derivation.geoSources
                 modelDrillLoopIdsOverride = derivation.drillLoopIds
                 modelEdgeChainLoopIdsOverride = derivation.edgeChainLoopIds
               } catch (deriveErr) {
+                if (deriveErr instanceof BoreSourceSupersededError) {
+                  completeBatchOperation()
+                  return
+                }
                 const deriveMessage = deriveErr instanceof ModelBodyDeriveError
                   ? deriveErr.message
                   : deriveErr instanceof Error ? deriveErr.message : String(deriveErr)
@@ -20872,6 +21864,10 @@ export const useCamStore = create<CamStore>()(
           throw err
         }
 
+        // Registry rows may replace basePayload.heights with this resolved object.
+        // The travel switch is independent of smart planes and must survive resolution.
+        opHeights = { ...opHeights, minimizeZTravel: op.heights.minimizeZTravel }
+
         // R3 plane-ordering validation, ALL op types (ADR 0003: block compute
         // with a plain-language error, never a silent wrong toolpath):
         // clearance >= retract >= feed >= top > bottom, all WCS-relative.
@@ -21035,10 +22031,15 @@ export const useCamStore = create<CamStore>()(
 
         let resolveWorkerDone!: () => void
         const workerDone = new Promise<void>((resolve) => { resolveWorkerDone = resolve })
+        const stockSnapshotAborter = new AbortController()
+        let terminalPreparing = false
         let workerSettled = false
+        let unsubscribeBoreWorker = () => {}
         const settleWorker = () => {
           if (workerSettled) return
           workerSettled = true
+          unsubscribeBoreWorker()
+          stockSnapshotAborter.abort()
           watchdog.stop()
           completeBatchOperation()
           worker.terminate()
@@ -21055,8 +22056,22 @@ export const useCamStore = create<CamStore>()(
           if (!discardStaleFaceRequest()) setOperationComputeError(get, setupId, opId, error.message)
         })
 
-        worker.onmessage = (event: MessageEvent<WorkerResponseMsg>) => {
-          if (workerSettled) return
+        // WO-3169: Undo/source replacement must settle a Bore even when its
+        // old worker never sends another message. The fingerprint compares the
+        // CURRENT revision; the request token protects a concurrent replacement.
+        if (op.type === 'bore') unsubscribeBoreWorker = useCamStore.subscribe(() => {
+          if (workerSettled || faceInputsCurrent()) return
+          settleWorker()
+          discardStaleFaceRequest()
+        })
+
+        // WO-3126: worker-side percentage throttling still leaves a queued
+        // message burst after a busy renderer turn. Match the existing 3D
+        // publication cadence; phases and 100% are always delivered.
+        let lastProgressPostAt = -Infinity
+        let lastProgressPhase: string | undefined
+        worker.onmessage = async (event: MessageEvent<WorkerResponseMsg>) => {
+          if (workerSettled || terminalPreparing) return
           const msg = event.data
           if (discardStaleFaceRequest()) {
             settleWorker()
@@ -21064,7 +22079,12 @@ export const useCamStore = create<CamStore>()(
           }
           if (msg.type === 'TOOLPATH_PROGRESS') {
             watchdog.pulse(msg.phase ?? 'Computing toolpath')
-            // Live recompute progress — update and keep the worker alive.
+            const now = Date.now()
+            if (msg.progress < 1 && msg.phase === lastProgressPhase && now - lastProgressPostAt < 60) return
+            lastProgressPostAt = now
+            lastProgressPhase = msg.phase
+            // Every message pulses the watchdog; only visible progress writes
+            // are coalesced. Terminal publication/cleanup remains immediate.
             get().updateOperation(setupId, opId, {
               progress: msg.progress,
               progressPhase: msg.phase,
@@ -21072,6 +22092,22 @@ export const useCamStore = create<CamStore>()(
             return
           }
           if (msg.type === 'TOOLPATH_COMPLETE') {
+            terminalPreparing = true
+            try { await primeOperationStockMoves(msg.moves, stockSnapshotAborter.signal) }
+            catch (error) {
+              if (!workerSettled && computeGeneration === cam3dComputeRuntime.generation &&
+                  get().project.id === state.project.id && (!faceRequestToken || faceOwnsRequest())) {
+                setOperationComputeError(get, setupId, opId, error instanceof Error ? error.message : String(error))
+              }
+              settleWorker()
+              return
+            }
+            if (workerSettled || computeGeneration !== cam3dComputeRuntime.generation ||
+                get().project.id !== state.project.id || discardStaleFaceRequest()) {
+              settleWorker()
+              return
+            }
+
             // Estimate machine execution time from the computed moves + the active machine
             // rapid rate (the worker payload has no machine). Fast-traverse moves carry no
             // baked feed, so resolve their speed here from the operation/tool, clamped to
@@ -21116,7 +22152,11 @@ export const useCamStore = create<CamStore>()(
               faceMaterialResults.set(opId, { epoch: operationStockEpoch(),
                 inputKey: faceMaterialResultKey(currentSetup, currentOp) })
             }
-            get().updateOperation(setupId, opId, {
+            // WO-3169: reachShortfall is a derived result, not a user edit.
+            // Bore publication must not snapshot a computing worker into undo
+            // or clear the redo of Edit as model. Keep command reconciliation;
+            // other families' publication semantics are outside this order.
+            applyCamCommands([{ kind: 'operation.update', setupId, operationId: opId, patch: {
               status: 'ready',
               toolpathMoves: msg.moves,
               computeTimeMs: msg.computeTimeMs,
@@ -21125,13 +22165,13 @@ export const useCamStore = create<CamStore>()(
               resolvedHeights: resolvedHeightSnapshot,
               resolvedHeightPlan,
               generationFingerprint: dispatchFingerprint,
-              ...({ dependsOnPredecessors: dependsOnRestStock || undefined } as Partial<Operation>),
+              ...({ dependsOnPredecessors: dependsOnRestStock || hasTabRemovalBinding(currentOp) || undefined } as Partial<Operation>),
               // WO-1683: the reach trim's shortfall fact, straight off the worker
               // response (the same loose cast `notices` already uses below).
               reachShortfall: (msg as { reachShortfall?: OperationReachShortfall }).reachShortfall,
               progress: undefined,
               progressPhase: undefined,
-            })
+            } }], undefined, true, op.type === 'bore')
             // WO-1540: what the generator substituted or left out reaches the app console.
             writeGeneratorNotices(get, currentOp, [
               ...workholding.notices,
@@ -21281,7 +22321,7 @@ export const useCamStore = create<CamStore>()(
         // marker preview afterwards. The manifest says which row that is
         // (`derivesTabPreview`) so this is not a second op.type enumeration.
         let contourParams: ContourParams | undefined
-        let tabStockBounds: ReturnType<typeof getStockBoundsFromViewport> | null = null
+        let tabStockBottomWcsZ: number | undefined
         let contourDispatch: ContourDispatchInputs | undefined
         if (computeRoute.derivesTabPreview) {
           const contourParamsBase = op.params as unknown as ContourParams
@@ -21306,14 +22346,19 @@ export const useCamStore = create<CamStore>()(
           // that in the worker against the active stock's bottom plane. This
           // payload field is absent when tabs are disabled, preserving the
           // legacy message and generated moves exactly.
-          tabStockBounds = contourParams.tabs
-            ? getStockBoundsFromViewport(setup.wcs.stockId ?? undefined)
-            : null
+          // WO-3218: the bottom comes from the project's stock RECORD (the
+          // kernel's stockBounds, which converts world to WCS once), never
+          // the mounted viewport, so a headless compute plans the same tabs.
+          // No record stock leaves it absent: the worker's one-line refusal.
+          const recordBottom = contourParams.tabs
+            ? stockBottomWcsZ(state.project, setup)
+            : undefined
+          tabStockBottomWcsZ = Number.isFinite(recordBottom) ? recordBottom : undefined
           contourDispatch = {
             params: contourParams,
             ...(loopBottoms ? { loopBottoms } : {}),
-            ...(tabStockBounds
-              ? { stockBottomZ: tabStockBounds.min.z - setup.wcs.origin.z }
+            ...(tabStockBottomWcsZ !== undefined
+              ? { stockBottomZ: tabStockBottomWcsZ }
               : {}),
             ...(openStockBounds
               ? {
@@ -21453,7 +22498,7 @@ export const useCamStore = create<CamStore>()(
           // computeContourTabPreviewLoop, so a marker fraction and a cut tab
           // can never disagree. Best-effort: a preview failure must never
           // block the compute itself (the worker fails loud on real errors).
-          if (contourParams.tabs && tabStockBounds) {
+          if (contourParams.tabs && tabStockBottomWcsZ !== undefined) {
             try {
               await ensureClipperReady()
               const closed = resolvedLoops.filter((l) => l.closed)
@@ -21461,6 +22506,7 @@ export const useCamStore = create<CamStore>()(
                 ? closed.filter((l) => contourParams!.loopIds.includes(l.id))
                 : closed
               const previewLoops = []
+              const suggestionLoops: ContourTabSuggestionSource['loops'] = []
               for (const lp of targets) {
                 const preview = computeContourTabPreviewLoop(
                   lp.points, contourParams.side, contourParams.direction, tool.diameter,
@@ -21468,13 +22514,43 @@ export const useCamStore = create<CamStore>()(
                 )
                 if (preview) {
                   previewLoops.push({ loopId: lp.id, path: preview.path, perimeter: preview.perimeter })
+                  suggestionLoops.push({ loopId: lp.id, path: preview.path, perimeter: preview.perimeter,
+                    sourceRings: contourTabSourceRings(lp, closed) })
                 }
               }
-              get().updateOperation(setupId, opId, {
+              const tabTopZ = tabStockBottomWcsZ + setup.wcs.origin.z +
+                (contourParams.tabHeight ?? DEFAULT_CONTOUR_TABS.height)
+              // WO-3220: the inputs Suggest tab locations reads, keyed to the
+              // exact inputs this preview came from (see contourTabSourceKey).
+              const sourceKey = contourTabSourceKey(state.project, setup, op,
+                (toolId) => state.toolLibrary.find((candidate) => candidate.id === toolId))
+              try {
+                const fixtureEvidence = await resolveWorkholdingObstacles(
+                  state.project.geometry, state.project.modelItemPlacements, geoSources.map((g) => g.id), undefined,
+                  { workholding: state.project.workholding, setupId: setup.id, includeAvailability: true },
+                )
+                if (get().project.id === state.project.id) {
+                  rememberContourTabSuggestionSource({
+                    projectId: state.project.id, setupId, opId, sourceKey, cutterRadius: tool.diameter / 2,
+                    loops: suggestionLoops, fixtures: contourTabFixtureObstacles(fixtureEvidence),
+                    // The cutter crossing a tab: from the stock bottom up
+                    // through its flutes above the tab top; the 0.25 mm
+                    // default shank clearance (CF-008).
+                    cuttingBand: { bottomZ: tabStockBottomWcsZ + setup.wcs.origin.z,
+                      topZ: tabTopZ + (tool.fluteLength > 0 ? tool.fluteLength : tool.diameter), allowanceMm: 0.25 },
+                  })
+                }
+              } catch (err) {
+                console.warn(operatorText('index526'), err)
+              }
+              // Never into a replaced project: updateOperation finds ids only.
+              if (get().project.id === state.project.id) get().updateOperation(setupId, opId, {
                 contourTabPreview: {
                   loops: previewLoops,
-                  tabTopZ: tabStockBounds.min.z +
-                    (contourParams.tabHeight ?? DEFAULT_CONTOUR_TABS.height),
+                  // Back to world exactly as the engine does (contour2d
+                  // resolveTabs: stockBottomWcsZ + wcsOrigin.z + height).
+                  tabTopZ,
+                  sourceKey,
                 },
               })
             } catch (err) {
@@ -21493,14 +22569,15 @@ export const useCamStore = create<CamStore>()(
           const currentSetup = get().project.setups.find((candidate) => candidate.id === setupId)
           const currentOp = currentSetup?.operations.find((candidate) => candidate.id === opId)
           if (!currentSetup || !currentOp) { completeBatchOperation(); return }
+          const moves = enforceOperationTravel(plan.moves, op.heights, setup.wcs.origin.z, 0, plan.resolvedHeights ? { clearanceZ: plan.resolvedHeights.machine.clearance, retractZ: plan.resolvedHeights.machine.retract, feedZ: plan.resolvedHeights.machine.feed } : undefined, op.type)
           const cutTime = estimateRuntimeMsOrError(
-            plan.moves, state.project.machine.rapidRate,
+            moves, state.project.machine.rapidRate,
             resolveFeedrates(tool, op.feedrateOverride, state.project.machine.rapidRate).fastTraverseRate,
             resolveFeedrates(tool, op.feedrateOverride, state.project.machine.rapidRate).finishRate,
             machineCutTimeMotion(state.project.machine),
           )
           get().updateOperation(setupId, opId, {
-            status: 'ready', toolpathMoves: plan.moves, computeTimeMs: plan.computeTimeMs,
+            status: 'ready', toolpathMoves: moves, computeTimeMs: plan.computeTimeMs,
             resolvedHeights: plan.resolvedHeights, resolvedHeightPlan: plan.resolvedHeightPlan,
             generationFingerprint: projectOperationFingerprint(
               state.project, setup, op, plan.resolvedHeights, tool,
@@ -21519,8 +22596,23 @@ export const useCamStore = create<CamStore>()(
         })
       })()),
 
-      stageOperationsForEmission: async (setupId, includedOpIds) => {
+      regenerateOutdatedForSimulation: async (setupId, opIds) => {
+        const regenerated: string[] = []
+        const setup0 = get().project.setups.find((s) => s.id === setupId)
+        if (!setup0) return regenerated
+        for (const op of setup0.operations) {
+          if (!op.enabled || !opIds.includes(op.id)) continue
+          const live = get().project.setups.find((s) => s.id === setupId)?.operations.find((o) => o.id === op.id)
+          if (live?.status !== 'outdated') continue
+          await get().computeOperationToolpath(setupId, op.id)
+          regenerated.push(op.id)
+        }
+        return regenerated
+      },
+
+      stageOperationsForEmission: async (setupId, includedOpIds, prepareFreshness) => {
         const recomputed: EmissionRecomputeEntry[] = []
+        emissionExcludedOps.delete(setupId)
         const setup0 = get().project.setups.find((s) => s.id === setupId)
         if (!setup0) return { recomputed, restore: () => {} }
 
@@ -21544,9 +22636,14 @@ export const useCamStore = create<CamStore>()(
         // matching. This is exactly the check the post/run gates already make
         // (buildPostInput's downgradeIfOutdated, collectSetupProgramSections);
         // recomputing here is what replaces their refusal.
+        // WO-3125: only this caller's fenced, canonical worker result may
+        // replace the same snapshot's check. Any recompute retires the receipt
+        // before the next predecessor-dependent operation is considered.
+        let preparedFreshness = prepareFreshness ? await prepareFreshness(projectForFreshnessCheck(), currentSetup()) : undefined
         const isStale = (op: Operation): boolean =>
           op.status === 'outdated' ||
-          (op.status === 'ready' && !operationGenerationIsCurrent(projectForFreshnessCheck(), currentSetup(), op))
+          (op.status === 'ready' && !(preparedFreshness?.get(op.id)
+            ?? operationGenerationIsCurrent(projectForFreshnessCheck(), currentSetup(), op)))
 
         // ---- PASS 1: a genuinely outdated included operation (a real edit or
         // a real disable already sitting in the live project) is recomputed in
@@ -21556,6 +22653,7 @@ export const useCamStore = create<CamStore>()(
           if (!op.enabled || !included(op)) continue
           const live = currentOp(op.id)
           if (!live || !isStale(live)) continue
+          preparedFreshness = undefined
           await get().computeOperationToolpath(setupId, op.id)
           if (currentOp(op.id)?.status === 'ready') {
             recomputed.push({
@@ -21584,6 +22682,8 @@ export const useCamStore = create<CamStore>()(
           if (excluded.length > 0) {
             const preShadowOperations = setup1.operations
             const excludedIds = new Set(excluded.map((op) => op.id))
+            // WO-3221: these are off for this program only, not suppressed.
+            emissionExcludedOps.set(setupId, excludedIds)
             const toolResolver = (toolId: string) =>
               get().toolLibrary.find((candidate) => candidate.id === toolId)
 
@@ -21628,6 +22728,7 @@ export const useCamStore = create<CamStore>()(
             }
 
             const restore = () => {
+              if (emissionExcludedOps.get(setupId) === excludedIds) emissionExcludedOps.delete(setupId)
               set((s) => ({
                 project: {
                   ...s.project,
@@ -22365,6 +23466,7 @@ export const useCamStore = create<CamStore>()(
         type OwnedCacheKey = { format: 'step' | 'stl'; key: string }
         const ownedCacheKeys: OwnedCacheKey[] = []
         let cacheOwnershipTransferred = false
+        let preparedBoreItemId: string | undefined
         const cacheFreshStep = async (key: string, bytes: ArrayBuffer): Promise<void> => {
           // Register ownership before the write: a cache implementation can
           // reject after persisting, and that partial success is still ours.
@@ -22557,6 +23659,104 @@ export const useCamStore = create<CamStore>()(
         // can scope its kernel replay to this id and run it BEFORE any store
         // mutation -- a fail-loud refusal then leaves the combined row pristine.
         const newItemId = crypto.randomUUID()
+        let boreConversion: { geometry: ImportedGeometry; ops: Map<string, Operation> } | undefined
+        const detectedLayers = row.format === 'step'
+          ? (row.layers2d ?? []).filter(layer => layer.id.startsWith('bore_detect:')) : []
+        const selectedBoreOps = get().project.setups.flatMap(setup => setup.operations).filter(op =>
+          op.type === 'bore' && (op.params as unknown as BoreParams).geometryId === geoId)
+        const selectedBoreLoops = new Set(selectedBoreOps.flatMap(op => (op.params as unknown as BoreParams).loopIds))
+        if (detectedLayers.some(layer => layer.cylinders?.some(c => c.loopId && selectedBoreLoops.has(c.loopId)))) {
+          // WO-3169: optional CAM correspondence must never gate Edit as model.
+          // Carry only selected, exactly matched walls; unresolved selections are
+          // named by Bore at Generate. Worker face indices are never stable ids.
+          const seed = stashLoadedDocument(seedBytes, newItemId)
+          preparedBoreItemId = newItemId
+          const bodyId = seed.dag.nodeIds().find(id => seed.dag.getNode(id)?.kind === 'import')!
+          try {
+            const modelGeo: ImportedGeometry = { ...row, type: 'model', format: 'model', modelItemId: newItemId,
+              modelBody: { ref: { bodyId, lineageId: bodyId, stableIds: [], version: 1 } } }
+            const placements = [{ modelItemId: newItemId, position: row.position, rotation: row.rotation }]
+            const result = await readModelBodyBoreFeatureResult(bodyId, newItemId)
+            const candidates = deriveModelBodyBoreCandidates(modelGeo, placements, result, [], true)
+            const matched = new Map<string, typeof candidates[number]>()
+            for (const layer of detectedLayers) {
+              for (const cylinder of layer.cylinders ?? []) {
+                if (!cylinder.loopId || !selectedBoreLoops.has(cylinder.loopId)) continue
+                const local = layer.frame === 'geometry_local'
+                const center = local ? transformLoopPoints([{ x: cylinder.center[0], y: cylinder.center[1] }], row)[0]
+                  : { x: cylinder.center[0], y: cylinder.center[1] }
+                const top = cylinder.topZ + (local ? row.position.z : 0)
+                const bottom = cylinder.bottomZ + (local ? row.position.z : 0)
+                const matches = candidates.filter(({ derived: { cylinder: c } }) =>
+                  Math.hypot(c.center[0] - center.x, c.center[1] - center.y) < 0.001 &&
+                  Math.abs(c.diameter - cylinder.diameter) < 0.001 &&
+                  Math.abs(c.topZ - top) < 0.001 && Math.abs(c.bottomZ - bottom) < 0.001 &&
+                  c.through === cylinder.through)
+                if (matches.length !== 1) continue
+                matched.set(cylinder.loopId, { ...matches[0],
+                  binding: { ...matches[0].binding, loopId: cylinder.loopId },
+                  derived: { ...matches[0].derived, loop: { ...matches[0].derived.loop, id: cylinder.loopId },
+                    cylinder: { ...matches[0].derived.cylinder, loopId: cylinder.loopId } },
+                })
+              }
+            }
+            const convertedGeo: ImportedGeometry = { ...modelGeo,
+              loops: row.loops?.map(loop => {
+                const target = matched.get(loop.id)
+                if (target) return { ...target.derived.loop, layerId: loop.layerId }
+                const layer = detectedLayers.find(l => l.id === loop.layerId)
+                return layer?.frame === 'geometry_local' ? { ...loop, points: transformLoopPoints(loop.points, row) } : loop
+              }),
+              layers2d: row.layers2d?.map(layer => !detectedLayers.includes(layer) ? layer : {
+                ...layer, frame: undefined,
+                projectionPlane: layer.projectionPlane ? { ...layer.projectionPlane, origin: { ...layer.projectionPlane.origin,
+                  z: layer.projectionPlane.origin.z + (layer.frame === 'geometry_local' ? row.position.z : 0) } } : undefined,
+                modelBoreFeatures: (layer.cylinders ?? []).flatMap(c => {
+                  const target = matched.get(c.loopId ?? '')
+                  return target ? [target.binding] : []
+                }),
+                cylinders: (layer.cylinders ?? []).map(c => {
+                  const target = matched.get(c.loopId ?? '')
+                  if (target) return target.derived.cylinder
+                  if (layer.frame !== 'geometry_local') return c
+                  const center = transformLoopPoints([{ x: c.center[0], y: c.center[1] }], row)[0]
+                  return { ...c, center: [center.x, center.y] as [number, number],
+                    topZ: c.topZ + row.position.z, bottomZ: c.bottomZ + row.position.z }
+                }),
+              }),
+            }
+            const ops = new Map<string, Operation>()
+            for (const op of selectedBoreOps) {
+              const ids = (op.params as unknown as BoreParams).loopIds
+              const selected = ids.flatMap(id => matched.has(id) ? [matched.get(id)!] : [])
+              if (!ids.length || !selected.length) continue
+              // A bad saved CAM intent belongs to this operation, not conversion
+              // or another operation. Preserve it for its normal Generate error.
+              try {
+                const before = deriveDrillBoreFeatureBindings([row], ids, 'bore')
+                if (!before.ok) continue
+                // Keep unresolved selections in the height scope as themselves.
+                // They stop this operation at Generate, but do not erase valid
+                // sibling bindings or veto Edit as model.
+                const afterMatched = deriveDrillBoreFeatureBindings([convertedGeo], selected.map(t => t.binding.loopId), 'bore')
+                if (!afterMatched.ok) continue
+                const rebound = rebindBoreFeatureIntent(op, before.bindings.map(b => ({ before: b.feature,
+                  after: afterMatched.bindings.find(a => a.loopId === b.loopId)?.feature ?? b.feature })))
+                ops.set(op.id, { ...rebound,
+                  modelReferences: [...(op.modelReferences ?? []), { modelItemId: newItemId, bodyId,
+                    stableIds: selected.map(t => t.binding.faceStableId), role: 'bore-target', boreFeatures: selected.map(t => t.binding) }],
+                })
+              } catch { /* Keep the operation unresolved; never veto model editing. */ }
+            }
+            boreConversion = { geometry: convertedGeo, ops }
+          } catch {
+            // Recognition may be unavailable even though the model can be edited.
+            // Keep discovery snapshots; Generate must resolve selected walls or
+            // report them by name, never cut from these old STEP dimensions.
+          }
+          const stale = staleSourceReason()
+          if (stale !== null) return abortStale(stale)
+        }
         const commitWrap = (): void => {
           get().pushHistory()
           set((s) => {
@@ -22572,7 +23772,9 @@ export const useCamStore = create<CamStore>()(
             // format === 'model' and lights up model-row UI); a still-import
             // pending row must not. The adapter clears this on adoption.
             const geometry = s.project.geometry.map((g) =>
-              g.id === geoId ? { ...g, pendingModelItemId: newItemId } : g,
+              g.id === geoId ? { ...g,
+                ...(boreConversion ? { loops: boreConversion.geometry.loops, layers2d: boreConversion.geometry.layers2d } : {}),
+                pendingModelItemId: newItemId } : g,
             )
             // MODEL-ROW-CITIZEN (defect e): "Edit as model" flips this row's format
             // to 'model' on adoption, so the compute path re-routes from the import's
@@ -22584,7 +23786,11 @@ export const useCamStore = create<CamStore>()(
             // honestly re-derives or refuses on recompute (part of the ONE pushHistory
             // undo step above, so undo restores the pre-wrap ready ops).
             const loopIds = new Set((row.loops ?? []).map((lp) => lp.id))
-            const setups = outdateOpsReferencingGeo(s.project.setups, geoId, loopIds, isWorkholdingGeometry(row))
+            const reboundSetups = boreConversion ? s.project.setups.map(setup => ({ ...setup,
+              operations: setup.operations.map(op => selectedBoreOps.includes(op)
+                ? boreConversion!.ops.get(op.id) ?? op : op),
+            })) : s.project.setups
+            const setups = outdateOpsReferencingGeo(reboundSetups, geoId, loopIds, isWorkholdingGeometry(row))
             // No-jump: seed the item's whole-item Placement from the row's OWN pose
             // (syncModelBodies only seeds identity when NO placement exists, so
             // ours wins) -- the adopted body lands exactly where the import sat.
@@ -22657,7 +23863,10 @@ export const useCamStore = create<CamStore>()(
         get().openModelItem(newItemId)
         return { ok: true, itemId: newItemId }
         } finally {
-          if (!cacheOwnershipTransferred) await releaseOwnedCacheKeys()
+          if (!cacheOwnershipTransferred) {
+            if (preparedBoreItemId) clearLoadedDocument(preparedBoreItemId)
+            await releaseOwnedCacheKeys()
+          }
           // Delete only this attempt's project-scoped token. A replacement
           // project may already own a different token for the same geometry id.
           importedGeometryWrapsInFlight.delete(wrapFlightKey)
@@ -22854,10 +24063,14 @@ export const useCamStore = create<CamStore>()(
       openDimensionEditor: (dimId) => {
         const sk = get().activeSketch
         if (!sk || !sk.dimensions.some((d) => d.id === dimId)) return
+        dimensionPlacement = null
         set({ sketchDimEditor: { dimId, isNew: false } })
       },
 
-      closeDimensionEditor: () => set({ sketchDimEditor: null }),
+      closeDimensionEditor: () => {
+        dimensionPlacement = null // Escape accepts the measured placement.
+        set({ sketchDimEditor: null })
+      },
 
       commitDimensionValue: (dimId, value, expression, half) => {
         const sk = get().activeSketch
@@ -22959,7 +24172,11 @@ export const useCamStore = create<CamStore>()(
         // the line to the mirror branch. Shared with the workbench accept path
         // via signedAngleEditValue -- the single point of truth.
         const signedValue = signedAngleEditValue(dim, value)
-        get().pushHistory()
+        const placement = get().sketchDimEditor?.isNew && dimensionPlacement?.dimId === dimId &&
+          dimensionPlacement.epoch === currentSketchGeometryEpoch()
+          ? dimensionPlacement : null
+        if (!placement) get().pushHistory()
+        dimensionPlacement = null
         set((s) => ({
           activeSketch: {
             ...s.activeSketch!,
@@ -22982,7 +24199,8 @@ export const useCamStore = create<CamStore>()(
         latestSketchRequestEpoch = currentSketchGeometryEpoch() // see applySketchConstraint
         pendingDimensionApply = {
           requestId, dimId, label,
-          revert: editsD2
+          ...(placement ? { history: placement } : {}),
+          revert: placement ? { kind: 'remove' } : editsD2
             ? { kind: 'restore', value: dim.value, d2: prev, expression: prevExpression }
             : { kind: 'restore', value: prev, expression: prevExpression },
         }
@@ -25359,7 +26577,9 @@ export const useCamStore = create<CamStore>()(
             candidate.setupId === job.setupId
             && (waitsForEvery || WORKER_2D_OPERATION_TYPES.has(candidate.operationType)))
           const earlierOpIds = earlier.map((candidate) => candidate.opId)
-          // Nothing to wait for: dispatch in this same turn, as before.
+          // WO-3126: runBatchJob yields at the shared entry, including a job
+          // with no predecessors taking a pool slot freed by another setup.
+          // Dependency ordering and settled-result checks stay unchanged.
           const dispatched = earlier.length === 0
             ? runBatchJob(job)
             : Promise.all(earlier.map((candidate) => settledJobs.get(candidate)))
@@ -25370,6 +26590,9 @@ export const useCamStore = create<CamStore>()(
           return settled
         }
         const runBatchJob = async (job: (typeof jobs)[number]) => {
+          // Publication and next-slot planning otherwise join in one microtask
+          // turn. Leave an input/paint frame on EVERY batch dispatch route.
+          await new Promise<void>(resolve => setTimeout(resolve, 16))
           // Project replacement/cancellation clears the owning batch. Old queue
           // lanes must never dispatch into a new project that reuses the ids.
           if (get().toolpathBatch?.id !== batchId) return
@@ -26323,9 +27546,9 @@ export const useCamStore = create<CamStore>()(
       // migrate/partialize/merge are extracted to exported named functions so
       // they can be unit-tested headlessly.
       version: PERSIST_STORE_VERSION,
-      storage: createJSONStorage<unknown>(
+      storage: withoutProgressSnapshots(createJSONStorage<unknown>(
         () => referenceImageStateStorage(userSpaceStateStorage),
-      ),
+      )),
       // WO-2639: a hydration that threw leaves defaults live; writes stay
       // closed so they never replace the stored project.
       onRehydrateStorage: () => (_state, error) => {
@@ -26333,7 +27556,16 @@ export const useCamStore = create<CamStore>()(
         else userSpaceStateStorage.failInitialHydration()
       },
       migrate: persistMigrate,
-      partialize: persistPartialize,
+      partialize: state => {
+        const snapshot = persistPartialize(state)
+        // Zustand shallow-copies get() before partialize. Compare all root
+        // fields to the exact observed progress state, not just project identity.
+        if (progressOnlyState && Object.keys(state).length === Object.keys(progressOnlyState).length &&
+          Object.keys(state).every(key => state[key as keyof CamStore] === progressOnlyState![key as keyof CamStore])) {
+          progressPersistenceSnapshots.add(snapshot)
+        }
+        return snapshot
+      },
       merge: persistMerge,
     }
   )
@@ -26342,6 +27574,8 @@ export const useCamStore = create<CamStore>()(
 // Observe every semantic write, including raw setState and history restore.
 // Generated status/progress does not renew the semantic edit serial.
 useCamStore.subscribe(state => {
+  if (toolpathProgressProjects.delete(state.project)) { progressOnlyState = state; return }
+  progressOnlyState = undefined
   observeOperationStockState(operationStockEpoch(), state.project, state.toolLibrary)
 })
 
@@ -26584,6 +27818,7 @@ function ensureSketchWorker(): Worker {
       if (pendingDimensionApply?.requestId === msg.requestId) {
         const pending = pendingDimensionApply
         pendingDimensionApply = null
+        if (dimensionPlacement?.dimId === pending.dimId) dimensionPlacement = null
         const exclude = new Set([pending.dimId])
         const names = describeConstraintSet(s.activeSketch, msg.status.conflicting, exclude)
         const revert = pending.revert
@@ -26605,6 +27840,8 @@ function ensureSketchWorker(): Worker {
           // driving-flag rewrite of an existing entry), never a fresh
           // ingestion -- is mechanically visible to the sweep.
           activeSketch: { ...sk, dimensions: dimensions },
+          ...(pending.history && s.projectHistory.at(-1) === pending.history.top
+            ? pending.history.before : {}),
           // An editor open on a removed dimension has nothing to edit.
           ...(pending.revert.kind === 'remove' &&
               useCamStore.getState().sketchDimEditor?.dimId === pending.dimId
@@ -26861,6 +28098,11 @@ const camSketchDocumentPort: SketchDocumentPort = {
         operatorText('index664'),
       )
     }
+    const placedDim = opts?.openDimensionEditor && shape.notices.length === 0 ? liveDimensions[0] : undefined
+    // Direct semantic callers also get a placement step; pointer gestures may
+    // already have pushed this exact pre-placement document through their sink.
+    if (placedDim && !(lastSketchHistoryPush?.sketch === s0.activeSketch &&
+      s0.projectHistory.at(-1) === lastSketchHistoryPush?.top)) s0.pushHistory()
     useCamStore.setState((st) => ({
       ...(opts?.clearSelection ? { sketchSelectedIds: [] } : {}),
       activeSketch: {
@@ -26873,8 +28115,10 @@ const camSketchDocumentPort: SketchDocumentPort = {
       sketchSolveStatus: null,
     }))
     for (const notice of shape.notices) showSketchNotice(useCamStore.setState, notice)
-    const placedDim = opts?.openDimensionEditor && shape.notices.length === 0 ? liveDimensions[0] : undefined
     if (placedDim) {
+      const pushed = lastSketchHistoryPush
+      dimensionPlacement = pushed && pushed.sketch === s0.activeSketch && useCamStore.getState().projectHistory.at(-1) === pushed.top
+        ? { ...pushed, dimId: placedDim.id, epoch: currentSketchGeometryEpoch() } : null
       const pendingSketch = useCamStore.getState().activeSketch!
       // Placed driving dimension: VERDICT solve (chunk-1 path) — a conflicting placement
       // auto-removes the dimension and names the conflict set. The value editor opens IMMEDIATELY,
@@ -26887,6 +28131,7 @@ const camSketchDocumentPort: SketchDocumentPort = {
         dimId: placedDim.id,
         label: operatorText('index665', { value1: String(constraintKindLabel(placedDim.kind)) }),
         revert: { kind: 'remove' },
+        ...(dimensionPlacement ? { history: dimensionPlacement } : {}),
       }
       const msg: SketchWorkerRequestMsg = {
         type: 'SOLVE_SKETCH',

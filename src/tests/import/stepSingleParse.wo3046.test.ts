@@ -50,7 +50,8 @@ describe('WO-3046 CAM Import geometry: no second full STEP import for the name',
     const { calls, factory } = countingService()
     const out = await readStepDisplayAttributes(bytes(FILES[0]), 'IMP1', factory)
     expect(calls.importStep, 'full importStep calls during the attribute read').toBe(0)
-    expect(out).toEqual({ name: 'Part 1', color: undefined, partCount: 1, warning: undefined })
+    // WO-3093 (436ff063c1) reads explicit STEP presentation metadata without a full parse.
+    expect(out).toEqual({ name: 'Part 1', color: '#9dcfed', partCount: 1, warning: undefined })
   }, 60_000)
 })
 

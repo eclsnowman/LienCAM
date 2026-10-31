@@ -197,7 +197,7 @@ describe('WO-214 schema v5 end-condition persistence', () => {
     })
 
     const loaded = loadDocumentArchive(v4)
-    expect(loaded.migrationsApplied).toEqual([4])
+    expect(loaded.migrationsApplied).toEqual([4, 6]) // WO-3234 adds the v6->v7 step
     expect(loaded.dag.getNode('B1')!.payload.endCondition).toBe('blind')
     expect(loaded.dag.getNode('F2')!.payload.endCondition).toBe('symmetric')
     expect(loaded.dag.getNode('F2')!.payload.endTarget).toBeUndefined()
@@ -229,7 +229,7 @@ describe('WO-1085 schema v6 multi-region selector persistence', () => {
 
     const loaded = loadDocumentArchive(createDocumentArchive({ dag, elementMapDeltas: [] }))
 
-    expect(loaded.manifest.schemaVersion).toBe(6)
+    expect(loaded.manifest.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
     expect(loaded.migrationsApplied).toEqual([])
     expect(loaded.dag.getNode('F2')!.payload.profileSelector).toEqual(profileSelector)
   })

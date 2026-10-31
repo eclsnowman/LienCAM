@@ -216,6 +216,11 @@ describe('Adaptive Clearing wall-finish lead radius controls (UI reachability + 
     setNumeric(leadInInput(), '2.5')
     setNumeric(leadOutInput(), '3.5')
 
+    // WO-3137 (7ce28356a7) invalidates the resolved Smart Height preview whenever a
+    // draft field changes, so Create is disabled from the moment a lead radius is
+    // committed until the preview re-resolves. Wait for the modal's own contract
+    // before pressing it; the payload assertions below are unchanged.
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByTestId('op-create'))
 
     return waitFor(() => {

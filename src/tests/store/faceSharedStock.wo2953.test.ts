@@ -48,7 +48,12 @@ beforeEach(() => {
   requests = []; instances = []; hold = false
   install()
 })
-afterEach(() => { vi.useRealTimers() })
+afterEach(async () => {
+  // WO-3126: stock settlement still has 16 ms frames queued on the fake clock;
+  // let them run so the shared authority is not left mid-settlement.
+  if (vi.isFakeTimers()) for (let frame = 0; frame < 20; frame++) await vi.advanceTimersByTimeAsync(20)
+  vi.useRealTimers()
+})
 afterAll(() => {
   vi.unstubAllGlobals(); vi.unstubAllEnvs()
   if (process.env.WO2953_CAPTURE === '1') writeFileSync('src/tests/evidence/WO-2953/application.json', JSON.stringify({
@@ -84,6 +89,14 @@ const preview = () => useCamStore.getState().previewOperationSmartHeightPlan(set
 const generate = (id = 'target') => useCamStore.getState().computeOperationToolpath(setup().id, id)
 const update = (id: string, patch: Partial<Operation>) => useCamStore.getState().updateOperation(setup().id, id, patch)
 const top = () => op().resolvedHeightPlan!.machining.materialStart.machineMm
+// WO-3126: a result's stock witness is prepared across a 16 ms renderer frame
+// before it publishes. On the fake clock, let those frames pass while waiting.
+async function settled<T>(promise: Promise<T>): Promise<T> {
+  let finished = false
+  void promise.then(() => { finished = true }, () => { finished = true })
+  for (let frame = 0; !finished && frame < 50; frame++) await vi.advanceTimersByTimeAsync(20)
+  return promise
+}
 
 function rawOperations(transform: (ops: Operation[]) => Operation[]) {
   useCamStore.setState(s => ({ project: { ...s.project, setups: s.project.setups.map(item =>
@@ -229,7 +242,7 @@ describe('WO-2953 production Face shared stock', () => {
     if (terminal === 'success') worker.release()
     else if (terminal === 'browser error') worker.onerror?.({ message: 'controlled browser error' } as ErrorEvent)
     else await vi.advanceTimersByTimeAsync(180_000)
-    await done
+    await settled(done)
     expect(op().status).toBe('outdated')
     expect(op().toolpathMoves).toBeUndefined()
     expect(worker.terminated).toBe(true)
@@ -401,7 +414,9 @@ describe('WO-2953 production Face shared stock', () => {
     await vi.waitFor(() => expect(instances[0]?.terminal).toBeDefined())
     const done = generate()
     update('prior', { passes: { ...op('prior').passes, stepover: 1 } })
-    instances[0].release(); await priorDone; await done
+    // Only the cancelled terminal is held: a restarted predecessor would run to
+    // the assertions below instead of hanging on the hold.
+    instances[0].release(); hold = false; await priorDone; await done
     expect(op('prior').status).toBe('outdated')
     expect(op().status).toBe('error')
     expect(requests.map(request => request.payload.opId)).toEqual(['prior'])
@@ -489,8 +504,10 @@ describe('WO-2953 production Face shared stock', () => {
     moves[index].x += 0.1 // Same length and saved depth; new removal content.
     rawOperations(ops => ops.map(o => o.id === 'prior' ? { ...o, toolpathMoves: moves } : o))
     const domain = getOperationStockDomain(setup().id, useCamStore.getState().project.stocks![0].id)
-    expect(domain.authority.readBefore({ beforeOperationId: 'last', frame: domain.frame,
-      maxCellMm: Number.MAX_VALUE })).toMatchObject({ status: 'recomputing', waitingFor: ['target'] })
+    // WO-3126: the edited inputs are prepared off the renderer before the read
+    // names what it waits for; until then it is recomputing with no name yet.
+    await vi.waitFor(() => expect(domain.authority.readBefore({ beforeOperationId: 'last', frame: domain.frame,
+      maxCellMm: Number.MAX_VALUE })).toMatchObject({ status: 'recomputing', waitingFor: ['target'] }))
     await generate('last')
     expect(op('last').status, op('last').errorMessage).toBe('ready')
     expect(requests.filter(request => request.payload.opId === 'target')).toHaveLength(2)

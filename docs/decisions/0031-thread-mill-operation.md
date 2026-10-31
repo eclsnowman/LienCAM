@@ -265,6 +265,9 @@ fail-loud contracts above.
 
 ### A2.1 Exit climb — thread fully out of the hole before retract
 
+RETIRED by Amendment 10 (2026-10-23, WO-3080): the ascending thread now ends at the
+hole top and retracts up the open centre. Kept below as history.
+
 The helix no longer ends at `topZ` (inside the hole) followed by a lead-out and
 retract from the thread top. After cutting the thread to `topZ` the builder
 CONTINUES the helix at the thread radius up to the feed plane (`feedZ`, above the
@@ -627,6 +630,58 @@ codebase agrees with itself on climb. `extSpan = 0.6*pitch` remains a v1
 approximation -- deriving the real external span from a measured root/minor
 diameter is still future work.
 
+## Amendment 10 (2026-10-23, WO-3080): the ascending internal thread ends at the hole top
+
+Retires A2.1's exit climb. The internal ascending (bottom-up) thread helix now ends
+at `topZ`, the thread top: the lead-out (arc or straight, unchanged logic) runs at
+`topZ` back to the open hole centre, and the tool then rapids straight up the open
+centre to clearance - the same exit the internal descending branch already used.
+
+Reason: owner release review 2026-10-23 on example 01 (Fixture Plate, Thread Mill 3):
+"you are helixing up far beyond the part up. The end height seems excessive." The
+exit climb orbited from the thread top to the feed plane in air - 5 air turns per
+hole at the default 5 mm feed height (12.5 helix turns per hole for a 7.5-turn
+thread). The open, pre-drilled hole centre is a clear path up, so threading back
+out of the hole bought nothing.
+
+Unchanged: the internal descending branch (its in-air entry orbit from the feed
+plane to the thread top is a separate question), both external branches (they
+never had an exit climb), `threadHelix.ts`, and the kernel parity copies.
+Builder tests assert the helix ends at the thread top and the lead-out is there;
+`src/tests/cam/threadMillStartHeight.wo3080.test.ts` asserts it through the
+production route on example 01.
+
+## Amendment 11 (2026-10-23, WO-3083): every pass enters at material + 1 and hops at Retract
+
+Every branch comes down to 1 mm above the material under the tool (ADR-0002
+Amendment 1, `src/lib/cam/moves`) instead of to the feed plane, then plunges as
+before. The internal descending branch no longer orbits down in air from the
+feed plane to the thread top: it plunges to `topZ`, leads in there and starts the
+thread there (the former DEGENERATE branch is now the only one). Passes leave
+straight up to Retract and the next pass hops there; the first pass comes down
+through Clearance and the operation's final exit rises to it.
+
+Reason: the owner's 2026-10-23 release review (see ADR-0002 Amendment 1); this
+answers the "separate question" Amendment 10 left open.
+
+## Amendment 12 (2026-10-27, WO-3193): the operator chooses Bottom-up or Top-down
+
+The owner's alpha.3.2 plan (THREAD-DIR, 2026-10-27): the axial direction is now an
+explicit choice, `ThreadMillParams.axialDirection: 'bottom-up' | 'top-down'`,
+in the New Operation editor (Passes > Advanced, replacing the climb/conventional
+toggle) and in Properties. With a direction chosen, every pass (roughing and
+spring) follows it and the orbit sense is the one that follows the hand's groove
+that way: s = h ascending, -h descending (the inverse of `threadTravelUp`).
+Climb or conventional is what results, c = s * e * p (the inverse of
+`threadOrbitSense`), and is shown under the choice, not asked. With no choice
+made (every op saved before WO-3193) the direction is derived from
+`cutDirection` exactly as in sec 5 / Amendment 7, so no saved toolpath changes;
+both surfaces show that derived direction as the active one.
+`resolveThreadMotion` in `threadHelix.ts` is the one resolver for the builder
+and both screens. With a right-hand cutter (M3): internal RH and external LH cut
+climb bottom-up and conventional top-down; internal LH and external RH cut
+climb top-down and conventional bottom-up. A left-hand cutter swaps each.
+
 ## References
 
 - ADR 0001 — toolpath/postprocessor separation (output stays full-precision; the
@@ -671,3 +726,5 @@ diameter is still future work.
 - `src/store/index.ts` — the explicit store dispatch (replaces the silent
   `COMPUTE_CONTOUR` fall-through)
 - `src/tests/cam/threadmill2d.test.ts` — builder emission + fail-loud tests
+- `src/tests/cam/threadMillStartHeight.wo3080.test.ts` — Amendment 10 production-route proof (example 01)
+- `src/tests/cam/threadMillDirection.wo3193.test.ts` — Amendment 12 direction choice: hand oracle for every kind x hand x direction x cutter

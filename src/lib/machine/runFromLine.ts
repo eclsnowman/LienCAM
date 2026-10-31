@@ -29,6 +29,8 @@ export interface RunFromLineOptions {
    *  when Z has a datum this session and the definition names one. The
    *  approach lifts there (G53 G0 Z) before any X/Y move. */
   safeZMachine?: number | null
+  /** WO-3123: current controller-reported machine Z in mm, when known. */
+  currentZMachine?: number | null
   /** WO-2237, a return to a pause point only: the work offset the controller
    *  reported the point in (54-59), for a program that selects none itself. */
   frameAtPause?: number | null
@@ -765,8 +767,13 @@ function planFrom(
   let lastMotion: 'G0' | 'G1' | null = null
   const units = state.inch ? 'G20' : 'G21'
   const inUnits = (v: number | null) => (v === null ? null : state.inch ? v / 25.4 : v)
-  const safeZ = options.safeZMachine
+  const authoredSafeZ = options.safeZMachine
+  const liveZ = options.currentZMachine
+  const safeZ = typeof authoredSafeZ === 'number' && Number.isFinite(authoredSafeZ)
+    ? Math.max(authoredSafeZ, typeof liveZ === 'number' && Number.isFinite(liveZ) ? liveZ : -Infinity)
+    : null
   const machineLift = typeof safeZ === 'number' && Number.isFinite(safeZ)
+    && authoredSafeZ !== 0 && (fmt(safeZ) !== 0 || safeZ === liveZ)
 
   // WO-2054: every move goes in the work offset its numbers were set in, and
   // the one in force at the line goes on last. X/Y a G53 line left at a
@@ -842,10 +849,15 @@ function planFrom(
   if (machineLift) {
     // The safe Z is a millimetre machine coordinate: lift in G21, then put
     // the program's units back. G53 is absolute in any distance mode.
-    prelude.push('G21', 'G90', `G53 G0 Z${fmt(safeZ)}`)
-    lastMotion = 'G0'
+    prelude.push('G21', 'G90')
+    // Never command machine zero. If live Z is already zero and above the
+    // authored safe height, keep it there for XY without a redundant Z move.
+    if (fmt(safeZ) !== 0) {
+      prelude.push(`G53 G0 Z${fmt(safeZ)}`)
+      lastMotion = 'G0'
+    }
     if (units === 'G20') prelude.push('G20')
-    warnings.push(`The tool lifts to machine Z${fmt(safeZ)} (this machine's safe Z) before any X/Y move.`)
+    warnings.push(`The tool ${fmt(safeZ) === 0 ? 'stays at' : 'lifts to'} machine Z${fmt(safeZ)} (${safeZ === authoredSafeZ ? "this machine's safe Z" : 'the higher current Z'}) before any X/Y move.`)
   } else {
     prelude.push(units)
     prelude.push('G90')

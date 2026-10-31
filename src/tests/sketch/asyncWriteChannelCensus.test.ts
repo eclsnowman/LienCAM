@@ -88,6 +88,26 @@ const CURRENT_CHANNEL_NAMED_EXCLUSIONS = [
       'WO-998 serial-baud configuration data: a readonly array of numeric choices, read for ' +
       'validation only. It contains no sketch payload, callback, timer, or deferred writer.',
   },
+  {
+    id: 'progressOnlyState',
+    file: STORE,
+    name: 'progressOnlyState',
+    reason:
+      'WO-3126 (2c05b482ed) progress-publication handle: the store instance whose pure progress ' +
+      'writes are being published, cleared by the persist observer on every other write. It ' +
+      'holds no sketch payload, timer or deferred writer, and a history restore is not a ' +
+      'progress publication, so nothing of it can carry a pending sketch write across the seam.',
+  },
+  {
+    id: 'CONTOUR_TAB_STALE_PATCH',
+    file: STORE,
+    name: 'CONTOUR_TAB_STALE_PATCH',
+    reason:
+      'WO-3220 (60a00dcfc9) contour tab-suggestion patch: a const object of toolpath result ' +
+      'fields (status, moves, timings, resolved heights, fingerprint) applied to an operation ' +
+      'whose contour inputs changed. It carries no sketch geometry, no timer and no sketch ' +
+      'writer, so it cannot commit a pending sketch write after a restore.',
+  },
 ] as const
 
 // ---- TIER 1: module-scope state holders ------------------------------------
@@ -163,6 +183,24 @@ describe('SKC-56-R3 tier 1: every module-scope mutable in the store is classifie
         `${name} is named by the ruling as a channel but is not censused as one`,
       ).toBe(true)
     }
+  })
+
+  it('WO-3133 keeps its asynchronous rollback latch as a seam-neutralized channel, while its synchronous push receipt remains a named exclusion', () => {
+    expect(ASYNC_WRITE_CHANNEL_CENSUS.filter((e) => e.name === 'dimensionPlacement')
+      .map((e) => e.class)).toEqual(['channel'])
+    expect(CURRENT_CHANNEL_NAMED_EXCLUSIONS.filter((e) => e.name === 'lastSketchHistoryPush')
+      .map((e) => e.reason)).toHaveLength(1)
+
+    // Adversarial removal: a future edit cannot quietly downgrade the latch
+    // to uncensused bookkeeping. The real seam still clears it, so both sides
+    // of the closed-set rule would turn red without this entry.
+    const withoutPlacement = ASYNC_WRITE_CHANNEL_CENSUS.filter((e) => e.name !== 'dimensionPlacement')
+    expect(auditClassification(mutables, withoutPlacement, CURRENT_CHANNEL_NAMED_EXCLUSIONS)
+      .map((p) => `${p.name}:${p.kind}`)).toContain('dimensionPlacement:unclassified')
+    const censusedNames = new Set(withoutPlacement.map((e) => e.name))
+    expect(extractSeamNeutralizations(STORE, storeSource)
+      .filter((n) => n.name === 'dimensionPlacement' && !censusedNames.has(n.name))
+      .map((n) => n.name)).toEqual(['dimensionPlacement'])
   })
 })
 
@@ -251,6 +289,7 @@ const NEUTRALIZE_ALL = [
   `  latestSketchRequestId = ''`,
   `  pendingConstraintApply = null`,
   `  pendingDimensionApply = null`,
+  `  dimensionPlacement = null`,
   `  pendingAppendApply = null`,
   `  if (dragDebounceTimer !== null) { clearTimeout(dragDebounceTimer); dragDebounceTimer = null }`,
   `  pendingDrag = null`,
@@ -261,6 +300,7 @@ const ALL_CHANNEL_LETS = [
   `let latestSketchRequestId = ''`,
   `let pendingConstraintApply = null`,
   `let pendingDimensionApply = null`,
+  `let dimensionPlacement = null`,
   `let pendingAppendApply = null`,
   `let dragDebounceTimer = null`,
   `let pendingDrag = null`,
@@ -398,6 +438,7 @@ describe('SKC-56-R3 adversarial fixture B: the R2 BLOCKER, reproduced structural
       extractSeamTimerCancels(STORE, fixture),
     )
     expect(violations.map((v) => `${v.name}:${v.kind}`)).toEqual([
+      'dimensionPlacement:not-neutralized',
       'pendingAppendApply:not-neutralized',
       'dragDebounceTimer:not-neutralized',
       'pendingDrag:not-neutralized',

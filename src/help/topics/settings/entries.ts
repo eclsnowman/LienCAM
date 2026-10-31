@@ -60,4 +60,13 @@ export const entries: HelpIndexEntry[] = [
       'user data backup restore sync folder download bundle recover previous generation shop data machines tools libraries preferences storage safe keep lost',
     contextKeys: ['modal:settings'],
   },
+  {
+    id: 'updating-liencam',
+    title: 'Updating LienCAM',
+    category: 'settings',
+    summary: 'The desktop app looks for a newer release when it starts, downloads and checks it when you click Download, and installs it only when you click Install and restart.',
+    keywords:
+      'update updating upgrade new version newer release github download install restart not now later checksum sha-256 sha256 verify portable appimage tar.gz macos dmg installer smartscreen offline git pull source keep settings',
+    contextKeys: ['modal:settings'],
+  },
 ]

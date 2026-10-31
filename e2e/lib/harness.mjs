@@ -6,6 +6,7 @@
 //   - size the window to 1920x1080 so every PNG has the same frame, and
 //   - answer the operating system's Save dialog with a path (a person types a
 //     file name there; the app's own code still writes the bytes).
+// Release smoke additionally runs with an empty update feed and no HTTP egress.
 import { _electron as electron } from 'playwright'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -14,10 +15,12 @@ export const WIDTH = 1920
 export const HEIGHT = 1080
 
 export class Journey {
-  constructor({ appPath, outDir, shots }) {
+  constructor({ appPath, outDir, shots, offline = false }) {
     this.appPath = appPath
     this.outDir = outDir
     this.shots = shots
+    this.offline = offline
+    this.network = { mode: offline ? 'offline' : 'normal', requests: [] }
     this.logPath = path.join(outDir, 'journey.log')
     this.steps = []
     this.current = null
@@ -65,10 +68,28 @@ export class Journey {
       executablePath: this.appPath,
       // Keep painting and timers running when the window is covered by others.
       args: ['--force-device-scale-factor=1', '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding', '--disable-background-timer-throttling'],
+        '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
+        // This applies from process start, before Playwright can intercept the
+        // first window. Never let the initial update request race the route.
+        ...(this.offline ? ['--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>',
+          '--host-resolver-rules=MAP * ~NOTFOUND'] : [])],
       env: { ...process.env, LIENCAM_USER_DATA_DIR: profileDir },
       timeout: 120_000,
     })
+    if (this.offline) {
+      await this.app.context().route(/^https?:\/\//, async route => {
+        const url = new URL(route.request().url())
+        const feed = url.hostname === 'api.github.com'
+          && /^\/repos\/[^/]+\/[^/]+\/releases$/.test(url.pathname)
+        const action = feed ? 'empty-update-feed' : 'blocked'
+        this.network.requests.push({ url: url.href, action })
+        this.log(`OFFLINE ${action} ${url.href}`)
+        if (feed) await route.fulfill({ status: 200, contentType: 'application/json',
+          headers: { 'Access-Control-Allow-Origin': '*' }, body: '[]' })
+        else await route.abort('internetdisconnected')
+      })
+      this.log('OFFLINE launch proxy and DNS guard active; HTTP requests intercepted')
+    }
     const proc = this.app.process()
     proc.stdout?.on('data', (chunk) => this.log(`MAIN stdout ${String(chunk).trimEnd()}`))
     proc.stderr?.on('data', (chunk) => this.log(`MAIN stderr ${String(chunk).trimEnd()}`))

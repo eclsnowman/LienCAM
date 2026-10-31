@@ -567,11 +567,14 @@ describe('CAM-12-R3: mechanical dereference-closure (STOP-ruling enforcement)', 
     // WO-2976: run the scan asynchronously. A synchronous child blocks the
     // worker for the whole ~60 s scan, Vitest's worker RPC times out
     // ("Timeout calling onTaskUpdate") and the file fails with every test green.
-    const { stdout: output } = await promisify(execFile)(
-      process.execPath,
-      [resolve(REPO_ROOT, 'src/tests/support/deriveSetupClosure.mjs')],
-      { encoding: 'utf8', cwd: REPO_ROOT, windowsHide: true, timeout: 135_000, maxBuffer: 64 * 1024 * 1024 },
-    )
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      // The scan parses the whole of src/; on this checkout it exceeds Node's
+      // default heap and dies with "heap out of memory" before it can report, so
+      // give the child the same ceiling the build script uses.
+      '--max-old-space-size=8192',
+      resolve(REPO_ROOT, 'src/tests/support/deriveSetupClosure.mjs'),
+    ], { encoding: 'utf8', cwd: REPO_ROOT, windowsHide: true, timeout: 135_000, maxBuffer: 64 * 1024 * 1024 })
+    const output = stdout
     const extracted = performance.now()
     const { fieldPaths, violations } = JSON.parse(output) as {
       fieldPaths: string[]

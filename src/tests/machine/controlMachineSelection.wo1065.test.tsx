@@ -692,6 +692,10 @@ describe('WO-1065 Control machine ownership', () => {
     expect(libraryCamReferencePaths).toEqual([
       'src/lib/machine/machineSession.ts',
       'src/lib/machine/programContext.ts',
+      // WO-3125: the prepared Setup Load comparison is bound to the posted
+      // machine identity (bindSetupLoadComparison / preparedSetupLoadComparison),
+      // the same post-identity read as ProgramPreview's WO-1404 entry above.
+      'src/lib/machine/setupLoadPreparation.ts',
     ])
   })
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // React-render SMOKE test for the toolpath-legend chip (clutter-audit P10).
-// The 11-toggle legend collapses to a single "Legend" chip with a visible-role
+// The 12-toggle legend collapses to a single "Legend" chip with a visible-role
 // count badge; clicking expands the full list as a flyout. Operator's verdict
 // requires the expanded/collapsed state to PERSIST, so it lives in the
 // persisted uiPrefs store (key "liencam-ui-prefs") - the same mechanism the
@@ -34,7 +34,7 @@ afterEach(cleanup)
 
 const legendRoles = [
   'cut', 'rapid', 'helix', 'ramp', 'plunge', 'stepover',
-  'fast_traverse', 'wall_follow', 'finish', 'lead_in', 'lead_out',
+  'fast_traverse', 'wall_follow', 'finish', 'lead_in', 'lead_out', 'loop_back',
 ] as const
 
 // Both stores are process singletons; force a toolpath-mode viewer with no
@@ -83,19 +83,19 @@ beforeEach(() => {
 })
 
 describe('ViewportOverlay toolpath-legend chip (P10)', () => {
-  it('renders collapsed by default: chip with an 11 badge, no list', () => {
+  it('renders collapsed by default: chip with a 12 badge, no list', () => {
     render(<ViewportOverlay interactionMode="normal" />)
     expect(screen.getByTestId('tp-legend-chip')).not.toBeNull()
-    expect(screen.getByTestId('tp-legend-chip-badge').textContent).toBe('11')
+    expect(screen.getByTestId('tp-legend-chip-badge').textContent).toBe('12')
     expect(screen.queryByTestId('tp-legend-list')).toBeNull()
   })
 
-  it('clicking the chip expands the full 11-toggle list (collapsed -> expanded render)', () => {
+  it('clicking the chip expands the full 12-toggle list (collapsed -> expanded render)', () => {
     render(<ViewportOverlay interactionMode="normal" />)
     act(() => { fireEvent.click(screen.getByTestId('tp-legend-chip')) })
 
     const list = screen.getByTestId('tp-legend-list')
-    expect(list.querySelectorAll('.tp-legend-toggle').length).toBe(11)
+    expect(list.querySelectorAll('.tp-legend-toggle').length).toBe(12)
 
     // Collapse again: the list unmounts, the chip stays.
     act(() => { fireEvent.click(screen.getByTestId('tp-legend-chip')) })
@@ -114,7 +114,7 @@ describe('ViewportOverlay toolpath-legend chip (P10)', () => {
     expect(persisted?.state?.tpLegendExpanded).toBe(true)
   })
 
-  it('badge counts VISIBLE roles: hiding one via its eye toggle drops it to 10', () => {
+  it('badge counts VISIBLE roles: hiding one via its eye toggle drops it to 11', () => {
     act(() => { useUiPrefs.setState({ tpLegendExpanded: true }) })
     render(<ViewportOverlay interactionMode="normal" />)
 
@@ -122,7 +122,7 @@ describe('ViewportOverlay toolpath-legend chip (P10)', () => {
     act(() => { fireEvent.click(firstToggle!) })
 
     expect(useCamStore.getState().viewer.hiddenToolpathRoles.length).toBe(1)
-    expect(screen.getByTestId('tp-legend-chip-badge').textContent).toBe('10')
+    expect(screen.getByTestId('tp-legend-chip-badge').textContent).toBe('11')
   })
 
   it('hides move roles absent from the rendered toolpath and counts only active visible roles', () => {
@@ -167,7 +167,7 @@ describe('ViewportOverlay toolpath-legend chip (P10)', () => {
 
     const toggle = screen.getByTestId('toggle-roughing-preview') as HTMLInputElement
     expect(toggle.checked).toBe(false)
-    expect(screen.getByTestId('tp-legend-list').querySelectorAll('.tp-legend-toggle').length).toBe(11)
+    expect(screen.getByTestId('tp-legend-list').querySelectorAll('.tp-legend-toggle').length).toBe(12)
 
     act(() => { fireEvent.click(toggle) })
     expect(useCamStore.getState().viewer.showRoughingPreview).toBe(true)

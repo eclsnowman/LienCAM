@@ -5,6 +5,12 @@
 import type { Translation } from '../../index'
 
 const messages: Translation<'console-and-operator-messages'> = {
+  "postToolNumberAssigned": "T{{number}} wurde „{{name}}“ für dieses Programm zugewiesen.",
+  "g53BottomOfTravel": "„{{name}}“, Zeile {{line}}: {{code}} fährt auf Maschinen-Z {{z}}, das untere Ende des Z-Verfahrwegs dieser Maschine. Es läuft wie geschrieben.",
+  "g53BottomOfTravelMore": "„{{name}}“: {{count}} weitere Zeilen fahren ebenfalls an das untere Ende des Z-Verfahrwegs, die nächste in Zeile {{line}}.",
+  "interpreterHandover": "„{{name}}“: Zeile {{line}} ({{word}}) liest der Datei-Interpreter der Maschinenbrücke, deshalb wird die ganze Datei dort gelesen.",
+  "interpreterHandoverNoLine": "„{{name}}“: Diese Datei liest der Datei-Interpreter der Maschinenbrücke, deshalb wird die ganze Datei dort gelesen.",
+  "index40": "{{value1}}: {{value3}} Verbindungen geprüft; {{value2}} Eilgangbewegungen bleiben unter der Sicherheitshöhe über bereits entferntem Material.",
   "outdatedReasonEarlierChanged": "{{name}} wurde nach dieser Berechnung geändert",
   "outdatedReasonEarlierRemoved": "{{name}} wurde nach dieser Berechnung gelöscht",
   "outdatedReasonEarlierEnabled": "{{name}} wurde nach dieser Berechnung eingeschaltet",

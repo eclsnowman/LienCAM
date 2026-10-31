@@ -1,6 +1,7 @@
 // WO-3042 (WO-3029 phase 2, card C): the adaptive steering wobble smoothing, behind one switch that
-// ships OFF (src/kernel/ops/adaptive/policy.ts ADAPTIVE_MOTION_SWITCHES.steeringSmoothing).
-// 1. Ships OFF; OFF is today's stepper to the bit.
+// ships ON after the owner's WO-3067 approval, 2026-10-22 "Turn it on (recommended)"
+// (src/kernel/ops/adaptive/policy.ts ADAPTIVE_MOTION_SWITCHES.steeringSmoothing).
+// 1. Ships ON; the explicit OFF control retains the prior stepper.
 // 2. The stepper rules on the real stepper (steering.ts): B, the first guess is corrected toward the
 //    load target instead of being kept anywhere in the band; C, a move the caller replaced is what the
 //    momentum learns.
@@ -50,9 +51,9 @@ const metric = (row: Row, key: string) => {
 }
 
 describe('WO-3042 steering smoothing switch', () => {
-  it('ships OFF', async () => {
+  it('ships ON (WO-3067, owner 2026-10-22 "Turn it on (recommended)")', async () => {
     const real = await vi.importActual<PolicyModule>('../../../kernel/ops/adaptive/policy')
-    expect(real.ADAPTIVE_MOTION_SWITCHES.steeringSmoothing).toBe(false)
+    expect(real.ADAPTIVE_MOTION_SWITCHES.steeringSmoothing).toBe(true)
     expect(Object.isFrozen(real.ADAPTIVE_MOTION_SWITCHES)).toBe(true)
     expect(Object.isFrozen(real.STEERING_SMOOTHING)).toBe(true)
   })

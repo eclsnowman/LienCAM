@@ -12,6 +12,16 @@
 // asking the operator to visit a tab first. Only a genuine failure to
 // reconstruct the body (an unsupported feature kind, a lost reference, a
 // kernel refusal) still refuses by name (ADR-0003).
+//
+// WO-3202 (WO-3170 Slice B): both reads below go through ONE revision-bound
+// recognition result (src/lib/geometry/partFeatureBinding.ts). The open
+// model's result lives in its ModelSession's memo -- the same result Resize
+// Hole picked from; a closed model's result lives in documentHolder's memo for
+// the exact archived bytes, replayed at most once per archive (or carried over
+// from the session when the Model tab closed). The window hooks stay as a
+// one-off fallback for a harness that installs them without a session, and
+// are ignored when they belong to a different Model Item (two items may share
+// a raw body id).
 
 import type { BodyHandle, FeatureVerdict } from '../../geom/geom-service'
 import type { BodyResolution } from './modelReferenceResolution'
@@ -19,12 +29,31 @@ import { createGeomService, type GeomClient } from '../../geom'
 import type { GeometrySnapshot } from '../../geom'
 import { RegenScheduler, type DagNodeSnapshot, type ElementMap, type FeatureDag, type FeatureOp } from '../../doc'
 import { loadDocumentArchive } from '../../doc/persist'
-import { collectDocumentArchive, LEGACY_MODEL_ITEM_ID } from '../../doc/documentHolder'
+import {
+  archiveFeatureResultScope,
+  collectDocumentArchive,
+  getModelSession,
+  LEGACY_MODEL_ITEM_ID,
+} from '../../doc/documentHolder'
+import {
+  bindModelBodyFeatures,
+  featuresOnFace,
+  FeatureSourceUnavailableError,
+  MODEL_FEATURE_BINDER_VERSION,
+  produceModelBodyFeatures,
+  readLiveModelBodyFeatures,
+  verdictForFeature,
+  type ModelBodyFeatureResult,
+  type ModelBodySourceToken,
+} from '../geometry/partFeatureBinding'
+import type { PartFeature } from '../../kernel/features'
 import { isDatumPlanePayload, type DatumPlanePayload } from '../../sketch3d/datumPlane'
 import { makeSketch3dExecutor, sketch3dIdFromNodeId } from '../../sketch3d/regen'
 import { createSketch3dSolveService, type Sketch3dSolveService } from '../../sketch3d/solveService'
 import type { PlaneFrame } from '../../sketch3d'
 import { extractSketchProfile } from '../../components/model3d/workbench/sketchProfile'
+import { expandSweepPathSelection } from '../../geom/sweep-path'
+import { expandBlocksForGeometry } from '../sketch/blocks'
 import type { Sketch as CamSketch } from '../../lib/sketch/sketcher'
 import { liveBodyFeatureIds } from '../../components/model3d/bodyLineage'
 import {
@@ -56,6 +85,8 @@ export function setModelBodyFaceSnapshotReader(fn: ModelBodyFaceSnapshotReader |
 }
 
 type WorkbenchHoleHooks = {
+  /** WO-3202: the item the mounted page holds; absent on a harness fake. */
+  modelItemId?: string
   getBodyHandle?: (featureId: string) => unknown
   client?: {
     recognizeFeatures?: (h: unknown) => Promise<FeatureVerdict[]>
@@ -63,9 +94,12 @@ type WorkbenchHoleHooks = {
   }
 }
 
-function workbenchHooks(): WorkbenchHoleHooks | undefined {
+function workbenchHooks(modelItemId: string): WorkbenchHoleHooks | undefined {
   if (typeof window === 'undefined') return undefined
-  return (window as unknown as { __solidsWorkbenchHooks?: WorkbenchHoleHooks }).__solidsWorkbenchHooks
+  const hooks = (window as unknown as { __solidsWorkbenchHooks?: WorkbenchHoleHooks }).__solidsWorkbenchHooks
+  // WO-3202: a mounted page's hooks reach ITS item's bodies only.
+  if (hooks?.modelItemId !== undefined && hooks.modelItemId !== modelItemId) return undefined
+  return hooks
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +134,15 @@ function isFiniteFrame(frame: PlaneFrame | undefined): frame is PlaneFrame {
   return Math.hypot(frame.normal.x, frame.normal.y, frame.normal.z) > 1e-9
 }
 
+/** True when one of the sketch's own lines or arcs expands, through the ONE
+ *  sweep-path authority (WO-3228), into an open chain a Sweep can follow. */
+function drawsSweepPath(dag: FeatureDag, nodeId: string, sketch: CamSketch): boolean {
+  const lookup = (id: string) => dag.getNode(id)
+  const flat = expandBlocksForGeometry(sketch.entities ?? [], sketch.constraints ?? [], sketch.blockDefs)
+  return flat.entities.some((e) => (e.kind === 'line' || e.kind === 'arc') && e.construction !== true &&
+    expandSweepPathSelection(nodeId, e.id, lookup).ok)
+}
+
 /** Recompute a "package sketch" node's `profile`/`regions` from its plane's
  *  current frame -- the headless counterpart of SolidsWorkbenchPage's
  *  recomputeSketchProfileInDag, minus the concurrent-session stale-result
@@ -122,7 +165,20 @@ async function recomputePackageSketchProfile(dag: FeatureDag, nodeId: string): P
 
   const rawId = sketch3dIdFromNodeId(nodeId) ?? nodeId
   const result = await extractSketchProfile(sketch, frame, rawId)
-  if (!result.ok) return kernelOpFailure(nodeId, result.refusal.message)
+  if (!result.ok) {
+    // WO-3231: a sketch that encloses nothing but draws an open line/arc chain
+    // is a sweep PATH, as the live recompute treats it: the node stays ok with
+    // no regions (a downstream profile consumer still refuses by name), so a
+    // Sweep that follows it can replay. Every other refusal stays a failure.
+    const enclosesNothing = result.refusal.code === 'open-loop' || result.refusal.code === 'no-geometry'
+    if (enclosesNothing && drawsSweepPath(dag, nodeId, sketch)) {
+      const next = { ...node.payload }
+      delete next.regions
+      dag.setPayload(nodeId, next)
+      return { ok: true, diagnostics: [] }
+    }
+    return kernelOpFailure(nodeId, result.refusal.message)
+  }
 
   dag.setPayload(nodeId, { ...node.payload, regions: result.regions })
   return { ok: true, diagnostics: [] }
@@ -402,6 +458,69 @@ async function regenerateModelBodyHeadless(
   }
 }
 
+/** A one-off token: nothing shares or memoizes a result made under it. */
+function transientToken(bodyId: string, modelItemId: string): ModelBodySourceToken {
+  return { binderVersion: MODEL_FEATURE_BINDER_VERSION, route: 'transient', modelItemId, bodyId, revision: 0 }
+}
+
+/** Replay the held document headlessly and read `token.bodyId`'s result,
+ *  terminating the transient kernel whatever happens. */
+async function replayModelBodyFeatures(token: ModelBodySourceToken): Promise<ModelBodyFeatureResult> {
+  const { client, handle } = await regenerateModelBodyHeadless(token.bodyId, token.modelItemId)
+  try {
+    return await produceModelBodyFeatures(token, client, handle)
+  } finally {
+    await client.terminate().catch(() => undefined)
+  }
+}
+
+const ARCHIVE_SUPERSEDED_RETRIES = 3
+
+/** WO-3202: the closed model's result, one replay per archived document.
+ *  Concurrent readers share the replay; a result whose archive was replaced
+ *  while it ran is not handed out (the read retries against the new bytes). */
+async function readArchivedModelBodyFeatures(bodyId: string, modelItemId: string): Promise<ModelBodyFeatureResult> {
+  for (let attempt = 0; attempt < ARCHIVE_SUPERSEDED_RETRIES; attempt++) {
+    const scope = archiveFeatureResultScope(modelItemId)
+    if (scope === undefined) return replayModelBodyFeatures(transientToken(bodyId, modelItemId))
+    const token: ModelBodySourceToken = {
+      binderVersion: MODEL_FEATURE_BINDER_VERSION, route: 'archive', modelItemId, bodyId, revision: scope.serial,
+    }
+    const result = await scope.memo.read(token, () => replayModelBodyFeatures(token))
+    if (archiveFeatureResultScope(modelItemId)?.serial === scope.serial) return result
+  }
+  throw new Error(`body "${bodyId}": the project's model kept changing while its features were read; try again.`)
+}
+
+/**
+ * WO-3202: the ONE recognition result for a Model-kernel body -- the open
+ * model's session memo when the workbench holds that body, else the archived
+ * document's memo. Throws a named Error when recognition cannot run.
+ */
+export async function readModelBodyFeatureResult(
+  bodyId: string,
+  modelItemId: string = LEGACY_MODEL_ITEM_ID,
+): Promise<ModelBodyFeatureResult> {
+  if (typeof bodyId !== 'string' || bodyId.length === 0) {
+    throw new Error('readModelBodyFeatureResult: bodyId is required.')
+  }
+  const session = getModelSession(modelItemId)
+  if (session !== undefined && session.liveBodySource()?.handleOf(bodyId) !== undefined) {
+    try {
+      return await readLiveModelBodyFeatures(session, bodyId)
+    } catch (err) {
+      // The body left the open model while it was read: the document decides.
+      if (!(err instanceof FeatureSourceUnavailableError)) throw err
+    }
+  }
+  return readArchivedModelBodyFeatures(bodyId, modelItemId)
+}
+
+/** The live session for `modelItemId` when it holds `bodyId` right now. */
+function liveSessionHolding(bodyId: string, modelItemId: string): boolean {
+  return getModelSession(modelItemId)?.liveBodySource()?.handleOf(bodyId) !== undefined
+}
+
 /**
  * Recognize holes on a Model-kernel body id (DAG feature id / bodyId).
  * Throws a named Error when recognition cannot run.
@@ -418,18 +537,16 @@ export async function recognizeModelBodyHoles(bodyId: string, modelItemId?: stri
   if (injectedRecognizer) {
     return injectedRecognizer(bodyId)
   }
-  const hooks = workbenchHooks()
-  const handle = hooks?.getBodyHandle?.(bodyId)
-  const recognize = hooks?.client?.recognizeFeatures
-  if (handle !== undefined && recognize !== undefined) {
-    return recognize(handle)
+  const owner = modelItemId ?? LEGACY_MODEL_ITEM_ID
+  if (!liveSessionHolding(bodyId, owner)) {
+    const hooks = workbenchHooks(owner)
+    const handle = hooks?.getBodyHandle?.(bodyId)
+    const recognize = hooks?.client?.recognizeFeatures
+    if (handle !== undefined && recognize !== undefined) {
+      return recognize(handle)
+    }
   }
-  const { client, handle: headlessHandle } = await regenerateModelBodyHeadless(bodyId, modelItemId)
-  try {
-    return await client.recognizeFeatures(headlessHandle)
-  } finally {
-    await client.terminate().catch(() => undefined)
-  }
+  return [...(await readModelBodyFeatureResult(bodyId, owner)).verdicts]
 }
 
 export interface ModelBodyFaceFacts {
@@ -437,9 +554,48 @@ export interface ModelBodyFaceFacts {
   verdicts: FeatureVerdict[]
 }
 
+/** WO-3202: the face facts with the shared result they were read from and
+ *  the common feature on that face (the snapshot read API above stays the
+ *  plain pair its callers compare). */
+export interface ModelBodyFaceBinding {
+  facts: ModelBodyFaceFacts
+  /** absent on the injected test seams, which bypass recognition entirely */
+  result?: ModelBodyFeatureResult
+  /** the common feature on the selected face whose verdict is a hole -- the
+   *  same feature Resize Hole selects for that face */
+  feature?: PartFeature
+}
+
+type FaceFactsObserver = (binding: ModelBodyFaceBinding, bodyId: string, faceStableId: string) => void
+let faceFactsObserver: FaceFactsObserver | null = null
+
+/** Test / harness observation of every bound face read (WO-3202's journey
+ *  test captures the Bore adapter's token and feature here). Pass null to clear. */
+export function __observeModelBodyFaceFactsForTests(observer: FaceFactsObserver | null): void {
+  faceFactsObserver = observer
+}
+
+const HOLE_FEATURE_CLASSES = new Set(['throughHole', 'blindHole', 'counterboreStack'])
+
+function holeFeatureOnFace(result: ModelBodyFeatureResult, faceStableId: string): PartFeature | undefined {
+  return featuresOnFace(result, faceStableId).find((feature) => {
+    const verdict = verdictForFeature(result, feature)
+    return verdict !== undefined && HOLE_FEATURE_CLASSES.has(verdict.featureClass)
+  })
+}
+
+function unavailableFace(bodyId: string, faceStableId: string): Error {
+  return new Error(
+    `Selected Model face "${faceStableId}" is unavailable on body "${bodyId}". ` +
+      'Re-sync the model and pick the face again.',
+  )
+}
+
 /** Read one selected face's analytic kernel snapshot and the body's recognition
  * verdicts. Both facts belong to the same live body identity; no mesh inference
- * or imported-STEP worker is involved.
+ * or imported-STEP worker is involved. WO-3202: both come from the one shared
+ * result (readModelBodyFeatureResult), so a Bore pick right after a Resize
+ * Hole reads the result Resize Hole already holds.
  *
  * `modelItemId` (optional, defaults to the legacy item): see
  * `recognizeModelBodyHoles`'s doc comment -- same reason, same fallback. */
@@ -448,6 +604,15 @@ export async function readModelBodyFaceFacts(
   faceStableId: string,
   modelItemId?: string,
 ): Promise<ModelBodyFaceFacts> {
+  return (await readModelBodyFaceBinding(bodyId, faceStableId, modelItemId)).facts
+}
+
+/** WO-3202: readModelBodyFaceFacts plus the shared result and common feature. */
+export async function readModelBodyFaceBinding(
+  bodyId: string,
+  faceStableId: string,
+  modelItemId?: string,
+): Promise<ModelBodyFaceBinding> {
   if (typeof bodyId !== 'string' || bodyId.length === 0) {
     throw new Error('readModelBodyFaceFacts: bodyId is required.')
   }
@@ -460,46 +625,56 @@ export async function readModelBodyFaceFacts(
       injectedSnapshotReader(bodyId, faceStableId),
       recognizeModelBodyHoles(bodyId, modelItemId),
     ])
-    if (!snapshot) {
-      throw new Error(
-        `Selected Model face "${faceStableId}" is unavailable on body "${bodyId}". ` +
-          'Re-sync the model and pick the face again.',
-      )
-    }
-    return { snapshot, verdicts }
+    if (!snapshot) throw unavailableFace(bodyId, faceStableId)
+    return { facts: { snapshot, verdicts } }
   }
 
-  const hooks = workbenchHooks()
-  const handle = hooks?.getBodyHandle?.(bodyId)
-  const recognize = hooks?.client?.recognizeFeatures
-  const snapshotsFor = hooks?.client?.snapshotsFor
-  if (handle !== undefined && recognize !== undefined && snapshotsFor !== undefined) {
-    const [verdicts, snapshots] = await Promise.all([recognize(handle), snapshotsFor(handle)])
-    const snapshot = snapshots[faceStableId]
-    if (!snapshot) {
-      throw new Error(
-        `Selected Model face "${faceStableId}" is unavailable on body "${bodyId}". ` +
-          'Re-sync the model and pick the face again.',
-      )
+  const owner = modelItemId ?? LEGACY_MODEL_ITEM_ID
+  let result: ModelBodyFeatureResult | undefined
+  if (!liveSessionHolding(bodyId, owner)) {
+    const hooks = workbenchHooks(owner)
+    const handle = hooks?.getBodyHandle?.(bodyId)
+    const recognize = hooks?.client?.recognizeFeatures
+    const snapshotsFor = hooks?.client?.snapshotsFor
+    if (handle !== undefined && recognize !== undefined && snapshotsFor !== undefined) {
+      const [verdicts, snapshots] = await Promise.all([recognize(handle), snapshotsFor(handle)])
+      result = bindModelBodyFeatures(transientToken(bodyId, owner), verdicts, snapshots)
     }
-    return { snapshot, verdicts }
   }
+  result ??= await readModelBodyFeatureResult(bodyId, owner)
+  const snapshot = result.snapshots[faceStableId]
+  if (!snapshot) throw unavailableFace(bodyId, faceStableId)
+  const feature = holeFeatureOnFace(result, faceStableId)
+  const binding: ModelBodyFaceBinding = {
+    facts: { snapshot, verdicts: [...result.verdicts] },
+    result,
+    ...(feature !== undefined ? { feature } : {}),
+  }
+  faceFactsObserver?.(binding, bodyId, faceStableId)
+  return binding
+}
 
-  const { client, handle: headlessHandle } = await regenerateModelBodyHeadless(bodyId, modelItemId)
-  try {
-    const [verdicts, snapshots] = await Promise.all([
-      client.recognizeFeatures(headlessHandle),
-      client.snapshotsFor(headlessHandle),
-    ])
-    const snapshot = snapshots[faceStableId]
-    if (!snapshot) {
-      throw new Error(
-        `Selected Model face "${faceStableId}" is unavailable on body "${bodyId}". ` +
-          'Re-sync the model and pick the face again.',
-      )
+
+/** Read one body result for a Bore selection. Production reuses the shared
+ * session/archive memo. Injected readers remain test seams, not a second cache. */
+export async function readModelBodyBoreFeatureResult(
+  bodyId: string, modelItemId: string = LEGACY_MODEL_ITEM_ID,
+): Promise<ModelBodyFeatureResult> {
+  if (injectedSnapshotReader) {
+    const verdicts = await recognizeModelBodyHoles(bodyId, modelItemId)
+    const snapshots: Record<string, GeometrySnapshot> = {}
+    for (const face of new Set(verdicts.flatMap(v => v.faceIds.map(String)))) {
+      const snapshot = await injectedSnapshotReader(bodyId, face)
+      if (snapshot) snapshots[face] = snapshot
     }
-    return { snapshot, verdicts }
-  } finally {
-    await client.terminate().catch(() => undefined)
+    return bindModelBodyFeatures(transientToken(bodyId, modelItemId), verdicts, snapshots)
   }
+  if (!liveSessionHolding(bodyId, modelItemId)) {
+    const hooks = workbenchHooks(modelItemId)
+    const handle = hooks?.getBodyHandle?.(bodyId)
+    if (handle !== undefined && hooks?.client?.recognizeFeatures && hooks.client.snapshotsFor) {
+      return produceModelBodyFeatures(transientToken(bodyId, modelItemId), hooks.client as import('../geometry/partFeatureBinding').ModelBodyKernel, handle as BodyHandle)
+    }
+  }
+  return readModelBodyFeatureResult(bodyId, modelItemId)
 }

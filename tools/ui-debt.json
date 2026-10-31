@@ -1,0 +1,16 @@
+{
+  "note": "WO-3275 UI debt ratchet (M2-PLAN standard 13). Counts may only fall: tools/ui-debt.mjs fails when one rises; an order that removes debt runs node tools/ui-debt.mjs --update. Scope and patterns are documented in tools/ui-debt.mjs. Re-recorded at landing 2026-10-29 (architect): main gained 5 inline styles from WO-3250/WO-3257 (NewOperationModalBody.tsx +1, CamShortcutMap.tsx +1, CamShortcutSettings.tsx +3) before this ratchet existed. Re-recorded again 2026-10-29 1:55 AM after main gained rawSelect +1 and inlineStyle +13 from orders that landed before this ratchet. Re-recorded 2026-10-29 3:35 AM after WO-3259 (gamepad step-jog; GamepadJogSettings.tsx, JogPanel.tsx) landed on old screens: inlineStyle +10, toFixed +1. Re-recorded 2026-10-29 9:25 AM after classic-screen orders WO-3237 (thin walls) and WO-3169 (Bore detect holes) landed without the ratchet in their slice: rawSelect +1, inlineStyle +5, bigFiles +1. Re-recorded 2026-10-29 10:10 AM after WO-3244 (Mirror dialog, classic UI) landed rawSelect +2, titleTooltip +1, inlineStyle +4 by hand-land without the ratchet in its slice; the architect hand-land helper now checks ui-debt before landing.",
+  "baseline": "c087e14559f76156838489f1f1080a0a229c9776",
+  "counts": {
+    "rawSelect": 224,
+    "rawNumberInput": 22,
+    "titleTooltip": 70,
+    "inlineStyle": 1857,
+    "rawHex": 208,
+    "toFixed": 213,
+    "parseFloat": 36,
+    "keydownListener": 55,
+    "engineImport": 116,
+    "bigFiles": 32
+  }
+}

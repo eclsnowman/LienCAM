@@ -132,9 +132,52 @@ interface OpenStep {
 }
 let openStep: OpenStep | null = null
 
+// WO-3133: preview the measured dimension in the document, but publish its undo
+// command only when initial entry accepts (or Escape keeps the measurement).
+// This also keeps the page's parallel touched-id stack paired with history.
+let dimensionPlacement: {
+  dimId: string
+  step: OpenStep
+  before: Sketch
+  after: Record<string, unknown>
+  owner: SketchSessionDeps
+} | null = null
+
+export function hasWorkbenchDimensionPlacement(dimId: string): boolean {
+  return dimensionPlacement?.dimId === dimId && openStep === dimensionPlacement.step &&
+    deps() === dimensionPlacement.owner &&
+    sketchSessionStore.getState().sketchNodeId === dimensionPlacement.step.nodeId
+}
+
+export function settleWorkbenchDimensionPlacement(dimId: string, accept: boolean): void {
+  if (!dimensionPlacement || dimensionPlacement.dimId !== dimId ||
+    openStep !== dimensionPlacement.step || deps() !== dimensionPlacement.owner) return
+  const placement = dimensionPlacement!
+  dimensionPlacement = null
+  if (accept) {
+    const cmd = new SketchStepCommand(placement.step.nodeId, placement.step.before, placement.after)
+    placement.step.cmd = cmd
+    placement.owner.history.execute(cmd)
+    placement.owner.onHistoryStep(placement.step.nodeId)
+  } else {
+    openStep = null
+    commitSketch(solved(placement.before))
+    sketchSessionStore.setState({ dimEditor: null })
+  }
+}
+
+// Closing the editor, including leaving the session, keeps the measurement.
+// No document write here: the payload already contains that accepted value.
+sketchSessionStore.subscribe(() => {
+  if (dimensionPlacement && sketchSessionStore.getState().dimEditor?.dimId !== dimensionPlacement.dimId) {
+    settleWorkbenchDimensionPlacement(dimensionPlacement.dimId, true)
+  }
+})
+
 /** Test seam ONLY: the module-level step latch must not leak between tests. */
 export function __resetSketchDocumentPort(): void {
   openStep = null
+  dimensionPlacement = null
   dragPlan = null
 }
 
@@ -178,7 +221,9 @@ function commitSketch(next: Sketch, opts?: { clearSelection?: boolean }): void {
   })
 
   if (openStep !== null && openStep.nodeId === sketchNodeId) {
-    if (openStep.cmd === null) {
+    if (dimensionPlacement?.step === openStep) {
+      dimensionPlacement.after = nextPayload
+    } else if (openStep.cmd === null) {
       openStep.cmd = new SketchStepCommand(sketchNodeId, openStep.before, nextPayload)
       d.history.execute(openStep.cmd) // first do() is a no-op; the write above already landed
       // WO SKC-15C-R1 (B2): tell the page a package undo step just entered `history`, so its parallel
@@ -201,6 +246,7 @@ function commitSketch(next: Sketch, opts?: { clearSelection?: boolean }): void {
  * already in history with its final `after`, so there is nothing to flush.
  */
 function openStepNow(): void {
+  if (dimensionPlacement) settleWorkbenchDimensionPlacement(dimensionPlacement.dimId, true)
   const { sketchNodeId } = sketchSessionStore.getState()
   const payload = currentPayload()
   if (sketchNodeId === null || payload === null) return
@@ -477,16 +523,18 @@ export const workbenchSketchDocumentPort: SketchDocumentPort = {
       constraints: [...s.constraints, ...commit.constraints, ...inferred],
       dimensions: [...s.dimensions, ...(commit.dimensions ?? [])],
     }
-    commitSketch(solved(next), opts)
-
-    // A freshly placed DRIVING dimension opens its value editor immediately, pre-filled with the
-    // measured value (the intended behavior; CAM's chunk-1 path). CAM additionally runs a VERDICT solve
-    // that auto-removes a conflicting placement -- that rides its solver worker's request/response
-    // protocol, which this synchronous mount does not have. Here the solve above has ALREADY run,
-    // so a conflicting dimension is reported by `solved()`'s notice and the editor still opens on
-    // the measured value, which is the state the user needs to fix it from.
     const placedDim = opts?.openDimensionEditor ? commit.dimensions?.[0] : undefined
-    if (placedDim !== undefined) {
+    const result = solved(next)
+    // A failed measured placement cannot become a document or undo entry.
+    if (placedDim && (result.solveStatus?.solveFailed || result.solveStatus?.conflicting.length)) return
+    if (placedDim && (!openStep || openStep.cmd !== null || openStep.before !== currentPayload())) openStepNow()
+    if (placedDim && openStep && openStep.cmd === null && deps()) {
+      dimensionPlacement = { dimId: placedDim.id, step: openStep, before: s,
+        after: currentPayload()!, owner: deps()! }
+      sketchSessionStore.setState({ dimEditor: { dimId: placedDim.id, isNew: true } })
+    }
+    commitSketch(result, opts)
+    if (placedDim && !dimensionPlacement) {
       sketchSessionStore.setState({ dimEditor: { dimId: placedDim.id, isNew: true } })
     }
   },

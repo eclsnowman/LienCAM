@@ -531,29 +531,134 @@ function indexHeadBands(bands: readonly HeadBand[]): HeadBandIndex {
   return { bands, maxRadius, monotone, peak }
 }
 
+/** WO-2930: column cells the reach trim's scans (`partHitsCylinder`, `partHitsHead`,
+ *  `stockHitsCylinder`) have visited since the last reset. A deterministic measure of the
+ *  trim's work, read by the profile test; wall time is not. */
+let columnCellsVisited = 0
+export function reachColumnScanStats(): { cellsVisited: number } {
+  return { cellsVisited: columnCellsVisited }
+}
+export function resetReachColumnScanStats(): void {
+  columnCellsVisited = 0
+}
+
+/**
+ * WO-2930. A coarse grid over a column grid: per tile of TILE_CELLS x TILE_CELLS cells,
+ * the highest solid top (part / fixture span tops, or stock column tops) in it, or
+ * -Infinity where the tile is all air. Every scan below asks only "is some top above
+ * this floor?" (`spanZ[k + 1] > z0`, `> bottom`, `top > zBottom`) of each cell, so a
+ * tile whose highest top is <= that floor holds no cell that can answer yes and is
+ * skipped. The boolean is the same as the full scan's; only the visits change. The
+ * reach trim makes one per grid per trim (`columnTiles`, default on); a tile is measured
+ * the first time a scan reaches it, so a trim pays only for the tiles it touches.
+ */
+interface ColumnTiles {
+  readonly tnx: number
+  /** Highest top per tile; NaN until the first scan that reaches the tile measures it. */
+  readonly maxTop: Float64Array
+  /** Measure tile (ti, tj) into maxTop. */
+  readonly measure: (ti: number, tj: number) => number
+}
+const TILE_CELLS = 8
+
+function lazyTiles(nx: number, ny: number, topOfTile: (i0: number, i1: number, j0: number, j1: number) => number): ColumnTiles {
+  const tnx = Math.ceil(nx / TILE_CELLS)
+  const maxTop = new Float64Array(tnx * Math.ceil(ny / TILE_CELLS)).fill(Number.NaN)
+  const measure = (ti: number, tj: number): number => {
+    const i0 = ti * TILE_CELLS, j0 = tj * TILE_CELLS
+    const top = topOfTile(i0, Math.min(nx - 1, i0 + TILE_CELLS - 1), j0, Math.min(ny - 1, j0 + TILE_CELLS - 1))
+    maxTop[tj * tnx + ti] = top
+    return top
+  }
+  return { tnx, maxTop, measure }
+}
+
+function buildColumnTiles(columns: SolidColumns): ColumnTiles {
+  const { nx, ny, spanStart, spanZ } = columns
+  return lazyTiles(nx, ny, (i0, i1, j0, j1) => {
+    let top = Number.NEGATIVE_INFINITY
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        columnCellsVisited++
+        const column = j * nx + i
+        for (let k = spanStart[column]; k < spanStart[column + 1]; k += 2) {
+          if (spanZ[k + 1] > top) top = spanZ[k + 1]
+        }
+      }
+    }
+    return top
+  })
+}
+
+function buildStockTiles(stock: StockState): ColumnTiles {
+  const { nx, ny, topZ } = stock
+  return lazyTiles(nx, ny, (i0, i1, j0, j1) => {
+    let top = Number.NEGATIVE_INFINITY
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        columnCellsVisited++
+        if (topZ[j * nx + i] > top) top = topZ[j * nx + i]
+      }
+    }
+    return top
+  })
+}
+
+/** Cell scan over rows j0..j1 and columns i0..i1, true at the first cell that answers yes. */
+type CellScan = (j0: number, j1: number, i0: number, i1: number) => boolean
+
+/** Run `scan` over the cell window, tile by tile, skipping tiles whose highest top is
+ *  <= `floor`; without tiles, over the whole window at once (the plain scan). */
+function scanLiveTiles(
+  tiles: ColumnTiles | null | undefined, floor: number,
+  j0: number, j1: number, i0: number, i1: number, scan: CellScan,
+): boolean {
+  if (!tiles) return scan(j0, j1, i0, i1)
+  if (j0 > j1 || i0 > i1) return false
+  const { tnx, maxTop, measure } = tiles
+  const tj1 = Math.floor(j1 / TILE_CELLS), ti0 = Math.floor(i0 / TILE_CELLS), ti1 = Math.floor(i1 / TILE_CELLS)
+  for (let tj = Math.floor(j0 / TILE_CELLS); tj <= tj1; tj++) {
+    for (let ti = ti0; ti <= ti1; ti++) {
+      let top = maxTop[tj * tnx + ti]
+      if (Number.isNaN(top)) top = measure(ti, tj)
+      if (top <= floor) continue
+      if (scan(
+        Math.max(j0, tj * TILE_CELLS), Math.min(j1, tj * TILE_CELLS + TILE_CELLS - 1),
+        Math.max(i0, ti * TILE_CELLS), Math.min(i1, ti * TILE_CELLS + TILE_CELLS - 1),
+      )) return true
+    }
+  }
+  return false
+}
+
 /** Whether any part column under a disc of `radius` holds solid between z0 and z1. */
-function partHitsCylinder(part: SolidColumns, x: number, y: number, radius: number, z0: number, z1: number): boolean {
+function partHitsCylinder(
+  part: SolidColumns, x: number, y: number, radius: number, z0: number, z1: number, tiles?: ColumnTiles | null,
+): boolean {
   const { originX, originY, cell, nx, ny, spanStart, spanZ } = part
   const i0 = Math.max(0, Math.ceil((x - radius - originX) / cell - 0.5))
   const i1 = Math.min(nx - 1, Math.floor((x + radius - originX) / cell - 0.5))
   const j0 = Math.max(0, Math.ceil((y - radius - originY) / cell - 0.5))
   const j1 = Math.min(ny - 1, Math.floor((y + radius - originY) / cell - 0.5))
   const r2 = radius * radius
-  for (let j = j0; j <= j1; j++) {
-    const dy = originY + (j + 0.5) * cell - y
-    if (dy * dy > r2) continue
-    for (let i = i0; i <= i1; i++) {
-      const column = j * nx + i
-      const end = spanStart[column + 1]
-      if (spanStart[column] === end) continue
-      const dx = originX + (i + 0.5) * cell - x
-      if (dx * dx + dy * dy > r2) continue
-      for (let k = spanStart[column]; k < end; k += 2) {
-        if (spanZ[k] < z1 && spanZ[k + 1] > z0) return true
+  return scanLiveTiles(tiles, z0, j0, j1, i0, i1, (ja, jb, ia, ib) => {
+    for (let j = ja; j <= jb; j++) {
+      const dy = originY + (j + 0.5) * cell - y
+      if (dy * dy > r2) continue
+      for (let i = ia; i <= ib; i++) {
+        columnCellsVisited++
+        const column = j * nx + i
+        const end = spanStart[column + 1]
+        if (spanStart[column] === end) continue
+        const dx = originX + (i + 0.5) * cell - x
+        if (dx * dx + dy * dy > r2) continue
+        for (let k = spanStart[column]; k < end; k += 2) {
+          if (spanZ[k] < z1 && spanZ[k + 1] > z0) return true
+        }
       }
     }
-  }
-  return false
+    return false
+  })
 }
 
 /**
@@ -641,6 +746,7 @@ function partHitsHead(
   z: number,
   lift: number,
   bottomOffset: number,
+  tiles?: ColumnTiles | null,
 ): boolean {
   const { bands, maxRadius } = index
   const { originX, originY, cell, nx, ny, spanStart, spanZ } = part
@@ -648,92 +754,101 @@ function partHitsHead(
   const i1 = Math.min(nx - 1, Math.floor((x + maxRadius - originX) / cell - 0.5))
   const j0 = Math.max(0, Math.ceil((y - maxRadius - originY) / cell - 0.5))
   const j1 = Math.min(ny - 1, Math.floor((y + maxRadius - originY) / cell - 0.5))
-  for (let j = j0; j <= j1; j++) {
-    const dy = originY + (j + 0.5) * cell - y
-    for (let i = i0; i <= i1; i++) {
-      const column = j * nx + i
-      const end = spanStart[column + 1]
-      if (spanStart[column] === end) continue
-      const dx = originX + (i + 0.5) * cell - x
-      const d = Math.hypot(dx, dy)
-      if (d > maxRadius) continue
+  // Every route below answers yes only for a span top above some band's bottom,
+  // z + band.bottom + bottomOffset; a tile topping out at or below the lowest is skipped.
+  let floor = Number.POSITIVE_INFINITY
+  if (tiles) for (const band of bands) floor = Math.min(floor, z + band.bottom + bottomOffset)
+  return scanLiveTiles(tiles, floor, j0, j1, i0, i1, (ja, jb, ia, ib) => {
+    for (let j = ja; j <= jb; j++) {
+      const dy = originY + (j + 0.5) * cell - y
+      for (let i = ia; i <= ib; i++) {
+        columnCellsVisited++
+        const column = j * nx + i
+        const end = spanStart[column + 1]
+        if (spanStart[column] === end) continue
+        const dx = originX + (i + 0.5) * cell - x
+        const d = Math.hypot(dx, dy)
+        if (d > maxRadius) continue
 
-      if (bands.length === 1) {
-        // Flat and cylindrical cutting heads have one band. Avoid both binary
-        // searches in this common roughing case while retaining the old loop's
-        // arithmetic and strict contact policy.
-        const band = bands[0]
-        if (band.radius <= d) continue
-        const bottom = z + band.bottom + bottomOffset
-        const top = z + lift + band.top
-        for (let k = spanStart[column]; k < end; k += 2) {
-          if (spanZ[k] < top && spanZ[k + 1] > bottom) return true
-        }
-        continue
-      }
-
-      if (!index.monotone) {
-        // Exact fallback for lollipop, dovetail, thread and any future profile
-        // whose radii narrow or whose axial bands are not ordered tip-up.
-        for (const band of bands) {
+        if (bands.length === 1) {
+          // Flat and cylindrical cutting heads have one band. Avoid both binary
+          // searches in this common roughing case while retaining the old loop's
+          // arithmetic and strict contact policy.
+          const band = bands[0]
           if (band.radius <= d) continue
           const bottom = z + band.bottom + bottomOffset
           const top = z + lift + band.top
           for (let k = spanStart[column]; k < end; k += 2) {
             if (spanZ[k] < top && spanZ[k + 1] > bottom) return true
           }
+          continue
         }
-        continue
-      }
 
-      // First band with radius > d, searched up to the peak. This is the same
-      // strict comparison as the scan above; plateaus and exact/ULP-neighbor
-      // contacts keep their verdict.
-      const { peak } = index
-      if (bands[peak].radius <= d) continue
-      let radialLo = 0
-      let radialHi = peak
-      while (radialLo < radialHi) {
-        const mid = (radialLo + radialHi) >>> 1
-        if (bands[mid].radius <= d) radialLo = mid + 1
-        else radialHi = mid
-      }
-      // WO-1975: past the peak the head narrows again (a ball above its
-      // equator); the eligible run ends at the first band there with radius <= d.
-      let eligibleEnd = peak + 1
-      let narrowHi = bands.length
-      while (eligibleEnd < narrowHi) {
-        const mid = (eligibleEnd + narrowHi) >>> 1
-        if (bands[mid].radius <= d) narrowHi = mid
-        else eligibleEnd = mid + 1
-      }
-
-      for (let k = spanStart[column]; k < end; k += 2) {
-        // Among the radially eligible run, find the first band whose top is
-        // strictly above this span's bottom. If that band's bottom is below the
-        // span top, it overlaps. Otherwise every later bottom is higher and no
-        // band can overlap. This remains exact when bottomOffset > lift leaves
-        // axial gaps between adjacent bands; the gaps are never unioned.
-        let axialLo = radialLo
-        let axialHi = eligibleEnd
-        while (axialLo < axialHi) {
-          const mid = (axialLo + axialHi) >>> 1
-          const top = z + lift + bands[mid].top
-          if (spanZ[k] < top) axialHi = mid
-          else axialLo = mid + 1
+        if (!index.monotone) {
+          // Exact fallback for lollipop, dovetail, thread and any future profile
+          // whose radii narrow or whose axial bands are not ordered tip-up.
+          for (const band of bands) {
+            if (band.radius <= d) continue
+            const bottom = z + band.bottom + bottomOffset
+            const top = z + lift + band.top
+            for (let k = spanStart[column]; k < end; k += 2) {
+              if (spanZ[k] < top && spanZ[k + 1] > bottom) return true
+            }
+          }
+          continue
         }
-        if (axialLo === eligibleEnd) continue
-        const bottom = z + bands[axialLo].bottom + bottomOffset
-        if (spanZ[k + 1] > bottom) return true
+
+        // First band with radius > d, searched up to the peak. This is the same
+        // strict comparison as the scan above; plateaus and exact/ULP-neighbor
+        // contacts keep their verdict.
+        const { peak } = index
+        if (bands[peak].radius <= d) continue
+        let radialLo = 0
+        let radialHi = peak
+        while (radialLo < radialHi) {
+          const mid = (radialLo + radialHi) >>> 1
+          if (bands[mid].radius <= d) radialLo = mid + 1
+          else radialHi = mid
+        }
+        // WO-1975: past the peak the head narrows again (a ball above its
+        // equator); the eligible run ends at the first band there with radius <= d.
+        let eligibleEnd = peak + 1
+        let narrowHi = bands.length
+        while (eligibleEnd < narrowHi) {
+          const mid = (eligibleEnd + narrowHi) >>> 1
+          if (bands[mid].radius <= d) narrowHi = mid
+          else eligibleEnd = mid + 1
+        }
+
+        for (let k = spanStart[column]; k < end; k += 2) {
+          // Among the radially eligible run, find the first band whose top is
+          // strictly above this span's bottom. If that band's bottom is below the
+          // span top, it overlaps. Otherwise every later bottom is higher and no
+          // band can overlap. This remains exact when bottomOffset > lift leaves
+          // axial gaps between adjacent bands; the gaps are never unioned.
+          let axialLo = radialLo
+          let axialHi = eligibleEnd
+          while (axialLo < axialHi) {
+            const mid = (axialLo + axialHi) >>> 1
+            const top = z + lift + bands[mid].top
+            if (spanZ[k] < top) axialHi = mid
+            else axialLo = mid + 1
+          }
+          if (axialLo === eligibleEnd) continue
+          const bottom = z + bands[axialLo].bottom + bottomOffset
+          if (spanZ[k + 1] > bottom) return true
+        }
       }
     }
-  }
-  return false
+    return false
+  })
 }
 
 /** Whether remaining stock (material from the column bottom to its top) lies
  *  under a disc of `radius` above zBottom. */
-function stockHitsCylinder(stock: StockState, x: number, y: number, radius: number, zBottom: number): boolean {
+function stockHitsCylinder(
+  stock: StockState, x: number, y: number, radius: number, zBottom: number, tiles?: ColumnTiles | null,
+): boolean {
   const cell = stock.resolutionMm
   const { minX, minY } = stock.bounds
   const i0 = Math.max(0, Math.ceil((x - radius - minX) / cell - 0.5))
@@ -741,17 +856,21 @@ function stockHitsCylinder(stock: StockState, x: number, y: number, radius: numb
   const j0 = Math.max(0, Math.ceil((y - radius - minY) / cell - 0.5))
   const j1 = Math.min(stock.ny - 1, Math.floor((y + radius - minY) / cell - 0.5))
   const r2 = radius * radius
-  for (let j = j0; j <= j1; j++) {
-    const dy = minY + (j + 0.5) * cell - y
-    if (dy * dy > r2) continue
-    for (let i = i0; i <= i1; i++) {
-      const dx = minX + (i + 0.5) * cell - x
-      if (dx * dx + dy * dy > r2) continue
-      const top = stock.topZ[j * stock.nx + i]
-      if (top > stock.bottomZ && top > zBottom) return true
+  // A top answers yes only above both the stock bottom and zBottom.
+  return scanLiveTiles(tiles, Math.max(stock.bottomZ, zBottom), j0, j1, i0, i1, (ja, jb, ia, ib) => {
+    for (let j = ja; j <= jb; j++) {
+      const dy = minY + (j + 0.5) * cell - y
+      if (dy * dy > r2) continue
+      for (let i = ia; i <= ib; i++) {
+        columnCellsVisited++
+        const dx = minX + (i + 0.5) * cell - x
+        if (dx * dx + dy * dy > r2) continue
+        const top = stock.topZ[j * stock.nx + i]
+        if (top > stock.bottomZ && top > zBottom) return true
+      }
     }
-  }
-  return false
+    return false
+  })
 }
 
 export type ReachComponent = ClearanceComponent | 'cutter'
@@ -799,6 +918,9 @@ export interface ToolReachCheck {
   /** Radial and axial clearance kept between neck/shank/holder and the part or
    *  stock, and between every component and the workholding. */
   readonly allowanceMm: number
+  /** WO-2930: skip column tiles whose highest top cannot reach the tested band. The
+   *  answer is the same either way; false runs the plain full scan. Default true. */
+  readonly columnTiles?: boolean
 }
 
 /**
@@ -1897,6 +2019,7 @@ export function trimToolpathToAssemblyReach({
   stock,
   workholding = [],
   allowanceMm,
+  columnTiles = true,
 }: ToolReachCheck): ToolReachResult {
   const warnings: string[] = []
   const shank = shankComponents(tool, warnings)
@@ -1921,6 +2044,10 @@ export function trimToolpathToAssemblyReach({
   const headIndex = indexHeadBands(head)
   const partSlack = part ? part.cell * Math.SQRT1_2 : 0
   const stockSlack = stock ? stock.resolutionMm * Math.SQRT1_2 : 0
+  // WO-2930: one coarse max-top grid per obstacle grid for this trim (see ColumnTiles).
+  const partTiles = columnTiles && part ? buildColumnTiles(part) : null
+  const stockTiles = columnTiles && stock ? buildStockTiles(stock) : null
+  const fixtureTiles = columnTiles ? workholding.map(buildColumnTiles) : []
 
   // A head coming straight down bores the hole its own narrower neck follows it
   // into, so a descending neck is not rubbing the stock that head just removed.
@@ -1937,25 +2064,27 @@ export function trimToolpathToAssemblyReach({
         const top = component.topOffsetMm === undefined
           ? Number.POSITIVE_INFINITY
           : z + lift + component.topOffsetMm + allowance
-        if (partHitsCylinder(part, x, y, radius + partSlack, bottom, top)) {
+        if (partHitsCylinder(part, x, y, radius + partSlack, bottom, top, partTiles)) {
           return { component: component.kind, obstacle: 'part' }
         }
       }
       const inOwnBore = descending && radius <= boreRadius
-      if (stock && !inOwnBore && stockHitsCylinder(stock, x, y, radius + stockSlack, bottom)) {
+      if (stock && !inOwnBore && stockHitsCylinder(stock, x, y, radius + stockSlack, bottom, stockTiles)) {
         return { component: component.kind, obstacle: 'stock' }
       }
     }
     if (part && head.length > 0) {
-      if (partHitsHead(part, x, y, headIndex, z, lift, gougeTolerance)) {
+      if (partHitsHead(part, x, y, headIndex, z, lift, gougeTolerance, partTiles)) {
         return { component: 'cutter', obstacle: 'part' }
       }
     }
-    for (const fixture of workholding) {
+    for (let f = 0; f < workholding.length; f++) {
+      const fixture = workholding[f]
+      const tiles = fixtureTiles[f]
       const slack = fixture.cell * Math.SQRT1_2
       for (const band of fixtureHead) {
         if (partHitsCylinder(fixture, x, y, band.radius + allowance + slack,
-          z + band.bottom - allowance, z + lift + band.top + allowance)) {
+          z + band.bottom - allowance, z + lift + band.top + allowance, tiles)) {
           return { component: 'cutter', obstacle: 'workholding' }
         }
       }
@@ -1964,7 +2093,7 @@ export function trimToolpathToAssemblyReach({
           ? Number.POSITIVE_INFINITY
           : z + lift + component.topOffsetMm + allowance
         if (partHitsCylinder(fixture, x, y, component.diameterMm / 2 + allowance + slack,
-          z + component.bottomOffsetMm - allowance, top)) {
+          z + component.bottomOffsetMm - allowance, top, tiles)) {
           return { component: component.kind, obstacle: 'workholding' }
         }
       }

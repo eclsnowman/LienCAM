@@ -98,6 +98,8 @@ export {
   booleanBodySelection,
   BOOLEAN_BODY_KIND,
   BOOLEAN_BODY_VERSION,
+  filletSweep,
+  type BooleanBodyFilletChain,
   type BooleanBodyOperation,
   type BooleanBodyParameters,
   type BooleanBodyShape,

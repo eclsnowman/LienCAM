@@ -1,3 +1,4 @@
+import { fieldsForOperation } from '../../engraveVcarveFields'
 import { localizeHelpTopics } from '../catalog'
 import type { HelpTopic } from '../../types'
 
@@ -450,7 +451,14 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         kind: 'paragraph',
         text: 'Trace with the tool on the line has a Style: Plain (one pass along the line, the default) or Trochoidal, which cuts a slot wider than the tool, centred on the line, in overlapping orbits so a deep slot or keyway takes a light side load. Trochoidal shows Slot width (1.15 to 2.5 x the tool diameter) and Advance per orbit. The slot along an open line ends round at the end points of the line, around a closed loop it closes with no ridge, and a curve too short for one orbit is cut Plain.',
       },
+      {
+        kind: 'paragraph',
+        text: 'Add operation also offers Slot (centerline). It makes this same Engrave, set to Trace with the tool on the line and the Plain style, and names it Slot; it saves and edits as Engrave. A centerline slot follows the line you pick: the tool centre rides the line, so the slot is one tool wide with Plain, or the Slot width with Trochoidal, with round ends. It never clears the inside of a closed shape: around a closed loop it cuts a ring along the loop. To clear a region, such as a slot drawn as a closed outline, use 2D Pocket or 2D Adaptive Clearing on that outline.',
+      },
       { kind: 'image', slot: 'result' },
+      { kind: 'heading', text: 'What each field changes', anchor: 'fields' },
+      { kind: 'paragraph', text: 'Hover a field for its meaning. The labelled pictures below show the real dialog; the cut sketches are explanatory cross-sections, not simulated toolpaths. The same meanings apply in Properties. Some fields appear only after you select their mode or open Advanced.' },
+      { kind: 'table', columns: ['Field', 'What it changes'], rows: fieldsForOperation('engrave').map(field => ({ cells: [field.label, field.text] })) },
     ],
     images: [
       {
@@ -492,6 +500,9 @@ export const topics: HelpTopic[] = localizeHelpTopics([
         kind: 'paragraph',
         text: 'V-carve finishes nearby cuts of each letter together and follows connected corner grooves without retracting for each branch. Short links over already carved space lift only as far as needed and run at feed; links across uncut space or farther away rise to Retract. Clearance is used for the first entry and final exit. This reduces repositioning without changing the carved shape.',
       },
+      { kind: 'heading', text: 'What each field changes', anchor: 'fields' },
+      { kind: 'paragraph', text: 'Hover a field for its meaning. The labelled pictures below show the real dialog; the cut sketches are explanatory cross-sections, not simulated toolpaths. The same meanings apply in Properties. Some fields appear only after you select their mode or open Advanced.' },
+      { kind: 'table', columns: ['Field', 'What it changes'], rows: fieldsForOperation('vcarve').map(field => ({ cells: [field.label, field.text] })) },
     ],
     images: [
       {

@@ -16,8 +16,9 @@
 // WO-3018: every sampling, steering, sharpening and cap number comes from the policy record.
 import { ADAPTIVE_POLICY as AP } from '../../../../kernel/ops/adaptive/policy'
 import {
-  type Pt, type Loops,
-  diskPath, capsulePath, difference, intersection, totalArea,
+  type Pt, type Loops, type HeldLoops,
+  diskPath, capsulePath, difference, totalArea,
+  intersectionHeld, emptyHeld, differenceHeld, differenceTranslatedHeld, intersectionWithHeld,
 } from './clipperEngine'
 
 /** WO-1226. The cutting-SIDE split of one step's cut: how much of the material this step
@@ -142,6 +143,14 @@ function halfPlaneAbsArea(loop: readonly Pt[], ox: number, oy: number, nx: numbe
   return Math.abs(acc) / 2
 }
 
+/** WO-2930: the wasm-held sets of one ToolGeometry. Callers never dispose a geometry, so the
+ *  sets still held when it becomes unreachable are freed then; every earlier set was freed
+ *  the moment it was replaced. Emscripten memory never shrinks, so nothing may leak. */
+interface HeldSets { bound: HeldLoops | null; region: HeldLoops | null; empty: HeldLoops | null }
+const freeHeldWithGeometry = new FinalizationRegistry<HeldSets>(sets => {
+  sets.bound?.dispose(); sets.region?.dispose(); sets.empty?.dispose()
+})
+
 /**
  * Build a ToolGeometry for a given tool radius and step-over fraction (0..1).
  * `arcTol` controls disk faceting (mm); finer = more accurate area, denser polygons.
@@ -195,28 +204,39 @@ export function createToolGeometry(radius: number, stepOver: number, arcTol = 0.
   // box around the tool and reuse that small local polygon for every query inside the box
   // -- the angle search (~12 calls per step at a fixed `from`) and the next several steps.
   // Far geometry cannot intersect the crescent, so the result is identical; only faster.
+  // WO-2930: the local polygon stays in wasm memory (HeldLoops) between queries, so a
+  // probe copies in only its own crescent or disk. Re-made on re-clip, freed when replaced;
+  // the last ones are freed when this geometry is garbage-collected (see `held` below).
   const BOUND_HALF = radius * AP.sampling.cutAreaBoundHalfRadii   // box half-extent: larger => fewer (O(cleared)) re-clips
   const BOUND_MARGIN = radius * AP.sampling.cutAreaBoundMarginRadii // > max crescent reach from `from` (|step| + radius); keeps every reused crescent fully inside the box
   let boundRef: Loops | null = null
   let boundCx = 0, boundCy = 0
-  let boundLocal: Loops = []
   let boundClips = 0
+  // The wasm-held sets: the cleared box, the region box, and the empty set a query against
+  // an empty `cleared` / `region` clips with (as `difference(x, [])` did before).
+  const held: HeldSets = { bound: null, region: null, empty: null }
+  const emptySet = (): HeldLoops => (held.empty ??= emptyHeld())
 
-  function clearedNear(cleared: Loops, c: Pt): Loops {
-    if (cleared.length === 0) return []
-    if (boundRef === cleared &&
-        Math.abs(c.x - boundCx) <= BOUND_HALF - BOUND_MARGIN &&
-        Math.abs(c.y - boundCy) <= BOUND_HALF - BOUND_MARGIN) {
-      return boundLocal
-    }
+  function boxAround(c: Pt): Loops {
     const h = BOUND_HALF
-    const rect: Loops = [[
+    return [[
       { x: c.x - h, y: c.y - h }, { x: c.x + h, y: c.y - h },
       { x: c.x + h, y: c.y + h }, { x: c.x - h, y: c.y + h },
     ]]
-    boundLocal = intersection(cleared, rect)
+  }
+
+  function clearedNear(cleared: Loops, c: Pt): HeldLoops {
+    if (cleared.length === 0) return emptySet()
+    if (boundRef === cleared && held.bound &&
+        Math.abs(c.x - boundCx) <= BOUND_HALF - BOUND_MARGIN &&
+        Math.abs(c.y - boundCy) <= BOUND_HALF - BOUND_MARGIN) {
+      return held.bound
+    }
+    const next = intersectionHeld(cleared, boxAround(c))
+    held.bound?.dispose()
+    held.bound = next
     boundRef = cleared; boundCx = c.x; boundCy = c.y; boundClips++
-    return boundLocal
+    return next
   }
 
   // WO-439 fix 2: the SAME box-clip cache, for the cut region diskBiteIn clips against.
@@ -225,32 +245,31 @@ export function createToolGeometry(radius: number, stepOver: number, arcTol = 0.
   // `cleared` grows while the region never changes -- sharing one slot would thrash.
   let regionRef: Loops | null = null
   let regionCx = 0, regionCy = 0
-  let regionLocal: Loops = []
 
-  function regionNear(region: Loops, c: Pt): Loops {
-    if (region.length === 0) return []
-    if (regionRef === region &&
+  function regionNear(region: Loops, c: Pt): HeldLoops {
+    if (region.length === 0) return emptySet()
+    if (regionRef === region && held.region &&
         Math.abs(c.x - regionCx) <= BOUND_HALF - BOUND_MARGIN &&
         Math.abs(c.y - regionCy) <= BOUND_HALF - BOUND_MARGIN) {
-      return regionLocal
+      return held.region
     }
-    const h = BOUND_HALF
-    const rect: Loops = [[
-      { x: c.x - h, y: c.y - h }, { x: c.x + h, y: c.y - h },
-      { x: c.x + h, y: c.y + h }, { x: c.x - h, y: c.y + h },
-    ]]
-    regionLocal = intersection(region, rect)
+    const next = intersectionHeld(region, boxAround(c))
+    held.region?.dispose()
+    held.region = next
     regionRef = region; regionCx = c.x; regionCy = c.y; boundClips++
-    return regionLocal
+    return next
   }
 
   function cutArea(from: Pt, to: Pt, cleared: Loops): CutAreaResult {
     const d = Math.sqrt(dist2(from, to))
     if (d === 0) return NO_CUT()
-    const shape = cutShape(from, to)
+    const dx = to.x - from.x, dy = to.y - from.y
+    if (dx * dx + dy * dy < QUANT * QUANT) return NO_CUT() // cutShape's empty crescent
+    const shape = cutShapeAtOrigin(dx, dy)
     if (shape.length === 0) return NO_CUT()
     // Clip against only the cleared material near the tool (identical result, see above).
-    const cut = difference(shape, clearedNear(cleared, from))
+    // The origin crescent goes in translated to `from` (cutShape's arithmetic), unbuilt in JS.
+    const cut = differenceTranslatedHeld(shape, from.x, from.y, clearedNear(cleared, from))
     // totalArea (absolute sum) is the faithful port of FreeCAD calcCutingArea
     // (ProcessFeature.py:141 sums math.fabs(Area(poly))): a cut bite, not a region.
     const area = totalArea(cut)
@@ -279,19 +298,19 @@ export function createToolGeometry(radius: number, stepOver: number, arcTol = 0.
   function diskBite(c: Pt, cleared: Loops): number {
     // disk(c) minus cleared, but cleared box-clipped to the local rect (identical result,
     // see clearedNear). Same box cache cutArea uses; disk reach r < crescent reach.
-    const bite = difference(diskPath(c, radius, arcTol), clearedNear(cleared, c))
+    const bite = differenceHeld(diskPath(c, radius, arcTol), clearedNear(cleared, c))
     return totalArea(bite)
   }
 
   function diskBiteIn(c: Pt, cleared: Loops, region: Loops): number {
     // disk ∩ region first (cheap: both small once the region is box-clipped), then minus
     // the locally clipped cleared -- same set as clipping against the monoliths, faster.
-    const reach = intersection(diskPath(c, radius, arcTol), regionNear(region, c))
+    const reach = intersectionWithHeld(diskPath(c, radius, arcTol), regionNear(region, c))
     if (reach.length === 0) return 0
-    return totalArea(difference(reach, clearedNear(cleared, c)))
+    return totalArea(differenceHeld(reach, clearedNear(cleared, c)))
   }
 
-  return {
+  const geometry: ToolGeometry = {
     radius,
     fullSlotAreaPerDist,
     optimalCutAreaPerDist,
@@ -302,4 +321,6 @@ export function createToolGeometry(radius: number, stepOver: number, arcTol = 0.
     diskBiteIn,
     cacheStats: () => ({ hits, misses, boundClips }),
   }
+  freeHeldWithGeometry.register(geometry, held)
+  return geometry
 }

@@ -7,6 +7,7 @@ const { accessSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync }
 const { appendFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } = require('node:fs/promises')
 const net = require('node:net')
 const path = require('node:path')
+const { net: electronNet } = require('electron')
 const { createAgentChannel } = require('./agentChannel.cjs')
 const { createMcpServer } = require('./mcp/server.cjs')
 
@@ -16,10 +17,112 @@ const PENDANT_PORT = 8324
 const traceEnabled = process.env.LIENCAM_EVIDENCE_TRACE === '1'
 const trace = (message) => { if (traceEnabled) console.error(`[LienCAM trace] ${message}`) }
 
+// WO-3071 helper start
+// Kept in main.cjs because the desktop package explicitly includes this file.
+// No shell, sudo, packet capture or controller commands are involved.
+function createLinuxControllerNetwork({ platform, run, stat, access, dialoutGid, username }) {
+  const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'"
+  const command = args => 'nmcli ' + args.map(quote).join(' ')
+  const oneLine = error => String(error.message || error).replace(/[\r\n]+/g, ' ').trim()
+  const supported = platform === 'linux'
+  return {
+    async ports() {
+      if (!supported) return { ports: [] }
+      try {
+        const output = await run(['--terse', '--escape', 'no', '--fields', 'DEVICE,TYPE', 'device', 'status'])
+        return { ports: output.trim().split('\n').filter(line => line.endsWith(':ethernet')).map(line => line.slice(0, -9)) }
+      } catch (error) {
+        return { ports: [], message: `NetworkManager could not list wired ports: ${oneLine(error)}; enter the wired port name below.` }
+      }
+    },
+    async setup(input) {
+      if (!supported) return { ok: false, message: 'Controller network setup is available on Linux.' }
+      const port = input?.port
+      const address = input?.address || '10.10.10.20/24'
+      if (typeof port !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$/.test(port)) {
+        return { ok: false, message: 'Choose the wired port connected to the controller.' }
+      }
+      // This action configures the AXBB-E default subnet, not the desktop's
+      // Internet route. .10 is permitted when the operator explicitly asks.
+      if (typeof address !== 'string' || !/^10\.10\.10\.(\d{1,3})\/24$/.test(address)
+        || Number(address.split('.')[3].split('/')[0]) < 1
+        || Number(address.split('.')[3].split('/')[0]) > 254
+        || Number(address.split('.')[3].split('/')[0]) === 11) {
+        return { ok: false, message: 'Use a free host address from 10.10.10.1/24 to 10.10.10.254/24, other than the controller at 10.10.10.11.' }
+      }
+      const name = `liencam-controller-${port}`
+      const properties = ['ipv4.method', 'manual', 'ipv4.addresses', address, 'ipv4.never-default', 'yes',
+        'ipv6.method', 'disabled', 'connection.autoconnect', 'yes', 'connection.autoconnect-priority', '999']
+      const show = ['--get-values', 'connection.uuid', 'connection', 'show', 'id', name]
+      const add = ['connection', 'add', 'type', 'ethernet', 'ifname', port, 'con-name', name, ...properties]
+      const modify = ['connection', 'modify', 'id', name, 'connection.interface-name', port, ...properties]
+      const up = ['connection', 'up', 'id', name, 'ifname', port]
+      const commands = `if ${command(show)} >/dev/null 2>&1; then\n  ${command(modify)}\nelse\n  ${command(add)}\nfi\n${command(up)}`
+      try {
+        let exists = true
+        try { await run(show) } catch (error) {
+          // nmcli 10 means this connection does not exist. A permission or
+          // service failure must not be mistaken for permission to add one.
+          if (error.code !== 10) throw error
+          exists = false
+        }
+        await run(exists ? modify : add)
+        await run(up)
+        return { ok: true, message: `Set ${port} to ${address}; ${name} reconnects automatically after a cable or controller power drop.` }
+      } catch (error) {
+        return { ok: false, message: `NetworkManager could not finish controller setup: ${oneLine(error)}; run the commands below in a terminal (install NetworkManager if nmcli is missing; an administrator can use sudo nmcli if authorization is refused).`, commands }
+      }
+    },
+    async serialPermission(port) {
+      if (!supported || typeof port !== 'string' || !port.startsWith('/dev/')) return null
+      try {
+        const info = await stat(port)
+        if (!info.isCharacterDevice()) return null
+        try { await access(port); return null } catch (error) {
+          if (error.code !== 'EACCES') return null
+        }
+        if (info.gid !== await dialoutGid()) return null
+        return `This user cannot open ${port}; run sudo usermod -aG dialout ${quote(username())}, then log out and log in again.`
+      } catch { return null }
+    },
+  }
+}
+// WO-3071 helper end
+
+const linuxControllerNetwork = createLinuxControllerNetwork({
+  platform: process.platform,
+  run: args => new Promise((resolve, reject) => {
+    execFile('nmcli', args, { timeout: 20000, windowsHide: true, env: { ...process.env, LC_ALL: 'C' } },
+      (error, stdout, stderr) => error ? reject(Object.assign(error, { message: stderr?.trim() || error.message })) : resolve(stdout))
+  }),
+  stat: file => require('node:fs/promises').stat(file),
+  access: file => require('node:fs/promises').access(file, require('node:fs').constants.R_OK | require('node:fs').constants.W_OK),
+  dialoutGid: () => new Promise((resolve, reject) => {
+    execFile('getent', ['group', 'dialout'], { timeout: 3000, windowsHide: true },
+      (error, stdout) => error ? reject(error) : resolve(Number(stdout.split(':')[2])))
+  }),
+  username: () => require('node:os').userInfo().username,
+})
+
 // A rehearsal must select its profile before Chromium opens localStorage,
 // IndexedDB or OPFS and before either machine-bridge path below is read. With
 // no override this does nothing, preserving Electron's existing default.
 const userDataOverride = process.env.LIENCAM_USER_DATA_DIR?.trim()
+// WO-3290: whether this computer has run LienCAM before, read before anything
+// of this run can create the user-data folder. Electron creates it on the first
+// app.getPath('userData') and Chromium writes Crashpad into it before ready
+// (measured, src/tests/evidence/WO-3290/). A folder that is already there is a
+// computer that ran LienCAM before; only one that is not there is fresh.
+const machineBridgeFreshInstallProbe = (() => {
+  try {
+    const folder = userDataOverride
+      ? path.resolve(userDataOverride)
+      : typeof app.name === 'string' && app.name ? path.join(app.getPath('appData'), app.name) : null
+    return folder === null ? null : { folder, existed: existsSync(folder) }
+  } catch {
+    return null
+  }
+})()
 if (userDataOverride) {
   const userDataPath = path.resolve(userDataOverride)
   mkdirSync(userDataPath, { recursive: true })
@@ -66,6 +169,8 @@ function mcpServerInstance() {
   return mcpServer
 }
 let pendantProcess = null
+// WO-2883: the pendant an update stopped, so a failed install can start it again.
+let pendantStoppedForUpdate = false
 let machineBridgeProcess = null
 let machineBridgeLastExit = null
 let machineBridgeIntentionalProcess = null
@@ -80,6 +185,7 @@ let machineBridgeBuiltExecutable = null
 let machineBridgeBuildPromise = null
 let machineBridgeWinePrefix = null
 let machineBridgeLinuxNative = false
+let machineBridgeMacNativeReady = false
 let machineBridgeWineCleanup = null
 let machineBridgeWineCleanupFailed = null
 const machineBridgeWineRuns = new WeakMap()
@@ -108,6 +214,8 @@ let machineBridgeSetup = {
   error: null,
 }
 let jobWakeLockId = null
+// WO-2883: the update route needs the job state itself (the wake-lock id can stay null).
+let jobRunning = false
 
 const MACHINE_BRIDGE_DEFAULT_PORT = 8325
 const MACHINE_BRIDGE_RESPAWN_DELAYS_MS = Object.freeze([1_000, 2_000, 4_000])
@@ -191,6 +299,77 @@ function persistMachineBridgeLaunchSettings(settings) {
       console.warn('[LienCAM] Could not persist machine bridge launch settings:', error)
     })
   return machineBridgeSettingsWriteChain
+}
+
+// WO-3290 (alpha.3.1 finding 15): a fresh Linux install prepares the bridge at
+// launch and starts it on the operator's first Connect, instead of running
+// board discovery before he asks. Fresh comes only from the probe above (no
+// user-data folder before this run); that launch leaves a record saying it is
+// waiting, so a relaunch before the first Connect waits too, and the first
+// Connect rewrites it. Saved launch settings play no part: boot hydration can
+// null them on any computer. No folder-less launch and no waiting record means
+// the bridge starts at launch, as it always has. Decided once per run.
+const MACHINE_BRIDGE_FIRST_CONNECT_FILE = 'machine-bridge-first-connect.json'
+let machineBridgeWaitsForConnect = null
+
+function machineBridgeFirstConnectPath() {
+  return typeof app.getPath === 'function'
+    ? path.join(app.getPath('userData'), MACHINE_BRIDGE_FIRST_CONNECT_FILE)
+    : null
+}
+
+function persistMachineBridgeFirstConnect(awaitingFirstConnect) {
+  const filePath = machineBridgeFirstConnectPath()
+  if (filePath === null) return Promise.resolve()
+  machineBridgeSettingsWriteChain = machineBridgeSettingsWriteChain
+    .then(() => writeFile(filePath, JSON.stringify({ awaitingFirstConnect }), 'utf8'))
+    .catch((error) => {
+      console.warn('[LienCAM] Could not record the first Connect:', error)
+    })
+  return machineBridgeSettingsWriteChain
+}
+
+function machineBridgeWaitingForConnect() {
+  if (machineBridgeWaitsForConnect !== null) return machineBridgeWaitsForConnect
+  machineBridgeWaitsForConnect = false
+  if (process.platform !== 'linux') return false
+  const filePath = machineBridgeFirstConnectPath()
+  if (filePath === null) return false
+  const probe = machineBridgeFreshInstallProbe
+  if (probe !== null && !probe.existed && path.resolve(probe.folder) === path.resolve(path.dirname(filePath))) {
+    machineBridgeWaitsForConnect = true
+    void persistMachineBridgeFirstConnect(true)
+    return true
+  }
+  try {
+    machineBridgeWaitsForConnect = JSON.parse(readFileSync(filePath, 'utf8'))?.awaitingFirstConnect === true
+  } catch {
+    // No record: this computer was never a waiting fresh install.
+  }
+  return machineBridgeWaitsForConnect
+}
+
+/** The operator's press ends the wait for this run and every later launch. */
+function recordMachineBridgeOperatorConnect() {
+  if (!machineBridgeWaitingForConnect()) return
+  machineBridgeWaitsForConnect = false
+  void persistMachineBridgeFirstConnect(false)
+}
+
+// WO-3290 audit (astra 10-29): opening Control asks the host to start a
+// stopped bridge (useMachineDefinitionPanel ensureBridgeForControl, no press).
+// On a waiting fresh install that request is not a Connect: it starts nothing,
+// records nothing, and is answered with the first Connect's own result.
+let machineBridgeFirstConnectWaiters = []
+
+function waitForMachineBridgeFirstConnect() {
+  return new Promise((resolve) => { machineBridgeFirstConnectWaiters.push(resolve) })
+}
+
+function answerMachineBridgeFirstConnectWaiters(result) {
+  const waiters = machineBridgeFirstConnectWaiters
+  machineBridgeFirstConnectWaiters = []
+  for (const resolve of waiters) resolve(result)
 }
 
 function holdJobWakeLock() {
@@ -508,8 +687,12 @@ function configuredMachineBridgeInstallRoot(settings) {
   return typeof settings?.installRoot === 'string' ? settings.installRoot.trim() : ''
 }
 
+// WO-3088: a search root that is set but empty searches nowhere. It used to
+// fall back to C:\, so a rehearsal that pointed it at nothing found the
+// operator's own UCCNC installs.
 function machineBridgeSearchRoot() {
-  return process.env.LIENCAM_UCCNC_SEARCH_ROOT || 'C:\\'
+  const configured = process.env.LIENCAM_UCCNC_SEARCH_ROOT
+  return configured === undefined ? 'C:\\' : configured.trim()
 }
 
 // WO-2894: route A uses the operator's existing prefix and DLL. Never discover
@@ -555,6 +738,7 @@ async function findMachineBridgeInstall(settings) {
   }
 
   const searchRoot = machineBridgeSearchRoot()
+  if (searchRoot === '') return { installRoot: null, lookedFor: 'nowhere (LIENCAM_UCCNC_SEARCH_ROOT is set but empty)' }
   const lookedFor = path.join(searchRoot, 'UCCNC*')
   try {
     const candidates = (await readdir(searchRoot, { withFileTypes: true }))
@@ -862,7 +1046,7 @@ function firstMachineBridgeBuildError(output, error) {
 }
 
 function configuredMachineBridgeExecutable(settings) {
-  if (process.platform === 'linux') return null // prepare and validate the Wine route first
+  if (process.platform === 'linux' || process.platform === 'darwin') return null // prepare and validate platform routes first
   if (!process.env.LIENCAM_BRIDGE_EXECUTABLE) return null
   machineBridgeBuiltExecutable = process.env.LIENCAM_BRIDGE_EXECUTABLE
   machineBridgeSetup = {
@@ -873,6 +1057,7 @@ function configuredMachineBridgeExecutable(settings) {
 }
 
 function failMachineBridgeWine(error, lookedFor = null) {
+  machineBridgeMacNativeReady = false
   machineBridgeBuiltExecutable = null
   machineBridgeWinePrefix = null
   machineBridgeLinuxNative = false
@@ -923,12 +1108,10 @@ async function prepareMachineBridgeWine(settings) {
 function machineBridgeNativeSource() {
   const override = process.env.LIENCAM_BRIDGE_EXECUTABLE
   if (override) return /\.exe$/i.test(override) ? null : override
-  // Route B is opt-in until its real-board check (OWED-CHECKS O61) passes;
-  // a bundled native runtime alone never displaces the Wine route.
-  if (process.env.LIENCAM_BRIDGE_NATIVE !== '1') return null
-  if (!['x64', 'arm64'].includes(process.arch)) return null
+  // WO-3072: O61 passed; Wine is parked behind an explicit operator opt-in.
+  if (process.env.LIENCAM_BRIDGE_WINE === '1') return null
   const executable = path.join(machineBridgeSourceDirectory(), 'native', `linux-${process.arch}`, 'liencam-bridge')
-  return existsSync(executable) ? executable : null
+  return executable
 }
 
 async function machineBridgeNativeBundleMatches(source, destination) {
@@ -942,7 +1125,7 @@ async function machineBridgeNativeBundleMatches(source, destination) {
   return true
 }
 
-async function prepareMachineBridgeNative(settings, source) {
+async function prepareMachineBridgeNative(settings, source, rid = `linux-${process.arch}`) {
   machineBridgeWinePrefix = null
   machineBridgeLinuxNative = false
   const installRoot = configuredMachineBridgeInstallRoot(settings)
@@ -954,7 +1137,7 @@ async function prepareMachineBridgeNative(settings, source) {
     if (!process.env.LIENCAM_BRIDGE_EXECUTABLE) {
       // Separate runtime records from route A; it must never load a cached
       // vendor DLL, and the app's mounted resources cannot be written to.
-      const nativeDirectory = path.join(path.dirname(machineBridgeDataDirectory()), 'machine-bridge-native', `linux-${process.arch}`)
+      const nativeDirectory = path.join(path.dirname(machineBridgeDataDirectory()), 'machine-bridge-native', rid)
       executable = path.join(nativeDirectory, 'liencam-bridge')
       const unchanged = await machineBridgeNativeBundleMatches(path.dirname(source), nativeDirectory)
       if (!unchanged) {
@@ -972,7 +1155,26 @@ async function prepareMachineBridgeNative(settings, source) {
   }
 }
 
+// WO-2897: Mac has one native route; a missing/unsupported bundle must not
+// reach the generic executable shortcut, Windows compiler, Wine or demo.
+async function prepareMachineBridgeMac(settings) {
+  machineBridgeMacNativeReady = false
+  const label = 'macOS AXBB-E bridge (alpha, untested on macOS)'
+  if (process.arch !== 'arm64') return failMachineBridgeWine(`${label} is unsupported on Intel Macs; requires Apple Silicon.`)
+  const source = process.env.LIENCAM_BRIDGE_EXECUTABLE
+    || path.join(machineBridgeSourceDirectory(), 'native', 'osx-arm64', 'liencam-bridge')
+  if (/\.exe$/i.test(source)) return failMachineBridgeWine(`${label} requires a native osx-arm64 executable; Windows executables are unsupported.`, source)
+  for (const name of ['liencam-bridge.dll', 'liencam-bridge.deps.json', 'liencam-bridge.runtimeconfig.json', 'libcoreclr.dylib', 'libhostfxr.dylib', 'libhostpolicy.dylib', MACHINE_BRIDGE_BOARDS_DIRECTORY]) {
+    if (!existsSync(path.join(path.dirname(source), name))) return failMachineBridgeWine(`${label} runtime is missing ${name}.`, source)
+  }
+  const prepared = await prepareMachineBridgeNative(settings, source, 'osx-arm64')
+  machineBridgeMacNativeReady = prepared !== null
+  if (prepared !== null) console.log(`[LienCAM] ${label}`)
+  return prepared
+}
+
 async function buildMachineBridge(settings, { recoverArtifact = false } = {}) {
+  if (process.platform === 'darwin') return prepareMachineBridgeMac(settings)
   if (process.platform === 'linux') {
     const native = machineBridgeNativeSource()
     return native ? prepareMachineBridgeNative(settings, native) : prepareMachineBridgeWine(settings)
@@ -1164,6 +1366,7 @@ async function ensureMachineBridge(settings, options) {
 function machineBridgeSpec(settings = machineBridgeLaunchSettings) {
   const executable = process.env.LIENCAM_BRIDGE_EXECUTABLE || machineBridgeBuiltExecutable
   if (!executable || (process.platform === 'linux' && !machineBridgeWinePrefix && !machineBridgeLinuxNative)) return null
+  if (process.platform === 'darwin' && !machineBridgeMacNativeReady) return null
   // 2026-09-03: this defaulted to NO arguments, and that made the operator's machine
   // unusable. With no `--board`, Bridge.cs falls back to
   // liencam-bridge.config.json, whose board default is the DEMO board (-19).
@@ -1682,6 +1885,14 @@ async function restartMachineBridge(settings = null, { operatorPress = false } =
   return { ok: false, reason: 'no-socket', pid: child.pid, port }
 }
 
+// Read-only desktop discovery also works before the bridge holds a VFD link.
+function linuxSpindlePorts() {
+  if (process.platform !== 'linux') return []
+  const names = directory => { try { return readdirSync(directory) } catch { return [] } }
+  return [...names('/dev').filter(name => /^tty(?:USB|ACM)\d+$/.test(name)).map(name => `/dev/${name}`),
+    ...names('/dev/serial/by-id').map(name => `/dev/serial/by-id/${name}`)].sort()
+}
+
 function machineBridgeStatus() {
   trace(`machine bridge status: setup=${machineBridgeSetup.state} running=${machineBridgeProcess !== null && machineBridgeProcess.exitCode === null}`)
   return {
@@ -1706,6 +1917,7 @@ function machineBridgeStatus() {
       .filter((line) => !line.progress
         || (machineBridgeUpdatingFirmware() && machineBridgeFirmwareUpdate.eventId === line.id))
       .map(({ id, severity, text }) => ({ id, severity, text })),
+    ...(process.platform === 'linux' ? { serialPorts: linuxSpindlePorts() } : {}),
     setup: { ...machineBridgeSetup },
     overrides: machineBridgeOverrides(),
   }
@@ -1731,8 +1943,29 @@ function reportMachineBridgeOverrides() {
   console.warn(`[LienCAM] Developer override in force: ${names.join(' and ')} ${names.length === 1 ? 'replaces' : 'replace'} the machine connection settings saved on the Machine page. Start LienCAM from its own shortcut to use the saved settings.`)
 }
 
+/**
+ * WO-2883: the shutdown an update takes before it replaces or restarts this copy. It
+ * stops the pendant and waits for the machine bridge (and its Wine cleanup) to exit;
+ * false when the bridge would not stop. A bridge mid firmware update is never stopped.
+ */
+async function shutdownForUpdate() {
+  if (machineBridgeUpdatingFirmware()) throw new Error('the controller is updating its firmware; install again when it finishes')
+  if (pendantProcess && pendantProcess.exitCode === null) pendantStoppedForUpdate = true
+  stopPendant()
+  return stopMachineBridge()
+}
+
+/** After a replace that failed, this copy keeps running: start what the shutdown stopped. */
+function resumeAfterUpdate() {
+  initializeMachineBridge().catch((error) => console.warn('[LienCAM] update: the machine bridge did not start again:', error))
+  if (!pendantStoppedForUpdate) return
+  pendantStoppedForUpdate = false
+  startPendant().catch((error) => console.warn('[LienCAM] update: the pendant did not start again:', error))
+}
+
 async function initializeMachineBridge() {
   trace('machine bridge automatic startup requested')
+  machineBridgeWaitingForConnect()
   const startingSettings = machineBridgeLaunchSettings
   const configuredExecutable = configuredMachineBridgeExecutable(machineBridgeLaunchSettings)
   const preparedSettings = configuredExecutable ?? await ensureMachineBridge(machineBridgeLaunchSettings)
@@ -1741,6 +1974,11 @@ async function initializeMachineBridge() {
   if (configuredExecutable === null
       && JSON.stringify(startingSettings) !== JSON.stringify(preparedSettings)) {
     void persistMachineBridgeLaunchSettings(machineBridgeLaunchSettings)
+  }
+  // WO-3290: prepared, and started by the operator's first Connect.
+  if (machineBridgeWaitsForConnect) {
+    trace('machine bridge waits for the first Connect (fresh install)')
+    return null
   }
   return startMachineBridge()
 }
@@ -1845,6 +2083,7 @@ function createWindow() {
   })
   window.webContents.on('render-process-gone', (_event, details) => {
     releaseJobWakeLock()
+    jobRunning = false
     console.error(`[LienCAM] renderer process gone: ${details.reason} (${details.exitCode})`)
   })
   window.once('ready-to-show', () => {
@@ -1866,12 +2105,25 @@ function createWindow() {
   })
   window.once('closed', () => {
     releaseJobWakeLock()
+    jobRunning = false
     if (mainWindow === window) mainWindow = null
   })
   mainWindow = window
 }
 
 ipcMain.handle('liencam:machine-bridge-status', () => machineBridgeStatus())
+ipcMain.handle('liencam:linux-controller-ports', event => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return undefined
+  return linuxControllerNetwork.ports()
+})
+ipcMain.handle('liencam:linux-controller-network', (event, input) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return undefined
+  return linuxControllerNetwork.setup(input)
+})
+ipcMain.handle('liencam:linux-serial-permission', (event, port) => {
+  if (mainWindow === null || event.sender !== mainWindow.webContents) return null
+  return linuxControllerNetwork.serialPermission(port)
+})
 // WO-1259: the renderer hands over the build provenance BAKED INTO the bundle
 // that is executing (src/version.ts GIT_COMMIT), and the main process answers
 // with a content comparison against it. Asking the running bundle beats reading
@@ -1905,6 +2157,8 @@ ipcMain.on('liencam:machine-bridge-ready', (event, settings) => {
     machineBridgeLaunchSettings = hydratedSettings
     void persistMachineBridgeLaunchSettings(machineBridgeLaunchSettings)
     if (sameMachineBridgeSpec(runningSpec, hydratedSpec)) return
+    // WO-3290: a fresh install's bridge is not running; Connect starts it.
+    if (machineBridgeWaitsForConnect) return
     void restartMachineBridge(machineBridgeLaunchSettings)
   })()
 })
@@ -1912,9 +2166,15 @@ ipcMain.on('liencam:machine-bridge-remember', (event, settings) => {
   if (mainWindow !== null && event.sender !== mainWindow.webContents) return
   void persistMachineBridgeLaunchSettings(normalizeMachineBridgeLaunchSettings(settings))
 })
-ipcMain.handle('liencam:machine-bridge-restart', async (event, settings) => {
+ipcMain.handle('liencam:machine-bridge-restart', async (event, settings, request) => {
   if (mainWindow !== null && event.sender !== mainWindow.webContents) return undefined
-  return restartMachineBridge(settings, { operatorPress: true })
+  // WO-3290: only the operator's press (preload passes it) is the first Connect.
+  const pressed = request?.operatorPress === true
+  if (!pressed && machineBridgeWaitingForConnect()) return waitForMachineBridgeFirstConnect()
+  if (pressed) recordMachineBridgeOperatorConnect()
+  const result = restartMachineBridge(settings, { operatorPress: true })
+  if (pressed) answerMachineBridgeFirstConnectWaiters(result)
+  return result
 })
 ipcMain.handle('liencam:choose-machine-path', async (event, kind) => {
   if (mainWindow !== null && event.sender !== mainWindow.webContents) return undefined
@@ -2056,6 +2316,7 @@ ipcMain.on('liencam:set-job-wake-lock', (event, active) => {
     return
   }
   if (mainWindow !== null && event.sender !== mainWindow.webContents) return
+  jobRunning = active
   if (active) holdJobWakeLock()
   else releaseJobWakeLock()
 })
@@ -2092,6 +2353,34 @@ app.whenReady().then(async () => {
   reportMachineBridgeOverrides()
   void initializeMachineBridge()
   createWindow()
+  // WO-2883: the desktop app updates itself from the published releases. A failure to set
+  // updates up is logged and never stops LienCAM from starting.
+  try {
+    const { createUpdateRoute, registerUpdateIpc } = require(path.join(__dirname, 'update', 'updater.cjs'))
+    const updateRoute = createUpdateRoute({
+      currentVersion: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged,
+      portableFile: process.env.PORTABLE_EXECUTABLE_FILE, appImage: process.env.APPIMAGE,
+      updatesDir: path.join(app.getPath('temp'), 'LienCAM-updates'),
+      fetch: (url, init) => electronNet.fetch(url, init),
+      isJobRunning: () => jobRunning,
+      spawn,
+      // Every install-and-restart path takes the one shutdown first: the updater awaits it
+      // before the installer starts or the AppImage is swapped, and the quit and relaunch
+      // take it again, because app.exit skips will-quit and its cleanup.
+      shutdown: shutdownForUpdate,
+      resume: resumeAfterUpdate,
+      quit: () => { void shutdownForUpdate().catch(() => false).then(() => app.quit()) },
+      relaunch: (execPath) => {
+        void shutdownForUpdate().catch(() => false).then(() => { app.relaunch({ execPath }); app.exit(0) })
+      },
+      showItemInFolder: (file) => shell.showItemInFolder(file),
+      openPath: (file) => shell.openPath(file),
+      emitProgress: (progress) => { if (mainWindow) mainWindow.webContents.send('liencam:update-progress', progress) },
+    })
+    registerUpdateIpc({ ipcMain, route: updateRoute, isTrustedSender: (sender) => mainWindow !== null && sender === mainWindow.webContents })
+  } catch (error) {
+    console.error('[LienCAM] update check unavailable:', error)
+  }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
 
@@ -2100,7 +2389,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', (event) => {
-  if (process.platform === 'linux' && (machineBridgeProcess || machineBridgeWineCleanup)) {
+  if ((process.platform === 'linux' && (machineBridgeProcess || machineBridgeWineCleanup))
+      || (process.platform === 'darwin' && machineBridgeProcess)) {
     event.preventDefault()
     releaseJobWakeLock()
     stopPendant()

@@ -79,9 +79,9 @@ describe('WO-3026 link-policy-mapping: each field value x case', () => {
 })
 
 describe('WO-3026 role-vocabulary-closed: every emitted role has a feed row', () => {
-  it('the vocabulary is exactly 12 roles with exactly one feed row each', () => {
-    expect(kernel.MOVE_ROLES).toHaveLength(12)
-    expect(new Set(kernel.MOVE_ROLES).size).toBe(12)
+  it('the vocabulary is exactly 13 roles with exactly one feed row each', () => {
+    expect(kernel.MOVE_ROLES).toHaveLength(13)
+    expect(new Set(kernel.MOVE_ROLES).size).toBe(13)
     expect(Object.keys(kernel.ROLE_FEED_TABLE).sort()).toEqual([...kernel.MOVE_ROLES].sort())
     for (const role of kernel.MOVE_ROLES) {
       const row = kernel.ROLE_FEED_TABLE[role]
@@ -209,6 +209,14 @@ describe('WO-3026 kernel linking is headless, deterministic and called by no app
     const kernelSibling = (path: string, specifier: string): boolean =>
       rel(path).startsWith('src/kernel/feeds/') &&
       rel(resolve(dirname(path), specifier)).replace(/\.(ts|tsx)$/, '') === 'src/kernel/linking/roles'
+    // WO-3317 repin: WO-3227 (862ac0046e) added src/kernel/estimators/cuttingLoad.ts, which
+    // reads the pure A.4.1 chip-thinning relation. That is a kernel sibling reaching a pure
+    // relation, not an app path reaching either service, so exactly that one import is
+    // exempt from the app-reach check below (feedsUnits.wo3033 pins the allow-list itself).
+    // Reaching any other feeds or linking module from a kernel estimator stays RED.
+    const kernelSiblingFeedsRelation = (path: string, specifier: string): boolean =>
+      rel(path).startsWith('src/kernel/estimators/') &&
+      rel(resolve(dirname(path), specifier)).replace(/\.(ts|tsx)$/, '') === 'src/kernel/feeds/thinning'
     const callers = files(resolve('src'))
       .filter(path => !rel(path).startsWith('src/kernel/linking/') && !rel(path).startsWith('src/tests/'))
       .flatMap(path => imports(path)
@@ -220,8 +228,11 @@ describe('WO-3026 kernel linking is headless, deterministic and called by no app
       .filter(path => !rel(path).startsWith('src/kernel/feeds/') && !rel(path).startsWith('src/kernel/linking/') && !rel(path).startsWith('src/tests/'))
       .flatMap(path => imports(path)
         .filter(specifier => specifier.startsWith('.') && rel(resolve(dirname(path), specifier)).startsWith('src/kernel/feeds'))
+        .filter(specifier => !kernelSiblingFeedsRelation(path, specifier))
         .map(specifier => `${rel(path)} -> ${specifier}`))
     expect(siblingCallers, 'an app file reaches the linking service through the kernel feed service').toEqual([])
+    expect(kernelSiblingFeedsRelation(resolve('src/kernel/estimators/cuttingLoad.ts'), '../feeds/thinning')).toBe(true)
+    expect(kernelSiblingFeedsRelation(resolve('src/kernel/estimators/cuttingLoad.ts'), '../feeds')).toBe(false)
     expect(kernelSibling(resolve('src/kernel/feeds/select.ts'), '../linking/roles')).toBe(true)
     expect(kernelSibling(resolve('src/kernel/feeds/select.ts'), '../linking/service')).toBe(false)
     expect(kernelSibling(resolve('src/store/negative-control.ts'), '../kernel/linking/roles')).toBe(false)

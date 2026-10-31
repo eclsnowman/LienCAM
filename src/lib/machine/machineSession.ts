@@ -13,6 +13,8 @@
 // nothing in this module fires on import or on a timer except the
 // controller's own read-only status polling.
 
+import { freezeSimulatedProgram } from './simulatedProgramPreparation'
+import { loadedProgramMoveRole } from './programPath'
 import { readRegisteredSessionData, writeRegisteredSessionData } from '../../store/persistedKeys'
 import {
   useMachineControl,
@@ -137,10 +139,17 @@ import {
   subscribeMacroRun,
 } from './macros/macroRuntime'
 import { workholdingStopPark } from './macros/clampPauseMacro'
+import {
+  announceManualMotionConnection,
+  announceManualMotionIntent,
+  announceManualMotionStop,
+  noteManualMotionStop,
+  replayDeferredManualMotion,
+} from './manualJogInputContext'
 import { fillToolTableFromProgram, saveMachineToolRecord, useMachineToolTable } from '../../store/machineToolTableStore'
 import { toolOffsetLine } from './toolTable'
 import { buildFitTraceSequence, computeCutBounds } from './materialFit'
-import { buildPreviewModel } from './previewGeometry'
+import { buildPreviewModel, type PreviewModel } from './previewGeometry'
 import { GrblController } from './grbl/controller'
 import {
   APP_COMMAND_HELD_G,
@@ -344,12 +353,15 @@ import {
   type VfdRunStateValue,
 } from './vfd'
 import { spindleSafetyStopIsActionable } from './vfd/vfdSafety'
+import { recordCommandedSpindle, recordSpindleWordsSent } from './commandedSpindle'
 import { machineBridgePort, useUiPrefs } from '../../store/uiPrefs'
 import {
   SIMULATED_TOOL_SETTER_DIAMETER_MM, SimulatedController, type SimulatedPart, type SimulatedToolSetter,
 } from './simulatedController'
 import { machineCutTimeMotion } from '../simulation/machineCutTimeMotion'
 import { lintGcode, tokenizeLine, type GcodeWord } from '../gcode'
+import { retainTransferCheckGeometry } from './transferCheck'
+import { invalidateSetupLoadActivity, yieldSetupLoadTask, setupLoadParserIdentity, type PreparedTransferLoad } from './setupLoadPreparation'
 import {
   builtInGcodeWordTable,
   gcodeMacroRefusal,
@@ -381,7 +393,7 @@ import {
   assertProgramContextMatchesProgram,
   buildProgramContext,
   freezeProgramContext,
-  transferCheckJobFromProgram,
+  transferCheckJobFromPreview,
   type ProgramContextV1,
 } from './programContext'
 import {
@@ -433,6 +445,8 @@ import {
   type SurfaceMeshPoint,
   type SurfaceMeshSample,
 } from './zSurfaceMesh'
+import { G53_BOTTOM_NAMED_LINES, g53LinesAtBottomOfTravel } from './g53BottomOfTravel'
+import { operatorText } from '../../i18n/locales/en/console-and-operator-messages'
 
 export type { SimulatedPart, SimulatedBore, SimulatedBoss } from './simulatedController'
 
@@ -442,6 +456,9 @@ export type { SimulatedPart, SimulatedBore, SimulatedBoss } from './simulatedCon
 // offset, settings, homing, accessory and ready channels. Nothing above the
 // backends reaches past the interface any more.
 let controller: MachineController | null = null
+// WO-3127: console severity only. Backend identity keeps a requested close
+// from disguising another connection's failure; all lifecycle decisions stay.
+const requestedDisconnects = new WeakSet<MachineController>()
 // WO-2316: setMachinePosition is synchronous and the simulator publishes its
 // datum through onHomed too. Keep that state reconciliation, but distinguish
 // its acknowledgement from a completed homing cycle's console announcement.
@@ -1256,7 +1273,25 @@ let rearmingAfterOperatorStop = false
 
 function setOperatorStop(next: (OperatorStopState & { controller: MachineController }) | null): void {
   operatorStopValue = next
+  operatorStopHomedOver = false
   for (const listener of operatorStopListeners) listener()
+}
+
+/** WO-3087: a Home All after the stop. The stop report itself stands (the
+ *  file it re-armed, the progress it left); only its sentence on the top
+ *  line is spent - the machine is no longer where that stop left it. */
+let operatorStopHomedOver = false
+
+function noteHomeOverOperatorStop(): void {
+  if (operatorStopValue === null || operatorStopHomedOver) return
+  operatorStopHomedOver = true
+  for (const listener of operatorStopListeners) listener()
+}
+
+/** WO-3087: the stop the top line still says, or null - `operatorStopState`
+ *  until a Home All. Stable between changes, for a `useSyncExternalStore`. */
+export function operatorStopSentenceState(): OperatorStopState | null {
+  return operatorStopHomedOver ? null : operatorStopState()
 }
 
 /** The operator's last Stop of this program, or null. Stable between changes
@@ -2918,6 +2953,13 @@ let programPartsTerminal: ProgramPartsTerminalState | null = null
 let wcsScanSourceLine = 0
 let wcsScanText: string | null = null
 let wcsScanLines: string[] = []
+// WO-3191: the same evidence for the spindle panel's direction - the source
+// line up to which a text-door program's SENT lines have been read for an
+// M3/M4/M5, and the program text it was read in. A program's spindle word on
+// the text door goes to the controller's own reader, never through
+// commandSpindle, so the sent line is the only place the app sees it go.
+let spindleScanSourceLine = 0
+let spindleScanText: string | null = null
 // Monotonic session boundary. A Step Back controlled stop awaits timers and
 // status reports; if disconnect/reconnect occurs during that await, the old
 // transaction must not publish authority into the replacement session.
@@ -3590,7 +3632,10 @@ function applyJobLifecycleEvent(event: JobLifecycleEvent, fault: JobFault | null
   if (event === 'started' || event === 'stopped') clearRunFromReview()
   // WO-2686: a hold is a start the operator will resume; every other edge ends it.
   chosenStartAtEpoch = event === 'paused' ? armEpochValue : null
-  if (event === 'started') wcsScanSourceLine = 0
+  if (event === 'started') {
+    wcsScanSourceLine = 0
+    spindleScanSourceLine = 0
+  }
 }
 
 /** WO-2256: the job's counts and cursor as the controller reported them for
@@ -5560,15 +5605,17 @@ function applyProgramListedOutputs(
  *  move - a G53 machine coordinate, so it is offered only when Z has a datum
  *  this session. Without one the planner lifts to the program's own
  *  clearance height instead. */
-export function runFromLineMachineOptions(): { outputs: MachineOutputDefinition[]; safeZMachine: number | null } {
+export function runFromLineMachineOptions(): { outputs: MachineOutputDefinition[]; safeZMachine: number | null; currentZMachine: number | null } {
   const machine = controlMachine(useCamStore.getState())
   const config = useMachineActions.getState().configFor(machine?.id ?? 'default')
   const safeZ = machineSafeZValue(parkCarrierMachine(useCamStore.getState()), config)
   const ctrl = getMachineController()
   const zDatum = typeof ctrl.homedThisSession === 'function' && unhomedAxes(ctrl, ['Z']).length === 0
+  const currentZ = ctrl.status().machinePos?.z
   return {
     outputs: machine?.controllerDefinition?.outputs ?? [],
     safeZMachine: zDatum ? safeZ : null,
+    currentZMachine: zDatum && typeof currentZ === 'number' && Number.isFinite(currentZ) ? currentZ : null,
   }
 }
 
@@ -5941,6 +5988,33 @@ function followStreamedWcs(ackedSourceLine: number): void {
 }
 
 /**
+ * WO-3191: THE PROGRAM STREAM'S SPINDLE WORDS. Record the last M3/M4/M5 among
+ * the text-door program lines SENT since the last call. Forward only, each line
+ * once per run (a 'started' edge or another program starts the read again from
+ * line 1): the simulator's sent cursor steps back onto the acked line in a
+ * Feed Hold, and that is not the program commanding its spindle again. A
+ * run-from-line start reads the file from line 1 to its start line, which is
+ * what its prelude re-established.
+ *
+ * The text door only: the program door's cursor is a step id, not a line of
+ * this text, and its spindle words go through `commandSpindle`, which records
+ * them itself.
+ */
+function followStreamedSpindle(sentSourceLine: number): void {
+  const whole = textProgramWhole
+  const text = store().programText
+  if (whole === null || whole.controller !== controller || whole.programText !== text) return
+  if (text !== spindleScanText) {
+    spindleScanText = text
+    spindleScanSourceLine = 0
+  }
+  if (sentSourceLine <= spindleScanSourceLine) return
+  const sent = programLinesForWcsScan().slice(spindleScanSourceLine, sentSourceLine)
+  spindleScanSourceLine = sentSourceLine
+  recordSpindleWordsSent(sent)
+}
+
+/**
  * Send one manual (MDI / macro) line. Same refusals as the controller's
  * sendCommand; when the line carries a G54..G59 word, its ack flips
  * activeWcs so the Position chip and Work Offsets table follow a typed G5x
@@ -5954,7 +6028,11 @@ export function sendMdiLine(text: string, typedRowId?: number): boolean {
   const beforeId = store().consoleLines.at(-1)?.id ?? -1
   // WO-2519: a line typed in a kept stop reads as the MDI line it is.
   if (controller !== null) nameKeptStopCommand(controller, 'MDI')
-  const sent = dispatchMdiLine(text, typedRowId)
+  // WO-3258: a line the E-STOP door would hold back can move the machine; a
+  // line of stop words only cannot, and is nobody's request to move.
+  const sent = mdiLineMayPassEstopLatch(text, getMachineController())
+    ? dispatchMdiLine(text, typedRowId)
+    : announceManualMotionIntent('mdi', `MDI ${text}`, () => dispatchMdiLine(text, typedRowId))
   if (typedRowId !== undefined && store().consoleLines.some((row) => row.id === typedRowId)) {
     useMachineControl.setState((s) => ({
       consoleLines: s.consoleLines.filter((row) =>
@@ -6078,15 +6156,23 @@ function dispatchMdiLine(text: string, typedRowId?: number): boolean {
   // anything more (`G43 H3 G0 Z10`) stays with the controller's own reader.
   if (isPureG43HLine(mdiWords)) return runMdiWords(text, mdiWords, ctrl)
   const wcs = wcsWordInLine(text)
-  if (!wcs) return noteKeptStopToolTyped(ctrl, toolStop, typedTool, ctrl.sendCommand(text))
+  // WO-3191: a spindle word that went is the spindle panel's direction.
+  if (!wcs) return noteKeptStopToolTyped(ctrl, toolStop, typedTool, noteSpindleWordSent(text, ctrl.sendCommand(text)))
   const pending = ctrl.sendCommandAwait(text)
   if (!pending) return false
+  noteSpindleWordSent(text, true)
   const receiptToken = captureBackendReceipt(ctrl)
   void pending.then((ack) => {
     if (!receiptIsCurrent(receiptToken)) return
     if (ack.ok) store().setActiveWcs(wcs)
   })
   return true
+}
+
+/** WO-3191: an MDI line's M3/M4/M5 is recorded once the line went. */
+function noteSpindleWordSent(text: string, sent: boolean): boolean {
+  if (sent) recordSpindleWordsSent([text])
+  return sent
 }
 
 /** The user macro a lone typed M-code is bound to, or null (WO-1680; WO-1681:
@@ -8025,9 +8111,10 @@ let lastReportedSoftLimitLatched = false
 const softLimitLatchListeners = new Set<() => void>()
 
 export const SOFT_LIMIT_TRIPPED_NOTICE =
-  'Soft limit tripped - buffered moves are refused until you press Unlock.'
+  'Soft limit tripped - buffered moves are refused. Press Stop/Reset or Unlock: the bridge reopens the controller connection, then Home All.'
 export const SOFT_LIMIT_CLEARED_NOTICE = 'Soft limit cleared.'
-export const SOFT_LIMIT_UNLOCK_TITLE = 'Clears the soft-limit latch and restores motion.'
+export const SOFT_LIMIT_UNLOCK_TITLE =
+  'Clears the soft-limit latch by reopening the controller connection; Home All afterwards.'
 
 /** Snapshot/subscription pair for React's useSyncExternalStore. */
 export function softLimitLatchActive(): boolean {
@@ -8196,18 +8283,53 @@ function supportsWorkOffsetWrites(
   return typeof target?.setWorkOffset === 'function'
 }
 
-function reportBridgeDefinitionSource(target: BridgeHelloController): void {
+/** Says what configured the board at start-up. True when Connect sends this
+ *  machine's definition next (WO-3088): a bridge with no definition of this
+ *  computer's (a fresh install - nothing cached) is sent the one the app
+ *  holds, instead of being told to apply it. */
+function reportBridgeDefinitionSource(target: BridgeHelloController): boolean {
   const source = target.bridgeHello()?.definitionSource
+  const sends = (source === 'profile' || source === 'none') && activeMachineDefinition() !== null
   const report = source === 'cache-baseline'
     ? { text: "Machine configured from this computer's data (the .pro was not opened).", severity: 'info' as const }
+    : source === 'profile' && sends
+      ? { text: "Machine configured from the .pro, once - the first start under this bridge; Connect is sending this machine's definition to make this computer the source.", severity: 'info' as const }
     : source === 'profile'
       ? { text: 'Machine configured from the .pro, once - the first start under this bridge; apply the definition to make this computer the source.', severity: 'warn' as const }
+      : source === 'none' && sends
+        ? { text: "The bridge holds no definition - Connect is sending this machine's definition.", severity: 'info' as const }
       : source === 'none'
         ? { text: 'The bridge holds no definition - nothing configured; apply one.', severity: 'warn' as const }
         : source === 'cache'
           ? { text: 'Machine configured from the bridge cache; its start-up source was not distinguished.', severity: 'warn' as const }
           : { text: 'This older bridge did not say what configured the machine at start-up.', severity: 'warn' as const }
   store().pushConsole('rx', report.text, report.severity)
+  return sends
+}
+
+/** WO-3088: Connect's send of the definition the app holds, through the same
+ *  apply (and readback) the panel's Apply uses. Never awaited by the connect:
+ *  the link is live either way, and the result is said when it arrives.
+ *
+ *  It declares authorship exactly as the panel's Apply does. The bridge caches
+ *  the provenance map this sends and nothing else (Machine.cs
+ *  SaveDefinitionCache), and at its next start reverts every value that
+ *  differs from the imported settings and is not in that map - so sending `{}`
+ *  here put an operator's saved edits back to the .pro after one restart. */
+async function sendDefinitionOnConnect(target: BridgeHelloController): Promise<void> {
+  const machine = controlMachine(useCamStore.getState())
+  const definition = activeMachineDefinition()
+  const provenance = machineDefinitionApplyProvenance(definition, definition, machine.name)
+  let lines: ApplyReportLine[]
+  try {
+    lines = describeApplyOutcome(await applyActiveMachineDefinition(provenance, definition, machine.id))
+  } catch (error) {
+    lines = [{ text: `Connect could not send the machine definition: ${error instanceof Error ? error.message : String(error)}`, severity: 'error' }]
+  }
+  if (getMachineController() !== target || store().connectionPhase !== 'connected') return
+  for (const line of lines) {
+    store().pushConsole('rx', line.text, line.severity === 'success' ? 'info' : line.severity)
+  }
 }
 
 function reportBridgeDefinitionDrift(target: BridgeHelloController): void {
@@ -8272,6 +8394,9 @@ function handleConnectionPhase(
     cancelLoadAwaitingMdi('the machine connection changed')
     mdiLineForLoad = null
     connectionRevision++
+    // WO-3125: retain no prepared transfer geometry across a connection's
+    // lifetime. The loaded-text/readiness contract below remains unchanged.
+    if (transferReviewInput) transferReviewInput.preparedPreview = null
   }
   // A waiting macro belongs to the session it started in, and EVERY session
   // boundary ends it - not just a disconnect. A SWAP (connecting a bridge over
@@ -8313,7 +8438,15 @@ function handleConnectionPhase(
   if (phase !== 'connected' && programPartsRun) {
     const reason = `Program parts ended because the machine connection changed${detail ? `: ${detail}` : '.'} `
       + 'No later part was loaded.'
-    endProgramParts(reason, 'failed', { code: null, message: reason, line: null, moveId: null }, 'error')
+    const ordinaryDisconnect = phase === 'disconnected'
+      && controller !== null && requestedDisconnects.has(controller)
+      && (detail === null || detail === 'disconnect requested')
+    // WO-3127: presentation belongs to this fault, not retained console rows.
+    // Keep the failed lifecycle and every boundary action for ordinary closure.
+    endProgramParts(reason, 'failed', {
+      code: null, message: reason, line: null, moveId: null,
+      ...(ordinaryDisconnect ? { consoleOnly: true } : {}),
+    }, ordinaryDisconnect ? 'info' : 'error')
   }
   // Connection transitions are session boundaries. The controller tears
   // down its streamer on disconnect, and a reconnect is a new controller
@@ -8381,8 +8514,9 @@ function handleConnectionPhase(
     // line even if a phase transition were ever missed.
     if (publishesBridgeHello(controller) && definitionDriftNoticeSentFor !== controller) {
       definitionDriftNoticeSentFor = controller
-      reportBridgeDefinitionSource(controller)
+      const sendsDefinition = reportBridgeDefinitionSource(controller)
       reportBridgeDefinitionDrift(controller)
+      if (sendsDefinition) void sendDefinitionOnConnect(controller)
     }
   } else {
     // Any phase that is not `connected` ends the session the notice belonged
@@ -9250,6 +9384,9 @@ export function buildContractEvents(scope?: BackendEventScope): ControllerEvents
     if (settingMachinePosition) return
     const homedAxes = scope?.homeAnnouncement?.requested ?? axes
     if (scope) scope.homeAnnouncement = undefined
+    // WO-3087 (O61 laptop 10-22): "Stopped by the operator at line 5" stayed
+    // on the top line after Home All.
+    noteHomeOverOperatorStop()
     if (store().homed) {
       store().pushConsole('rx', 'Homed - machine coordinates set.', 'info')
     } else if (homedAxes?.length) {
@@ -9325,6 +9462,7 @@ export function buildContractEvents(scope?: BackendEventScope): ControllerEvents
     if (!accepts()) return
     progress = wholeProgramProgress(progress)
     followStreamedWcs(progress.ackedSourceLine)
+    followStreamedSpindle(progress.sentSourceLine)
     const now = sessionElapsedNowMs()
     const isEdge =
       progress.phase !== progressPhase
@@ -9838,6 +9976,8 @@ function applyContractStatus(status: MachineStatus): void {
   const hardwareEstop = status.inputs?.estop === true
   if (hardwareEstop && !lastReportedHardwareEstop) {
     armEstopNeedsReset()
+    // WO-3258: an input holding a jog hears of this E-STOP as of a pressed one.
+    noteManualMotionStop('estop')
     // Same debounce a software trigger gets: a stop the operator did not
     // initiate deserves the same protection from an accidental double-tap
     // clearing it the instant it appears.
@@ -9941,6 +10081,8 @@ let pathFidelitySampleCount = 0
 let pathFidelityFrameChanges: PathFidelityFrameChange[] = []
 let pathFidelityTruncated = false
 let lastPathFidelityReport: PathFidelityReport | null = null
+/** WO-3087: an E-STOP (the button or the machine's input) met this run. */
+let pathFidelityEndedByEstop = false
 
 /**
  * WO-2033: A TOOL CHANGE IS NOT PART OF THE COMMANDED PATH, AND NEITHER IS THE
@@ -10218,10 +10360,11 @@ export function stagedGeometryProgramPath(): {
       const y = step.to.y ?? modalPosition?.y
       const z = step.to.z ?? modalPosition?.z
       if (x === undefined || y === undefined || z === undefined) continue
+      const from = modalPosition
       modalPosition = { x, y, z }
       moves.push({
         type: step.rapid ? 'rapid' : 'feed',
-        role: step.rapid ? 'rapid' : 'cut',
+        role: loadedProgramMoveRole(step.rapid ? 'rapid' : 'feed', from, { x, y, z }),
         x,
         y,
         z,
@@ -10395,6 +10538,7 @@ export function pathFidelityReport(): PathFidelityReport | null {
 function beginPathFidelityRun(): void {
   pathFidelityAnalysis?.dispose()
   pathFidelityAnalysis = null
+  pathFidelityEndedByEstop = false
   pathFidelityRunRefusal = null
   pathFidelitySamples = []
   pathFidelitySampleCount = 0
@@ -10413,6 +10557,7 @@ function beginPathFidelityRun(): void {
 
 function recordPathFidelitySample(status: MachineStatus): void {
   if (pathFidelitySamples === null) return
+  if (status.inputs?.estop === true) pathFidelityEndedByEstop = true
   if (pathFidelityExcursionOwns(status)) {
     pathFidelityExcursionFrames++
     return
@@ -10567,6 +10712,8 @@ function finishPathFidelityRun(): void {
   // WO-1660: captured HERE, beside the run it belongs to - `pathFidelityArmed`
   // can be replaced by a later load before the analysis answers.
   const brief = briefPathFidelityRun()
+  const estopped = pathFidelityEndedByEstop || estopTripNeedsReset()
+  pathFidelityEndedByEstop = false
   pathFidelitySamples = null
   pathFidelityAnalysis = null
   pathFidelityRunRefusal = null
@@ -10599,6 +10746,7 @@ function finishPathFidelityRun(): void {
     reportPathFidelity(
       truncated ? truncatedPathFidelityReport(report, PATH_FIDELITY_SAMPLE_CAP) : report,
       brief,
+      estopped,
     )
   })
 }
@@ -10703,6 +10851,7 @@ function describeBriefTravelLimit(limit: BriefPathFidelityRun['atTravelLimit'][n
 function reportPathFidelity(
   report: PathFidelityReport,
   brief: BriefPathFidelityRun | null = null,
+  estopped = false,
 ): void {
   lastPathFidelityReport = report
   // A MEASURED DEPARTURE IS AN ERROR WHATEVER THE VERDICT WORD IS. A run that
@@ -10716,6 +10865,13 @@ function reportPathFidelity(
   const lines = pathFidelityConsoleLines(report).map(line => ({
     ...line, text: fmtMachineDiagnostic(line.text, machineDisplayUnits()),
   }))
+  // WO-3087 (alpha.3.1 board check G7): after an E-STOP the console read
+  // "program STOPPED by E-STOP", the alarm, then "Path check: the machine
+  // stayed on the commanded path" - a verdict on a run the operator just
+  // ended in an emergency, with its position possibly lost. Only a measured
+  // departure is owed then (it may be why he pressed it); the report stays
+  // whole in `pathFidelityReport()`.
+  if (estopped && lines[0]?.severity !== 'error') return
   if (brief !== null) {
     const limit = brief.atTravelLimit[0]
     if (report.verdict === 'clean' && limit !== undefined) {
@@ -10803,6 +10959,9 @@ function restateSetupContinuation(target: MachineController): void {
 }
 
 function installBackend(next: MachineController, scope: BackendEventScope): void {
+  // WO-3258: an input holding a jog hears of the swap while the controller it
+  // jogs is still the current one, so its own stop never reaches the new one.
+  announceManualMotionConnection()
   // WO-1275: a pending release belongs to the backend that armed it. A swap
   // leaves nothing to release into.
   cancelSpindleSpeedWait()
@@ -10816,17 +10975,22 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
   // directly, so enforce the session E-STOP latch here at the common backend
   // boundary. A clean idle status does not clear this latch; only the
   // operator's deliberate CLEAR does.
+  //
+  // WO-3258: every motion wrapper below first tells the manual-input observers
+  // which input is about to send (`announceManualMotionIntent`, before anything
+  // goes out), and every operator stop tells them after it went out
+  // (`announceManualMotionStop`). Neither changes what the wrapper does.
   const home = next.home.bind(next)
-  next.home = () => {
+  next.home = () => announceManualMotionIntent('home', 'Home All', () => {
     if (estopNeedsReset()) {
       store().pushConsole('tx', `Home All: refused - ${ESTOP_BLOCKS_MOTION}`, 'error')
       return false
     }
     return home()
-  }
+  })
   if (next.homeAxes) {
     const homeAxes = next.homeAxes.bind(next)
-    next.homeAxes = (axes) => {
+    next.homeAxes = (axes) => announceManualMotionIntent('home', `Home ${axes.join(', ')}`, () => {
       if (estopNeedsReset()) {
         store().pushConsole('tx', `Home ${axes.join(', ')}: refused - ${ESTOP_BLOCKS_MOTION}`, 'error')
         return false
@@ -10837,7 +11001,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
       const accepted = homeAxes(axes)
       if (!accepted && scope.homeAnnouncement === announcement) scope.homeAnnouncement = previous
       return accepted
-    }
+    })
   }
   // Operator 2026-09-14 (WO-328 "across all locations"): while the E-STOP blinks,
   // jog is motion too. The jog buttons grey out, but a pendant or any other
@@ -10869,8 +11033,17 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     }, true, () => answer(false))
     return taken ? later : null
   }
+  // A step jog whose end lies past a stated soft limit used to go to the board
+  // whole; the real board clamped it at the limit, latched SOFT LIMIT and left
+  // buffered motion dead until the bridge restarted. Every step route (Control
+  // panel buttons, keyboard, gamepad, phone pendant, held-jog bursts, Goto)
+  // reaches the controller through this wrapper, so the move is shortened here,
+  // once. `queuedJogEnds` is where the steps already sent will leave each axis,
+  // so a step pressed while an earlier one is still moving is measured from
+  // there, not from where the axis happens to be.
+  const queuedJogEnds: Partial<Record<'x' | 'y' | 'z', { endMm: number; sentAtMs: number }>> = {}
   const jog = next.jog.bind(next)
-  next.jog = (axis, deltaMm, feedMmMin) => {
+  next.jog = (axis, deltaMm, feedMmMin) => announceManualMotionIntent('jog', `Jog ${axis}`, () => {
     if (estopNeedsReset()) {
       sayJogRefused(`Jog ${axis}`)
       return false
@@ -10880,40 +11053,77 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
       sayJogRefused(`Jog ${axis}`, PAUSED_PROGRAM_JOG_LOCK)
       return false
     }
-    if (jog(axis, deltaMm, feedMmMin)) return true
-    sayJogRefused(`Jog ${axis}`, controllerJogRefusal(next, axis, deltaMm))
+    const key = axis.toLowerCase()
+    let step: JogSoftLimitStep | null = null
+    let baseMm: number | null = null
+    if ((key === 'x' || key === 'y' || key === 'z') && Number.isFinite(deltaMm)) {
+      const range = currentResolvedMachineMotion().axes[key].controller
+      const at = next.status().machinePos?.[key]
+      if (range && typeof at === 'number' && Number.isFinite(at)) {
+        const queued = queuedJogEnds[key]
+        const stillQueued = queued !== undefined
+          && (MOVING_STATES.has(next.machineState()) || sessionElapsedNowMs() - queued.sentAtMs < JOG_QUEUE_SETTLE_MS)
+        if (!stillQueued) delete queuedJogEnds[key]
+        baseMm = stillQueued
+          ? (deltaMm > 0 ? Math.max(at, queued!.endMm) : Math.min(at, queued!.endMm))
+          : at
+        step = jogStepWithinSoftLimits(baseMm, deltaMm, range)
+      }
+    }
+    if (step?.kind === 'at-limit') {
+      store().pushConsole('tx', `Jog ${axis.toUpperCase()} not sent: ${axis.toUpperCase()} is at its soft limit (${machineLengthText(step.limitMm)}).`, 'warn')
+      return true
+    }
+    const sendMm = step?.kind === 'clamped' ? step.deltaMm : deltaMm
+    if (jog(axis, sendMm, feedMmMin)) {
+      if (baseMm !== null && (key === 'x' || key === 'y' || key === 'z')) {
+        queuedJogEnds[key] = { endMm: baseMm + sendMm, sentAtMs: sessionElapsedNowMs() }
+      }
+      if (step?.kind === 'clamped') {
+        store().pushConsole('tx', `Jog stopped at the ${axis.toUpperCase()} soft limit (${machineLengthText(step.limitMm)}).`, 'warn')
+      }
+      return true
+    }
+    sayJogRefused(`Jog ${axis}`, controllerJogRefusal(next, axis, sendMm))
     return false
-  }
+  })
+  // WO-3258: the release of a held jog is a stop, never a new request; so is
+  // the native jog's own stop. jogHold is neither - it only keeps a jog going.
+  const forgetQueuedJogs = () => { delete queuedJogEnds.x; delete queuedJogEnds.y; delete queuedJogEnds.z }
   const jogCancel = next.jogCancel.bind(next)
-  next.jogCancel = () => {
+  next.jogCancel = () => announceManualMotionStop('jog-cancel', () => {
+    forgetQueuedJogs()
     dropCommandsWaitingForKeptStop(next, true)
     jogCancel()
-  }
+  })
   if (next.jogStop) {
     const jogStop = next.jogStop.bind(next)
-    next.jogStop = () => {
+    next.jogStop = () => announceManualMotionStop('jog-stop', () => {
+      forgetQueuedJogs()
       dropCommandsWaitingForKeptStop(next, true)
       jogStop()
-    }
+    })
   }
   if (next.jogStartContinuous) {
     const jogStartContinuous = next.jogStartContinuous.bind(next)
-    next.jogStartContinuous = (...args: Parameters<NonNullable<MachineController['jogStartContinuous']>>) => {
-      if (estopNeedsReset()) {
-        sayJogRefused(`Jog ${String(args[0])}`)
-        return Promise.resolve(false)
-      }
-      const later = afterKeptStop(`Jog ${String(args[0])}`, () => next.jogStartContinuous!(...args))
-      if (later !== null) return later
-      if (pausedProgramKeepsItsLock(next)) {
-        sayJogRefused(`Jog ${String(args[0])}`, PAUSED_PROGRAM_JOG_LOCK)
-        return Promise.resolve(false)
-      }
-      return jogStartContinuous(...args).then((ok) => {
-        if (!ok) sayJogRefused(`Jog ${String(args[0])}`, controllerJogRefusal(next, args[0], null))
-        return ok
+    next.jogStartContinuous = (...args: Parameters<NonNullable<MachineController['jogStartContinuous']>>) => (
+      announceManualMotionIntent('jog-continuous', `Jog ${String(args[0])}`, () => {
+        if (estopNeedsReset()) {
+          sayJogRefused(`Jog ${String(args[0])}`)
+          return Promise.resolve(false)
+        }
+        const later = afterKeptStop(`Jog ${String(args[0])}`, () => next.jogStartContinuous!(...args))
+        if (later !== null) return later
+        if (pausedProgramKeepsItsLock(next)) {
+          sayJogRefused(`Jog ${String(args[0])}`, PAUSED_PROGRAM_JOG_LOCK)
+          return Promise.resolve(false)
+        }
+        return jogStartContinuous(...args).then((ok) => {
+          if (!ok) sayJogRefused(`Jog ${String(args[0])}`, controllerJogRefusal(next, args[0], null))
+          return ok
+        })
       })
-    }
+    )
   }
   // WO-1638: the same latch where programs start, resume and step, and where
   // the app-issued moves go out. Every button already checks it first; this is
@@ -10926,42 +11136,42 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     return true
   }
   const jogToWorkXY = next.jogToWorkXY.bind(next)
-  next.jogToWorkXY = (x, y, feedMmMin) => {
+  next.jogToWorkXY = (x, y, feedMmMin) => announceManualMotionIntent('move', 'Move to work X Y', () => {
     if (refuseUnderEstopLatch('Move to work X Y')) return false
     if (commandThroughKeptStop(next, 'Move to work X Y', () => { next.jogToWorkXY(x, y, feedMmMin) }, true)) return true
     if (pausedProgramKeepsItsLock(next)) return refusePausedMove('Move to work X Y')
     return jogToWorkXY(x, y, feedMmMin)
-  }
+  })
   const jogToMachineZ = next.jogToMachineZ.bind(next)
-  next.jogToMachineZ = (z, feedMmMin) => {
+  next.jogToMachineZ = (z, feedMmMin) => announceManualMotionIntent('move', 'Move to machine Z', () => {
     if (refuseUnderEstopLatch('Move to machine Z')) return false
     // Safe Z is this move.
     if (commandThroughKeptStop(next, 'Move to machine Z', () => { next.jogToMachineZ(z, feedMmMin) }, true)) return true
     if (pausedProgramKeepsItsLock(next)) return refusePausedMove('Move to machine Z')
     return jogToMachineZ(z, feedMmMin)
-  }
+  })
   if (next.jogToWorkXYAwait) {
     const jogToWorkXYAwait = next.jogToWorkXYAwait.bind(next)
-    next.jogToWorkXYAwait = (x, y, feedMmMin) => {
+    next.jogToWorkXYAwait = (x, y, feedMmMin) => announceManualMotionIntent('move', 'Move to work X Y', () => {
       if (refuseUnderEstopLatch('Move to work X Y')) return Promise.resolve(false)
       const later = afterKeptStop('Move to work X Y', () => next.jogToWorkXYAwait!(x, y, feedMmMin))
       if (later !== null) return later
       if (pausedProgramKeepsItsLock(next)) return Promise.resolve(refusePausedMove('Move to work X Y'))
       return jogToWorkXYAwait(x, y, feedMmMin)
-    }
+    })
   }
   if (next.jogToMachineZAwait) {
     const jogToMachineZAwait = next.jogToMachineZAwait.bind(next)
-    next.jogToMachineZAwait = (z, feedMmMin) => {
+    next.jogToMachineZAwait = (z, feedMmMin) => announceManualMotionIntent('move', 'Move to machine Z', () => {
       if (refuseUnderEstopLatch('Move to machine Z')) return Promise.resolve(false)
       const later = afterKeptStop('Move to machine Z', () => next.jogToMachineZAwait!(z, feedMmMin))
       if (later !== null) return later
       if (pausedProgramKeepsItsLock(next)) return Promise.resolve(refusePausedMove('Move to machine Z'))
       return jogToMachineZAwait(z, feedMmMin)
-    }
+    })
   }
   const startJob = next.startJob.bind(next)
-  next.startJob = () => {
+  next.startJob = () => announceManualMotionIntent('program', 'Cycle Start', () => {
     if (refuseUnderEstopLatch('Cycle Start')) return false
     restateSetupContinuation(next)
     if (pathFidelityArmed) geometryStepMotionSeen.delete(pathFidelityArmed)
@@ -10972,14 +11182,14 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
       store().pushConsole('tx', `Cycle Start: refused - ${controllerStartRefusal(next)}`, 'error')
       return false
     })
-  }
+  })
   const pauseJob = next.pauseJob.bind(next)
-  next.pauseJob = () => {
+  next.pauseJob = () => announceManualMotionStop('pause', () => {
     cancelSpindleSpeedWait()
     pauseJob()
     stopGeometryProgramSpindle(next)
     reopenToolChangeHold(next)
-  }
+  })
   // WO-1330 fix round: every release door asks the tool-change hold FIRST,
   // before `runWithGeometryProgramSpindle` commands the incoming spindle. No
   // confirmed Z zero: nothing is sent. Confirmed: jog and the Z cells close
@@ -11008,15 +11218,15 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     return released
   }
   const resumeJob = next.resumeJob.bind(next)
-  next.resumeJob = () => {
+  next.resumeJob = () => announceManualMotionIntent('program', 'Resume', () => {
     if (refuseUnderEstopLatch('Resume')) return false
     // WO-2259: a held tool-change park owns this press, whichever door it came by.
     if (guidedParkPausedByOperator(next)) return carryOnGuidedPark(next, cycleResume)
     if (programClampPauseBlocksCycleStart(next)) return refuseCycleStartAtClampPause('Cycle Start')
     return releaseThroughToolChange(() => runWithGeometryProgramSpindle(next, resumeJob))
-  }
+  })
   const feedHold = next.feedHold.bind(next)
-  next.feedHold = () => {
+  next.feedHold = () => announceManualMotionStop('feed-hold', () => {
     // WO-1275: FIRST, before anything that touches the wire. Clearing one
     // local timer cannot fail, so a Feed Hold pressed during the up-to-speed
     // wait drops the armed motion and then holds exactly as it always did.
@@ -11024,9 +11234,9 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     if (!holdProgramPartsBetweenParts(next)) feedHold()
     stopGeometryProgramSpindle(next)
     reopenToolChangeHold(next)
-  }
+  })
   const cycleResume = next.cycleResume.bind(next)
-  next.cycleResume = () => {
+  next.cycleResume = () => announceManualMotionIntent('program', 'Cycle Start', () => {
     if (refuseUnderEstopLatch('Cycle Start')) return false
     // WO-2600: Main's CYCLE START also carries on this retained probe move.
     if (isProbeCyclePaused()) { resumeProbing(); return true }
@@ -11049,9 +11259,9 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
       next,
       () => resumeProgramPartsBetweenParts(next) || cycleResume(),
     ))
-  }
+  })
   const stepJob = next.stepJob.bind(next)
-  next.stepJob = () => {
+  next.stepJob = () => announceManualMotionIntent('program', 'Single block step', () => {
     if (refuseUnderEstopLatch('Single block step')) return false
     // WO-1790: the first Single Block press is a program START and therefore
     // carries the same datum prerequisite as ordinary Cycle Start. Ask here,
@@ -11065,7 +11275,10 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     // WO-2237: with Single Block on, the first step out of a kept stop is
     // the return's first block - never the re-armed program's top.
     const kept = startingKeptStopResume ? null : liveKeptStop(next)
-    if (kept !== null && kept.resumed === null) return startFromKeptStop(next, kept, () => next.stepJob())
+    // WO-3258: the step the kept stop's return starts is this press, not a new one.
+    if (kept !== null && kept.resumed === null) {
+      return startFromKeptStop(next, kept, () => replayDeferredManualMotion(() => next.stepJob()))
+    }
     restateSetupContinuation(next)
     if (programClampPauseBlocksCycleStart(next)) return refuseCycleStartAtClampPause('Single block step')
     if (programBoundaryMacroBlocksCycleStart(next)) return false
@@ -11080,17 +11293,21 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     // Cycle Start does; later steps are excluded by the active-job guard.
     const reread = rereadFileForExecutionChange(next, releaseStep)
     return reread ?? releaseStep()
-  }
+  })
   recordWatchedMoves(next)
+  // WO-3258: the session's own stops (a kept stop being taken, Step Back, a
+  // tool change's controlled stop, a spindle fault) are not the operator's
+  // Stop and tell the observers nothing - a kept stop taken for a queued jog
+  // must not end that jog's input. Every other Stop and Reset does.
   const stopJob = next.stopJob.bind(next)
-  next.stopJob = () => {
+  const stopJobBody = () => {
     cancelLoadAwaitingMdi('Stop was pressed')
     scope.homeAnnouncement = undefined
     const staleRun = runReadsOverIdleController(next)
     const releaseHold = !sessionStopInProgress && stopEndsBoardHold(next)
     // WO-2071: a probe routine the Stop halts ends here, before the board is told.
     stopRunningProbeCycle()
-    noteMotionStop('stop')
+    noteMotionStop('stop', next)
     noteOperatorStop(next)
     noteOperatorMotionStop(next)
     cancelSpindleSpeedWait()
@@ -11107,6 +11324,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     endMdiLineOverFile(next)
     if (staleRun) endStaleRunAtStopReset(next)
   }
+  next.stopJob = () => (sessionStopInProgress ? stopJobBody() : announceManualMotionStop('stop', stopJobBody))
   const reset = next.reset.bind(next)
   probeControllerResets.set(next, reset)
   if ('softReset' in next && typeof next.softReset === 'function') {
@@ -11118,12 +11336,12 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
       else softReset()
     }
   }
-  next.reset = () => {
+  const resetBody = () => {
     cancelLoadAwaitingMdi('Reset was pressed')
     scope.homeAnnouncement = undefined
     const staleRun = runReadsOverIdleController(next)
     stopRunningProbeCycle()
-    noteMotionStop('reset')
+    noteMotionStop('reset', next)
     noteOperatorMotionStop(next)
     cancelSpindleSpeedWait()
     if (!sessionStopInProgress) forgetKeptStopOnOperatorStop(next)
@@ -11140,10 +11358,12 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     // Operator ruling 10-05 chose Reset ends the program, like UCCNC. Setup holds above
     // still retain the continuation authorized by that earlier ruling.
   }
+  next.reset = () => (sessionStopInProgress ? resetBody() : announceManualMotionStop('reset', resetBody))
   const emergencyStop = next.emergencyStop.bind(next)
-  next.emergencyStop = () => {
+  next.emergencyStop = () => announceManualMotionStop('estop', () => {
     cancelLoadAwaitingMdi('E-STOP was pressed')
-    noteMotionStop('estop')
+    if (pathFidelitySamples !== null) pathFidelityEndedByEstop = true
+    noteMotionStop('estop', next)
     cancelSpindleSpeedWait()
     forgetKeptStopOnOperatorStop(next)
     emergencyStop()
@@ -11151,7 +11371,7 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
     scheduleOutputPinRefresh()
     // WO-2234: and the E-STOP's; the file waits for the reset and Idle.
     endMdiLineOverFile(next)
-  }
+  })
   backendResetUnsubscribe?.()
   backendResetUnsubscribe = next.subscribeResetInProgress(() => {
     if (!acceptsBackendEvent(scope)) return
@@ -11175,7 +11395,12 @@ function installBackend(next: MachineController, scope: BackendEventScope): void
 type MotionStopKind = 'stop' | 'reset' | 'estop'
 const motionStopListeners = new Set<(kind: MotionStopKind) => void>()
 
-function noteMotionStop(kind: MotionStopKind): void {
+function noteMotionStop(kind: MotionStopKind, ctrl: MachineController): void {
+  // WO-3191: a stop that ends the spindle is the spindle panel's Off. E-STOP
+  // does on every machine; Stop and Reset do on a text controller (GRBL's are
+  // a soft reset; the simulator's, WO-2863). A controller with no text reader
+  // has its program spindle stopped through commandSpindle, which records it.
+  if (kind === 'estop' || ctrl.capabilities.gcodeText) recordCommandedSpindle('off')
   for (const listener of [...motionStopListeners]) listener(kind)
 }
 
@@ -11376,8 +11601,10 @@ export function estopNeedsReset(): boolean {
 }
 
 /** True only after an actual software/hardware trip. The initial fail-closed
- * latch and the connect-only latch are safety gates, but neither claims an
- * E-STOP happened on the operator state chip. */
+ * latch and the connect-only latch are safety gates with nothing pressed
+ * behind them, so the top line keeps the software-latch sentence for them
+ * (WO-3087). The Control state chip and the header chip read estopNeedsReset
+ * instead: they say E-STOP for every latch, connect-time included (WO-3190). */
 export function estopTripNeedsReset(): boolean {
   return estopNeedsResetValue && estopTripNeedsResetValue
 }
@@ -12169,6 +12396,11 @@ export async function applyMachineSpindleLinkDefinition(
       spindleConsole(`Spindle link refused - ${error}.`, 'warning')
       return { ok: false, stored: false, sent: false, error, definition: null }
     }
+    // WO-3088: an edit with no bridge to hear it says where it went.
+    spindleConsole(
+      'Spindle link saved on this computer - no machine bridge is connected for this machine, so Connect sends it.',
+      'info',
+    )
     return filled({ ok: true, stored: true, sent: false, error: null, definition })
   }
   const target = controller as SpindleDefinitionController | null
@@ -12788,7 +13020,7 @@ async function connectSimulatorRegistryBackend(context: BackendConnectContext): 
     settings: {},
     datumKnown: false,
   })
-  let defaultG54: Partial<MachinePosition> | null = null
+  const heldOffsets: Partial<Record<WcsId, Partial<MachinePosition>>> = {}
   const installed = context.install((events) => new SimulatedController(events, {
     dialect: declaredController.ok ? declaredController.dialect : undefined,
     cutTimeMotion: machineCutTimeMotion(sessionMachine),
@@ -12817,8 +13049,9 @@ async function connectSimulatorRegistryBackend(context: BackendConnectContext): 
     workOffsets: Object.fromEntries(WCS_SLOTS.map((wcs) => {
       const stored = cam.machineWorkOffsets[sessionMachine.id]?.[wcs]?.offset
       const fresh = wcs === 'G54' ? defaultSimulatorG54(sessionMachine.id, stored, simulatorMotion.envelope) : null
-      if (fresh) defaultG54 = fresh
-      return [wcs, fresh ?? stored ?? {}]
+      const held = fresh ?? stored ?? {}
+      heldOffsets[wcs] = held
+      return [wcs, held]
     })),
     toolSetter: setter && setterTopZ !== null
       ? { x: setter.x, y: setter.y, topZ: setterTopZ, diameter: SIMULATED_TOOL_SETTER_DIAMETER_MM }
@@ -12834,8 +13067,22 @@ async function connectSimulatorRegistryBackend(context: BackendConnectContext): 
   // the moment it connects, so it is recorded exactly as a board's G54 report
   // at connect - this session's stamp, never the durable record. Load's travel
   // check, the tool-change confirmation and the file-door re-read then judge
-  // it like any reported zero. A stored G54 gets no default and no stamp.
-  if (defaultG54) markReportedWorkOffsetAxes('G54', defaultG54)
+  // it like any reported zero.
+  // WO-3184 (owner report 2026-10-27, a posted file with G53 "waits for G54" with
+  // G54 300/300/8 on screen): a STORED offset handed to the simulator is held
+  // by it just the same, so every axis it was handed counts as this
+  // connection's report - what a real bridge's write receipt records
+  // (sendStoredWorkOffset). An axis never stored and never defaulted was
+  // handed nothing, gets no stamp, and still waits. Real bridges never pass here.
+  for (const [wcs, held] of Object.entries(heldOffsets) as Array<[WcsId, Partial<MachinePosition>]>) {
+    if (offsetAxes(held).length > 0) markReportedWorkOffsetAxes(wcs, held)
+  }
+  // WO-3189 (gap CT-1): the part a probe touches exists from connect - the
+  // operator's placed part when there is one, else the setup's stock box
+  // (buildDefaultSimulatedPart). It used to wait for the Diagnostics card's
+  // first draw, so Z0 run without opening that card descended onto nothing.
+  // Seeded after the held offsets above, which place the stock box.
+  placeSimulatedPart(installed.controller, simulatedPartAtConnect(sessionMachine.id))
   runTransferCheck()
   return installed.controller
 }
@@ -13382,11 +13629,15 @@ async function reconcileWorkOffsets(
 
 export async function disconnectMachine(): Promise<void> {
   connectionAttemptSequence++
+  // WO-3258: an input holding a jog drops it before the link goes.
+  announceManualMotionConnection()
   const target = getMachineController()
   const generation = captureBackendGeneration(target)
+  requestedDisconnects.add(target)
   try {
     await target.disconnect()
   } finally {
+    requestedDisconnects.delete(target)
     if (backendGenerationIsCurrent(generation)) {
       useMachineControl.getState().setConnectionKind(null)
       useCamStore.getState().setControlSessionMachine(null)
@@ -14125,12 +14376,44 @@ export function describeApplyOutcome(outcome: ApplyActiveDefinitionOutcome): App
 
 // ---- WO-416: the simulator's virtual part (simulator only) ----
 
+/** WO-3189: the part the operator placed (Diagnostics' Place under probe)
+ *  and the machine it was placed for, handed to that machine's simulator
+ *  again on every reconnect. Null - nothing placed, or Reset - seeds the
+ *  setup's default part instead. */
+let operatorSimulatedPart: { machineId: string; part: SimulatedPart | null } | null = null
+
+/** Put `part` on the connected simulator and tell the Diagnostics card. */
+function placeSimulatedPart(controller: SimulatedController, part: SimulatedPart | null): void {
+  controller.setSimulatedPart(part)
+  useMachineControl.setState((s) => ({ simulatedPartRevision: s.simulatedPartRevision + 1 }))
+}
+
+/** WO-3189: the part a simulator connecting for `machineId` starts with - the
+ *  operator's placed part on this machine, else the setup's default part. */
+function simulatedPartAtConnect(machineId: string): SimulatedPart {
+  const placed = operatorSimulatedPart?.machineId === machineId ? operatorSimulatedPart.part : null
+  return placed ?? buildDefaultSimulatedPart()
+}
+
 /** Thin pass-through to the connected simulator's virtual part. A no-op
- *  (returns false) against real hardware or before connect - never throws. */
+ *  (returns false) against real hardware or before connect - never throws.
+ *  WO-3189: the part placed here survives a reconnect. */
 export function setSimulatedPart(part: SimulatedPart | null): boolean {
   if (!simulatedController) return false
-  simulatedController.setSimulatedPart(part)
+  placeSimulatedPart(simulatedController, part)
+  operatorSimulatedPart = { machineId: controlMachine(useCamStore.getState()).id, part }
   return true
+}
+
+/** WO-3189: Reset - forget any placed part and put the default part (the
+ *  setup's stock box) on the connected simulator. Returns the part now on it,
+ *  null before connect or against real hardware. */
+export function resetSimulatedPart(): SimulatedPart | null {
+  operatorSimulatedPart = null
+  if (!simulatedController) return null
+  const part = buildDefaultSimulatedPart()
+  placeSimulatedPart(simulatedController, part)
+  return part
 }
 
 export function getSimulatedPart(): SimulatedPart | null {
@@ -14164,9 +14447,9 @@ export function getSimulatedToolSetter(): SimulatedToolSetter | null {
  * sized off its footprint. Otherwise a nominal 100x80x30 block inside the
  * active machine definition's resolved travel, shrunk only when that machine
  * is smaller. The body sits just above the Z floor and its boss stays below
- * the Z ceiling, so an ordinary downward part probe can reach it. Never called
- * automatically (no connectMachine path invokes it) - only the Diagnostics
- * panel's initial placement / Reset actions do.
+ * the Z ceiling, so an ordinary downward part probe can reach it. WO-3189: every
+ * simulator connect seeds it (unless the operator placed a part), and the
+ * Diagnostics panel's Reset puts it back; the panel no longer creates it.
  */
 export function buildDefaultSimulatedPart(): SimulatedPart {
   const stockBox = intendedStockMachineBox()
@@ -14398,9 +14681,47 @@ function stageRunningM6HoldLines(rawLines: string[]): string[] {
     }
     // There is no optional-stop switch: M1 must hold even on a text reader
     // whose dialect accepts only M0. Keep the source line and comments intact.
-    const stop = stageExecutableM6Hold(raw, true)
+    const stop = /(?:^|\s)M0?1(?:\s|$)/i.test(code) ? stageExecutableM6Hold(raw, true) : raw
     return runningM6 ? stageExecutableM6Hold(stop) : stop
   })
+}
+
+/** WO-3125: capture the actual session staging, never a display-parser
+ * substitute. Adoption computes it again; a changed probe/tool/optional-stop
+ * cannot reuse geometry from the earlier stream. Mesh compilation stays live. */
+export function setupLoadStagedText(text: string): string { return stageRunningM6Holds(text) }
+export function setupLoadSimulatorInput() {
+  const ctrl = getMachineController()
+  return ctrl instanceof SimulatedController ? ctrl.setupLoadPreparationInput() : undefined
+}
+export function freezeSetupSimulator(prepared: PreparedTransferLoad): void {
+  if (prepared.simulator) freezeSimulatedProgram(prepared.simulator)
+}
+// Existing synchronous callers (including file/rearm controls) retain their API.
+export function freezeSetupTransfer(prepared: PreparedTransferLoad): void {
+  freezeTransferPreview(prepared.preview)
+  if (prepared.geometry) freezeTransferPreview(prepared.geometry)
+  if (prepared.geometry) retainTransferCheckGeometry(transferCheckJobFromPreview(prepared.preview), prepared.geometry)
+}
+export async function prepareSetupTransferAdoption(prepared: PreparedTransferLoad, signal?: AbortSignal): Promise<void> {
+  // Preparation is private until adoption. Freeze it in bounded tasks before
+  // retaining geometry; cancellation can never publish a partially frozen graph.
+  const pending: unknown[] = [prepared.preview, prepared.geometry]
+  let started = performance.now(), visited = 0
+  while (pending.length) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    const value = pending.pop()
+    if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+      Object.freeze(value)
+      for (const child of Object.values(value)) if (child !== null && typeof child === 'object') pending.push(child)
+    }
+    if (++visited % 128 === 0 && performance.now() - started >= 45) {
+      await yieldSetupLoadTask()
+      started = performance.now()
+    }
+  }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  freezeSetupTransfer(prepared)
 }
 
 function stageRunningM6Holds(text: string, fromLine = 1): string {
@@ -14753,6 +15074,7 @@ let transferReviewValue: TransferReviewState = {
 const transferReviewListeners = new Set<() => void>()
 
 interface TransferReviewInput {
+  preparedPreview: Readonly<PreviewModel> | null
   sourceProgramText: string
   stagedProgramText: string
   context: ProgramContextV1 | null
@@ -15008,9 +15330,24 @@ function rereadFileForExecutionChange(
   return outcome.ok
 }
 
+/** WO-3125: one immutable parser result on the active input, never a safety
+ * verdict. Freeze in place (no second move-list copy); shared arc objects are
+ * visited once. No external preview consumer obtains this session instance. */
+function freezeTransferPreview<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value)
+    for (const child of Object.values(value)) freezeTransferPreview(child)
+  }
+  return value
+}
+
+function transferPreview(input: TransferReviewInput): Readonly<PreviewModel> {
+  return input.preparedPreview ??= freezeTransferPreview(buildPreviewModel(input.stagedProgramText))
+}
+
 function activeWcsAffectsTransferReview(): boolean {
   if (!transferReviewInput) return false
-  const workMoves = transferCheckJobFromProgram(transferReviewInput.stagedProgramText).moves
+  const workMoves = transferPreview(transferReviewInput).moves
     .filter((move) => move.coordinateFrame === 'work')
   return workMoves.length > 0 && workMoves.every((move) => !move.workCoordinateSystem)
 }
@@ -15056,6 +15393,7 @@ interface RunTransferCheckOptions {
    *  still owns readiness; a refusal of its own that restates that same reason
    *  is not printed again. A different reason (WO-1289) still is. */
   controllerRefusal?: string | null
+  preparedTransfer?: PreparedTransferLoad
 }
 
 function runTransferCheck(
@@ -15067,9 +15405,16 @@ function runTransferCheck(
       clearTransferReview()
       return
     }
+    const stagedProgramText = loaded.stagedProgramText ?? machineState.programText
+    const preparedPreview = loaded.preparedTransfer?.stagedText === stagedProgramText
+      && loaded.preparedTransfer.parserIdentity === setupLoadParserIdentity()
+      ? loaded.preparedTransfer.preview
+      : transferReviewInput?.stagedProgramText === stagedProgramText
+        ? transferReviewInput.preparedPreview : null
     transferReviewInput = {
+      preparedPreview,
       sourceProgramText: machineState.programText,
-      stagedProgramText: loaded.stagedProgramText ?? machineState.programText,
+      stagedProgramText,
       context: machineState.programContext,
       sourceMachine: loaded.sourceMachine
         ? {
@@ -15082,7 +15427,11 @@ function runTransferCheck(
     }
   }
   const input = transferReviewInput
-  if (!input || machineState.programText !== input.sourceProgramText) return
+  if (!input) return
+  if (machineState.programText !== input.sourceProgramText) {
+    input.preparedPreview = null
+    return
+  }
 
   const cam = useCamStore.getState()
   const machine = controlMachine(cam)
@@ -15097,7 +15446,7 @@ function runTransferCheck(
   // drawable collections. The transfer check historically treated that same
   // empty move list as "nothing to check", so carry the model's third state
   // into the gate before any bounds verdict can silently pass.
-  const preview = buildPreviewModel(input.stagedProgramText)
+  const preview = transferPreview(input)
   const result = preview.refusal !== null
     ? {
         refusals: [
@@ -15107,7 +15456,7 @@ function runTransferCheck(
         notes: [],
       }
     : checkJobAgainstMachine(
-        transferCheckJobFromProgram(input.stagedProgramText, postedController
+        transferCheckJobFromPreview(preview, postedController
           ? {
               id: input.sourceMachine?.id ?? input.context?.project.id ?? 'posted-program',
               name: input.sourceMachine?.name ?? input.context?.post.label ?? postedController,
@@ -15278,7 +15627,28 @@ function retireMdiForReplacementLoad(): void {
 /** `replaced`: his newer Load (or Apply) ends the waiting one - it owns what
  *  happens to the program beneath the line. Any other cancel puts back the
  *  program the waiting Load retired (WO-2833 round 9). */
+// WO-3125: every replacement/cancel boundary already converges here, including
+// Stop/Reset/E-STOP and connection changes. Invalidate preparation even if no
+// deferred MDI Load exists. This adds no controller action or waiting state.
+let setupLoadPreparationEpoch = 0
+export function invalidateSetupLoadPreparation(): void {
+  setupLoadPreparationEpoch++
+  // The same existing cancellation boundary also releases the rendering hint,
+  // even if a worker is still computing and has not delivered its stale reply.
+  invalidateSetupLoadActivity()
+}
+export function captureSetupLoadPreparation(): () => boolean {
+  const epoch = setupLoadPreparationEpoch
+  const revision = geometryProgramLoadRevision
+  const arm = armEpoch()
+  const starts = jobStartedEvents
+  const receipt = captureBackendReceipt(getMachineController())
+  return () => epoch === setupLoadPreparationEpoch && revision === geometryProgramLoadRevision
+    && arm === armEpoch() && starts === jobStartedEvents && receiptIsCurrent(receipt)
+}
+
 function cancelLoadAwaitingMdi(why: string, replaced = false): void {
+  invalidateSetupLoadPreparation()
   const released = mdiLoadBeingReleased
   const waiting = loadAwaitingMdi ?? (released?.preparing && !released.canceledReason ? released.waiting : null)
   if (!waiting) return
@@ -15415,7 +15785,7 @@ export function loadGcodeFile(
    *  with. WO-2833: `editsLoadedProgram` - the editor's Apply of the loaded
    *  program is not another Load: it retires nothing, and a refusal leaves
    *  the loaded program as it was (WO-2686 fix round 6). */
-  options: { runThroughOffsetChanges?: boolean; editsLoadedProgram?: boolean } = {},
+  options: { runThroughOffsetChanges?: boolean; editsLoadedProgram?: boolean; preparedTransfer?: PreparedTransferLoad } = {},
 ): GcodeFileLoadOutcome {
   const candidateLoad = options.editsLoadedProgram !== true
   if (deferLoadAfterMdi(name, () => { loadGcodeFile(name, text, context, options) }, undefined, false, candidateLoad)) {
@@ -15429,7 +15799,7 @@ export function loadGcodeFile(
       // WO-2237: the operator's Load - the same file too - replaces a kept
       // stop's place; its CYCLE START runs the file from its start (rehearsal L3).
       forgetKeptStop()
-      const load = loadTextProgram(name, text, context, context === null)
+      const load = loadTextProgram(name, text, context, context === null, true, options.preparedTransfer)
       if (load !== null) return { door: 'text', load }
     }
     // WO-2686 fix round 6: the program door forgets the kept stop only when it
@@ -15448,13 +15818,46 @@ export function loadGcodeFile(
   // whichever door read it and whether or not it armed - measuring is the
   // operator's preparation for running it (a file refused for a G54 not yet
   // set is still the file he is about to run).
-  fillToolTableFromProgram(name, text)
+  fillToolTableFromProgram(name, text, options.preparedTransfer)
+  sayG53ZAtBottomOfTravel(name, text)
   sayReferenceToolNeeded(name, outcome.door === 'text' ? textFixedPadChanges(name) : programFixedPadChanges(outcome.ok))
   // WO-2675: his Load, the same file too, frames the program in the 3D view.
   // The text door's store holds the file even when the controller refused it;
-  // a program-door refusal leaves the program before it where it was.
-  if (outcome.door === 'text' || outcome.ok) bumpProgramLoadEpoch()
+  // a program-door refusal leaves the program before it where it was - unless
+  // (WO-3186) the refused file is the one now named or shown, which the view draws.
+  if (outcome.door === 'text' || outcome.ok || (loadedFileRefusedAtLoad() && store().job.name === name)
+    || refusedLoadShown?.name === name) {
+    bumpProgramLoadEpoch()
+  }
   return outcome
+}
+
+// ---- a G53 Z to the bottom of Z travel (WO-3187) ----
+//
+// Owner, 2026-10-27: "We don't want artificially stop a user from doing
+// something they intend to do, but we can have a console warning letting them
+// know in case there's malformed g-code they aren't expecting." Load names each
+// line whose G53 Z goes to the bottom end of this machine's Z travel - the end
+// opposite its Z home - and nothing else: the file loads, stages and runs as
+// written. Read off the same Z range and home end the travel check uses; an
+// unknown home end says nothing.
+
+/** At Load: one console line per G53 Z line at the bottom of Z travel, the
+ *  first few by name and the rest counted in one more. */
+function sayG53ZAtBottomOfTravel(name: string, text: string): void {
+  const z = currentResolvedMachineMotion().axes.z
+  const lines = g53LinesAtBottomOfTravel(text, { range: z.effective, homesToward: z.homesToward })
+  if (lines.length === 0) return
+  // One more is named rather than counted as "1 more lines".
+  const named = lines.length <= G53_BOTTOM_NAMED_LINES + 1 ? lines : lines.slice(0, G53_BOTTOM_NAMED_LINES)
+  const fmt = (v: number) => v.toFixed(3).replace(/\.?0+$/, '')
+  for (const hit of named) {
+    store().pushConsole('rx', operatorText('g53BottomOfTravel', { name, line: hit.line, code: hit.code, z: fmt(hit.machineZ) }), 'warn')
+  }
+  const rest = lines.slice(named.length)
+  if (rest.length > 0) {
+    store().pushConsole('rx', operatorText('g53BottomOfTravelMore', { name, count: rest.length, line: rest[0].line }), 'warn')
+  }
 }
 
 // ---- a reference tool before the run (WO-2016) ----
@@ -15594,6 +15997,7 @@ function loadTextProgram(
   context: ProgramContextV1 | null | undefined,
   handOnRefusedFile: boolean,
   sayRefusal = true,
+  preparedTransfer?: PreparedTransferLoad,
 ): LoadResult | null {
   cancelLoadAwaitingMdi('another program was loaded', true)
   publishNonProgramActionStatus(null)
@@ -15680,18 +16084,25 @@ function loadTextProgram(
     // sentence. `capabilities.gcodeText` is true on this branch, so a refusal
     // here is a controller-state problem (not connected, etc.), and the
     // operator gets the backend's own words rather than "no executable lines".
-    const outcome = ctrl.loadJob(nativeM6Text)
+    const outcome = ctrl instanceof SimulatedController
+      ? ctrl.loadJob(nativeM6Text, preparedTransfer?.simulator)
+      : ctrl.loadJob(nativeM6Text)
     if (outcome.ok) {
       result = outcome.result
       controllerProgramReplaced = true
     } else if (handOnRefusedFile && controllerHasProgramRoute(ctrl)) {
       // A refused loadJob disturbed nothing on the controller, and nothing
       // above has written the store's program, so the interpreter door starts
-      // clean. Its load row names the file; this row says why it took it.
+      // clean. Its load row names the file; this row says which door took it.
+      // Nothing was refused, so the reader's own reason is not repeated: it
+      // ends in "refusing to run it", which is true only where the file is
+      // not loaded at all (the branch below).
+      const first = /^Line (\d+): (\S+) /.exec(outcome.reason)
       store().pushConsole(
         'rx',
-        `"${name}": the controller's text reader cannot run it (${outcome.reason}), so it was read by the `
-        + 'file interpreter the machine bridge uses.',
+        first
+          ? operatorText('interpreterHandover', { name, line: first[1], word: first[2] })
+          : operatorText('interpreterHandoverNoLine', { name }),
         'info',
       )
       return null
@@ -15730,9 +16141,10 @@ function loadTextProgram(
   // WO-2464: the readiness check reads comments the way the ACTIVE controller does (same selector as
   // ProgramPanel); an undeclared controller keeps the GRBL reading.
   const lintDialect = resolveDeclaredController(controlMachine(useCamStore.getState()))
-  const firstLintError = lintGcode(text, {
-    commentStyle: (lintDialect.ok ? lintDialect.dialect : GRBL_CONFIG).capabilities.comment,
-  }).find(
+  const commentStyle = (lintDialect.ok ? lintDialect.dialect : GRBL_CONFIG).capabilities.comment
+  const preparedLint = preparedTransfer?.sourceText === text && preparedTransfer.commentStyle === commentStyle
+    && preparedTransfer.parserIdentity === setupLoadParserIdentity() ? preparedTransfer.lint : null
+  const firstLintError = (preparedLint ?? lintGcode(text, { commentStyle })).find(
     (finding) => finding.level === 'error',
   )
   const readinessReason =
@@ -15785,6 +16197,7 @@ function loadTextProgram(
     sourceMachine: sourceMachineForCheck,
     stagedProgramText,
     controllerRefusal: loadRefusal,
+    preparedTransfer,
   })
   bumpArmEpoch()
   return result
@@ -16436,7 +16849,8 @@ export async function loadSetupToolpathProgram(
   const load = async (guard?: DeferredSetupGuard): Promise<DeferredLoadResult> => {
     beginCandidateLoad()
     const loaded = await stageSetupToolpathProgram(setupId, guard)
-    if (loaded.ok) bumpProgramLoadEpoch()
+    // WO-3186 fix round: a refused setup the view still draws is framed too.
+    if (loaded.ok || refusedLoadShown !== null) bumpProgramLoadEpoch()
     return loaded
   }
   return deferredSetupLoad('setup', load) ?? load()
@@ -16537,8 +16951,10 @@ async function loadSetupsPostedProgram(
   const loaded = loadGcodeTextToolpathProgram(name, posted.combined.gcode, {
     publishListing: true,
     runThroughOffsetChanges: runThrough,
+    setupLoad: true,
   })
   fillToolTableFromProgram(name, posted.combined.gcode)
+  sayG53ZAtBottomOfTravel(name, posted.combined.gcode)
   sayReferenceToolNeeded(name, programFixedPadChanges(loaded.ok))
   return loaded
 }
@@ -16578,8 +16994,9 @@ function loadSetupPostedProgram(setupId: string): { ok: boolean; reason: string 
   // WO-2047: the context Control's text route binds to this same post, so the
   // staged program shows the setup's intended stock.
   const context = postedSetupContext(project, setup, resolution.dialect, posted)?.context ?? null
-  const loaded = loadGcodeTextToolpathProgram(name, posted.combined.gcode, { publishListing: true, context })
+  const loaded = loadGcodeTextToolpathProgram(name, posted.combined.gcode, { publishListing: true, context, setupLoad: true })
   fillToolTableFromProgram(name, posted.combined.gcode)
+  sayG53ZAtBottomOfTravel(name, posted.combined.gcode)
   sayReferenceToolNeeded(name, programFixedPadChanges(loaded.ok))
   return loaded
 }
@@ -17030,7 +17447,8 @@ export async function loadSetupsToolpathProgram(
   const load = async (guard?: DeferredSetupGuard): Promise<DeferredLoadResult> => {
     beginCandidateLoad()
     const loaded = await stageSetupsToolpathProgram(setupIds, options, guard)
-    if (loaded.ok) bumpProgramLoadEpoch()
+    // WO-3186 fix round: a refused posted program the view still draws is framed too.
+    if (loaded.ok || refusedLoadShown !== null) bumpProgramLoadEpoch()
     return loaded
   }
   return deferredSetupLoad('setups', load) ?? load()
@@ -17139,6 +17557,10 @@ interface GcodeTextLoadOptions {
    *  they are set - still his Load: refused for a reason outside the file, it
    *  stays the loaded file, as a `candidate` refused that way does. */
   awaitedFile?: boolean
+  /** WO-3186 fix round: his Load > Setup of a setup's posted file - refused
+   *  and not kept, it is still shown (`refusedLoadShown`), as a `candidate`
+   *  is. Never a re-stage of the loaded program. */
+  setupLoad?: boolean
 }
 
 /** WO-2256: how a program staged as the rest of the loaded file reads as it. */
@@ -17273,6 +17695,18 @@ interface ProgramAwaitingOffsets {
 }
 let programAwaitingOffsets: ProgramAwaitingOffsets | null = null
 let awaitedOffsetsCheckQueued = false
+
+/** Display-only source: this file has no executable queue until its real
+ * offsets are known (WO-1980). Do not broaden loadedProgramText: its callers
+ * include mesh, editing and re-arming. The arm/store notices update the UI. */
+export function programAwaitingOffsetsText(): string | null {
+  const waiting = programAwaitingOffsets
+  const s = store()
+  return waiting !== null && waiting.controller === controller
+    && waiting.revision === connectionRevision && controller.connectionPhase() === 'connected'
+    && s.job.name === waiting.name && s.programText === null && s.stagedProgram === null
+    ? waiting.text : null
+}
 
 /** The frames a file runs in that are not known yet - but only when knowing
  *  them is ALL the file needs: it is read once more with every unknown frame
@@ -17427,6 +17861,7 @@ function fileReaderOptions(
   startedAt: GcodeReaderPoint,
   readerOffsets: ReaderWorkOffsets,
   toolLengthMm: (h: number, wcs: string) => number,
+  toolLengthInForce: (wcs: string) => number,
 ): GcodeInterpretOptions {
   // The definition carrier is live even while the connection identity is
   // pinned. G30.1 writes point 1 here and a subsequent G30 in the same session
@@ -17458,6 +17893,9 @@ function fileReaderOptions(
     // force in that frame (the panel's Apply, a guided tool change): a real
     // controller's G43 H REPLACES that length, it does not add to it.
     toolLengthMm,
+    // WO-3192: and the file's G49 CANCELS that length in force, as UCCNC and
+    // LinuxCNC do - folded out of the moves below it, nothing written.
+    toolLengthInForceMm: toolLengthInForce,
   }
 }
 
@@ -17479,10 +17917,18 @@ export function loadGcodeTextToolpathProgram(
   const operatorFileLoad = options.publishListing === true && !options.keepsLoadedProgram
     && (options.candidate === true || options.fileReread === true || options.awaitedFile === true)
   const refusedBefore = fileRefusedAtLoad
-  /** `outsideFile`: a reason fixed on the machine, never by another file. */
-  const refuse = (reason: string, outsideFile = false) => {
+  /** `outsideFile`: a reason fixed on the machine, never by another file.
+   *  `drawn`: the moves the reading built before it refused, for the view. */
+  const refuse = (reason: string, outsideFile = false, drawn: RefusedFileView['drawn'] = null) => {
     const outcome = keepsProgramBefore ? refuseCandidateProgramLoad(reason) : refuseProgramLoad(reason)
     if (!keepsProgramBefore && operatorFileLoad) keepFileRefusedAtLoad(outsideFile)
+    // WO-3186 fix round: his Load of a file or a setup that is refused and not
+    // kept (the reader refuses its text; a posted setup leaves the travel) is
+    // still shown - display only, never the file CYCLE START reads.
+    if (!keepsProgramBefore && (options.candidate === true || options.setupLoad === true)
+      && !(fileRefusedAtLoad?.name === name && fileRefusedAtLoad.text === text)) {
+      refusedLoadShown = { name, text, refusal: reason, drawn }
+    }
     options.onStageResult?.(outcome)
     return outcome
   }
@@ -17529,6 +17975,8 @@ export function loadGcodeTextToolpathProgram(
     keepsProgramBefore = false
     // WO-2772: whatever this load does, the refused file is no longer it.
     if (!options.keepsLoadedProgram) fileRefusedAtLoad = null
+    // WO-3186 fix round: nor is the refused Load shown before it.
+    if (!options.keepsLoadedProgram) refusedLoadShown = null
     // WO-2237: the operator's Load replaces a kept stop's place.
     if (options.candidate) forgetKeptStop()
     // WO-2234: an MDI line over the loaded program leaves the operator's stop
@@ -17622,7 +18070,7 @@ export function loadGcodeTextToolpathProgram(
       const mm = toolLengthAnswer(h, wcs)
       toolLengthAsked.set(`${h}|${wcs}`, { h, wcs, mm })
       return mm
-    })
+    }, (wcs) => toolLengthInForceMm(ctrl, wcs))
   // WO-1980: a FILE (never a typed MDI line, never a re-read Cycle Start is
   // about to run) that needs only a frame nobody has set yet is kept for it.
   const keepsForOffsets = options.onStaged === undefined
@@ -17773,6 +18221,9 @@ export function loadGcodeTextToolpathProgram(
     meshed.sourceLineOf?.(allLines[index]) ?? allLines[index],
   ]))
 
+  // WO-3186 fix round: what a travel refusal below shows - these moves, each
+  // section in its own work frame, as `fileFitReading` draws a kept file.
+  const drawnIfRefused = { program: built.program, lineOfStep: lineByStepId }
   const cap = resolveMaxProgramMoves(ctrl.capabilities)
   const envelope = currentResolvedMachineMotion().envelope
   const parts: MachineProgram[] = []
@@ -17816,6 +18267,7 @@ export function loadGcodeTextToolpathProgram(
       return refuse(
         arcsNeedTravelMessage(`"${name}"`),
         true,
+        drawnIfRefused,
       )
     }
     // WO-2219: turned by the rotation the controller reports for that offset.
@@ -17828,6 +18280,7 @@ export function loadGcodeTextToolpathProgram(
       return refuse(
         `"${name}", line ${line}: ${describeTravelOffence(offence, stageProgram)}`,
         true,
+        drawnIfRefused,
       )
     }
 
@@ -17967,7 +18420,8 @@ export function loadGcodeTextToolpathProgram(
     for (const part of partitioned.parts) parts.push(part)
   }
 
-  const loadedReason = describeGcodeTextLoad(name, program, drivesSpindle, state.toolLibrary, namingContext)
+  const loadedReason = describeGcodeTextLoad(name, program, drivesSpindle, state.toolLibrary, namingContext,
+    [...toolLengthAsked.values()])
     + (meshed.compensatedBlocks === null
       ? ''
       : ` Surface mesh compensation is ACTIVE (${meshed.compensatedBlocks} compensated motion blocks).`)
@@ -18350,12 +18804,52 @@ function toolRunOrder(program: GcodeInterpretedProgram): number[] {
   return program.tools.every((tool) => order.includes(tool)) ? order : program.tools
 }
 
+/** WO-3087: one `G43 H` row of the load line - the shift its moves carry. */
+function describeG43Shift(
+  entry: { line: number; h: number },
+  table: { deltaMm: number; measured: boolean },
+  folded: readonly { h: number; wcs: string; mm: number }[],
+): string {
+  const asked = folded.filter((fold) => fold.h === entry.h)
+  const shifts = new Map<string, number>()
+  for (const fold of asked) shifts.set(fold.wcs, fold.mm)
+  if (shifts.size === 0) shifts.set('', table.deltaMm)
+  const nets = [...new Set([...shifts.values()].map((mm) => Math.round(mm * 1e6) / 1e6))]
+  const opening = `G43 H${entry.h} on line ${entry.line}`
+  const length = table.measured
+    ? `tool ${entry.h}'s measured length on this machine`
+    : `tool ${entry.h} has no measured length on this machine`
+  const shiftText = (mm: number) => Math.abs(mm) < 5e-7 ? 'zero' : machineLengthText(mm)
+  if (nets.length > 1) {
+    const each = [...shifts].map(([wcs, mm]) => `${shiftText(mm)} in ${wcs}`).join(', ')
+    return `${opening} shifts Z by ${each} - ${length}, less the length already in force in each`
+  }
+  const net = nets[0]
+  const inForce = table.deltaMm - net
+  if (Math.abs(inForce) < 5e-7) {
+    return table.measured
+      ? `${opening} shifts Z by ${shiftText(net)}, ${length}`
+      : `${opening} shifts Z by zero - ${length}`
+  }
+  if (Math.abs(net) < 5e-7) {
+    return `${opening} shifts Z by zero - tool ${entry.h}'s measured length `
+      + `(${machineLengthText(table.deltaMm)}) is already in force`
+  }
+  return table.measured
+    ? `${opening} shifts Z by ${shiftText(net)} - ${length} (${machineLengthText(table.deltaMm)}) `
+      + `less the ${machineLengthText(inForce)} already in force`
+    : `${opening} shifts Z by ${shiftText(net)} - ${length}, so the `
+      + `${machineLengthText(inForce)} already in force comes off`
+}
+
 function describeGcodeTextLoad(
   name: string,
   program: GcodeInterpretedProgram,
   drivesSpindle: boolean,
   library: readonly Tool[],
   namingContext: ProgramContextV1 | null,
+  /** WO-3087: every (H, frame) the reader folded, with the NET length it folded. */
+  folded: readonly { h: number; wcs: string; mm: number }[] = [],
 ): string {
   const frames = program.frames.join(', then ')
   const speeds = program.spindleSpeeds
@@ -18418,17 +18912,14 @@ function describeGcodeTextLoad(
   // moves already carry it; a tool with no measured length applies zero - what the
   // operator's own controller answers for an unmeasured row - and the row
   // says so, once, here.
+  // WO-3087 (OWED O22, desk kit 10-22): the shift said is the one the moves
+  // carry - NET of the length already in force in that frame (WO-1677), as
+  // the reader folded it. With T3's own length in force, "G43 H3 shifts Z by
+  // 10.00 mm" was said over moves shifted by nothing.
   const offsets = program.toolLengthOffsets.length === 0
     ? ''
     : ` Tool length: ${program.toolLengthOffsets
-      .map((entry) => {
-        const resolved = resolveG43ToolLengthMm(entry.h)
-        return resolved.measured
-          ? `G43 H${entry.h} on line ${entry.line} shifts Z by ${machineLengthText(resolved.deltaMm)}, `
-            + `tool ${entry.h}'s measured length on this machine`
-          : `G43 H${entry.h} on line ${entry.line} shifts Z by zero - tool ${entry.h} has no measured `
-            + 'length on this machine'
-      })
+      .map((entry) => describeG43Shift(entry, resolveG43ToolLengthMm(entry.h), folded))
       .join('; ')}.`
   // WORDS READ AND HONOURED BY DOING NOTHING, said ONCE (architect re-scope) -
   // so the operator learns they were read rather than wondering.
@@ -18747,6 +19238,8 @@ function beginCandidateLoad(whileLineRuns = false): void {
     }
     return
   }
+  // WO-3186 fix round: his next Load replaces a refused Load shown before it.
+  refusedLoadShown = null
   // WO-2833 round 9: a setup Load released after the line is not attempted
   // until it is prepared; a cancel before then puts A back (as main does), so
   // A is retired once it is prepared, or when it settles uncanceled.
@@ -19288,6 +19781,12 @@ function fileDoorProgramForLine1(): ToolpathProgramReload | FileRefusedAtLoad | 
  * It has no session effects: it reads, it never stages, publishes or ends anything.
  */
 export function loadedFileFitRefusal(): string | null {
+  return loadedFileFitReading()?.refusal ?? null
+}
+
+/** `loadedFileFitRefusal`'s reading of the loaded file: the refusal, and
+ *  (WO-3186) the moves that reading built, for a display to draw. */
+function loadedFileFitReading(): FileFitReading | null {
   const file = fileDoorProgramForLine1()
   if (file === null) return null
   const ctrl = getMachineController()
@@ -19299,9 +19798,9 @@ export function loadedFileFitRefusal(): string | null {
   const sessionWcs = store().activeWcs
   const startedAt = readerPosition(ctrl, activeMachine)
   if (!(typeof rapidFeedMmMin === 'number' && Number.isFinite(rapidFeedMmMin) && rapidFeedMmMin > 0)) {
-    return NO_RAPID_RATE_FILE_REFUSAL
+    return { refusal: NO_RAPID_RATE_FILE_REFUSAL, drawn: null }
   }
-  if (dialect === null) return noReaderDialectRefusal(declared)
+  if (dialect === null) return { refusal: noReaderDialectRefusal(declared), drawn: null }
   if (!sessionWcs || startedAt === null) return null
   // Under an applied surface mesh the file is compiled at staging, which also
   // ends a re-zeroed mesh - session effects a verdict must not have. The
@@ -19310,17 +19809,17 @@ export function loadedFileFitRefusal(): string | null {
   const readerOffsets = readerWorkOffsets()
   const envelope = currentResolvedMachineMotion().envelope
   const options = fileReaderOptions(state, activeMachine, dialect, sessionWcs as GcodeWcs, startedAt, readerOffsets,
-    (h, wcs) => readerToolLengthMm(ctrl, h, wcs))
+    (h, wcs) => readerToolLengthMm(ctrl, h, wcs), (wcs) => toolLengthInForceMm(ctrl, wcs))
   const key = [file.name, file.text, ctrl, rapidFeedMmMin, JSON.stringify([options.dialect, options.sessionWcs,
     options.initialPosition, options.workOffsets, options.referencePositions, options.machineHome, envelope]),
-  options.machineDefinition]
+  options.machineDefinition, file === fileRefusedAtLoad]
   const memo = loadedFileFit
   if (memo !== null && memo.key.length === key.length && memo.key.every((value, i) => value === key[i])
     && memo.toolLengths.every((asked) => Math.abs(readerToolLengthMm(ctrl, asked.h, asked.wcs) - asked.mm) < 1e-9)) {
-    return memo.refusal
+    return memo.reading
   }
   const toolLengths: { h: number; wcs: string; mm: number }[] = []
-  const refusal = fileFitRefusal(file.name, file.text, {
+  const read = fileFitReading(file.name, file.text, {
     ...options,
     toolLengthMm: (h, wcs) => {
       const mm = readerToolLengthMm(ctrl, h, wcs)
@@ -19328,19 +19827,31 @@ export function loadedFileFitRefusal(): string | null {
       return mm
     },
   }, rapidFeedMmMin, startedAt, readerOffsets, envelope)
-  loadedFileFit = { key, toolLengths, refusal }
-  return refusal
+  // Only a refused file is drawn from this reading (`refusedFileView`); a
+  // staged one is drawn from its staging, so its moves are not kept twice.
+  const reading = file === fileRefusedAtLoad ? read : { refusal: read.refusal, drawn: null }
+  loadedFileFit = { key, toolLengths, reading }
+  return reading
 }
 
 let loadedFileFit: {
   key: unknown[]
   toolLengths: { h: number; wcs: string; mm: number }[]
-  refusal: string | null
+  reading: FileFitReading
 } | null = null
+
+/** What reading a file against the machine as it stands found: the file
+ *  door's refusal (null when it fits), and the moves it built - each section
+ *  in its own work frame, as the file door stages them - or null when the
+ *  reader could not build them. */
+interface FileFitReading {
+  refusal: string | null
+  drawn: { program: MachineProgram; lineOfStep: ReadonlyMap<number, number> } | null
+}
 
 /** The file door's fit refusals, word for word (`loadGcodeTextToolpathProgram`):
  *  the reader's, arcs that need declared travel, and the first move outside it. */
-function fileFitRefusal(
+function fileFitReading(
   name: string,
   text: string,
   options: GcodeInterpretOptions,
@@ -19348,9 +19859,9 @@ function fileFitRefusal(
   startedAt: GcodeReaderPoint,
   readerOffsets: ReaderWorkOffsets,
   envelope: ReturnType<typeof currentResolvedMachineMotion>['envelope'],
-): string | null {
+): FileFitReading {
   const interpreted = interpretGcodeProgram(text, options)
-  if (!interpreted.ok) return `"${name}" was not loaded. ${interpreted.refusal.message}`
+  if (!interpreted.ok) return { refusal: `"${name}" was not loaded. ${interpreted.refusal.message}`, drawn: null }
   const program = interpreted.program
   const allMoves = program.stages.flatMap((stage) => stage.moves)
   const allLines = program.stages.flatMap((stage) => stage.moveLines)
@@ -19358,36 +19869,94 @@ function fileFitRefusal(
     opId: GCODE_TEXT_OP_ID,
     setupId: name,
   }, undefined, startedAt)
-  if (!built.ok) return null
+  if (!built.ok) return { refusal: null, drawn: null }
   const motionSteps = built.program.steps.filter(isStagedMove) as QueuedMove[]
-  if (motionSteps.length !== allMoves.length) return null
-  let cursor = 0
-  for (const stage of program.stages) {
-    const steps = motionSteps.slice(cursor, cursor + stage.moves.length)
-    const firstIndex = cursor
-    cursor += stage.moves.length
-    const wco = readerOffsets[stage.wcs as GcodeWcs]
-    if (wco === undefined) return null
-    if (steps.some((step) => step.kind === 'arc') && (!envelope.x || !envelope.y)) {
-      return arcsNeedTravelMessage(`"${name}"`)
-    }
-    const stageProgram: MachineProgram = {
-      frame: 'work',
-      units: 'mm',
-      steps,
-      index: Object.fromEntries(
-        steps.map((step) => [step.id, built.program.index[step.id]]).filter(([, v]) => v !== undefined),
-      ) as ProgramIndex,
-    }
-    const offence = firstStepOutsideTravel(stageProgram, wco, envelope, ENVELOPE_FIT_TOLERANCE_MM, controllerRotationDeg(stage.wcs))
-    if (offence === null) continue
-    const index = steps.findIndex((step) => step.id === offence.stepId)
-    const stagedLine = index < 0 ? undefined : allLines[firstIndex + index]
-    const line = stagedLine ?? stage.firstLine
-    return `"${name}", line ${line}: ${describeTravelOffence(offence, stageProgram)}`
+  if (motionSteps.length !== allMoves.length) return { refusal: null, drawn: null }
+  const drawn = {
+    program: built.program,
+    lineOfStep: new Map(motionSteps.map((step, index) => [step.id, allLines[index]] as const)),
   }
-  return null
+  const refusal = ((): string | null => {
+    let cursor = 0
+    for (const stage of program.stages) {
+      const steps = motionSteps.slice(cursor, cursor + stage.moves.length)
+      const firstIndex = cursor
+      cursor += stage.moves.length
+      const wco = readerOffsets[stage.wcs as GcodeWcs]
+      if (wco === undefined) return null
+      if (steps.some((step) => step.kind === 'arc') && (!envelope.x || !envelope.y)) {
+        return arcsNeedTravelMessage(`"${name}"`)
+      }
+      const stageProgram: MachineProgram = {
+        frame: 'work',
+        units: 'mm',
+        steps,
+        index: Object.fromEntries(
+          steps.map((step) => [step.id, built.program.index[step.id]]).filter(([, v]) => v !== undefined),
+        ) as ProgramIndex,
+      }
+      const offence = firstStepOutsideTravel(stageProgram, wco, envelope, ENVELOPE_FIT_TOLERANCE_MM, controllerRotationDeg(stage.wcs))
+      if (offence === null) continue
+      const index = steps.findIndex((step) => step.id === offence.stepId)
+      const stagedLine = index < 0 ? undefined : allLines[firstIndex + index]
+      const line = stagedLine ?? stage.firstLine
+      return `"${name}", line ${line}: ${describeTravelOffence(offence, stageProgram)}`
+    }
+    return null
+  })()
+  return { refusal, drawn }
 }
+
+/**
+ * WO-3186 (the owner, 10-27: "does not show anything into the conrol preview
+ * screen"): THE FILE A LOAD REFUSED FOR A REASON OUTSIDE IT IS STILL HIS FILE
+ * ON SCREEN. The refusal stands - a line below the Z travel at this G54 is
+ * one the machine cannot reach - but the file he loaded and where it leaves
+ * the travel are what he needs to see to fix it. So the kept file
+ * (`fileRefusedAtLoad`, WO-2772) is shown: its text for the listing, and the
+ * moves `loadedFileFitReading` built for the preview, each section in its own
+ * work frame as the file door stages them. `refusal` is that same reading's
+ * verdict, read again as the machine changes - the sentence CYCLE START says.
+ *
+ * Display only: nothing is staged, armed or published. CYCLE START, Run from
+ * line and Step read the file exactly as before. With no such file named, the
+ * refused Load shown (`refusedLoadShown`), else null.
+ */
+export interface RefusedFileView {
+  name: string
+  text: string
+  refusal: string | null
+  /** Null when the reader could not build the file's moves (it refuses them). */
+  drawn: FileFitReading['drawn']
+}
+
+export function refusedFileView(): RefusedFileView | null {
+  if (!loadedFileRefusedAtLoad()) return refusedLoadShown
+  const file = fileRefusedAtLoad!
+  const reading = loadedFileFitReading()
+  const refusal = reading?.refusal ?? null
+  const drawn = reading?.drawn ?? null
+  const shown = shownRefusedFile
+  if (shown !== null && shown.name === file.name && shown.text === file.text
+    && shown.refusal === refusal && shown.drawn === drawn) return shown
+  shownRefusedFile = { name: file.name, text: file.text, refusal, drawn }
+  return shownRefusedFile
+}
+
+/** The last `refusedFileView`, so an unchanged reading is the same object. */
+let shownRefusedFile: RefusedFileView | null = null
+
+/**
+ * WO-3186 fix round (astra audit; architect 10-27: "DISPLAY ONLY ... SEPARATE
+ * from the kept/armed file record"): HIS LOAD REFUSED, THE FILE NOT KEPT. A
+ * file the reader refuses for its own text (an unsupported word), or a setup's
+ * posted file Load > Setup refused for the travel, is no file CYCLE START,
+ * Run from line or Step reads (WO-2772 keeps none) - but it is the file he
+ * loaded, so it is listed, its refusing line marked, and drawn where the
+ * reading built its moves. Its refusal is the sentence that Load said, as it
+ * was. Nothing arms from it; his next Load replaces it.
+ */
+let refusedLoadShown: RefusedFileView | null = null
 
 /** WO-2686: whether a file the file door took is the loaded program CYCLE
  *  START can arm from line 1 - the live one, or the one a reconnect left named. */
@@ -20009,7 +20578,9 @@ function commandThroughKeptStop(
       return
     }
     keptStopCommand = { controller: ctrl, what, at: Date.now(), ran: false }
-    for (const command of entry.commands) command.run()
+    // WO-3258: each was announced when it was asked for; running it now is
+    // not another input's request.
+    replayDeferredManualMotion(() => { for (const command of entry.commands) command.run() })
   })
   return true
 }
@@ -21555,6 +22126,45 @@ function controllerStartRefusal(ctrl: MachineController): string {
 
 /** Why the controller did not take a jog, from its own state. `deltaMm` is
  *  null for a run-until-released jog, which has no end point to check. */
+/** A shortened jog stops this far inside the soft limit (the envelope's own
+ *  fit tolerance), so the board never sees a target on or past it. */
+export const JOG_SOFT_LIMIT_MARGIN_MM = ENVELOPE_FIT_TOLERANCE_MM
+/** A step sent this recently may not show as motion yet; its end still counts
+ *  as where the axis is going. */
+const JOG_QUEUE_SETTLE_MS = 1000
+
+export type JogSoftLimitStep =
+  | { kind: 'send' }
+  | { kind: 'clamped'; deltaMm: number; limitMm: number }
+  | { kind: 'at-limit'; limitMm: number }
+
+/**
+ * One step jog against the axis's soft limits, all in MACHINE coordinates:
+ * `fromMm` is the machine position the step starts from, `deltaMm` the
+ * relative step (a relative single-axis move is the same length in the work
+ * and machine frames), `range` the controller's stated soft limits.
+ * A step whose end stays inside the limits - or that moves away from the
+ * limit it is past - goes unchanged. One that would end past a limit is
+ * shortened to stop `JOG_SOFT_LIMIT_MARGIN_MM` inside it; with no room left
+ * in that direction nothing is sent.
+ */
+export function jogStepWithinSoftLimits(
+  fromMm: number,
+  deltaMm: number,
+  range: { min: number; max: number },
+): JogSoftLimitStep {
+  const end = fromMm + deltaMm
+  const limitMm = deltaMm > 0 ? range.max : range.min
+  if (deltaMm > 0 ? end <= range.max : deltaMm < 0 ? end >= range.min : true) return { kind: 'send' }
+  const roomMm = deltaMm > 0
+    ? (range.max - JOG_SOFT_LIMIT_MARGIN_MM) - fromMm
+    : fromMm - (range.min + JOG_SOFT_LIMIT_MARGIN_MM)
+  // Rounded DOWN to 0.0001 mm so the rounding never carries it past the margin.
+  const allowed = Math.floor(roomMm * 1e4 + 1e-6) / 1e4
+  if (!(allowed >= 0.001)) return { kind: 'at-limit', limitMm }
+  return { kind: 'clamped', deltaMm: deltaMm > 0 ? allowed : -allowed, limitMm }
+}
+
 function controllerJogRefusal(ctrl: MachineController, axis: ControlAxis, deltaMm: number | null): string {
   if (ctrl.connectionPhase() !== 'connected') return 'the machine is not connected. Nothing moved.'
   const state = ctrl.machineState()
@@ -21624,6 +22234,16 @@ export type MachineActionResult =
 export function runMachineAction(
   lines: string[],
   options: { action?: BuiltinActionId } = {},
+): MachineActionResult {
+  // WO-3258: as at the MDI door - stop words only are nobody's request to move.
+  const ctrl = getMachineController()
+  if (lines.every((line) => mdiLineMayPassEstopLatch(line, ctrl))) return runMachineActionLines(lines, options)
+  return announceManualMotionIntent('action', options.action ?? lines.join(' / '), () => runMachineActionLines(lines, options))
+}
+
+function runMachineActionLines(
+  lines: string[],
+  options: { action?: BuiltinActionId },
 ): MachineActionResult {
   let sent = 0
   const actionIsStop = options.action !== undefined
@@ -21719,7 +22339,9 @@ function sendMdiProgram(lines: readonly string[]): boolean {
   if (between !== null) return between
   // WO-2519: an action's lines in a kept stop read as MDI, as one line does.
   nameKeptStopCommand(ctrl, 'MDI')
-  return stageMdiMotion(label, lines.join('\n'))
+  const staged = stageMdiMotion(label, lines.join('\n'))
+  if (staged) recordSpindleWordsSent(lines)
+  return staged
 }
 
 /** Which route a spindle command actually took, so the UI can say so rather
@@ -21800,6 +22422,11 @@ export function commandSpindle(
   if (commandThroughKeptStop(ctrl, 'Spindle', () => { commandSpindle(direction, rpm, textLines, injected) })) {
     return { ok: true, route }
   }
+  // WO-3191: a command that WENT is the panel's direction, whoever sent it.
+  const went = (): SpindleCommandResult => {
+    recordCommandedSpindle(direction)
+    return { ok: true, route }
+  }
   // A pause that cannot be kept keeps its lock on a START; a stop is never gated.
   if (direction !== 'off' && pausedProgramKeepsItsLock(ctrl)) {
     const reason = 'A program is running - the spindle is locked out.'
@@ -21818,10 +22445,10 @@ export function commandSpindle(
       // A stop is never refused BY THE LATCH. Its action identity, rather than
       // the configured text, carries that rule through this shared gate.
       return runMachineAction(textLines(), { action: 'spindleOff' }).ok
-        ? { ok: true, route }
+        ? went()
         : { ok: false, route, reason: SPINDLE_REFUSAL.notSent }
     }
-    return { ok: true, route }
+    return went()
   }
 
   // WO-2157: a Probe-type tool in the spindle is not spun, by any route. Asked
@@ -21835,7 +22462,7 @@ export function commandSpindle(
     if (estopNeedsReset()) return { ok: false, route, reason: SPINDLE_REFUSAL.estop }
     if (!spindleOverrideUsesExternalSetpoint(ctrl)) {
       return ctrl.spindleOn!(direction, rpm)
-        ? { ok: true, route }
+        ? went()
         : { ok: false, route, reason: SPINDLE_REFUSAL.controllerRefused }
     }
     const machine = controlMachine(useCamStore.getState())
@@ -21862,7 +22489,7 @@ export function commandSpindle(
       ctrl.setOverride({ kind: 'spindle', to: 'percent', percent: initial.appliedPercent })
     }
     switchSpindleRelays(ctrl, direction === 'cw' ? 3 : 4)
-    return { ok: true, route }
+    return went()
   }
   if (route === 'text') {
     // Two different failures share this branch and the operator needs them
@@ -21871,7 +22498,7 @@ export function commandSpindle(
     // HERE, in the module that owns the latch, rather than by a panel asking
     // the latch a second question and hoping it means the same thing.
     const action: BuiltinActionId = direction === 'cw' ? 'spindleCw' : 'spindleCcw'
-    if (runMachineAction(textLines(), { action }).ok) return { ok: true, route }
+    if (runMachineAction(textLines(), { action }).ok) return went()
     return {
       ok: false,
       route,
@@ -22091,6 +22718,10 @@ interface ProbeCycleRun {
   /** WO-2533: settles once the move a touch stopped has come to rest (or
    *  the wait for it ended); null when no move was stopped. */
   contactRest: Promise<void> | null
+  /** WO-3262: the probe call in flight (or just answered) was handed to the
+   *  controller, and the axis it moves. False while a call is waiting out a
+   *  hold or was never made - "did not run" is only true then. */
+  probeSent: ProbeAxis | null
 }
 
 /** WO-2517: how the probe input ended a run. `touched` - it came on during a
@@ -22112,6 +22743,9 @@ const probeControlledResets = new WeakSet<MachineController>()
 
 /** Claimed alongside `probeCycleActive = true` by the routine that owns the lock. */
 function claimProbeCycleRun(routine: string): ProbeCycleRun {
+  // WO-3258: a probe routine is about to move the machine; an input holding a
+  // jog yields here, before the routine's first move goes out.
+  announceManualMotionIntent('probe', routine, () => undefined)
   let release: () => void = () => {}
   const stop = new Promise<null>((resolve) => { release = () => resolve(null) })
   const run: ProbeCycleRun = {
@@ -22136,6 +22770,7 @@ function claimProbeCycleRun(routine: string): ProbeCycleRun {
     move: null,
     contact: null,
     contactRest: null,
+    probeSent: null,
   }
   activeProbeCycle = run
   return run
@@ -22616,6 +23251,7 @@ async function probeCallAsTouch(
     if (!openProbeTouch(ctrl, `the probe move toward ${machinePositionText({ [axis.toLowerCase()]: targetMm })}`)) return null
     const epoch = run?.pauseEpoch
     try {
+      if (run !== null) run.probeSent = axis
       const touch = await untilProbeStop(ctrl.probe(axis, targetMm, feedMmMin))
       closeProbeTouch(ctrl, touch !== null && touch.ok && touch.at !== null)
       // WO-2800 fix round 2: an E-STOP the controller never answered ends it.
@@ -22644,6 +23280,7 @@ function probeCallUnlessStopped(
   feedMmMin: number,
 ): Promise<Awaited<ReturnType<MachineController['probe']>> | null> {
   const run = activeProbeCycle
+  if (run !== null) run.probeSent = null
   if (probeRunEnded(run)) return Promise.resolve(null)
   if (probeCycleHeldByOperator(ctrl)) {
     return waitOutProbeCycleHold(ctrl).then(() => {
@@ -22721,10 +23358,14 @@ async function guardedProbeCallUnlessStopped(
 }
 
 /** The one console line and result sentence for a stopped run. */
-function probeCycleStoppedMessage(run: ProbeCycleRun): string {
-  const where = run.step !== null
+function probeCycleWhere(run: ProbeCycleRun): string {
+  return run.step !== null
     ? run.phase !== null ? `${run.step} (${run.phase})` : run.step
     : run.phase ?? 'its start'
+}
+
+function probeCycleStoppedMessage(run: ProbeCycleRun): string {
+  const where = probeCycleWhere(run)
   const contact = run.contact
   // WO-2517: the probe input ended it - where it touched, and what was stopped or not sent.
   const at = contact?.at ? machinePositionText(contact.at) : 'an unreported machine position'
@@ -22948,6 +23589,41 @@ function downTargetAboveFloor(
  * and probe-cycle timeout after GetProbeState reported a touch. */
 function nativeProbeFailureMessage(reason: string, beforeContact: string): string {
   return reason.startsWith('the probe touched ') ? reason : `${beforeContact}: ${reason}`
+}
+
+/** WO-3262: a probe call's `reason` reply as the routine's failure sentence.
+ *  When the E-STOP landed after the call was handed to the controller, the move
+ *  ran and the E-STOP stopped it: the sentence says so, in the stopped-run
+ *  shape, at the last machine position the controller reported. "did not run"
+ *  is kept for every reply where nothing was sent (a latch already set, a
+ *  refusal, the controller declining the call). */
+function probeCallFailureMessage(ctrl: MachineController, reason: string, beforeContact: string): string {
+  const run = activeProbeCycle
+  const axis = run?.probeSent ?? null
+  if (run === null || axis === null || run.controller !== ctrl || !estopNeedsReset() || reason.startsWith('the probe touched ')) {
+    return nativeProbeFailureMessage(reason, beforeContact)
+  }
+  return probeCycleEstopSentence(run, ctrl, axis, reason)
+}
+
+/** WO-3262: the stopped-run sentence for an E-STOP that landed on a move in
+ *  flight. The controller's own reply follows it: it says how to get out. */
+function probeCycleEstopSentence(run: ProbeCycleRun, ctrl: MachineController, axis: ProbeAxis, reply: string | null | undefined): string {
+  const key = axis.toLowerCase() as 'x' | 'y' | 'z'
+  const reported = ctrl.status().machinePos?.[key]
+  const at = typeof reported === 'number' && Number.isFinite(reported)
+    ? `, at ${machinePositionText({ [key]: reported })}`
+    : ''
+  const said = typeof reply === 'string' && reply.trim() !== '' ? ` ${reply.trim()}` : ''
+  return `${run.routine}: stopped by E-STOP during ${probeCycleWhere(run)}${at}. No further probe or move was sent.${said}`
+}
+
+/** WO-3262: the text route's G38 line the E-STOP abandoned: sent, not taken to
+ *  its end, with the latch set. Null for any other outcome. */
+function textProbeEstopSentence(ctrl: MachineController, outcome: AppCommandOutcome | null, axis: ProbeAxis): string | null {
+  const run = activeProbeCycle
+  if (run === null || run.controller !== ctrl || outcome === null || outcome.ok || !outcome.sent || !estopNeedsReset()) return null
+  return probeCycleEstopSentence(run, ctrl, axis, outcome.message)
 }
 
 /**
@@ -23287,7 +23963,7 @@ async function executeNativeProbeTouch(
       const { touch: guarded, settle } = await guardedProbeCallUnlessStopped(ctrl, 'Z', n(approach.targetZ), n(approach.feedMmMin))
       if (!receiptIsCurrent(receiptToken)) { settle(false); return fail(changed) }
       if (guarded === null) return fail(PROBE_CYCLE_STOPPED)
-      if (guarded.reason) return fail(nativeProbeFailureMessage(guarded.reason, 'The approach toward the tool setter did not run'))
+      if (guarded.reason) return fail(probeCallFailureMessage(ctrl, guarded.reason, 'The approach toward the tool setter did not run'))
       if (guarded.ok && guarded.at !== null) {
         approachContact = { ...guarded.at }
         const tool = setter.tool === null ? 'the active tool' : `T${setter.tool}`
@@ -23330,7 +24006,7 @@ async function executeNativeProbeTouch(
     const fast = await probeCallUnlessStopped(ctrl, axis, fastTarget, fastFeed)
     if (!receiptIsCurrent(receiptToken)) return fail(changed)
     if (fast === null) return fail(PROBE_CYCLE_STOPPED)
-    if (fast.reason) return fail(nativeProbeFailureMessage(fast.reason, 'The probe did not run'))
+    if (fast.reason) return fail(probeCallFailureMessage(ctrl, fast.reason, 'The probe did not run'))
     if (!fast.ok || fast.at === null) {
       noteProbeEndedWithoutContact(ctrl, axis, direction, options)
       if (options.searchMissMessage) {
@@ -23371,7 +24047,7 @@ async function executeNativeProbeTouch(
   const fine = await probeCallUnlessStopped(ctrl, axis, fineTarget, fineFeed)
   if (!receiptIsCurrent(receiptToken)) return fail(changed)
   if (fine === null) return fail(PROBE_CYCLE_STOPPED)
-  if (fine.reason) return fail(nativeProbeFailureMessage(fine.reason, 'The fine probe pass did not run'))
+  if (fine.reason) return fail(probeCallFailureMessage(ctrl, fine.reason, 'The fine probe pass did not run'))
   if (!fine.ok || fine.at === null) {
     return fail((
       // A miss after an early setter touch says the touch came early (machine seat 10-06 a4 finding; operator 10:44 PM: fix it).
@@ -23571,6 +24247,8 @@ async function executeDirectionalProbeTouch(
         if (!guarded) return fail('The controller refused the approach toward the tool setter - the probe was not started.')
         const guardedUnsent = unsentReason(guarded)
         if (guardedUnsent) return fail(guardedUnsent)
+        const guardedStopped = textProbeEstopSentence(ctrl, guarded, 'Z')
+        if (guardedStopped) return fail(guardedStopped)
         if (guarded.ok) {
           const touched = store().probe
           if (touched?.success && Number.isFinite(touched.values[axisIndex])) {
@@ -23612,6 +24290,8 @@ async function executeDirectionalProbeTouch(
       // a probe that ran and missed.
       const fastUnsent = unsentReason(fast)
       if (fastUnsent) return fail(fastUnsent)
+      const fastStopped = textProbeEstopSentence(ctrl, fast, axis)
+      if (fastStopped) return fail(fastStopped)
       if (!fast.ok) {
         noteProbeEndedWithoutContact(ctrl, axis, direction, options)
         if (options.searchMissMessage) {
@@ -23674,6 +24354,8 @@ async function executeDirectionalProbeTouch(
     if (!slow) return fail('The controller refused the fine probe pass.')
     const slowUnsent = unsentReason(slow)
     if (slowUnsent) return fail(slowUnsent)
+    const slowStopped = textProbeEstopSentence(ctrl, slow, axis)
+    if (slowStopped) return fail(slowStopped)
     if (!slow.ok) {
       return fail(setter
         // A miss after an early setter touch says the touch came early (machine seat 10-06 a4 finding).
@@ -24165,7 +24847,7 @@ async function guardedZDescent(
     const { touch: guarded, settle } = await guardedProbeCallUnlessStopped(ctrl, 'Z', depthZ, feed)
     if (!receiptIsCurrent(receiptToken)) { settle(false); return { failed: changed } }
     if (guarded === null) return { failed: PROBE_CYCLE_STOPPED }
-    if (guarded.reason) return { failed: nativeProbeFailureMessage(guarded.reason, `${label} did not run`) }
+    if (guarded.reason) return { failed: probeCallFailureMessage(ctrl, guarded.reason, `${label} did not run`) }
     if (guarded.ok && guarded.at !== null) return { touchedZ: guarded.at.z }
     const distance = typeof fromZ === 'number' ? Math.abs(fromZ - depthZ) : 0
     const arrived = await waitForProbeRoutineMove(ctrl, { z: depthZ }, nativeMoveTimeoutMs(distance, feed))
@@ -24234,7 +24916,7 @@ async function guardedLineMove(
     const { touch: guarded, settle } = await guardedProbeCallUnlessStopped(ctrl, axes[0], target[key], feed)
     if (!receiptIsCurrent(receiptToken)) { settle(false); return { failed: changed } }
     if (guarded === null) return { failed: PROBE_CYCLE_STOPPED }
-    if (guarded.reason) return { failed: nativeProbeFailureMessage(guarded.reason, `${label} did not run`) }
+    if (guarded.reason) return { failed: probeCallFailureMessage(ctrl, guarded.reason, `${label} did not run`) }
     if (guarded.ok && guarded.at !== null) return { contact: { ...guarded.at } }
     const arrived = await waitForProbeRoutineMove(
       ctrl, { [key]: target[key] }, nativeMoveTimeoutMs(Math.abs(target[key] - from[key]), feed),

@@ -2,6 +2,7 @@
 import type { Translation } from '../../index'
 const words: Translation<'cam-operations-new-operation'> = {
   NewOperationModalBody: {
+    "part_on_other_stock": "La pièce « {{part}} » est sur {{stock}} ; ce montage utilise {{setupStock}}.",
     From_the_model: "Depuis le modèle",
     Modeled_chamfers_reading: "Lecture des chanfreins de cette pièce...",
     Modeled_chamfers_read_failed: "Impossible de lire les chanfreins de cette pièce : {{p1}}",
@@ -65,5 +66,24 @@ const words: Translation<'cam-operations-new-operation'> = {
     Settle_auto_orient_part_to_most_stable_resting_position: 'Stabiliser — orienter automatiquement la pièce dans sa position de repos la plus stable', Settle: 'Stabiliser',
     Set_projection_plane_click_a_face_or_stock_surface: 'Définir le plan de projection — cliquez sur une face ou une surface du brut pour y projeter la géométrie', Set_projection_plane: 'Définir le plan de projection',
   },
+  "newOperationModalParts": {
+    "Heights_explained": "Utilisation de ces hauteurs",
+    "Entry_explained": "L’entrée commence généralement juste au-dessus du matériau restant (environ 1 mm). Certaines familles utilisent d’autres règles ; consultez l’aide.",
+    "Travel_explained": "Le retrait est le saut normal entre les éléments. Les liaisons prouvées libres peuvent rester plus basses ; au-dessus d’une bride modélisée, la trajectoire monte davantage, même au-dessus du dégagement.",
+    "Clearance_explained": "Le dégagement sert à la première approche et à la sortie finale. Ces valeurs sont des plans de référence, pas toutes les hauteurs de déplacement.",
+    "Reference_planes": "Plans de référence (Z du repère pièce)",
+    "Illustrative_route": "Trajet local illustratif - non à l’échelle",
+    "Entry_start": "Début d’entrée",
+    "Ordinary_hop": "Saut normal",
+    "Clamp_crossing": "Passage de bride",
+    "Material_left": "Matériau restant",
+    "Clearance": "Dégagement",
+    "Retract": "Retrait",
+    "Feed_height": "Hauteur d’avance",
+    "Top_of_cut": "Haut de coupe",
+    "Bottom_of_cut": "Fond de coupe",
+    "Set_manually": "Définir manuellement",
+    "Auto_from_3D_model": "Automatique depuis le modèle 3D"
+}
 }
 export default words

@@ -48,6 +48,7 @@ const {
   getMachineController,
   runZProbeCycle,
   sendMdiLine,
+  setSimulatedPart,
   setWorkOffsetValue,
   zeroWorkAxes,
 } = await import('../../lib/machine/machineSession')
@@ -106,6 +107,10 @@ async function connect(definition: ControllerDefinition): Promise<void> {
   await pending
   await vi.advanceTimersByTimeAsync(1400)
   act(() => { __resetEstopInterlockForTest() })
+  // WO-3189 seeds the setup's stock box at every simulator connect; these
+  // tests probe the machine's flat pad, so they say no part is placed (a
+  // placed part replaces the pad by design, WO-416).
+  setSimulatedPart(null)
 }
 
 async function settle(ms = 2000): Promise<void> {

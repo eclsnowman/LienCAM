@@ -95,6 +95,34 @@ export const PERSISTED_USER_DATA_REGISTRY = {
     storage: 'local-storage',
     backup: { kind: 'local-record', collectionId: 'ui-customization', count: 'value' },
   },
+  // WO-3322: the New UI tryout's own choices (WO-3275 switch, WO-3285 shell
+  // look). Plain values on this computer; not backed up while the shell is a
+  // tryout, and a damaged value only ever falls back to the default.
+  newUiSwitch: {
+    key: 'liencam.ui2.newUi',
+    holds: 'Whether the New UI shell is switched on, on this computer.',
+    storage: 'local-storage',
+    backup: false,
+  },
+  ui2ShellTheme: {
+    key: 'liencam.ui2.theme',
+    holds: 'The New UI shell colour theme.',
+    storage: 'local-storage',
+    backup: false,
+  },
+  ui2ShellScale: {
+    key: 'liencam.ui2.scale',
+    holds: 'The New UI shell interface scale choice.',
+    storage: 'local-storage',
+    backup: false,
+  },
+  controlLayouts: {
+    // WO-3308 Control layouts; registered by WO-3322 like the other New UI keys.
+    key: 'liencam.ui2.controlLayouts',
+    holds: 'The New UI Control layout on screen and the saved layouts, per machine.',
+    storage: 'local-storage',
+    backup: false,
+  },
   aiModelChoice: {
     // WO-2979: the operator's AI model pick per project and harness. It stays on
     // this computer (not in the .camproject, not in a backup): a pick only means
@@ -267,13 +295,17 @@ function palettePreferenceRecord(storage: Storage): Record<string, unknown> {
   if (state.toolPaletteLayout !== undefined) return record
 
   const layout: Record<string, unknown> = {}
+  let drained = false
   for (const key of PERSISTED_USER_DATA_REGISTRY.uiPreferences.legacyKeys) {
     try {
       const legacy = storage.getItem(key)
-      if (legacy !== null) layout[key] = JSON.parse(legacy)
+      if (legacy !== null) { drained = true; layout[key] = JSON.parse(legacy) }
     } catch { /* an unreadable legacy choice leaves the palette's default */ }
   }
   const next = { ...record, state: { ...state, toolPaletteLayout: layout } }
+  // WO-3322: nothing to migrate is nothing to save. A read (a store hydrating
+  // as its module loads) must not create a preferences record by itself.
+  if (!drained) return next
   // Remove only after saving the migrated record. Failed persistence still
   // lets the viewer read their previous layout, and retries on the next read.
   try {

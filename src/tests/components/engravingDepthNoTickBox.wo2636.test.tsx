@@ -263,7 +263,8 @@ describe('WO-2636 engraving depth without a second confirmation', () => {
     act(() => useCamStore.getState().openModal('new-operation'))
     await authorNewEngrave()
     enterDepth(0.8)
-    await waitFor(() => expect(screen.getByText('No usable datum plane')).not.toBeNull())
+    // WO-3137 also explains the error beside Create. Check that specific surface.
+    await waitFor(() => expect(screen.getByTestId('op-create-reason').textContent).toBe('No usable datum plane'))
     expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(true)
     expect(useCamStore.getState().project.setups[0].operations).toHaveLength(0)
   })

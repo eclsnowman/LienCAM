@@ -15,7 +15,8 @@ describe('WO-1244 definition section ownership', () => {
       expect(imports).toContain(`./definition/${section}`)
     }
     const functions = root.statements.filter(ts.isFunctionDeclaration)
-    expect(functions.map(node => node.name?.text)).toEqual(['MachineDefinitionPanel'])
+    // WO-3071 5cbd034755 adds the separately owned Linux setup surface.
+    expect(functions.map(node => node.name?.text)).toEqual(['LinuxControllerNetworkSetup', 'MachineDefinitionPanel'])
     expect(root.text).not.toMatch(/\buse(?:State|Effect|LayoutEffect|SyncExternalStore)\(/)
   })
 

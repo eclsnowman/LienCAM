@@ -1,0 +1,52 @@
+/* WO-3281: the Notice part. Theme roles only (custom properties from src/theme/tokens.ts). */
+.kit-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp4);
+  padding: var(--sp3) var(--sp4);
+  background: var(--panel);
+  color: var(--tx);
+  border: 1px solid var(--b1);
+  border-left: 4px solid var(--notice-edge, var(--tx3));
+  border-radius: var(--r-md);
+  font: var(--f-body) var(--sans);
+}
+.kit-notice-level {
+  flex: none;
+  font-size: var(--f-cap);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--notice-label, var(--tx2));
+}
+.kit-notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.kit-notice-dismiss {
+  flex: none;
+  position: relative;
+  width: var(--min-hit);
+  height: var(--min-hit);
+  padding: 0;
+  background: transparent;
+  color: var(--tx2);
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.kit-notice-dismiss::before,
+.kit-notice-dismiss::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 1.5px;
+  background: currentColor;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.kit-notice-dismiss::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.kit-notice-dismiss:hover { background: var(--ctl-hover); color: var(--tx); }
+.kit-notice-dismiss:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.kit-notice[data-level='info'] { --notice-edge: var(--acc); --notice-label: var(--acc-ink); }
+.kit-notice[data-level='warning'] { --notice-edge: var(--warn); --notice-label: var(--warn); }
+.kit-notice[data-level='cannot-do-this'] { --notice-edge: var(--tx3); --notice-label: var(--tx2); }
+.kit-notice[data-level='error'] { --notice-edge: var(--err); --notice-label: var(--err); }

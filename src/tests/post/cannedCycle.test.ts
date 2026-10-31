@@ -95,7 +95,8 @@ describe('reconstructDrillCycles', () => {
     const p = res.program
     expect(p.gWord).toBe('G81')
     expect(p.returnMode).toBe('G98')          // retractMode 'clearance'
-    expect(p.initialZ).toBe(10)               // clearance plane
+    expect(p.initialZ).toBe(5)                // WO-3083: G98 returns to the hop plane, Retract (was Clearance 10)
+    expect(p.clearanceZ).toBe(10)             // the op still enters and leaves at Clearance
     expect(p.rPlaneZ).toBe(1)                 // feed height
     expect(p.feed).toBe(150)                  // plungeRate
     expect(p.holes).toEqual([

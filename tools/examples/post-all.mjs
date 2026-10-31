@@ -4,7 +4,7 @@
 import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,8 +51,8 @@ export async function postAll({ check = false, overrides = {}, only } = {}) {
   const discovery = discoverExamples()
   // A private ephemeral Vite host avoids the desktop config's controller broker.
   // It serves this worktree's actual source; no dist or copied post engine.
-  const server = await createServer({ root: ROOT, configFile: false,
-    cacheDir: path.join(tmpdir(), `liencam-examples-vite-${process.pid}`),
+  const cacheDir = path.join(tmpdir(), `liencam-examples-vite-${process.pid}`)
+  const server = await createServer({ root: ROOT, configFile: false, cacheDir,
     plugins: [{ name: 'liencam-examples-cross-drive-wasm', configureServer(server) {
       const installed = realpathSync(path.join(ROOT, 'node_modules'))
       server.middlewares.use((req, _res, next) => {
@@ -138,7 +138,11 @@ export async function postAll({ check = false, overrides = {}, only } = {}) {
     const actual = readdirSync(path.join(ROOT, 'examples/gcode')).filter(f => f.endsWith('.nc')).sort()
     if (!only && JSON.stringify(actual) !== JSON.stringify(expected)) differences.push('examples/gcode/: unexpected or missing files')
     return { ...discovery, version, files, differences }
-  } finally { await browser?.close(); await server.close() }
+  } finally {
+    await browser?.close(); await server.close()
+    // The per-run Vite cache is scratch: 147 were left in the Spark's /tmp on 10-23.
+    rmSync(cacheDir, { recursive: true, force: true })
+  }
 }
 
 if (isMain(import.meta.url)) {

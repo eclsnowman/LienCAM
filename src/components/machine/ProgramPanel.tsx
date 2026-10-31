@@ -1,3 +1,7 @@
+import { prepareProgramContextAdoption } from '../../lib/machine/programContext'
+import { i18n } from '../../i18n'
+import sourceMessages from '../../i18n/locales/en/console-and-operator-messages'
+import { adoptSetupLoad, beginSetupLoadActivity, bindSetupLoadComparison, observeSetupLoadInputs, preparedSetupLoadComparison, preparedSourceProgram, prepareSetupLoadOffThread, prepareTransferLoadOffThread, yieldSetupLoadTask, type PreparedTransferLoad, publishSetupLoadAnalysis, setupLoadParserIdentity, setupLoadParserTables, setupLoadTimingIdentity, type SetupLoadMessage } from '../../lib/machine/setupLoadPreparation'
 import { catalogChildren, liveCatalog } from './definition/catalogText'
 import { textFor, useText } from '../../i18n'
 const controlText = textFor('control-screens-not-probing')
@@ -51,6 +55,7 @@ import {
   beginGuidedToolChange,
   cancelGuidedToolChangeByOperator,
   programM0HoldLine,
+  programAwaitingOffsetsText,
   programPartsTransportState,
   programToolChangeCanStop,
   cancelMaterialFitTrace,
@@ -67,7 +72,14 @@ import {
   ESTOP_BLOCKS_MOTION,
   estopNeedsReset,
   getMachineController,
+  captureSetupLoadPreparation,
+  invalidateSetupLoadPreparation,
   loadGcodeFile,
+  setupLoadStagedText,
+  prepareSetupTransferAdoption,
+  freezeSetupSimulator,
+  setupLoadSimulatorInput,
+  loadedFileRefusedAtLoad,
   loadedProgramRunsThroughOffsetChanges,
   loadedProgramText,
   loadSetupToolpathProgram,
@@ -77,12 +89,16 @@ import {
   pausedProgramReadout,
   prepareMaterialFitTrace,
   referenceToolMeasuredIn,
+  refusedFileView,
   runFromReview,
   subscribeArmEpoch,
+  subscribeWorkRotations,
+  workRotations,
   subscribeEstopNeedsReset,
   subscribeOperatorStop,
   subscribeRunFromReview,
   stagedProgramContext,
+  stagedGeometryProgramPath,
   restageLoadedProgram,
   standaloneMdiJob,
   textProgramHoldLine,
@@ -114,7 +130,7 @@ import {
 } from '../../lib/machine/programLibrary'
 import { setupEnabledCutTimeMs } from '../../lib/cam/operationSuppression'
 import { machineCutTimeMotion } from '../../lib/simulation/machineCutTimeMotion'
-import { stagedProgramRunEstimate, textProgramRunEstimate } from '../../lib/machine/programRunEstimate'
+import { programRunEstimateFromPrepared, stagedProgramRunEstimate, textProgramRunEstimate } from '../../lib/machine/programRunEstimate'
 import { lintGcode, type LintFinding } from '../../lib/gcode'
 import {
   GRBL_CONFIG,
@@ -163,6 +179,7 @@ function operationItemStatus(status: OperationProgressStatus, state: OperationPr
   return status
 }
 import { ProgramPreview } from './ProgramPreview'
+import { textProgramInsight, stagedProgramInsight } from '../../lib/gcode/programInsight'
 import { useSelectAllOnClick } from '../ui/selectAllOnClick'
 import {
   centeredScrollTop,
@@ -181,8 +198,8 @@ import {
   type ProgramListingLine,
 } from './ProgramListing'
 import { RunClock, runClockSnapshot } from './RunClock'
-import { deriveOperatorProgramPercent } from '../../lib/machine/operatorTransport'
-import { buildProgramPath } from '../../lib/machine/programPath'
+import { currentOperatorTransport, cycleStartArmingFromLine1, deriveOperatorProgramPercent } from '../../lib/machine/operatorTransport'
+import { buildProgramPath, placeMachineFrameFromReported, type PlaceMachineFrame } from '../../lib/machine/programPath'
 import { arcSweep } from '../../lib/program/buildMachineProgram'
 import type { ProgramStep } from '../../lib/machine/controller'
 
@@ -205,8 +222,10 @@ function pointDistance(
 }
 
 /** Distance in the same sampled 3D path ProgramPreview draws. */
-function textProgramDistance(programText: string): ProgramDistanceSeries {
-  const path = buildProgramPath(programText)
+function textProgramDistance(programText: string, placeMachineFrame: PlaceMachineFrame): ProgramDistanceSeries {
+  const prepared = preparedSourceProgram(programText)
+  if (prepared && !prepared.preview.moves.some(move => move.coordinateFrame === 'machine' && move.kind === 'feed')) return prepared.distance
+  const path = buildProgramPath(programText, placeMachineFrame)
   const cursors: number[] = []
   const cumulative: number[] = []
   let total = 0
@@ -418,6 +437,9 @@ export function ProgramPanel() {
   const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const machineState = useMachineControl((s) => s.machineState)
   const job = useMachineControl((s) => s.job)
+  // WO-3127: ordinary requested Disconnect keeps its failed lifecycle but
+  // reports in the console. Use the current fault's presentation fact so
+  // clearing history cannot resurrect it or an old info row hide a new fault.
   // WO-1663: after the operator's own Stop the progress stays where they
   // stopped it until CYCLE START runs the program again - not a reset count.
   const operatorStop = useSyncExternalStore(subscribeOperatorStop, operatorStopState, () => null)
@@ -498,10 +520,29 @@ export function ProgramPanel() {
   // short form and keeps the sentence on hover - never a second copy of it.
   // The operator, 10-16: "Redundancy of what's in the terminal and at the top of the screen".
   const [sessionLoadRefusal, setSessionLoadRefusal] = useState<string | null>(null)
-  const mirrorSessionLoadRefusal = (reason: string | null) => {
+  // WO-3087: the file a Load refused for a reason outside it (the session kept
+  // it as the loaded file), when that is what the refusal was.
+  const [sessionRefusedFile, setSessionRefusedFile] = useState<string | null>(null)
+  const mirrorSessionLoadRefusal = (reason: string | null, file: string | null = null) => {
     setSessionLoadRefusal(reason)
+    setSessionRefusedFile(reason !== null && file !== null && loadedFileRefusedAtLoad() ? file : null)
     setLoadErrorState(reason)
   }
+  // WO-3087 (k72, desk kit 10-22): the file a Load refused for a reason
+  // outside it (a tool length, an offset) is read again as the machine
+  // changes, and once that reading passes the status says Ready. The short
+  // line beside Load is about that same file, so it goes with the refusal -
+  // read from the one verdict the status line reads. The console keeps the row.
+  // Audit 10-23: CYCLE START arming that Ready file, and the run it starts (the
+  // session retires its refused-file record when the file stages), are that
+  // same file accepted - the line does not come back for it.
+  // Review 10-23: only that refusal goes - a From line error said after it
+  // still shows.
+  const sessionRefusalLifted = loadError !== null && loadError === sessionLoadRefusal && (
+    loadedFileRefusedAtLoad()
+      ? currentOperatorTransport().action === 'arm-start' || cycleStartArmingFromLine1()
+      : sessionRefusedFile !== null && job.name === sessionRefusedFile && job.phase !== 'empty')
+  const shownLoadError = sessionRefusalLifted ? null : loadError
   const [meta, setMeta] = useState<LoadedMeta | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [recent, setRecent] = useState<RecentProgramMeta[]>([])
@@ -518,6 +559,7 @@ export function ProgramPanel() {
   const armedFromLine = useMachineControl((s) => s.armedFromLine)
   const stagedNumbering = useMachineControl((s) => s.stagedNumbering)
   const offsets = useMachineControl((s) => s.offsets)
+  const activeWcs = useMachineControl((s) => s.activeWcs)
   const operationListExpanded = useMachineControl((s) => s.operationListExpanded)
   const programPreviewPercent = useProgramPreviewPercent()
 
@@ -574,6 +616,12 @@ export function ProgramPanel() {
   // follows the controller.
   const listingShowsStaged = stagedListingText !== null
   const jobName = job.name
+  // WO-3186: a file his Load refused for a reason outside it (a line below the
+  // Z travel at this G54) is still listed - its own lines, none a step the
+  // controller holds, so no row offers Run from here - with the refusing line
+  // marked. The refusal itself is unchanged and so is what CYCLE START reads.
+  const refusedFile = programText === null && stagedProgram === null ? refusedFileView() : null
+  const waitingText = programAwaitingOffsetsText()
   const lines = useMemo<ProgramListingLine[]>(() => {
     if (stagedListingText !== null) {
       return stagedListingText.split(/\r?\n/).map((text, index) => ({ text, moveId: null, lineNumber: index + 1 }))
@@ -581,7 +629,11 @@ export function ProgramPanel() {
     if (programText) {
       return programText.split(/\r?\n/).map((text, index) => ({ text, moveId: index + 1, lineNumber: index + 1 }))
     }
-    if (!stagedProgram) return []
+    if (refusedFile !== null) {
+      return refusedFile.text.split(/\r?\n/).map((text, index) => ({ text, moveId: null, lineNumber: index + 1 }))
+    }
+    if (!stagedProgram) return waitingText === null ? []
+      : waitingText.split(/\r?\n/).map((text, index) => ({ text, moveId: null, lineNumber: index + 1 }))
     // WO-2580: a step that is no line of the file has no row.
     const staged = stagedProgramListing(stagedProgram).filter((line) => line.moveId === null || isListedStep(stagedProgram, line.moveId))
     // WO-2680: an opened file lists every line of the file (a posted program
@@ -590,15 +642,20 @@ export function ProgramPanel() {
       && stagedProgram.sourceLines !== undefined
       ? loadedProgramText() : null
     return plainFileText === null ? staged : fileLinesListing(staged, plainFileText.split(/\r?\n/))
-  }, [programText, stagedProgram, stagedListingText, jobName, t])
+  }, [programText, stagedProgram, stagedListingText, refusedFile, waitingText, jobName, t])
   // Full-file modal context is computed only when the listing changes, never
   // on cursor/follow updates. Comment spans are made only for visible rows.
   const listingKinds = useMemo(() => {
+    const prepared = !listingShowsStaged ? preparedSourceProgram(programText) : null
+    if (prepared?.listingKinds?.length === lines.length) return prepared.listingKinds
     const rawFile = jobName !== null && !jobName.endsWith(' (posted)') && !jobName.endsWith(' (toolpath)')
       && stagedProgram?.sourceLines !== undefined && loadedProgramText() !== null
-    return programListingKinds(lines, listingShowsStaged || programText !== null || rawFile
+    return programListingKinds(lines, listingShowsStaged || programText !== null || rawFile || refusedFile !== null
       ? [] : stagedProgram?.program.steps)
-  }, [lines, stagedProgram, listingShowsStaged, programText, jobName])
+  }, [lines, stagedProgram, listingShowsStaged, programText, jobName, refusedFile])
+  // WO-3186: the line the refusal names, the way the editor marks a load's refusal.
+  const refusedMark = refusedFile?.refusal ? markFromRefusal(refusedFile.refusal) : null
+  const refusedRow = refusedMark === null ? -1 : lines.findIndex((line) => line.lineNumber === refusedMark.line)
   const stagedRows = useMemo(() => {
     if (stagedListingText === null || programText === null) return null
     const rows = new Set<number>()
@@ -612,7 +669,7 @@ export function ProgramPanel() {
   const runFromText = programText ?? (stagedProgram ? loadedProgramText() : null)
   const runFromLines = useMemo(() => runFromText?.split(/\r?\n/) ?? [], [runFromText])
   const hasProgram = programText !== null || stagedProgram !== null
-  // WO-2560: a kept file awaiting offsets has a name but no listing yet.
+  // WO-2560: a kept file awaiting offsets has a name but no executable listing.
   // Hide these readouts only while the session's standalone typed line owns
   // the job; absence of text/listing does not identify an MDI line.
   const showProgramReadouts = !standaloneMdiJob()
@@ -622,7 +679,7 @@ export function ProgramPanel() {
   // A loaded program may be several megabytes. Hash it only when the text
   // changes; project edits still recompute the manufacturing-intent side.
   const loadedMotionDigest = useMemo(
-    () => computeMotionDigest(programText ?? ''),
+    () => preparedSourceProgram(programText)?.motionDigest ?? computeMotionDigest(programText ?? ''),
     [programText],
   )
   // WO-396: the comparison re-runs only when something the digest READS moved.
@@ -660,7 +717,8 @@ export function ProgramPanel() {
   const contextComparison = useMemo<ProgramContextComparison | 'comparison-failed'>(() => {
     if (!postConfigForProject) return programContext ? 'comparison-failed' : 'no-context'
     try {
-      return compareProgramContext(programContext, intentProject, programText, postConfigForProject, loadedMotionDigest)
+      return preparedSetupLoadComparison(programContext, intentProject, programText, postConfigForProject)?.comparison
+        ?? compareProgramContext(programContext, intentProject, programText, postConfigForProject, loadedMotionDigest)
     } catch (err) {
       console.error(controlText('ProgramPanel.text009'), err)
       return 'comparison-failed'
@@ -756,14 +814,18 @@ export function ProgramPanel() {
   const ownMoveEstimate = useMemo(() => {
     try {
       if (programText !== null) {
-        const dialect = machine.controller === 'uccnc' || machine.controller === 'linuxcnc'
+        const dialect: 'uccnc' | 'linuxcnc' | 'grbl' | 'generic' = machine.controller === 'uccnc' || machine.controller === 'linuxcnc'
           ? machine.controller : machine.controller === 'grbl' ? 'grbl' : 'generic'
         const workOffsets = Object.fromEntries(Object.entries(offsets).map(([wcs, v]) =>
           [wcs, { x: v[0] ?? 0, y: v[1] ?? 0, z: v[2] ?? 0 }]))
-        return textProgramRunEstimate(programText, machine, {
-          dialect, sessionWcs: 'G54', initialPosition: { x: 0, y: 0, z: 0 },
-          machineDefinition: machine, machineUnits: 'mm', workOffsets, macroMCodes: 'report',
-        })
+        const reader = {
+          dialect, sessionWcs: 'G54' as const, initialPosition: { x: 0, y: 0, z: 0 },
+          machineDefinition: machine, machineUnits: 'mm' as const, workOffsets, macroMCodes: 'report' as const,
+        }
+        const prepared = preparedSourceProgram(programText)
+        return prepared?.timingIdentity === setupLoadTimingIdentity(machine, reader)
+          ? programRunEstimateFromPrepared(prepared.timing)
+          : textProgramRunEstimate(programText, machine, reader)
       }
       return stagedProgram ? stagedProgramRunEstimate(stagedProgram.program.steps, machine) : null
     } catch {
@@ -771,6 +833,11 @@ export function ProgramPanel() {
       return null
     }
   }, [programText, stagedProgram, machine, offsets])
+  // Same source identity as preview; never re-parse on cursor/clock renders.
+  const insightText = programText ?? (stagedProgram?.sourceLines ? loadedProgramText() : null)
+  const insight = useMemo(() => insightText !== null ? preparedSourceProgram(insightText)?.insight ?? textProgramInsight(insightText)
+    : stagedProgram ? stagedProgramInsight(stagedProgram.program.steps, stagedGeometryProgramPath()?.workBounds ?? null) : null,
+  [insightText, stagedProgram])
   const resumedEstimate = stagedNumbering !== null || (armedFromLine !== null && armedFromLine > 1)
   const lastTextCursor = useRef(1)
   useEffect(() => { lastTextCursor.current = armedFromLine ?? 1 }, [programText, armedFromLine])
@@ -894,6 +961,16 @@ export function ProgramPanel() {
     [runFromPlan, contextComparison, programContext, programText],
   )
 
+  const inputRequestEpoch = useRef(0)
+  const preparingSetup = useRef<AbortController | null>(null)
+  const cancelSetupPreparation = () => {
+    inputRequestEpoch.current++
+    preparingSetup.current?.abort()
+    preparingSetup.current = null
+    invalidateSetupLoadPreparation()
+  }
+  useEffect(() => () => { preparingSetup.current?.abort(); invalidateSetupLoadPreparation() }, [])
+
   const applyProgram = (
     name: string,
     text: string,
@@ -902,7 +979,9 @@ export function ProgramPanel() {
     runThroughOffsetChanges = false,
     // WO-2833: the editor's Apply of the loaded program is not a new Load - a refused edit keeps it.
     editsLoadedProgram = false,
+    preparedTransfer?: PreparedTransferLoad,
   ): { door: 'text' | 'program'; ok: boolean; reason: string | null } => {
+    cancelSetupPreparation()
     // WO-1335: THE FILE DOOR IS CHOSEN BY THE CONTROLLER, in the same place and
     // for the same reason `loadFromSetup` chooses the setup door.
     //
@@ -921,14 +1000,14 @@ export function ProgramPanel() {
     // WO-1977: the session picks the door - including the interpreter for a
     // file this controller's own text reader refuses but its program route
     // can run (a Fusion file on "Simulate LienCNC").
-    const outcome = loadGcodeFile(name, text, context, { runThroughOffsetChanges, editsLoadedProgram })
+    const outcome = loadGcodeFile(name, text, context, { runThroughOffsetChanges, editsLoadedProgram, preparedTransfer })
     if (outcome.door === 'program') {
       setMeta(null)
       setRunFromPlan(null)
       setRunFromError(null)
       // The session owns the refusal's one console row. This local state only
       // mirrors it beside Load; pushing it again would print the same refusal.
-      mirrorSessionLoadRefusal(outcome.ok ? null : outcome.reason)
+      mirrorSessionLoadRefusal(outcome.ok ? null : outcome.reason, name)
       if (save && outcome.ok) void saveProgram(name, text).then(refreshRecent)
       return { door: 'program', ok: outcome.ok, reason: outcome.reason }
     }
@@ -936,9 +1015,10 @@ export function ProgramPanel() {
     // WO-2464: comments are read the way the ACTIVE controller reads them (a LinuxCNC post's ';' is valid
     // RS274NGC); an undeclared controller keeps the GRBL reading.
     const activeDialect = resolveDeclaredController(machine)
-    const lint = lintGcode(text, {
-      commentStyle: (activeDialect.ok ? activeDialect.dialect : GRBL_CONFIG).capabilities.comment,
-    })
+    const commentStyle = (activeDialect.ok ? activeDialect.dialect : GRBL_CONFIG).capabilities.comment
+    const lint = preparedTransfer?.sourceText === text && preparedTransfer.commentStyle === commentStyle
+      && preparedTransfer.parserIdentity === setupLoadParserIdentity()
+      ? preparedTransfer.lint : lintGcode(text, { commentStyle })
     setMeta({ load, lint })
     setLoadError(null)
     setRunFromPlan(null)
@@ -1033,9 +1113,13 @@ export function ProgramPanel() {
   }
 
   const loadFromRecent = (id: string) => {
+    cancelSetupPreparation()
+    const epoch = inputRequestEpoch.current
+    const sessionCurrent = captureSetupLoadPreparation()
     const entry = recent.find((r) => r.id === id)
     if (!entry) return
     void readProgram(id).then((text) => {
+      if (epoch !== inputRequestEpoch.current || !sessionCurrent()) return
       if (text !== null) applyProgram(entry.name, text, false, decodeProgramContext(text))
       else setLoadError(controlText('ProgramPanel.text014'))
     })
@@ -1068,6 +1152,14 @@ export function ProgramPanel() {
   }
 
   const loadFromSetup = async (setupId: string) => {
+    cancelSetupPreparation()
+    const preparation = new AbortController()
+    preparingSetup.current = preparation
+    const finishActivity = beginSetupLoadActivity(preparation.signal)
+    let stopWatchingInputs = () => {}
+    try {
+    const sessionCurrent = captureSetupLoadPreparation()
+    const requestCurrent = () => !preparation.signal.aborted && preparingSetup.current === preparation && sessionCurrent()
     dropStagedEditForLoad(useCamStore.getState().project.setups.find((x) => x.id === setupId)?.name ?? setupId)
     const st = useCamStore.getState()
     const setup = st.project.setups.find((s) => s.id === setupId)
@@ -1099,29 +1191,120 @@ export function ProgramPanel() {
       mirrorSessionLoadRefusal(loaded.ok ? null : loaded.reason)
       return
     }
-    // WO-1653: THE MOMENT CODE LEAVES THE APP. Every enabled operation in this
-    // setup goes (Control has no per-operation selection), so nothing is
-    // excluded on this call's own account - a genuinely outdated operation
-    // (a real edit or a real disable already in the project) is recomputed
-    // here instead of the post below refusing it.
-    await useCamStore.getState().stageOperationsForEmission(setupId, undefined)
-    // The exact project view the post resolves tools/stocks from - read AFTER
-    // staging, so a just-recomputed operation is seen fresh.
-    const freshState = useCamStore.getState()
-    const projectForPost = { ...freshState.project, toolLibrary: freshState.toolLibrary }
-    const resolution = resolveDeclaredController(projectForPost.machine)
-    if (!resolution.ok) {
-      setLoadError(resolution.reason)
+    // WO-3125: post once in the worker before staging. The store consumes
+    // its canonical currentness only while the detached raw/ABA witness holds.
+    // Recomputed operations retire that snapshot and receive a fresh post.
+    const capturePreparation = () => {
+      const freshState = useCamStore.getState()
+      const projectForPost = { ...freshState.project, toolLibrary: freshState.toolLibrary }
+      const resolution = resolveDeclaredController(projectForPost.machine)
+      if (!resolution.ok) {
+        throw new Error(resolution.reason)
+      }
+      const target = controlMachine(freshState)
+      const workOffsets = Object.fromEntries(Object.entries(useMachineControl.getState().offsets).map(([wcs, v]) =>
+        [wcs, { x: v[0] ?? 0, y: v[1] ?? 0, z: v[2] ?? 0 }]))
+      const dialect = target.controller === 'uccnc' || target.controller === 'linuxcnc'
+        ? target.controller : target.controller === 'grbl' ? 'grbl' : 'generic'
+      const parserIdentity = setupLoadParserIdentity()
+      const postIdentity = JSON.stringify(resolution.dialect)
+      const generation = freshState.control.sessionGeneration
+      const captureInputs = (state: ReturnType<typeof useCamStore.getState>) => {
+        const currentPost = resolveDeclaredController(state.project.machine)
+        return {
+          project: state.project,
+          toolLibrary: state.toolLibrary,
+          setupId,
+          machine: controlMachine(state),
+          post: currentPost.ok ? currentPost.dialect : resolution.dialect,
+          modelRefsVerifiedSinceLoad: state.modelRefsVerifiedSinceLoad,
+          parserIdentity: setupLoadParserIdentity(),
+        }
+      }
+      const inputWitness = observeSetupLoadInputs(captureInputs(freshState))
+      // Observe raw store writes as well as immutable reference replacements,
+      // but invalidate only a value this request actually reads.  The witness is
+      // sticky so an observed edit-away/edit-back cannot launder an old worker
+      // result into adoption.
+      const inputsChanged = (recheck = false) => inputWitness.changed(captureInputs(useCamStore.getState()), recheck)
+      stopWatchingInputs()
+      stopWatchingInputs = useCamStore.subscribe(() => { inputsChanged() })
+      return { freshState, projectForPost, resolution, target, parserIdentity, postIdentity, generation, inputsChanged,
+        message: { request: {
+          project: projectForPost, setupId, post: resolution.dialect,
+          modelRefsVerifiedSinceLoad: freshState.modelRefsVerifiedSinceLoad, machine: target,
+          reader: { dialect, sessionWcs: 'G54', initialPosition: { x: 0, y: 0, z: 0 },
+            machineDefinition: target, machineUnits: 'mm', workOffsets, macroMCodes: 'report' },
+          tables: setupLoadParserTables(),
+        }, messages: { ...sourceMessages, ...i18n.getResourceBundle(i18n.language, 'console-and-operator-messages') } } satisfies SetupLoadMessage }
+    }
+    let snapshot: ReturnType<typeof capturePreparation> | undefined
+    let prepared: Awaited<ReturnType<typeof prepareSetupLoadOffThread>>
+    let preparedBeforeStaging: typeof prepared | undefined
+    let preparedTransfer: PreparedTransferLoad | undefined
+    try {
+      const staging = await useCamStore.getState().stageOperationsForEmission(setupId, undefined, async () => {
+        await yieldSetupLoadTask()
+        if (!requestCurrent()) throw new DOMException('Aborted', 'AbortError')
+        snapshot = capturePreparation()
+        preparedBeforeStaging = await prepareSetupLoadOffThread(snapshot.message, preparation.signal)
+        if (!requestCurrent() || snapshot.inputsChanged()) throw new DOMException('Aborted', 'AbortError')
+        return new Map(preparedBeforeStaging.freshness)
+      })
+      if (!requestCurrent()) return
+      // Staging and the request's one detached raw/ABA witness are both required,
+      // but they do not need to monopolize the same renderer task.
+      await yieldSetupLoadTask()
+      if (!requestCurrent()) return
+      // The exact project view the post resolves tools/stocks from - read AFTER
+      // recomputation, or reuse the fenced worker snapshot when no input changed.
+      if (!snapshot || staging.recomputed.length || snapshot.inputsChanged()) {
+        snapshot = capturePreparation()
+        preparedBeforeStaging = undefined
+      }
+      prepared = preparedBeforeStaging ?? await prepareSetupLoadOffThread(snapshot.message, preparation.signal)
+      const { target, parserIdentity, inputsChanged } = snapshot
+      await yieldSetupLoadTask()
+      if (!requestCurrent() || inputsChanged() || parserIdentity !== setupLoadParserIdentity()) return
+      if (prepared.posted.ok && prepared.posted.combined) {
+        const sourceText = prepared.posted.combined.gcode
+        const activeDialect = resolveDeclaredController(target)
+        preparedTransfer = await prepareTransferLoadOffThread({ sourceText,
+          stagedText: setupLoadStagedText(sourceText), simulator: setupLoadSimulatorInput(), tables: setupLoadParserTables(),
+          commentStyle: (activeDialect.ok ? activeDialect.dialect : GRBL_CONFIG).capabilities.comment,
+        }, preparation.signal, { ...sourceMessages, ...i18n.getResourceBundle(i18n.language, 'console-and-operator-messages') }, prepared)
+        prepared = preparedTransfer.sourceResult ?? prepared
+        await yieldSetupLoadTask()
+        if (!requestCurrent() || inputsChanged() || parserIdentity !== setupLoadParserIdentity()) return
+        freezeSetupSimulator(preparedTransfer)
+        await yieldSetupLoadTask()
+        if (!requestCurrent() || inputsChanged() || parserIdentity !== setupLoadParserIdentity()) return
+        await prepareSetupTransferAdoption(preparedTransfer, preparation.signal)
+        await yieldSetupLoadTask()
+        await prepareProgramContextAdoption(sourceText, preparation.signal)
+        await yieldSetupLoadTask()
+      }
+      // WO-3292: the full raw/ABA scan of the read-set takes its own task. The
+      // store subscription (a full scan per publication) stays live until the
+      // commit task below, which rechecks the same intent references.
+      if (!requestCurrent() || (snapshot && snapshot.inputsChanged())) return
+      await yieldSetupLoadTask()
+    } catch (error) {
+      if (!requestCurrent() || (error instanceof DOMException && error.name === 'AbortError')) return
+      // A failed preparation has adopted nothing and leaves the current file.
+      setLoadError(error instanceof Error ? error.message : String(error))
       return
     }
-    const freshSetup = projectForPost.setups.find((s) => s.id === setupId) ?? setup
-    const result = postProject(projectForPost, [freshSetup], resolution.dialect, {
-      mode: 'combined',
-      pauseBetweenSetups: false,
-      baseName: 'control',
-      ext: 'nc',
-      modelRefsVerifiedSinceLoad: freshState.modelRefsVerifiedSinceLoad,
-    })
+    // The commit's own store writes (its tool-table fill) are not inputs.
+    stopWatchingInputs()
+    if (!snapshot) return
+    const { projectForPost, resolution, parserIdentity, postIdentity, generation, inputsChanged } = snapshot
+    const now = useCamStore.getState()
+    const currentPost = resolveDeclaredController(now.project.machine)
+    if (!requestCurrent() || inputsChanged(true) || now.control.sessionGeneration !== generation
+      || parserIdentity !== setupLoadParserIdentity() || !currentPost.ok
+      || postIdentity !== JSON.stringify(currentPost.dialect)) return
+    const result = prepared.posted
     if (!result.ok || !result.combined) {
       const firstErrors = result.diagnostics
         .filter((d) => d.level === 'error')
@@ -1138,17 +1321,17 @@ export function ProgramPanel() {
       setLoadError(controlText('ProgramPanel.text019'))
       return
     }
-    const context = buildProgramContext(
-      projectForPost,
-      freshSetup,
-      // The SAME config the G-code above was posted with. Building the context
-      // against a different dialect than the program it describes is how a
-      // context stops matching its own program.
-      resolution.dialect,
-      result.combined.gcode,
-      result.combined.operationSpans,
-    )
-    applyProgram(controlText('ProgramPanel.text020', { value1: String(setup.name) }), result.combined.gcode, true, context)
+    if (!prepared.context || !prepared.analysis) throw new Error('Setup preparation omitted its source facts.')
+    publishSetupLoadAnalysis(prepared.analysis)
+    const { gcode } = result.combined
+    adoptSetupLoad(() => applyProgram(controlText('ProgramPanel.text020', { value1: String(setup.name) }), gcode, true, prepared.context, false, false, preparedTransfer))
+    const adoptedContext = useMachineControl.getState().programContext
+    // Binding uses the captured intent revision; tool-table persistence changes
+    // only the four non-posted machine fields (checked by the consumer).
+    if (adoptedContext && useMachineControl.getState().programText === result.combined.gcode) {
+      bindSetupLoadComparison(prepared, adoptedContext, projectForPost, resolution.dialect)
+    }
+    } finally { stopWatchingInputs(); preparation.abort(); finishActivity() }
   }
 
   // WO-1323: EVERY SETUP, IN PROJECT ORDER, AS ONE PROGRAM.
@@ -1175,6 +1358,7 @@ export function ProgramPanel() {
   // tool-change SEQUENCE the operator works inside, and the box does not decide
   // it - the load line says so in as many words.
   const loadFromAllSetups = async () => {
+    cancelSetupPreparation()
     const ids = useCamStore.getState().project.setups.map((s) => s.id)
     dropStagedEditForLoad(useCamStore.getState().project.setups.map((x) => x.name).join(', '))
     const loaded = await loadSetupsToolpathProgram(ids, { runThrough: continueThroughSetups })
@@ -1193,8 +1377,12 @@ export function ProgramPanel() {
   // would; on any refusal the file loads as an ordinary no-context program with
   // one advisory warning - the chip then reads 'No setup information'.
   const loadFromFile = (file: File) => {
+    cancelSetupPreparation()
+    const epoch = inputRequestEpoch.current
+    const sessionCurrent = captureSetupLoadPreparation()
     dropStagedEditForLoad(file.name)
     void file.text().then((text) => {
+      if (epoch !== inputRequestEpoch.current || !sessionCurrent()) return
       applyProgram(file.name, text, true, decodeProgramContext(text))
     })
   }
@@ -1736,7 +1924,9 @@ export function ProgramPanel() {
   const windowStart =
     streaming || job.phase === 'complete' || paused !== null
       ? Math.max(0, cursorLine - Math.floor(FOLLOW_WINDOW / 4))
-      : 0
+      : refusedRow >= 0
+        ? Math.max(0, refusedRow - Math.floor(FOLLOW_WINDOW / 4))
+        : 0
   const visible = lines.slice(windowStart, windowStart + FOLLOW_WINDOW)
 
   // WO-037/WO-040: while the machine is RUNNING (phase 'streaming' only -
@@ -1773,15 +1963,37 @@ export function ProgramPanel() {
     el.scrollTop = top
   }, [running, cursor])
 
+  // WO-3186: a refused file's listing opens at the line its refusal names.
+  const refusedLine = refusedRow >= 0 ? refusedMark?.line ?? null : null
+  useEffect(() => {
+    const el = listRef.current
+    const row = refusedLine === null ? null : el?.querySelector<HTMLElement>('[data-refused="true"]')
+    if (!el || !row) return
+    const rowRect = row.getBoundingClientRect()
+    const rowTop = rowRect.top - el.getBoundingClientRect().top - el.clientTop + el.scrollTop
+    el.scrollTop = centeredScrollTop(rowTop, rowRect.height, el.clientHeight, el.scrollHeight)
+  }, [refusedFile, refusedLine])
+
   const progressPhase = paused !== null || (job.phase === 'streaming' && machineState === 'hold') ? 'paused' : job.phase
   const progressElapsedMs = useProgramProgressElapsedMs(progressPhase, job.startedAt, job.pausedAt)
+  // WO-3263: the distance runs over the same path the preview draws, G53 feed
+  // moves included, placed by the same reported offsets and rotations.
+  const rotations = useSyncExternalStore(subscribeWorkRotations, workRotations, workRotations)
+  const machinePlacementKey = programText !== null && /G\s*0*53(?![\d.])/i.test(programText)
+    ? JSON.stringify([activeWcs, offsets, rotations])
+    : ''
+  const placeMachineFrame = useMemo(
+    () => placeMachineFrameFromReported(offsets, activeWcs, rotations),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on what the placement reads, only for a program that has G53
+    [machinePlacementKey],
+  )
   const programDistance = useMemo(
     () => programText
-      ? textProgramDistance(programText)
+      ? textProgramDistance(programText, placeMachineFrame)
       : stagedProgram
         ? stagedProgramDistance(stagedProgram)
         : { mode: 'move-count', cursors: [], cumulative: [], total: 0 } satisfies ProgramDistanceSeries,
-    [programText, stagedProgram],
+    [programText, stagedProgram, placeMachineFrame],
   )
   const shownDistance = completedProgramDistance(
     programDistance,
@@ -1883,7 +2095,7 @@ export function ProgramPanel() {
               ProgramPreview.tsx (.control-intended-stock-popover). */}
           <div className="control-load-menu-anchor" ref={loadMenuRef}>
             <button
-              className={`modal-btn modal-btn-ghost control-load-menu-btn ${loadMenuOpen ? 'control-chip-active' : ''}`}
+              className={`modal-btn modal-btn-primary control-load-menu-btn ${loadMenuOpen ? 'control-chip-active' : ''}`}
               data-testid="control-load-menu"
               aria-haspopup="menu"
               aria-expanded={loadMenuOpen}
@@ -2011,7 +2223,7 @@ export function ProgramPanel() {
             )}
           </div>
           {/* The active setup's notes: a button + floating panel, nothing moves (replaces the WO-2992 strip). */}
-          <SetupNotesButton />
+          <SetupNotesButton insight={insight} estimatedMs={programEstimateMs ?? ownMoveEstimate?.totalMs ?? null} units={units} />
           {showProgramReadouts && job.name && !mergeSetupChip && !openedFileListing && (
             <span
               className="control-program-name"
@@ -2132,15 +2344,15 @@ export function ProgramPanel() {
         </div>
         {/* WO-1182: the transfer check's refusals, warnings and notes live in
             the console only (COHESION-STANDARD s13); nothing is repeated here. */}
-        {(loadError ?? runFromError) && (
+        {(shownLoadError ?? runFromError) && (
           <div
             className="control-connect-error control-load-error-line"
             data-testid="control-load-error"
-            title={loadError ?? runFromError ?? undefined}
+            title={shownLoadError ?? runFromError ?? undefined}
           >
-            {loadError !== null && loadError === sessionLoadRefusal
+            {shownLoadError !== null && shownLoadError === sessionLoadRefusal
               ? controlText('ProgramPanel.loadRefusedShort')
-              : loadError ?? runFromError}
+              : shownLoadError ?? runFromError}
           </div>
         )}
 
@@ -2336,7 +2548,7 @@ export function ProgramPanel() {
               </div>
             )}
 
-            {job.error && (
+            {job.error && !job.error.consoleOnly && (
               <div
                 className="control-overlay-card control-overlay-top control-connect-error"
                 data-testid="control-job-error"
@@ -2471,7 +2683,7 @@ export function ProgramPanel() {
               )
             }}
           >
-            {!hasProgram ? (
+            {!hasProgram && refusedFile === null && waitingText === null ? (
               <div className="panel-empty">{controlText('ProgramPanel.text111')}</div>
             ) : lines.length === 0 ? (
               <div className="panel-empty">{controlText('ProgramPanel.text112')}</div>
@@ -2506,6 +2718,7 @@ export function ProgramPanel() {
                 // staged from toolpaths lists steps, not text lines).
                 const editLine = listingHasText ? sourceLine ?? lineNo : null
                 const staged = lineNo !== null && stagedRows?.has(lineNo)
+                const refused = refusedMark !== null && lineNo === refusedMark.line
                 return (
                   <Fragment key={windowStart + i}>
                   <div
@@ -2521,6 +2734,8 @@ export function ProgramPanel() {
                     onDoubleClick={() => openEditor(editLine)}
                     data-testid={lineNo !== null ? `control-gcode-line-${lineNo}` : undefined}
                     data-staged={staged ? 'true' : undefined}
+                    data-refused={refused ? 'true' : undefined}
+                    data-tooltip={refused ? refusedMark.message : undefined}
                     data-listing-kind={listingKinds[windowStart + i]}
                     onMouseEnter={() => setHoverLine(lineNo)}
                     onMouseLeave={() => setHoverLine((h) => (h === lineNo ? null : h))}
@@ -2533,8 +2748,8 @@ export function ProgramPanel() {
                       setLineMenu({ x: e.clientX, y: e.clientY, line: lineNo ?? editLine ?? 1, sourceLine, pickable })
                     }}
                   >
-                    <span className="gcode-lineno">{lineNo}</span>
-                    <span className="gcode-linetext">{listingKinds[windowStart + i] === 'header' ? line.text
+                    <span className={`gcode-lineno${refused ? ' gce-lineno-mark' : ''}`}>{lineNo}</span>
+                    <span className="gcode-linetext" style={refused ? { color: 'var(--text-danger)' } : undefined}>{listingKinds[windowStart + i] === 'header' ? line.text
                       : listingCommentParts(line.text).map((part, index) => part.comment
                         ? <span key={index} className="gcode-comment">{part.text}</span>
                         : <Fragment key={index}>{part.text}</Fragment>)}</span>

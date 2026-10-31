@@ -6,7 +6,7 @@ import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { deriveMachineChip, type MachineChipFacts } from '../../lib/machine/machineChip'
 import type { MachineController } from '../../lib/machine/controller'
-import { getMachineController } from '../../lib/machine/machineSession'
+import { connectMachine, disconnectMachine, estopNeedsReset, getMachineController, pressEstop } from '../../lib/machine/machineSession'
 import { TopToolbar } from '../../components/toolbar/TopToolbar'
 import { useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
@@ -91,13 +91,34 @@ describe('WO-1153 machine header chip derivation', () => {
   })
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
   cleanup()
+  vi.useFakeTimers()
+  const pending = disconnectMachine()
+  await vi.advanceTimersByTimeAsync(100)
+  await pending
+  vi.useRealTimers()
 })
 
+/** WO-3190 (CT-2): connecting arms the software stop and the header chip reads
+ * that latch as E-STOP. Clear it the operator's way - CLEAR (pressEstop) on the
+ * connected simulator - before the test sets its own store facts. */
+async function connectAndClear(): Promise<void> {
+  vi.useFakeTimers()
+  const connecting = connectMachine('simulator')
+  await vi.advanceTimersByTimeAsync(1000)
+  await connecting
+  const cleared = pressEstop()
+  await vi.advanceTimersByTimeAsync(1500)
+  expect(await cleared).toMatchObject({ ok: true })
+  expect(estopNeedsReset()).toBe(false)
+  vi.useRealTimers()
+}
+
 describe('WO-1153 shared header wiring', () => {
-  it('repaints from homing changes while the shared resolver remains authoritative', () => {
+  it('repaints from homing changes while the shared resolver remains authoritative', async () => {
+    await connectAndClear()
     const controller = getMachineController() as MachineController & Required<
       Pick<MachineController, 'homedAxesThisSession'>
     >

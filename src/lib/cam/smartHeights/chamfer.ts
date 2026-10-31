@@ -31,6 +31,10 @@ export interface ChamferSmartHeightIntentInput extends ChamferSmartHeightDraft {
   setupId: string
   safetyIntent: Pick<HeightIntentV1, 'clearance' | 'retract' | 'feed'>
   features: ChamferSelectedFeatureEvidence[]
+  /** WO-3188: 'policy' when the operator never chose a datum, so the runtime
+   * may place a heightless 2D outline's chamfer at the material top. Any
+   * chosen reference or offset is 'user' (the default) and means what it says. */
+  datumOwner?: 'policy' | 'user'
 }
 
 export interface ChamferRemainingMaterialEvidence {
@@ -194,10 +198,12 @@ export function rebuildChamferSmartHeightFormulaIntent(input: {
   if (end.kind !== 'geometry_tool_formula' || end.formula.kind !== 'chamfer_edge') {
     throw new Error('Chamfer Smart Height formula authority is missing.')
   }
+  const datumEdited = input.patch.datumReference !== undefined || input.patch.datumOffsetMm !== undefined
   const formula: ChamferEdgeFormulaIntent = {
     ...end.formula,
     datumPlane: {
       ...end.formula.datumPlane,
+      ...(datumEdited ? { owner: userOwner } : {}),
       reference: validateDatumReference(next.datumReference),
       offsetMm: finite(next.datumOffsetMm, 'Chamfer datum offset'),
     },
@@ -231,7 +237,7 @@ export function buildChamferSmartHeightIntent(
     datumPlane: {
       reference: validateDatumReference(input.datumReference),
       offsetMm: finite(input.datumOffsetMm, 'Chamfer datum offset'),
-      owner: userOwner,
+      owner: input.datumOwner === 'policy' ? policyOwner : userOwner,
     },
     chamferWidthMm: positive(input.chamferWidthMm, 'Chamfer width'),
     tipOffsetMm: nonNegative(input.tipOffsetMm, 'Chamfer tip offset'),

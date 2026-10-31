@@ -31,6 +31,7 @@ import {
   toolClick, type ToolState, type ToolChainState, type ToolCommit,
 } from './toolMachine'
 import { circleClick } from './circleTools'
+import { rectCorners, buildRectCommit } from './rectTools'
 import { planDimension } from './dimTool'
 
 const TWO_PI = Math.PI * 2
@@ -253,4 +254,56 @@ function lineDistanceDim(
     ...out.plan, id: newId(), driving: true, value,
     labelAnchor: { x: mid.x + nx * off, y: mid.y + ny * off },
   }
+}
+
+// WO-3116: transient full side lengths. undefined follows the pointer; null
+// preserves an invalid edited field and must never fall back to pointer geometry.
+export interface CreationSizeDraft {
+  width?: number | null
+  height?: number | null
+  signX: number
+  signY: number
+}
+
+export function hasCreationSize(draft: CreationSizeDraft | null): boolean {
+  return !!draft && (draft.width !== undefined || draft.height !== undefined)
+}
+
+export function resolveCreationSize(
+  state: ToolState, cursor: Vec2, draft: CreationSizeDraft | null,
+): { cursor: Vec2; width: number; height: number } | null {
+  const ch = state.chain
+  if ((state.tool !== 'rect-corner' && state.tool !== 'rect-center') ||
+      ch?.kind !== 'rect' || ch.rotated || !ch.anchor) return null
+  const factor = ch.mode === 'center' ? 2 : 1
+  const dx = cursor.x - ch.anchor.x, dy = cursor.y - ch.anchor.y
+  const width = draft?.width === undefined ? Math.abs(dx) * factor : draft.width
+  const height = draft?.height === undefined ? Math.abs(dy) * factor : draft.height
+  if (width === null || height === null || !Number.isFinite(width) || !Number.isFinite(height)) return null
+  const sx = Math.sign(dx) || draft?.signX || 1
+  const sy = Math.sign(dy) || draft?.signY || 1
+  return { width, height, cursor: {
+    x: ch.anchor.x + sx * width / factor,
+    y: ch.anchor.y + sy * height / factor,
+  } }
+}
+
+export function commitCreationSize(
+  state: ToolState, cursor: Vec2, draft: CreationSizeDraft | null,
+  newId: () => string, construction = false, shiftKey = false,
+): DrawValueResult | null {
+  if (!hasCreationSize(draft)) return null
+  const size = resolveCreationSize(state, cursor, draft)
+  if (!size || size.width <= 0 || size.height <= 0 || state.chain?.kind !== 'rect') return null
+  const { a, b } = rectCorners(state.chain, size.cursor)
+  const both = draft!.width !== undefined && draft!.height !== undefined
+  const square = shiftKey && !both && Math.abs(size.width - size.height) < 1e-9
+  const commit = buildRectCommit(a, b, construction, newId, square)
+  const dimensions: SketchDimension[] = []
+  for (const [index, value] of [draft!.width, draft!.height].entries()) {
+    if (value === undefined || value === null) continue
+    const dim = lineDistanceDim(commit.entities, commit.entities[index].id, value, newId)
+    if (dim) dimensions.push(dim)
+  }
+  return { commit: { ...commit, dimensions }, nextChain: null }
 }

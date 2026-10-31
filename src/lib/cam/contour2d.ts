@@ -53,6 +53,9 @@ import {
   helixDescent,
   helixFits,
   resolveFloorHopMm,
+  entryMaterialOf,
+  entryStartAlong,
+  hopsAtRetract,
 } from './moves'
 import {
   buildTrochoid,
@@ -331,8 +334,11 @@ function buildOpenContourToolpath(
     feedRate, plungeRate, leadInRate, leadOutRate,
   } = resolveFeedrates(tool, payload.feedrateOverride)
   const {
-    clearanceZ, retractZ, feedZ, topZ, bottomZ: rawBottomZ,
+    clearanceZ, retractZ, feedZ: feedPlaneZ, topZ, bottomZ: rawBottomZ,
   } = resolveHeights(heights, wcsOrigin)
+  // WO-3083: every entry starts ENTRY_CLEARANCE_MM above the highest material under the
+  // contours and their tool reach (was the Feed plane, Top + 5).
+  const feedZ = entryStartAlong(entryMaterialOf(payload, topZ, feedPlaneZ), loops, 2 * toolRadius)
   const axialStock = Math.max(0, passes.floorStockToLeave ?? 0)
   const stockToLeave = Math.max(0, passes.stockToLeave)
   const hasRoughing = stockToLeave > 0
@@ -437,8 +443,9 @@ function buildOpenContourToolpath(
     )
   }
   // WO-1888: see the closed-contour return. Same call, same stock source.
+  // WO-3083 rule 2: hops between the contours of this operation cross at Retract.
   return applyRestAir2d(
-    'Open contour', moves, tool, (payload as ToolReachInputs).remainingStock, retractZ,
+    'Open contour', hopsAtRetract(moves, retractZ, clearanceZ), tool, (payload as ToolReachInputs).remainingStock, retractZ,
     undefined, resolveFloorHopMm(payload.linking),
   )
 }
@@ -482,7 +489,11 @@ export function buildContourToolpath(
     tool, payload.feedrateOverride,
   )
 
-  const { clearanceZ, retractZ, feedZ, topZ, bottomZ: rawBottomZ } = resolveHeights(heights, wcsOrigin)
+  const { clearanceZ, retractZ, feedZ: feedPlaneZ, topZ, bottomZ: rawBottomZ } = resolveHeights(heights, wcsOrigin)
+  // WO-3083: every entry starts ENTRY_CLEARANCE_MM above the highest material under the
+  // contours, their stock to leave, leads and tool reach (was the Feed plane, Top + 5).
+  const feedZ = entryStartAlong(entryMaterialOf(payload, topZ, feedPlaneZ), loops,
+    2 * toolRadius + Math.max(0, passes.stockToLeave) + Math.max(0, linking.leadInRadius ?? 0, linking.leadOutRadius ?? 0))
 
   // Axial (floor) stock to leave: the floor analog of the radial passes.stockToLeave.
   // Roughing stops `axialStock` mm ABOVE the true bottom (rough floor = bottomZ + axial),
@@ -666,7 +677,26 @@ export function buildContourToolpath(
       )
     }
     if (finishLoops.length === 0 && roughLoops.length === 0) continue   // degenerate
-    if (roughLoops.length > 1 || finishLoops.length > 1) {
+
+    const finishPoly = finishLoops.length === 1 ? finishLoops[0] : undefined
+    const finishPath = finishPoly ? applyDir(finishPoly) : null
+    // User-placed tab centers for THIS loop (fractions of the finish-contour
+    // perimeter). Absent/empty -> evenly spaced (byte-identical legacy plan);
+    // 'none' -> no tabs on this loop (WO-3220: an applied suggestion that
+    // found no safe place, never the even-spacing fallback).
+    // WO-3195: planned before the multi-region branch (tabs force one finish
+    // contour above), so a rough offset that splits into regions keeps the tabs:
+    // a tabbed loop never takes emitMultiRegion, it is cut below region by region.
+    const customTabFractions = params.tabLocations?.[loop.id]
+    const tabPlan = tabSettings && finishPath && customTabFractions !== 'none'
+      ? buildContourTabPlan(
+          finishPath,
+          tabSettings,
+          customTabFractions && customTabFractions.length > 0 ? customTabFractions : undefined,
+        )
+      : null
+
+    if (!tabPlan && (roughLoops.length > 1 || finishLoops.length > 1)) {
       if (trochoidalRequested) sayOffsetFallback(loop)
       emitMultiRegion({
         moves,
@@ -682,22 +712,11 @@ export function buildContourToolpath(
       continue
     }
 
-    const roughPoly  = roughLoops.length === 1 ? roughLoops[0] : null
-    const finishPoly = finishLoops.length === 1 ? finishLoops[0] : undefined
-    if (!finishPoly) continue
+    if (!finishPath) continue
 
-    const roughPath  = roughPoly ? applyDir(roughPoly) : null
-    const finishPath = applyDir(finishPoly)
-    // User-placed tab centers for THIS loop (fractions of the finish-contour
-    // perimeter). Absent/empty -> evenly spaced (byte-identical legacy plan).
-    const customTabFractions = params.tabLocations?.[loop.id]
-    const tabPlan = tabSettings
-      ? buildContourTabPlan(
-          finishPath,
-          tabSettings,
-          customTabFractions && customTabFractions.length > 0 ? customTabFractions : undefined,
-        )
-      : null
+    const roughPaths = roughLoops.map(applyDir)
+    const roughPath  = roughPaths.length === 1 ? roughPaths[0] : null
+    if (trochoidalRequested && roughPaths.length > 1) sayOffsetFallback(loop)
     const trochoid = trochoidalRequested && roughPath
       ? planTrochoidalRough(rawPts, isOuter, applyDir, tool.diameter, stockToLeave, params,
           plannerDirection, roughPath, tabPlan)
@@ -709,7 +728,23 @@ export function buildContourToolpath(
     // smoothly into the finishing path with a Bézier arc.
     let roughEndIdx = 0   // index in roughPath where the tool ends after roughing
 
-    if (hasRoughing && roughPath) {
+    if (hasRoughing && tabPlan && !trochoid) {
+      // WO-3195: Offset roughing lifts over the finish's own tabs, on every rough
+      // region, exactly as the finish passes below do; it retracts after each
+      // region, so the finish enters fresh (no bridge across a tab at depth).
+      // A rough loop wholly under its tabs is roughed down to the tab top and no
+      // further: everything below it there is tab material.
+      for (const path of roughPaths) {
+        const rough = roughTabPlan(tabPlan, path, stockToLeave)
+        const depths = rough.wholeLoop
+          ? [...new Set(roughDepths.map(d => Math.max(d, tabPlan.tabTopZ)))]
+          : roughDepths
+        emitTabbedOffsetRough(moves, rough.plan, {
+          depths, isRamp, feedZ, retractZ, clearanceZ,
+          feedRate, plungeRate, rampRate, tanAngle,
+        })
+      }
+    } else if (hasRoughing && roughPath) {
       if (trochoid) {
         emitTrochoidalRough(moves, trochoid, {
           depths: roughDepths, isRamp, stayDown: doFinish && !tabPlan,
@@ -909,8 +944,10 @@ export function buildContourToolpath(
   appendCornerRelief(moves, params, toolRadius, opStockToLeave, reliefGroups,
     { feedZ, retractZ, clearanceZ, feedRate, plungeRate, direction: plannerDirection })
 
+  // WO-3083 rule 2: hops between loops, depths, tabbed re-entries and corner reliefs of this
+  // operation cross at Retract (they rode Clearance); first entry and final exit keep it.
   return applyRestAir2d(
-    'Contour', moves, tool, (payload as ToolReachInputs).remainingStock, retractZ,
+    'Contour', hopsAtRetract(moves, retractZ, clearanceZ), tool, (payload as ToolReachInputs).remainingStock, retractZ,
     undefined, resolveFloorHopMm(payload.linking),
   )
 }
@@ -1865,6 +1902,150 @@ export function computeContourTabPreviewLoop(
   const { perimeter } = buildTabCumulative(path)
   if (!Number.isFinite(perimeter) || perimeter <= 1e-6) return null
   return { path, perimeter }
+}
+
+// ── Tabs on the Offset rough (WO-3195) ─────────────────────────────────────────
+
+/** Nearest point of a closed polyline to `p`: its distance and arc position. */
+function nearestAlong(path: Vec2[], cumulative: number[], p: Vec2): { distance: number; along: number } {
+  let distance = Infinity
+  let along = 0
+  for (let i = 0; i < path.length; i++) {
+    const a = path[i]
+    const b = path[(i + 1) % path.length]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len2 = dx * dx + dy * dy
+    const t = len2 > 1e-18 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0
+    const d = Math.hypot(a.x + dx * t - p.x, a.y + dy * t - p.y)
+    if (d < distance) {
+      distance = d
+      along = cumulative[i] + t * (cumulative[i + 1] - cumulative[i])
+    }
+  }
+  return { distance, along }
+}
+
+/**
+ * The finish tab plan carried onto one Offset rough loop, so roughing lifts over
+ * the same tabs the finish does - no second tab system. Each finish tab interval
+ * is sampled and every sample beside this loop (within 1.5 x the stock to leave,
+ * which also covers a square offset corner) is projected onto it; the span of
+ * those projections, never narrower than the tab width, is the rough tab. A rough
+ * region the tab is not beside (the far lobe of a split offset) gets nothing there.
+ * A rough tab over the seam re-seams the loop into its widest gap, as
+ * buildContourTabPlan does for custom tabs, so every entry sits clear of a tab.
+ * When the rough tabs cover the whole loop it is all tab: `wholeLoop` is set and
+ * the plan has no intervals, so the caller cuts it no deeper than the tab top.
+ */
+function roughTabPlan(
+  finish: ContourTabPlan, roughPath: Vec2[], stockToLeave: number,
+): { plan: ContourTabPlan; wholeLoop: boolean } {
+  let { cumulative, perimeter } = buildTabCumulative(roughPath)
+  let path = roughPath
+  const reach = 1.5 * stockToLeave + 0.05
+  const spans: Array<{ start: number; end: number }> = []
+  for (const { start, end } of finish.intervals) {
+    const samples = [start, end]
+    const steps = Math.max(1, Math.ceil((end - start) / 0.5))
+    for (let k = 1; k < steps; k++) samples.push(start + (end - start) * k / steps)
+    for (const c of finish.cumulative) if (c > start && c < end) samples.push(c)
+    let anchor: number | null = null
+    let lo = Infinity
+    let hi = -Infinity
+    for (const s of samples) {
+      const hit = nearestAlong(path, cumulative, sampleTabPath(finish, s))
+      if (hit.distance > reach) continue
+      if (anchor === null) anchor = hit.along
+      const offset = modDistance(hit.along - anchor + perimeter / 2, perimeter) - perimeter / 2
+      lo = Math.min(lo, offset)
+      hi = Math.max(hi, offset)
+    }
+    if (anchor === null) continue
+    const grow = Math.max(0, finish.width - (hi - lo)) / 2
+    const s0 = modDistance(anchor + lo - grow, perimeter)
+    spans.push({ start: s0, end: s0 + (hi - lo) + 2 * grow })
+  }
+
+  // Merge overlapping spans round the loop.
+  spans.sort((a, b) => a.start - b.start)
+  const merged: Array<{ start: number; end: number }> = []
+  for (const s of spans) {
+    const last = merged[merged.length - 1]
+    if (last && s.start <= last.end + 1e-9) last.end = Math.max(last.end, s.end)
+    else merged.push({ ...s })
+  }
+  while (merged.length > 1 && merged[merged.length - 1].end >= merged[0].start + perimeter - 1e-9) {
+    const last = merged.pop()!
+    merged[0] = { start: last.start - perimeter, end: Math.max(merged[0].end, last.end - perimeter) }
+  }
+  const covered = merged.reduce((sum, s) => sum + (s.end - s.start), 0)
+  if (covered >= perimeter - 1e-6) {
+    return { plan: { ...finish, count: 0, path, cumulative, perimeter, intervals: [] }, wholeLoop: true }
+  }
+
+  let intervals = merged
+  if (merged.some(s => s.start < 0 || s.end > perimeter)) {
+    // Seam inside a tab: move it to the middle of the widest gap.
+    let d0 = 0
+    let bestGap = -Infinity
+    for (let i = 0; i < merged.length; i++) {
+      const nextStart = i + 1 < merged.length ? merged[i + 1].start : merged[0].start + perimeter
+      const gap = nextStart - merged[i].end
+      if (gap > bestGap) { bestGap = gap; d0 = merged[i].end + gap / 2 }
+    }
+    d0 = modDistance(d0, perimeter)
+    const oldPerimeter = perimeter
+    path = reseamPath(roughPath, cumulative, d0)
+    ;({ cumulative, perimeter } = buildTabCumulative(path))
+    intervals = merged
+      .map(s => {
+        const start = modDistance(s.start - d0, oldPerimeter)
+        return { start, end: start + (s.end - s.start) }
+      })
+      .sort((a, b) => a.start - b.start)
+  }
+  return { plan: { ...finish, count: intervals.length, path, cumulative, perimeter, intervals }, wholeLoop: false }
+}
+
+interface TabbedRoughArgs {
+  depths: number[]
+  isRamp: boolean
+  feedZ: number
+  retractZ: number
+  clearanceZ: number
+  feedRate: number
+  plungeRate: number
+  rampRate: number
+  tanAngle: number
+}
+
+/**
+ * One tabbed Offset rough region at every level, with the finish's own tab
+ * emitters: Plunge re-enters at the seam each level and retracts after it; Ramp
+ * enters once and descends with clampedRampDescent (riding over any tab in the
+ * way), staying engaged between levels and retracting after the last.
+ */
+function emitTabbedOffsetRough(moves: ToolpathMove[], plan: ContourTabPlan, a: TabbedRoughArgs): void {
+  let cursor = 0
+  let prevZ = a.feedZ
+  for (let di = 0; di < a.depths.length; di++) {
+    const depth = a.depths[di]
+    const isLast = di === a.depths.length - 1
+    if (a.isRamp) {
+      if (di === 0) rapidEntryAt(moves, plan.path[0], a.feedZ, a.retractZ, a.clearanceZ)
+      cursor = clampedRampDescent(
+        moves, plan, cursor, prevZ, depth, a.tanAngle, a.rampRate, a.feedRate, a.plungeRate,
+      )
+    } else {
+      rapidEntry(moves, plan.path, a.feedZ, a.retractZ, a.clearanceZ)
+      plungeTo(moves, plan.path, 0, depth, a.plungeRate, 'plunge')
+      cursor = 0
+    }
+    cursor = cutLoopWithTabs(moves, plan, cursor, depth, a.feedRate, a.plungeRate, 0)
+    if (!a.isRamp || isLast) retractFrom(moves, a.retractZ, a.clearanceZ)
+    prevZ = depth
+  }
 }
 
 // ── Multi-region emission ───────────────────────────────────────────────────────

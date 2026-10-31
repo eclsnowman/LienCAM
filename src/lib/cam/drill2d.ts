@@ -3,6 +3,7 @@ import type { ToolpathMove } from '../../types'
 import { resolveHeights } from './heights'
 import { resolveFeedrates } from './feedrates'
 import { centroid } from './geometry'
+import { entryMaterialOf, entryStartZ } from './moves'
 
 type Pt = { x: number; y: number }
 
@@ -103,8 +104,6 @@ export function buildDrillToolpath(
 
   const { feedRate, plungeRate } = resolveFeedrates(tool, feedrateOverride)
 
-  // Between-hole retract Z
-  const betweenZ = params.retractMode === 'clearance' ? clearanceZ : retractZ
 
   // Filter loops to selected IDs (empty = all), THEN require closed: an open loop
   // (e.g. a partial-ellipse region baked as two disconnected open loops, SKC-47-R2)
@@ -150,6 +149,32 @@ export function buildDrillToolpath(
     default:                 sortedPts = rawCentroids
   }
 
+  // WO-3083: the R plane - where every hole starts feeding - sits ENTRY_CLEARANCE_MM above the
+  // highest material over any hole (was the Feed plane, Top + 5, fed at plunge rate). One plane
+  // for the operation, so a native canned cycle still carries one R.
+  const material = entryMaterialOf(payload, topZ, feedZ)
+  const holeBottomOf = (pt: Pt & { loopId: string }) => {
+    const mapped = holeBottoms?.[pt.loopId]
+    return mapped != null ? mapped + wcsOrigin.z : bottomZ
+  }
+  const entryRZ = Math.max(...sortedPts.map(pt => entryStartZ(material, pt, tool.diameter / 2, holeBottomOf(pt))))
+  // 'clearance' posts as G98, which returns to the initial plane between holes, so its R is free
+  // to sit just above the material. 'retract' posts as G99, whose native cycle returns to R
+  // between holes: there R is also the hop, so it keeps the operator's Feed plane exactly as
+  // before this order (at the default heights Feed = Retract, so the machine hops where this
+  // stream shows). Lowering it to the entry height would hop the machine at Top + 1 while the
+  // stream shows Retract.
+  // WO-3104 unchecked restores typed reference planes: R is Feed in BOTH
+  // modes. G98 returns at Retract; G99 returns at R by controller definition.
+  const rPlaneZ = heights.minimizeZTravel === false ? feedZ
+    : params.retractMode === 'clearance' ? entryRZ : feedZ
+  // Between-hole hop Z. WO-3083 (owner 2026-10-23: "We don't need to go that high unless a
+  // reposition move would go over a clamp"): both modes hop at Retract (G98 was Clearance). The
+  // post starts the G98 cycle from this plane, so the machine returns where this stream hops; a
+  // hop whose corridor crosses workholding is raised by the reach trim, and the post ends the
+  // cycle to make that lift (cannedCycle.ts liftZ). First entry and final exit stay at Clearance.
+  const betweenZ = params.retractMode === 'clearance' ? Math.max(retractZ, rPlaneZ) : retractZ
+
   const moves: ToolpathMove[] = []
 
   for (let i = 0; i < sortedPts.length; i++) {
@@ -176,8 +201,9 @@ export function buildDrillToolpath(
       rapid(moves, pt.x, pt.y, betweenZ)
     }
 
-    // Feed to feed height
-    feed(moves, pt.x, pt.y, feedZ, feedRate, 'rapid')
+    // Approach the R plane
+    feed(moves, pt.x, pt.y, rPlaneZ, feedRate, 'rapid')
+    if (heights.minimizeZTravel === false) moves[moves.length - 1].type = 'rapid'
 
     // Drill cycle
     switch (params.cycleType) {
@@ -185,7 +211,7 @@ export function buildDrillToolpath(
         emitSimple(moves, pt, holeBottomZ, plungeRate, 0)
         break
       case 'peck':
-        emitPeck(moves, pt, holeBottomZ, feedZ, retractZ, plungeRate, params.peckDepth, totalDepth,
+        emitPeck(moves, pt, holeBottomZ, rPlaneZ, retractZ, plungeRate, params.peckDepth, totalDepth,
           params.peckDecrement, params.minPeckDepth)
         break
       case 'chip_break':
@@ -249,7 +275,8 @@ function emitPeck(
   // count from topZ left the final peck ~(feedZ - topZ) short of the hole bottom
   // and emitted a dangling re-approach (DEF-4). Starting at topZ keeps the start
   // and the count consistent: the last peck clamps exactly to bottomZ (full depth)
-  // and never trips the "more to go" retract. feedZ stays the re-approach ceiling.
+  // and never trips the "more to go" retract. feedZ stays the re-approach ceiling
+  // (WO-3083: the caller passes the R plane).
   const topZ = bottomZ + totalDepth
   const endZ = bottomZ
 

@@ -42,6 +42,7 @@ const PARITY_ROLE_RATES: Readonly<Record<LinkRole, RoleRate | null>> = Object.fr
   helix: 'rampRate',
   ramp: 'rampRate',
   plunge: 'plungeRate',
+  retract: 'leadOutRate', // preview-only, retains its programmed feed
   stepover: 'feedRate',
   fast_traverse: 'fastTraverseRate',
   lead_in: 'leadInRate',

@@ -2,9 +2,9 @@ import { catalogChildren } from './catalogText'
 import { textFor, useText } from '../../../i18n'
 const controlText = textFor('control-screens-not-probing')
 
-import { type ReactNode } from 'react'
-import { hasNativeMachinePathPicker } from '../../../lib/machine/bridgeHost'
-import { activeVfdPortLink } from '../../../lib/machine/bridgeTransport'
+import { useEffect, useState, type ReactNode } from 'react'
+import { bridgeProcessStatus, hasNativeMachinePathPicker } from '../../../lib/machine/bridgeHost'
+import { activeVfdPortLink, rememberVfdPort } from '../../../lib/machine/bridgeTransport'
 import { setMachineSerialBaud } from '../../../store'
 import { MACHINE_SERIAL_BAUD_CHOICES } from '../../../store'
 import { SkewField } from './SkewField'
@@ -98,6 +98,20 @@ function describeLinuxcncSpindle(vfd: LinuxcncHello['vfd'], ownsSpindle: boolean
 
 export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeHello, bridgePort, bridgeProcessState, bridgeTextBlurred, bridgeTextFocused, connectionBusy, connectionKind, connectionPhase, controllerSetupHighlighted, controllerSetupRef, def, detectedInstallRoot, draft, editDraft, handleBridgeAction, legacyBridgeStatusHost, linuxcncHello, linuxcncJoints, linuxcncOwnsSpindle, localLink, noteBridgeSettingChanged, rememberBridgeSetting, rememberPickedPath, serialBaud, setMachineBridgePort, setSkewTyped, setupKind, skewTyped, source, spindleLink, uccnc }: ControllerSetupSectionProps) {
   useText('control-screens-not-probing')
+  const linux = typeof navigator !== 'undefined' && /linux/i.test(navigator.platform)
+  const [desktopPorts, setDesktopPorts] = useState<string[]>([])
+  const refreshPorts = async () => {
+    if (linux) {
+      const status = await bridgeProcessStatus().catch(() => null) as { serialPorts?: string[] } | null
+      setDesktopPorts(status?.serialPorts ?? [])
+    }
+    void activeVfdPortLink()?.listPorts()
+  }
+  useEffect(() => {
+    if (linux) void bridgeProcessStatus().catch(() => null).then(status => {
+      setDesktopPorts((status as { serialPorts?: string[] } | null)?.serialPorts ?? [])
+    })
+  }, [linux])
   return (
     <><div
           ref={controllerSetupRef}
@@ -431,13 +445,18 @@ export function ControllerSetupSection({ bridgeAction, bridgeCapability, bridgeH
                     className="mform-input mform-input-mono"
                     data-testid="machine-controller-vfd-port"
                     data-wired=""
-                    value={spindleLink.reportedPort ?? ''}
-                    disabled={!spindleLink.connected || !spindleLink.linkPresent || spindleLink.busy || spindleLink.spindleRunning || spindleLink.jobActive}
-                    onFocus={() => { void activeVfdPortLink()?.listPorts() }}
-                    onChange={(event) => { void activeVfdPortLink()?.selectPort(event.currentTarget.value) }}
+                    value={spindleLink.reportedPort ?? (linux ? localLink?.vfdPort : undefined) ?? ''}
+                    disabled={(!linux && (!spindleLink.connected || !spindleLink.linkPresent)) || spindleLink.busy || spindleLink.spindleRunning || spindleLink.jobActive}
+                    onFocus={() => { void refreshPorts() }}
+                    onChange={(event) => {
+                      const port = event.currentTarget.value
+                      if (linux && (!spindleLink.connected || !spindleLink.linkPresent)) rememberVfdPort(source.id, port)
+                      else void activeVfdPortLink()?.selectPort(port)
+                    }}
                   >
                     <option value="">{controlText('ControllerSetupSection.text048')}</option>
                     {Array.from(new Set([
+                      ...desktopPorts,
                       ...(spindleLink.ports ?? []),
                       spindleLink.reportedPort,
                       localLink?.vfdPort,

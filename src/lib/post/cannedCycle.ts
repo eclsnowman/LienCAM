@@ -25,6 +25,11 @@ export interface DrillHole {
   x: number
   y: number
   bottomZ: number
+  /** WORLD. Present when the stream lifts the hop INTO this hole above the plane the other
+   *  hops cross at - the workholding raise (holderClearance raiseTraverses). A canned cycle
+   *  hops at its return plane, so the post ends the cycle, crosses at this Z and restarts it
+   *  (WO-3083). */
+  liftZ?: number
 }
 
 export interface DrillCycleProgram {
@@ -32,8 +37,13 @@ export interface DrillCycleProgram {
   gWord: 'G81' | 'G82' | 'G83'
   /** retractMode 'clearance' -> G98 (return to initial Z), 'retract' -> G99 (return to R). */
   returnMode: 'G98' | 'G99'
-  /** WORLD; the clearance plane (max Z over the stream). Rapid here before the cycle. */
+  /** WORLD; the plane the cycle starts from. G98 returns here between holes, so it is the
+   *  plane the stream hops at (WO-3083: Retract, was Clearance); G99 keeps the clearance plane. */
   initialZ: number
+  /** WORLD; the highest Z of the stream (the op's first entry and final exit). */
+  clearanceZ: number
+  /** Unchecked operation exits at Clearance, including native G99. */
+  restoreClearance?: boolean
   /** WORLD; the feed-approach plane R — the feedZ each hole feeds to before plunging. */
   rPlaneZ: number
   /** In program order (the order holes appear in the move stream). */
@@ -68,8 +78,9 @@ function sameXY(a: { x: number; y: number }, b: { x: number; y: number }): boole
  *   plunge sequence       (type 'feed', role 'plunge') -> per-hole bottom
  *   rapid -> betweenZ
  * Final: rapid -> clearanceZ.
+ * A hop the reach trim raised over workholding arrives as extra rapids above betweenZ.
  */
-export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): ReconstructResult {
+export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[], wcsOriginZ = 0): ReconstructResult {
   // Read cycleType the way the worker does — params is a generic record; the
   // drill op stores a DrillParams shape under it.
   const params = op.params as unknown as DrillParams
@@ -130,13 +141,17 @@ export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): Re
       message: `Drill canned-cycle reconstruction: empty move stream on op ${op.id}.`,
     }
   }
-  const initialZ = Math.max(...moves.map(m => m.z))
+  const clearanceZ = Math.max(...moves.map(m => m.z))
 
   // Group moves into per-hole cycles. A hole is a contiguous run sharing one
   // XY that contains at least one plunge (role 'plunge') move. We walk the
   // stream, and each time we encounter a plunge move at a new XY (or the first
   // plunge), we open a hole; plunges sharing that XY accumulate into it.
   const holes: DrillHole[] = []
+  // Per hole: the index of its approach move and of its last plunge (the hop to the next hole
+  // is everything between the two).
+  const approachAt: number[] = []
+  const lastPlungeAt: number[] = []
   let rPlaneZ: number | undefined
   let feed: number | undefined
 
@@ -148,10 +163,14 @@ export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): Re
   // must carry the same pause; a stream that differs cannot be one canned cycle.
   let curDwellMs = 0
   let holeDwellMs: number | undefined
+  let curApproachAt = -1
+  let curLastPlungeAt = -1
 
   const flush = (): string | null => {
     if (curXY && curMinZ !== Infinity) {
       holes.push({ x: curXY.x, y: curXY.y, bottomZ: curMinZ })
+      approachAt.push(curApproachAt)
+      lastPlungeAt.push(curLastPlungeAt)
       if (holeDwellMs === undefined) holeDwellMs = curDwellMs
       else if (Math.abs(holeDwellMs - curDwellMs) > EPS) {
         return `hole dwell varies between holes (${holeDwellMs} ms vs ${curDwellMs} ms); ` +
@@ -170,7 +189,8 @@ export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): Re
     message: `Drill canned-cycle reconstruction: ${detail} (op ${op.id}).`,
   })
 
-  for (const m of moves) {
+  for (let idx = 0; idx < moves.length; idx++) {
+    const m = moves[idx]
     if (m.dwellMs !== undefined && m.dwellMs !== 0) {
       if (!Number.isFinite(m.dwellMs) || m.dwellMs < 0) {
         return malformed(`a move carries an invalid dwell ${String(m.dwellMs)}`)
@@ -183,12 +203,14 @@ export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): Re
       }
     }
 
-    if (m.type === 'feed' && m.role === 'rapid') {
+    if (m.role === 'rapid' && (m.type === 'feed'
+        || (op.heights?.minimizeZTravel === false && m.type === 'rapid' && m.feed !== undefined))) {
       // Approach-to-feedZ move: marks the R plane for the hole about to start.
       // It also marks the boundary of a new hole.
       const dwellMismatch = flush()
       if (dwellMismatch) return malformed(dwellMismatch)
       curApproachZ = m.z
+      curApproachAt = idx
       curXY = { x: m.x, y: m.y }
       // R plane must be consistent across all holes.
       if (rPlaneZ === undefined) {
@@ -229,6 +251,7 @@ export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): Re
         }
       }
       curMinZ = Math.min(curMinZ, m.z)
+      curLastPlungeAt = idx
       curDwellMs += m.dwellMs ?? 0
       if (m.feed !== undefined) {
         if (feed === undefined) feed = m.feed
@@ -270,10 +293,35 @@ export function reconstructDrillCycles(op: Operation, moves: ToolpathMove[]): Re
     }
   }
 
+  // WO-3083 (owner 2026-10-23: "We don't need to go that high unless a reposition move would go
+  // over a clamp"). The plane the stream hops at is the one it rises to straight out of each
+  // hole (the move after the hole's last plunge). The Z a hop crosses at is the highest move
+  // from one hole's last plunge to the next hole's approach; a hop above the plane is one the
+  // reach trim raised over workholding, and that hole carries its liftZ so the post never lets
+  // the cycle's own return plane cross the clamp.
+  // WO-3104: R is Feed, not a generic travel floor. G99 returns to R even
+  // when Feed differs from Retract; its explicit between-feature lift must
+  // still reproduce the stream (and retain any higher clamp detour).
+  const unchecked = op.heights?.minimizeZTravel === false
+  const floor = unchecked
+    ? (op.resolvedHeights?.wcs.retract ?? op.heights.retractHeight) + wcsOriginZ : -Infinity
+  if (unchecked) rPlaneZ = (op.resolvedHeights?.wcs.feed ?? op.heights.feedHeight) + wcsOriginZ
+  const hopPlaneZ = Math.min(...lastPlungeAt.map(j => moves[j + 1]?.z ?? clearanceZ))
+  const returnZ = unchecked && returnMode === 'G99' ? rPlaneZ : hopPlaneZ
+  for (let k = 1; k < holes.length; k++) {
+    let z = -Infinity
+    for (let j = lastPlungeAt[k - 1] + 1; j < approachAt[k]; j++) z = Math.max(z, moves[j].z)
+    if (z > returnZ + EPS) holes[k].liftZ = z
+  }
+  // G98's initial plane is its return plane; G99's R is its return plane.
+  const initialZ = returnMode === 'G98' ? Math.max(hopPlaneZ, rPlaneZ, floor) : Math.max(clearanceZ, floor)
+
   const program: DrillCycleProgram = {
     gWord,
     returnMode,
     initialZ,
+    clearanceZ,
+    ...(unchecked ? { restoreClearance: true } : {}),
     rPlaneZ,
     holes,
     feed,

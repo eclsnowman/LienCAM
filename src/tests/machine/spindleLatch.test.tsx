@@ -27,6 +27,9 @@ import { create } from 'zustand'
 // holderClearance3d.wo278.test.ts).
 import { typedMock } from '../support/typedMock'
 import { SpindlePanel } from '../../components/machine/SpindlePanel'
+// WO-3191: the commanded direction now lives in the shared store. The mock below
+// keeps that store REAL across tests, so each case must start from 'off'.
+import { useMachineControl } from '../../store/machineControlStore'
 import type {
   ConnectionPhase, LoadOutcome, MachineController, MachineState, MachineStatus, StreamerProgress,
 } from '../../lib/machine/controller'
@@ -160,6 +163,7 @@ afterEach(cleanup)
 beforeEach(() => {
   vi.useFakeTimers()
   reported = null
+  useMachineControl.setState({ commandedSpindle: 'off' })
   commandSpindle.mockReset()
   commandSpindle.mockReturnValue({ ok: true, route: 'calls' })
 })

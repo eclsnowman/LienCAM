@@ -52,7 +52,15 @@ function alongMove(from: ToolpathMove, to: ToolpathMove, at: { x: number; y: num
   }
 }
 
-function estimate(moves: ToolpathMove[], cursors: number[], machine: MachineConfig): ProgramRunEstimate | null {
+/** Worker messages carry arrays, never cursor/position closures. */
+export interface PreparedProgramRunEstimate {
+  moves: ToolpathMove[]
+  cursors: number[]
+  suffix: number[]
+  travel: number[]
+}
+
+function prepareEstimate(moves: ToolpathMove[], cursors: number[], machine: MachineConfig): PreparedProgramRunEstimate | null {
   if (moves.length < 2) return null
   const rapid = machine.rapidRate
   const motion = machineCutTimeMotion(machine)
@@ -64,6 +72,12 @@ function estimate(moves: ToolpathMove[], cursors: number[], machine: MachineConf
     travel[i] = durations?.[i] ?? estimateRuntimeMs([moves[i - 1], moves[i]], rapid)
     suffix[i] = suffix[i + 1] + travel[i] + (moves[i].dwellMs ?? 0)
   }
+  return { moves, cursors, suffix, travel }
+}
+
+export function programRunEstimateFromPrepared(prepared: PreparedProgramRunEstimate | null): ProgramRunEstimate | null {
+  if (!prepared) return null
+  const { moves, cursors, suffix, travel } = prepared
   // The first move at or after the cursor.
   const firstAt = (cursor: number): number => {
     let low = 1
@@ -118,7 +132,7 @@ function estimate(moves: ToolpathMove[], cursors: number[], machine: MachineConf
 }
 
 /** Adapt the file reader's geometry; WO-2148 remains the only time planner. */
-export function textProgramRunEstimate(text: string, machine: MachineConfig, options: GcodeReaderOptions): ProgramRunEstimate | null {
+export function prepareTextProgramRunEstimate(text: string, machine: MachineConfig, options: GcodeReaderOptions): PreparedProgramRunEstimate | null {
   const read = readGcodeProgram(text, options)
   if (!read.ok) return null
   const moves: ToolpathMove[] = [{ type: 'rapid', ...options.initialPosition }, ...read.program.moves]
@@ -131,7 +145,11 @@ export function textProgramRunEstimate(text: string, machine: MachineConfig, opt
     moves.splice(at, 0, { ...moves[at - 1], type: 'rapid', dwellMs: item.seconds * 1000 })
     cursors.splice(at, 0, item.line)
   }
-  return estimate(moves, cursors, machine)
+  return prepareEstimate(moves, cursors, machine)
+}
+
+export function textProgramRunEstimate(text: string, machine: MachineConfig, options: GcodeReaderOptions): ProgramRunEstimate | null {
+  return programRunEstimateFromPrepared(prepareTextProgramRunEstimate(text, machine, options))
 }
 
 /** Staged file/toolpath doors already hold the geometry the controller runs. */
@@ -177,7 +195,7 @@ export function stagedProgramRunEstimate(steps: readonly ProgramStep[], machine:
       cursors.push(placeOf(step.id))
     }
   }
-  const own = estimate(moves, cursors, machine)
+  const own = programRunEstimateFromPrepared(prepareEstimate(moves, cursors, machine))
   if (!own) return null
   return {
     totalMs: own.totalMs,

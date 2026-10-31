@@ -55,8 +55,9 @@ import {
   chamferApplyAll, chamferChainMaxSetback, chamferMaxUsableSetback,
   type ChamferCornerPick,
 } from '../tools/chamferTool'
-import { commitDrawValue } from '../tools/drawValue'
+import { commitDrawValue, commitCreationSize, resolveCreationSize, hasCreationSize } from '../tools/drawValue'
 import { formatDimensionValue } from '../tools/dimTool'
+import { resolveDimPlacement } from '../tools/dimPlacement'
 import { formatLiveDim } from '../tools/liveDims'
 import { unitLabel } from '../../ui/unitFormat'
 import {
@@ -112,6 +113,7 @@ export function __resetSketchClipboardForTest(): void {
 }
 
 export function bindSketcherDocument(port: SketchDocumentPort | null): void {
+  if (doc !== port) clearCreationSize()
   doc = port
 }
 
@@ -416,6 +418,25 @@ export function armTool(tool: SketchToolId): void {
     doc.setSelection(doc.getSelection().filter((x) => x !== seedId))
     doc.notice('Text attached to the selected curve — start typing')
   }
+}
+
+/** WO-3110: typing accepts the current dimension preview without another pick.
+ * Use the same resolver/initial clamp and document verdict as a placement click;
+ * the cursor may still be ON the picked edge, so this must not repick it. */
+export function placeDimensionForTyping(cursor: SketchVec2): void {
+  const s = toolState()
+  const sketch = doc?.getSketch()
+  if (!doc || !sketch || s.tool !== 'smart-dimension' || s.chain?.kind !== 'dim') return
+  const placement = resolveDimPlacement(sketch.entities, s.chain.operandIds, cursor,
+    { forceOrientation: s.chain.forceMode ?? null, clampInitial: true }, sketch.constraints)
+  if (!placement) return // Incomplete operands (including an ordinate datum) still need a pick.
+  doc.beginStep()
+  sketcherToolStore.setState({ chain: null, wakeRefs: [] })
+  doc.append({ entities: [], constraints: [], dimensions: [{
+    ...placement.plan, id: uuid(), value: placement.value, labelAnchor: placement.labelAnchor,
+    // Preserve WO-1858: a newly placed chamfer pair is reference-only.
+    driving: placement.plan.kind !== 'd1xd2',
+  }] }, [], { openDimensionEditor: true })
 }
 
 /** Tab while smart-dimension has an operand set: cycle that operand family's mode. */
@@ -777,6 +798,11 @@ export function click(
   const isPickTool = PICK_TOOLS.has(s.tool)
   const usesSnap = clickUsesSnap({ tool: s.tool, chain: s.chain })
   const at = usesSnap && snap?.point ? snap.point : world
+  if (hasCreationSize(s.creationSize)) {
+    trackCreationCursor(at)
+    commitCreationSizeAt(at, beforeMutate, snap, forceSquare)
+    return // invalid typed sizes never substitute a mouse-only rectangle
+  }
   const selection = doc.getSelection()
   const r = toolClick(
     { tool: s.tool, chain: s.chain },
@@ -959,7 +985,7 @@ export function overlay(
   if (!sketch) return null
   const s = toolState()
   return toolOverlay(
-    { tool: s.tool, chain: s.chain }, cursor, tolWorld,
+    { tool: s.tool, chain: s.chain }, creationCursor(cursor), tolWorld,
     {
       entities: sketch.entities,
       constraints: sketch.constraints,
@@ -1100,6 +1126,63 @@ export function setSelectedConicsRho(rho: number): void {
     e.kind === 'spline' && wanted.has(e.id) ? conicWithRho(e, drawn) : e)
   doc.beginStep()
   doc.replace({ entities, constraints: sketch.constraints, dimensions: sketch.dimensions })
+}
+
+// WO-3116: shared preview/commit authority for both mounts. Canvas blur defers
+// until pointerup; cancellation releases only this gesture, preserving held sizes.
+let creationPlacementPending = false
+// Blur has no modifier fields. Event routes remember the current state here;
+// every typed commit still uses commitCreationSize's single square rule.
+let creationShiftKey = false
+export function trackCreationModifiers(shiftKey: boolean): void { creationShiftKey = shiftKey }
+export function clearCreationSize(): void {
+  creationPlacementPending = false
+  creationShiftKey = false
+  sketcherToolStore.setState({ creationSize: null })
+}
+export function setCreationPlacementPending(pending: boolean): void { creationPlacementPending = pending }
+export function isCreationPlacementPending(): boolean { return creationPlacementPending }
+export function setCreationSize(field: 'width' | 'height', mm: number): void {
+  const s = toolState()
+  if (!resolveCreationSize(s, { x: 0, y: 0 }, null) || !s.creationSessionActive) return
+  sketcherToolStore.setState({ creationSize: {
+    signX: 1, signY: 1, ...s.creationSize,
+    [field]: Number.isFinite(mm) && mm > 0 ? mm : null,
+  } })
+}
+export function trackCreationCursor(cursor: SketchVec2): void {
+  const s = toolState(), ch = s.chain
+  if (ch?.kind !== 'rect' || !ch.anchor || ch.rotated) return
+  const signX = Math.sign(cursor.x - ch.anchor.x) || s.creationSize?.signX || 1
+  const signY = Math.sign(cursor.y - ch.anchor.y) || s.creationSize?.signY || 1
+  if (signX !== s.creationSize?.signX || signY !== s.creationSize?.signY) {
+    sketcherToolStore.setState({ creationSize: { ...s.creationSize, signX, signY } })
+  }
+}
+export function creationCursor(cursor: SketchVec2): SketchVec2 {
+  const s = toolState()
+  return resolveCreationSize(s, cursor, s.creationSize)?.cursor ?? cursor
+}
+export function commitCreationSizeAt(
+  cursor: SketchVec2, beforeMutate?: () => void, snapResult?: SnapResult | null, shiftKey = creationShiftKey,
+): boolean {
+  if (!doc?.getSketch()) return false
+  const s = toolState()
+  const res = commitCreationSize(s, cursor, s.creationSize, uuid, s.constructionMode, shiftKey)
+  if (!res) return false
+  const resolved = creationCursor(cursor)
+  // The typed endpoint may have moved away from the raw opposite-corner snap.
+  // Keep anchor snaps and accept an endpoint snap only at the resolved point.
+  if (snapResult?.inferences.length && Math.hypot(resolved.x - snapResult.point.x, resolved.y - snapResult.point.y) < 1e-6) {
+    recordPendingSnap({ point: snapResult.point, inferences: snapResult.inferences, alignFrom: snapResult.alignFrom })
+  }
+  const inferred = inferenceConstraints(res.commit, drainPendingSnaps(), uuid)
+  if (beforeMutate) beforeMutate()
+  else doc.beginStep()
+  clearCreationSize()
+  sketcherToolStore.setState({ chain: null, wakeRefs: [] })
+  doc.append(res.commit, inferred)
+  return true
 }
 
 /** The "type a value mid-draw" box. */
@@ -1651,7 +1734,10 @@ export async function importFileIntoSketch(
  * functions (the interaction layer, the toolbox, the overlays, tests).
  */
 export const sketcherTools = {
+  placeDimensionForTyping,
   editSelectedPattern, breakSelectedPattern,
+  clearCreationSize, setCreationSize, creationCursor, trackCreationCursor, trackCreationModifiers, commitCreationSizeAt,
+  setCreationPlacementPending, isCreationPlacementPending,
   armTool, beginPierce, piercePending, bezierJointsInSelection, bezierPress, breakOffsetLink, breakProjectionLink, clearBezierPress, click, copySelection, cycleDimForce, commitDrawValueAt,
   conicDrawRhoValue, conicsInSelection, deleteSelection, end, escape,
   importFileIntoSketch, exportSketchSvg, exportSketchDxf, printSketch, linkedOffsetInSelection, lockCursor,

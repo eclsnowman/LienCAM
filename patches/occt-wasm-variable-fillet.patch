@@ -1,0 +1,319 @@
+diff --git a/xtask/src/codegen/config.rs b/xtask/src/codegen/config.rs
+--- a/xtask/src/codegen/config.rs
++++ b/xtask/src/codegen/config.rs
+@@ -4211,6 +4211,158 @@
+         return_type: ReturnType::EvolutionData,
+     },
+     MethodSpec {
++        name: "filletLinearWithHistory",
++        kind: MethodKind::CustomBody,
++        params: &[
++            FacadeParam::ShapeId("solidId"), FacadeParam::ShapeId("edgeId"),
++            FacadeParam::Double("startRadius"), FacadeParam::Double("endRadius"),
++            FacadeParam::Double("startX"), FacadeParam::Double("startY"), FacadeParam::Double("startZ"),
++            FacadeParam::VectorInt("inputFaceHashes"), FacadeParam::Int("hashUpperBound"),
++        ],
++        occt_class: "",
++        ctor_args: "",
++        setup_code: r#"const auto& solid = get(solidId);
++const TopoDS_Edge& edge = TopoDS::Edge(get(edgeId));
++if (!std::isfinite(startRadius) || !std::isfinite(endRadius) || startRadius < 0.0 || endRadius < 0.0) {
++    throw std::runtime_error("filletLinearWithHistory: radii must be finite and not negative");
++}
++if (startRadius == 0.0 && endRadius == 0.0) {
++    throw std::runtime_error("filletLinearWithHistory: both radii are zero");
++}
++BRepFilletAPI_MakeFillet maker(solid);
++maker.Add(edge);
++const int ic = maker.Contour(edge);
++if (ic == 0) {
++    throw std::runtime_error("filletLinearWithHistory: the edge is not a fillet edge of this solid");
++}
++if (maker.NbEdges(ic) != 1) {
++    throw std::runtime_error("filletLinearWithHistory: the tangent contour through this edge has "
++        + std::to_string(maker.NbEdges(ic)) + " edges; a linear law is proved on one edge only");
++}
++if (maker.Closed(ic)) {
++    throw std::runtime_error("filletLinearWithHistory: the contour is closed; a linear law needs two ends");
++}
++// The start witness names the physical end that carries startRadius. It must
++// coincide with exactly one contour end; nothing is guessed from orientation.
++const TopoDS_Vertex vFirst = maker.FirstVertex(ic);
++const TopoDS_Vertex vLast = maker.LastVertex(ic);
++const gp_Pnt start(startX, startY, startZ);
++const double tolFirst = std::max(BRep_Tool::Tolerance(vFirst), Precision::Confusion());
++const double tolLast = std::max(BRep_Tool::Tolerance(vLast), Precision::Confusion());
++const bool atFirst = start.Distance(BRep_Tool::Pnt(vFirst)) <= tolFirst;
++const bool atLast = start.Distance(BRep_Tool::Pnt(vLast)) <= tolLast;
++if (atFirst == atLast) {
++    throw std::runtime_error("filletLinearWithHistory: the start point is not exactly one end of the edge");
++}
++const double rFirst = atFirst ? startRadius : endRadius;
++const double rLast = atFirst ? endRadius : startRadius;
++if (std::abs(rFirst - rLast) < Precision::Confusion()) {
++    maker.SetRadius(rFirst, ic, 1);
++} else {
++    // Endpoint radii in contour order (keeps per-edge constancy and the
++    // extremity data honest), then the law itself over the contour's own
++    // abscissa: r(s) = rFirst + (rLast - rFirst) * s / L.
++    maker.SetRadius(rFirst, rLast, ic, 1);
++    const double u0 = maker.Abscissa(ic, vFirst);
++    const double u1 = maker.Abscissa(ic, vLast);
++    Handle(Law_Linear) law = new Law_Linear();
++    law->Set(u0, rFirst, u1, rLast);
++    maker.SetRadius(law, ic, 1);
++}
++maker.Build();
++if (!maker.IsDone()) {
++    throw std::runtime_error("filletLinearWithHistory: operation failed");
++}
++uint32_t resultId = store(maker.Shape());
++return buildEvolution(maker, resultId, solid, inputFaceHashes, hashUpperBound);"#,
++        includes: &["BRepFilletAPI_MakeFillet.hxx", "TopoDS.hxx", "TopoDS_Vertex.hxx", "TopExp_Explorer.hxx",
++            "TopTools_ShapeMapHasher.hxx", "BRep_Tool.hxx", "Law_Linear.hxx", "Precision.hxx", "gp_Pnt.hxx",
++            "cmath", "algorithm", "string"],
++        category: "evolution",
++        return_type: ReturnType::EvolutionData,
++    },
++    MethodSpec {
++        name: "filletContourFacts",
++        kind: MethodKind::CustomBody,
++        params: &[
++            FacadeParam::ShapeId("solidId"), FacadeParam::ShapeId("edgeId"),
++            FacadeParam::Double("startRadius"), FacadeParam::Double("endRadius"),
++        ],
++        occt_class: "",
++        ctor_args: "",
++        setup_code: r#"// Vendor feasibility facts (WO-3240): the contour OCCT builds for one edge,
++// and what BRepFilletAPI_MakeFillet::SetLaw does to the law across Build().
++// Layout (all doubles, NaN = not available):
++//  [0] NbContours  [1] IC  [2] NbEdges  [3] Length  [4] Closed  [5] ClosedAndTangent
++//  [6..8] FirstVertex  [9..11] LastVertex  [12] Abscissa(first)  [13] Abscissa(last)
++//  [14] input edge orientation
++//  per contour edge j (8 each): IsSame(input), orientation, first xyz, last xyz
++//    (TopExp::FirstVertex/LastVertex with orientation)
++//  then: build1Done, boundsOk, F, L, law1[5], setLawOk, law2[5], build2Done,
++//        law3[5], resultId   (law samples at the 5 quarter stations of [u0,u1])
++const double nan = std::numeric_limits<double>::quiet_NaN();
++std::vector<double> out;
++const auto& solid = get(solidId);
++const TopoDS_Edge& edge = TopoDS::Edge(get(edgeId));
++BRepFilletAPI_MakeFillet maker(solid);
++maker.Add(startRadius, endRadius, edge);
++const int ic = maker.Contour(edge);
++out.push_back(maker.NbContours());
++out.push_back(ic);
++if (ic == 0) return out;
++const int n = maker.NbEdges(ic);
++const TopoDS_Vertex vFirst = maker.FirstVertex(ic);
++const TopoDS_Vertex vLast = maker.LastVertex(ic);
++const gp_Pnt pf = BRep_Tool::Pnt(vFirst);
++const gp_Pnt pl = BRep_Tool::Pnt(vLast);
++const double u0 = maker.Abscissa(ic, vFirst);
++const double u1 = maker.Abscissa(ic, vLast);
++out.insert(out.end(), {double(n), maker.Length(ic), maker.Closed(ic) ? 1.0 : 0.0,
++    maker.ClosedAndTangent(ic) ? 1.0 : 0.0, pf.X(), pf.Y(), pf.Z(), pl.X(), pl.Y(), pl.Z(),
++    u0, u1, double(edge.Orientation())});
++for (int j = 1; j <= n; j++) {
++    const TopoDS_Edge& e = maker.Edge(ic, j);
++    const gp_Pnt a = BRep_Tool::Pnt(TopExp::FirstVertex(e, Standard_True));
++    const gp_Pnt b = BRep_Tool::Pnt(TopExp::LastVertex(e, Standard_True));
++    out.insert(out.end(), {e.IsSame(edge) ? 1.0 : 0.0, double(e.Orientation()),
++        a.X(), a.Y(), a.Z(), b.X(), b.Y(), b.Z()});
++}
++auto sample = [&]() {
++    Handle(Law_Function) law;
++    try { law = maker.GetLaw(ic, edge); } catch (const Standard_Failure&) {}
++    for (int k = 0; k <= 4; k++) {
++        out.push_back(law.IsNull() ? nan : law->Value(u0 + (u1 - u0) * k / 4.0));
++    }
++};
++bool done1 = false;
++try { maker.Build(); done1 = maker.IsDone(); } catch (const Standard_Failure&) {}
++out.push_back(done1 ? 1.0 : 0.0);
++double f = nan, l = nan;
++bool bounds = false;
++try { bounds = maker.GetBounds(ic, edge, f, l); } catch (const Standard_Failure&) {}
++out.insert(out.end(), {bounds ? 1.0 : 0.0, f, l});
++sample();
++bool setOk = false;
++try {
++    Handle(Law_Linear) law = new Law_Linear();
++    law->Set(u0, startRadius, u1, endRadius);
++    maker.SetLaw(ic, edge, law);
++    setOk = true;
++} catch (const Standard_Failure&) {}
++out.push_back(setOk ? 1.0 : 0.0);
++sample();
++bool done2 = false;
++try { maker.Build(); done2 = maker.IsDone(); } catch (const Standard_Failure&) {}
++out.push_back(done2 ? 1.0 : 0.0);
++sample();
++out.push_back(done2 ? double(store(maker.Shape())) : nan);
++return out;"#,
++        includes: &["BRepFilletAPI_MakeFillet.hxx", "TopoDS.hxx", "TopoDS_Vertex.hxx", "TopExp.hxx", "BRep_Tool.hxx",
++            "Law_Linear.hxx", "Law_Function.hxx", "gp_Pnt.hxx", "limits", "vector"],
++        category: "evolution",
++        return_type: ReturnType::VectorDouble,
++    },
++    MethodSpec {
+         name: "rotateWithHistory",
+         kind: MethodKind::CustomBody,
+         params: &[
+diff --git a/facade/include/occt_kernel.h b/facade/include/occt_kernel.h
+--- a/facade/include/occt_kernel.h
++++ b/facade/include/occt_kernel.h
+@@ -343,6 +343,12 @@
+                                  int hashUpperBound);
+     EvolutionData filletWithHistory(uint32_t solidId, std::vector<uint32_t> edgeIds, double radius,
+                                     std::vector<int> inputFaceHashes, int hashUpperBound);
++    EvolutionData filletLinearWithHistory(uint32_t solidId, uint32_t edgeId, double startRadius,
++                                          double endRadius, double startX, double startY,
++                                          double startZ, std::vector<int> inputFaceHashes,
++                                          int hashUpperBound);
++    std::vector<double> filletContourFacts(uint32_t solidId, uint32_t edgeId, double startRadius,
++                                           double endRadius);
+     EvolutionData rotateWithHistory(uint32_t id, double px, double py, double pz, double dx,
+                                     double dy, double dz, double angle,
+                                     std::vector<int> inputFaceHashes, int hashUpperBound);
+diff --git a/ts/src/raw-types.ts b/ts/src/raw-types.ts
+--- a/ts/src/raw-types.ts
++++ b/ts/src/raw-types.ts
+@@ -326,6 +326,8 @@
+     fuseWithHistory(a: number, b: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+     cutWithHistory(a: number, b: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+     filletWithHistory(solidId: number, edgeIds: EmbindVectorU32, radius: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
++    filletLinearWithHistory(solidId: number, edgeId: number, startRadius: number, endRadius: number, startX: number, startY: number, startZ: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
++    filletContourFacts(solidId: number, edgeId: number, startRadius: number, endRadius: number): EmbindVectorF64;
+     rotateWithHistory(id: number, px: number, py: number, pz: number, dx: number, dy: number, dz: number, angle: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+     mirrorWithHistory(id: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+     scaleWithHistory(id: number, cx: number, cy: number, cz: number, factor: number, inputFaceHashes: EmbindVectorI32, hashUpperBound: number): RawEvolutionData;
+diff --git a/ts/src/index.ts b/ts/src/index.ts
+--- a/ts/src/index.ts
++++ b/ts/src/index.ts
+@@ -1711,6 +1711,45 @@
+         );
+     }
+ 
++    /**
++     * Fillet ONE edge with a radius that varies linearly with arc length:
++     * r(s) = startRadius + (endRadius - startRadius) * s / L, s = 0 at the edge
++     * end that coincides with `start`. Throws (and builds nothing) when the
++     * edge's tangent contour has more than one edge, is closed, or `start` is
++     * not exactly one of its ends. WO-3240 feasibility binding.
++     */
++    filletLinearWithHistory(
++        solid: ShapeHandle,
++        edge: ShapeHandle,
++        startRadius: number,
++        endRadius: number,
++        start: { x: number; y: number; z: number },
++        inputFaceHashes: number[],
++        hashUpperBound: number,
++    ): EvolutionData {
++        return wrap("filletLinearWithHistory", () =>
++            this.#withI32(inputFaceHashes, (hashes) =>
++                this.#extractEvolution(
++                    this.#raw.filletLinearWithHistory(solid, edge, startRadius, endRadius, start.x, start.y, start.z, hashes, hashUpperBound),
++                ),
++            ),
++        );
++    }
++
++    /** WO-3240 vendor feasibility facts; see the layout comment in the codegen spec. */
++    filletContourFacts(solid: ShapeHandle, edge: ShapeHandle, startRadius: number, endRadius: number): number[] {
++        return wrap("filletContourFacts", () => {
++            const vec = this.#raw.filletContourFacts(solid, edge, startRadius, endRadius);
++            try {
++                const out: number[] = [];
++                for (let i = 0; i < vec.size(); i++) out.push(vec.get(i));
++                return out;
++            } finally {
++                vec.delete();
++            }
++        });
++    }
++
+     rotateWithHistory(
+         shape: ShapeHandle,
+         axis: { point: Vec3; direction: Vec3 },
+diff --git a/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.hxx b/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.hxx
+--- a/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.hxx
++++ b/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.hxx
+@@ -102,6 +102,9 @@
+ 
+   NCollection_Sequence<gp_XY>                 parandrad;
+   NCollection_List<occ::handle<Law_Function>> laws;
++  // Rule of evolution given for the whole spine (SetRadius(Law_Function)),
++  // in spine abscissa. Null when the radius comes from parandrad.
++  occ::handle<Law_Function> spinelaw;
+ };
+ 
+ #endif // _ChFiDS_FilSpine_HeaderFile
+diff --git a/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.cxx b/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.cxx
+--- a/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.cxx
++++ b/occt/src/ModelingAlgorithms/TKFillet/ChFiDS/ChFiDS_FilSpine.cxx
+@@ -54,8 +54,9 @@
+   if (AllData)
+   {
+     parandrad.Clear();
++    spinelaw.Nullify();
+   }
+-  else // Complete parandrad
++  else if (!parandrad.IsEmpty()) // Complete parandrad
+   {
+     double spinedeb = FirstParameter();
+     double spinefin = LastParameter();
+@@ -234,11 +235,8 @@
+ 
+ void ChFiDS_FilSpine::SetRadius(const occ::handle<Law_Function>& C, const int /*IinC*/)
+ {
+-  splitdone                                          = false;
+-  occ::handle<Law_Composite>                   prout = new Law_Composite();
+-  NCollection_List<occ::handle<Law_Function>>& lst   = prout->ChangeLaws();
+-  lst.Append(C);
+-  parandrad.Clear();
++  splitdone = false;
++  spinelaw  = C;
+ }
+ 
+ //=================================================================================================
+@@ -543,6 +541,38 @@
+   int nbed   = ifin - ideb + 1;
+   int bidfin = ifin;
+ 
++  if (!spinelaw.IsNull())
++  {
++    if (IsPeriodic() || Els->IsPeriodic())
++    {
++      throw Standard_DomainError("ChFiDS_FilSpine : a radius law on a periodic spine is not supported");
++    }
++    double lf, ll;
++    spinelaw->Bounds(lf, ll);
++    const double                                 a     = std::max(deb, lf);
++    const double                                 b     = std::min(fin, ll);
++    occ::handle<Law_Composite>                   ulaw  = new Law_Composite();
++    NCollection_List<occ::handle<Law_Function>>& ulist = ulaw->ChangeLaws();
++    if (b - a <= tol3d)
++    {
++      throw Standard_DomainError("ChFiDS_FilSpine : the radius law does not cover the spine");
++    }
++    if (a - deb > tol3d)
++    {
++      occ::handle<Law_Constant> c = new Law_Constant();
++      c->Set(spinelaw->Value(a), deb, a);
++      ulist.Append(c);
++    }
++    ulist.Append(spinelaw->Trim(a, b, tol3d));
++    if (fin - b > tol3d)
++    {
++      occ::handle<Law_Constant> c = new Law_Constant();
++      c->Set(spinelaw->Value(b), b, fin);
++      ulist.Append(c);
++    }
++    return ulaw;
++  }
++
+   occ::handle<Law_Composite>                   loi  = new Law_Composite();
+   NCollection_List<occ::handle<Law_Function>>& list = loi->ChangeLaws();
+   double                                       Rdeb = 0., Rfin = 0., Rcur;

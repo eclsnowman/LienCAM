@@ -25,7 +25,7 @@ import type { ThreadHelixSpec as TodayThreadSpec, LeadArcSpec as TodayLeadArcSpe
 type BuilderName = 'helixDescent' | 'rampTo'
 interface BuilderCall { name: BuilderName; last?: ToolpathMove; args: unknown[]; pushed: ToolpathMove[]; ret: unknown }
 interface RampCall { last?: ToolpathMove; visits: Array<{ point: { x: number; y: number }; traveled: number }>; args: [number, number, number, number]; pushed: ToolpathMove[] }
-interface SpecCall<S> { spec: S; result?: ToolpathMove[]; error?: string }
+interface SpecCall<S> { spec: S; result?: ToolpathMove[]; error?: string; family?: string }
 interface RoughCall {
   z: number; helixAngleDeg?: number; millingDirection?: string; minHelixRadius?: number
   centres: Array<{ x: number; y: number; radius: number }>; result: IrMove[]
@@ -217,7 +217,9 @@ async function production(): Promise<void> {
   for (const entryType of TODAY_ENTRY_TYPES) {
     rec.linking.entryType = entryType
     for (const [label, scenario] of SCENARIOS_2D) {
+      const arcsBefore = rec.arcs.length
       const reading = await runHeightScenario(scenario)
+      for (const call of rec.arcs.slice(arcsBefore)) call.family = scenario.operation
       programs.push({
         label: `${label} ${entryType}`, family: scenario.operation, entryType, moves: reading.moves, feedRate: FALLBACK_FEED,
         status: `${reading.status} ${reading.errorMessage ?? reading.authoringError ?? ''}`.trim(),
@@ -332,8 +334,10 @@ describe('WO-3031 kernel entry at parity with today\'s entries', () => {
     // rampDescent is reached through rampTo on these rows (Pocket's inside-out default helixes);
     // any direct production call is replayed below, and the units file compares it on a grid.
     expect(rec.fits.length).toBeGreaterThan(0)
-    expect(rec.threads.length).toBeGreaterThan(0)
-    expect(rec.arcs.length).toBeGreaterThan(0)
+    // WO-3168 (35bb15a31d, found by bisect): Thread Mill's cutting helices ride Bore's
+    // native helical arcs, so today's thread helix builder has no production caller left.
+    expect(rec.arcs.some(call => call.family === 'thread_mill')).toBe(true)
+    expect(rec.arcs.some(call => call.family === 'bore')).toBe(true)
     expect(rec.rough.length).toBeGreaterThan(0)
   }, 900_000)
 
@@ -361,7 +365,9 @@ describe('WO-3031 kernel entry at parity with today\'s entries', () => {
   })
 
   it('bore and thread helices and the thread lead arcs: the one builder equals today\'s on every recorded production call', () => {
-    expect(rec.threads.length * rec.arcs.length * rec.leadArcs.length).toBeGreaterThan(0)
+    // WO-3168: the thread helices are among the helical-arc calls (see the first test).
+    expect(rec.arcs.some(call => call.family === 'thread_mill')).toBe(true)
+    expect(rec.arcs.length * rec.leadArcs.length).toBeGreaterThan(0)
     const differ = [
       ...rec.threads.flatMap((call, i) => replaySpec(call, kernel.threadHelix) ? [] : [`thread ${i}`]),
       ...rec.arcs.flatMap((call, i) => replaySpec(call, kernel.helixArcs) ? [] : [`bore arcs ${i}`]),

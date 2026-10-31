@@ -15,6 +15,7 @@ import {
   isProbeCycleActive,
   recoverFromProbeAlarm,
   runZProbeCycle,
+  setSimulatedPart,
 } from '../../lib/machine/machineSession'
 import type { ZProbeConfig } from '../../lib/machine/toolTable'
 import { axisSoftLimitStatementKey } from '../../lib/machine/resolvedMachineMotion'
@@ -48,6 +49,10 @@ async function connect() {
   __resetEstopInterlockForTest()
   // One status poll so the idle state lands before the runner's guards check it.
   await vi.advanceTimersByTimeAsync(50)
+  // WO-3189 seeds the setup's stock box at every simulator connect; this
+  // fixture is the machine's flat pad, so it says no part is placed. A placed
+  // part replaces the pad by design (WO-416), so the pad route needs this.
+  setSimulatedPart(null)
 }
 
 /** Drive a runner promise to completion under fake timers. */

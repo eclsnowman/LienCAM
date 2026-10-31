@@ -2528,6 +2528,7 @@ const sketchAndModelWorkbench = {
     "pushPullMovesThatFace": "Push/Pull moves that face",
     "thatIs": "that is",
     "hasNoRoundedEdgeForFilletToChange": "\"{{partName}}\" has no rounded edge for Fillet to change",
+    "filletRoundsAnEdgeClickOne": "Fillet rounds an edge - click an edge of \"{{partName}}\" to round it",
     "thatIsNotARoundedEdgeHasClickOne": "that is not a rounded edge - \"{{partName}}\" has {{fillets}}; click one of those",
     "notChanged": "Not changed: {{answer}}.",
     "notChangedThe": "Not changed: {{answer}}. {{value2}}: the {{label}}.",
@@ -2938,6 +2939,10 @@ const sketchAndModelWorkbench = {
     "tabHVAligned": "Tab: H / V / Aligned"
   },
   "SketchDrawValueInput": {
+    "width": "Width",
+    "height": "Height",
+    "held": "Typed size held",
+    "followsPointer": "Follows pointer",
     "enterSetsThenEnterToApply": "Enter sets {{value1}}, then Enter to apply",
     "setback": "setback",
     "radius": "radius"

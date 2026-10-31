@@ -73,6 +73,82 @@ export function threadTravelUp(
   return (orbitSense * h) > 0
 }
 
+/** WO-3193: the operator's axial direction choice on a thread mill. */
+export type ThreadAxialDirection = 'bottom-up' | 'top-down'
+
+export interface ThreadMotion {
+  orbitSense: 1 | -1                 // +1 CCW from +Z, -1 CW
+  travelUp: boolean                  // true = bottom -> top
+  axialDirection: ThreadAxialDirection
+  cut: 'climb' | 'conventional'      // what the orbit sense gives on this kind/spindle
+}
+
+/**
+ * WO-3193: resolve a thread mill's motion. With an explicit axialDirection the
+ * direction is the input: the orbit sense that follows the hand's groove in that
+ * direction is s = h when ascending, -h when descending (the inverse of
+ * threadTravelUp), and climb/conventional is what results (c = s * e * p, the
+ * inverse of threadOrbitSense). Without one (every op saved before WO-3193) the
+ * direction is derived from cutDirection exactly as before, so no saved
+ * toolpath changes.
+ */
+export function resolveThreadMotion(
+  params: {
+    threadKind: 'internal' | 'external'
+    handedness: 'right' | 'left'
+    cutDirection: 'climb' | 'conventional'
+    axialDirection?: ThreadAxialDirection
+  },
+  spindleSign: 1 | -1,
+): ThreadMotion {
+  const { threadKind: kind, handedness: hand, axialDirection } = params
+  if (axialDirection === undefined) {
+    const orbitSense = threadOrbitSense(kind, params.cutDirection, spindleSign)
+    const travelUp = threadTravelUp(orbitSense, hand)
+    return { orbitSense, travelUp, axialDirection: travelUp ? 'bottom-up' : 'top-down', cut: params.cutDirection }
+  }
+  if (axialDirection !== 'bottom-up' && axialDirection !== 'top-down') {
+    throw new Error(`resolveThreadMotion: invalid axialDirection "${axialDirection}"`)
+  }
+  if (hand !== 'right' && hand !== 'left') {
+    throw new Error(`resolveThreadMotion: invalid hand "${hand}"`)
+  }
+  if (kind !== 'internal' && kind !== 'external') {
+    throw new Error(`resolveThreadMotion: invalid kind "${kind}"`)
+  }
+  if (spindleSign !== 1 && spindleSign !== -1) {
+    throw new Error(`resolveThreadMotion: invalid spindle "${spindleSign}"`)
+  }
+  const travelUp = axialDirection === 'bottom-up'
+  const h = hand === 'right' ? 1 : -1
+  const orbitSense = (travelUp ? h : -h) as 1 | -1
+  const e = kind === 'internal' ? 1 : -1
+  const cut = orbitSense * e * spindleSign > 0 ? 'climb' : 'conventional'
+  return { orbitSense, travelUp, axialDirection, cut }
+}
+
+/**
+ * WO-3194 (plan page D9, 2026-10-27: "Compensate so the edge runs at the set
+ * feed"). The helix F word is programmed at the tool CENTRE, but the cutting edge
+ * rides the thread wall: centre radius + tool radius inside a hole, centre radius -
+ * tool radius around a boss. Scale the centre feed so the EDGE moves at the set feed:
+ *   internal  F_centre = F * R / (R + r)
+ *   external  F_centre = F * R / (R - r)
+ * Only the cutting helix uses this; leads, plunge and exit keep their own rates.
+ * An edge radius <= 0 (an external root at or past the boss centre) has no edge
+ * circle to compensate against, so the set feed is returned unchanged.
+ */
+export function threadEdgeFeed(
+  feed: number,
+  centreRadius: number,
+  toolRadius: number,
+  kind: 'internal' | 'external',
+): number {
+  const edgeRadius = kind === 'internal' ? centreRadius + toolRadius : centreRadius - toolRadius
+  if (!(centreRadius > 0) || !(edgeRadius > 0)) return feed
+  return feed * centreRadius / edgeRadius
+}
+
 export interface ThreadHelixSpec {
   cx: number; cy: number;      // orbit center (hole center) XY
   radius: number;              // orbit radius of the tool CENTER (> 0)
@@ -81,6 +157,10 @@ export interface ThreadHelixSpec {
   topZ: number;                // thread top (end, higher); must be > bottomZ
   dir: 1 | -1;                 // +1 CCW, -1 CW (from threadOrbitSense)
   feed: number;                // feedrate to tag on each move (> 0)
+  // generateHelixArcs only: feedrate for the FIRST move (the feed to the start point,
+  // at the start Z). It finishes whatever approach came before - an arc lead-in stops
+  // just short of the start point - so it is not cutting helix. Default `feed`.
+  entryFeed?: number;
   startAngle?: number;         // optional orbit start angle in radians (default 0)
   role?: 'helix';              // default 'helix'
   descend?: boolean;           // default false (ascend). true = top->bottom traversal.
@@ -208,7 +288,7 @@ export function generateHelixArcs(spec: ThreadHelixSpec): ToolpathMove[] {
 
   const moves: ToolpathMove[] = []
   const start = at(0)
-  moves.push({ type: 'feed', x: start.x, y: start.y, z: startZ, feed, role })
+  moves.push({ type: 'feed', x: start.x, y: start.y, z: startZ, feed: spec.entryFeed ?? feed, role })
 
   const segments = Math.max(1, Math.ceil(totalAngleAbs / Math.PI - 1e-9))
   let prev = start

@@ -92,7 +92,7 @@ export const BOOLEAN_BODY_KIND = 'boolean-body';
 export const BOOLEAN_BODY_VERSION = 1;
 
 export type BooleanBodyOperation = 'add' | 'subtract';
-export type BooleanBodyShape = 'box' | 'cylinder' | 'hole' | 'chamfer' | 'shell' | 'draft';
+export type BooleanBodyShape = 'box' | 'cylinder' | 'hole' | 'chamfer' | 'fillet' | 'shell' | 'draft';
 
 /** WO-2089: one straight edge a chamfer is cut from (or added into). */
 export interface BooleanBodyChamferEdge {
@@ -102,6 +102,20 @@ export interface BooleanBodyChamferEdge {
   /** unit directions from the edge INTO each of its two faces, square to it */
   faceDirections: [[number, number, number], [number, number, number]];
   /** 'subtract' for an outside edge, 'add' for an inside corner */
+  operation: BooleanBodyOperation;
+}
+
+/** WO-3092: one run of sharp edge a fillet rounds - a straight edge, or a
+ *  tangent-continuous chain of them (a hole's rim) - with, at every point of
+ *  it, the directions into its two faces square to it there. The first face is
+ *  the flat face the whole run lies in. */
+export interface BooleanBodyFilletChain {
+  /** the run's corners, part coordinates, mm (a closed run does not repeat its first) */
+  points: [number, number, number][];
+  closed: boolean;
+  /** per point: unit directions INTO its two faces, square to the run there */
+  faceDirections: [[number, number, number], [number, number, number]][];
+  /** 'subtract' for an outside edge (rounded off), 'add' for an inside corner (filled) */
   operation: BooleanBodyOperation;
 }
 
@@ -133,6 +147,9 @@ export interface BooleanBodyParameters {
   /** chamfer: the edges, and how far the chamfer runs back along each face */
   edges?: BooleanBodyChamferEdge[];
   distanceMm?: number;
+  /** WO-3092 fillet: the runs of edge, and the radius they are rounded to */
+  chains?: BooleanBodyFilletChain[];
+  radiusMm?: number;
   /** WO-2090 shell: the faces to open; draft: the faces to draft */
   faces?: MeshFaceRef[];
   /** shell: the wall thickness, mm */
@@ -160,6 +177,8 @@ const PARAMETER_KEYS = new Set([
   'countersinkAngleDeg',
   'edges',
   'distanceMm',
+  'chains',
+  'radiusMm',
   'faces',
   'thicknessMm',
   'angleDeg',
@@ -556,6 +575,105 @@ function chamferWedge(edge: BooleanBodyChamferEdge, distanceMm: number): MeshBuf
   return soup(coords);
 }
 
+/** WO-3092: one fillet's cutter (or filler) - the corner between a run's two
+ *  faces and the round of `radiusMm` tangent to both, swept along the run. In
+ *  section it is the region between the edge and the arc, grown a little out
+ *  past both faces and behind the edge so the kernel cuts (or fills) clean; it
+ *  meets the part's faces only along the two lines the round is tangent on.
+ *  Along a chain each section is mitred, so the arc stays `radiusMm` from both
+ *  faces of every facet of a polygon rim. An open run runs
+ *  `CHAMFER_END_RUN_MM` past each end, as a chamfer's wedge does. */
+export function filletSweep(chain: BooleanBodyFilletChain, radiusMm: number): MeshBuffers {
+  const n = chain.points.length;
+  const pts = chain.points.map((p) => [...p] as Vec3);
+  const closed = chain.closed && n >= 3;
+  const segDir = (k: number): Vec3 => unit(sub(pts[(k + 1) % n], pts[k]));
+  const tangents: Vec3[] = [];
+  const miters: number[] = [];
+  for (let k = 0; k < n; k++) {
+    const din = closed || k > 0 ? segDir((k - 1 + n) % n) : null;
+    const dout = closed || k < n - 1 ? segDir(k) : null;
+    const t = din !== null && dout !== null ? unit([din[0] + dout[0], din[1] + dout[1], din[2] + dout[2]]) : (din ?? dout) as Vec3;
+    tangents.push(t);
+    miters.push(din !== null && dout !== null ? 1 / Math.max(0.2, t[0] * dout[0] + t[1] * dout[1] + t[2] * dout[2]) : 1);
+  }
+  if (!closed) {
+    pts[0] = along(pts[0], tangents[0], -CHAMFER_END_RUN_MM);
+    pts[n - 1] = along(pts[n - 1], tangents[n - 1], CHAMFER_END_RUN_MM);
+  }
+  const r = radiusMm;
+  const frames = pts.map((_, k) => {
+    const t = tangents[k];
+    const square = (d: Vec3): Vec3 => {
+      const s = d[0] * t[0] + d[1] * t[1] + d[2] * t[2];
+      return unit([d[0] - t[0] * s, d[1] - t[1] * s, d[2] - t[2] * s]);
+    };
+    const t1 = square(chain.faceDirections[k][0] as Vec3);
+    const t2 = square(chain.faceDirections[k][1] as Vec3);
+    const c = Math.max(-1, Math.min(1, t1[0] * t2[0] + t1[1] * t2[1] + t1[2] * t2[2]));
+    const v = unit([t2[0] - t1[0] * c, t2[1] - t1[1] * c, t2[2] - t1[2] * c]);
+    return { t1, v, theta: Math.acos(c) };
+  });
+  const thetaMin = Math.min(...frames.map((f) => f.theta));
+  const arcSegments = Math.max(4, Math.ceil((boreSegments(r) * (Math.PI - thetaMin)) / (2 * Math.PI)));
+  // One section in the run's square plane: x along the first face, y toward
+  // the second. The round's centre is (d, r); it touches the faces at (d, 0)
+  // and d along the second face.
+  const profile = (theta: number): Array<[number, number]> => {
+    const d = r / Math.tan(theta / 2);
+    const grow = 0.25 * r;
+    const out: Array<[number, number]> = [[d, -grow]];
+    for (let i = 0; i <= arcSegments; i++) {
+      const phi = -Math.PI / 2 - (i / arcSegments) * (Math.PI - theta);
+      out.push([d + r * Math.cos(phi), r + r * Math.sin(phi)]);
+    }
+    out.push([d * Math.cos(theta) - grow * Math.sin(theta), d * Math.sin(theta) + grow * Math.cos(theta)]);
+    out.push([-grow * Math.cos(theta / 2), -grow * Math.sin(theta / 2)]);
+    return out;
+  };
+  const sections = pts.map((p, k) => {
+    const { t1, v, theta } = frames[k];
+    return profile(theta).map(([x, y]): Vec3 => [0, 1, 2].map((a) => p[a] + x * miters[k] * t1[a] + y * v[a]) as Vec3);
+  });
+  const m = sections[0].length;
+  // The point behind the edge: every other corner of a section is seen from it.
+  const behind = m - 1;
+  const coords: number[] = [];
+  const tri = (a: Vec3, b: Vec3, c: Vec3) => coords.push(...a, ...b, ...c);
+  const spans = closed ? n : n - 1;
+  for (let k = 0; k < spans; k++) {
+    const A = sections[k];
+    const B = sections[(k + 1) % n];
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      tri(A[i], B[i], B[j]);
+      tri(A[i], B[j], A[j]);
+    }
+  }
+  if (!closed) {
+    for (let i = 0; i < behind - 1; i++) {
+      tri(sections[0][behind], sections[0][i], sections[0][i + 1]);
+      tri(sections[n - 1][behind], sections[n - 1][i + 1], sections[n - 1][i]);
+    }
+  }
+  // Wind it outward, whichever way round the run and its faces were given.
+  let volume = 0;
+  for (let i = 0; i < coords.length; i += 9) {
+    const x = cross([coords[i + 3], coords[i + 4], coords[i + 5]], [coords[i + 6], coords[i + 7], coords[i + 8]]);
+    volume += coords[i] * x[0] + coords[i + 1] * x[1] + coords[i + 2] * x[2];
+  }
+  if (volume < 0) {
+    for (let i = 0; i < coords.length; i += 9) {
+      for (let a = 0; a < 3; a++) {
+        const tmp = coords[i + 3 + a];
+        coords[i + 3 + a] = coords[i + 6 + a];
+        coords[i + 6 + a] = tmp;
+      }
+    }
+  }
+  return soup(coords);
+}
+
 /** WO-2089: the solids this edit adds or cuts, in the order it applies them,
  *  each exactly as the kernel will be handed it. A box or a cylinder is one.
  *  `mesh` is the part they are applied to (a hole's cutters ring its faces). */
@@ -570,6 +688,12 @@ export function booleanBodyOperands(
     return (parameters.edges ?? []).map((edge) => ({
       mesh: chamferWedge(edge, parameters.distanceMm as number),
       operation: edge.operation,
+    }));
+  }
+  if (parameters.shape === 'fillet') {
+    return (parameters.chains ?? []).map((chain) => ({
+      mesh: filletSweep(chain, parameters.radiusMm as number),
+      operation: chain.operation,
     }));
   }
   if (parameters.shape === 'shell') {
@@ -626,6 +750,10 @@ function holeOrChamferWords(p: Partial<BooleanBodyParameters>): string | null {
   if (p.shape === 'chamfer') {
     const count = Array.isArray(p.edges) ? p.edges.length : 0;
     return `Chamfered ${count} edge${count === 1 ? '' : 's'} ${mm(p.distanceMm)} mm`;
+  }
+  if (p.shape === 'fillet') {
+    const count = Array.isArray(p.chains) ? p.chains.length : 0;
+    return `Filleted ${count} edge${count === 1 ? '' : 's'} ${mm(p.radiusMm)} mm`;
   }
   const faces = Array.isArray(p.faces) ? p.faces.length : 0;
   const faceWord = `${faces} face${faces === 1 ? '' : 's'}`;
@@ -875,6 +1003,7 @@ export const booleanBodyOperation: MeshEditOperation<BooleanBodyParameters> = {
     const center = triple(given.center, 'center');
     if (given.shape === 'hole') return validateHole(given, operation, center);
     if (given.shape === 'chamfer') return validateChamfer(given, operation, center);
+    if (given.shape === 'fillet') return validateFillet(given, operation, center);
     if (given.shape === 'shell' || given.shape === 'draft') return validateShellOrDraft(given, operation, center);
     if (given.shape === 'box') {
       const size = triple(given.size, 'size');
@@ -901,7 +1030,7 @@ export const booleanBodyOperation: MeshEditOperation<BooleanBodyParameters> = {
         axisDirection,
       };
     }
-    throw new Error(`"${BOOLEAN_BODY_KIND}" makes a box or a cylinder (or a hole, a chamfer, a shell or a draft); "${String(given.shape)}" is none of those.`);
+    throw new Error(`"${BOOLEAN_BODY_KIND}" makes a box or a cylinder (or a hole, a chamfer, a fillet, a shell or a draft); "${String(given.shape)}" is none of those.`);
   },
 
   apply({ mesh, parameters }: MeshEditApplyInput<BooleanBodyParameters>): MeshEditApplyResult {
@@ -991,6 +1120,35 @@ function validateChamfer(
     };
   });
   return { operation, shape: 'chamfer', center, edges, distanceMm: measurement(given.distanceMm, 'chamfer distance') };
+}
+
+function validateFillet(
+  given: Record<string, unknown>,
+  operation: BooleanBodyOperation,
+  center: [number, number, number],
+): BooleanBodyParameters {
+  onlyKeys(given, 'fillet', ['operation', 'shape', 'center', 'chains', 'radiusMm']);
+  if (!Array.isArray(given.chains) || given.chains.length === 0) {
+    throw new Error(`A fillet in "${BOOLEAN_BODY_KIND}" needs at least one edge.`);
+  }
+  const directions = `A fillet edge in "${BOOLEAN_BODY_KIND}" needs the directions into its two faces at every point.`;
+  const chains = given.chains.map((raw): BooleanBodyFilletChain => {
+    const c = (raw ?? {}) as Record<string, unknown>;
+    if (!Array.isArray(c.points) || c.points.length < 2) {
+      throw new Error(`A fillet edge in "${BOOLEAN_BODY_KIND}" needs at least two points.`);
+    }
+    const points = c.points.map((p) => triple(p, 'edge point'));
+    if (!Array.isArray(c.faceDirections) || c.faceDirections.length !== points.length) throw new Error(directions);
+    const faceDirections = c.faceDirections.map((pair): [[number, number, number], [number, number, number]] => {
+      if (!Array.isArray(pair) || pair.length !== 2) throw new Error(directions);
+      return [triple(pair[0], 'face direction'), triple(pair[1], 'face direction')];
+    });
+    if (c.operation !== 'add' && c.operation !== 'subtract') {
+      throw new Error(`A fillet edge adds or subtracts; "${String(c.operation)}" is neither.`);
+    }
+    return { points, closed: c.closed === true, faceDirections, operation: c.operation };
+  });
+  return { operation, shape: 'fillet', center, chains, radiusMm: measurement(given.radiusMm, 'fillet radius') };
 }
 
 function validateShellOrDraft(

@@ -525,7 +525,6 @@ export const RESIDUAL_TEXT: ResidualText[] = [
       '"{}": the tool change on line {} (T{}) measures the new tool against a reference tool, and none is measured yet. Measure a reference tool on the setter first (Tools / Probe panel).',
       'Cycle Start: no reference tool is measured yet for the tool change on line {} (T{}) - measure a reference tool on the setter before the program reaches it (see the load line).',
       'Reference tool measured - the tool change on line {} (T{}) will measure against it.',
-      '"{}": the controller\'s text reader cannot run it ({}), so it was read by the file interpreter the machine bridge uses.',
       '"{}" was not loaded: {}',
       '"{}" is loaded and waits for {} ({}). Setting {} reads it against that work zero; nothing else is needed.',
       '{}: the paused program did not come to a clean stop, so nothing was sent - check the machine.',

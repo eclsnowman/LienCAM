@@ -175,13 +175,15 @@ export function planTabs(pathIn: readonly Point[], tabs: ResolvedTabs, customFra
   return ok({ ...tabs, path, cumulative, perimeter, intervals })
 }
 
-/** Which contour routes keep the tabs. Off is today's engine: the single-region
- * Offset and Trochoidal roughing and the finish keep them; a contour whose rough
- * offset splits into several regions (finish still one) is cut by the multi-region
- * branch, which has no tabs (BL-312/313); open chains and a split finish refuse. */
+/** Which contour routes keep the tabs. Off is today's engine: Offset and
+ * Trochoidal roughing and the finish keep them, including a contour whose rough
+ * offset splits into several regions while the finish stays one (WO-3195: the
+ * Offset rough lifts over the finish's own tab plan on every region; before it,
+ * Offset roughing and the split route cut through the tabs); open chains and a
+ * split finish refuse. */
 export function tabRoutes(policy: WorkholdingPolicy): Readonly<Record<ContourRoute, RouteTabs>> {
   if (policy.tabs_all_routes) {
     return Object.freeze({ 'offset-rough': 'honoured', 'trochoidal-rough': 'honoured', finish: 'honoured', 'multi-region': 'honoured', 'split-finish': 'honoured', 'open-chain': 'honoured' })
   }
-  return Object.freeze({ 'offset-rough': 'honoured', 'trochoidal-rough': 'honoured', finish: 'honoured', 'multi-region': 'not-honoured', 'split-finish': 'refused', 'open-chain': 'refused' })
+  return Object.freeze({ 'offset-rough': 'honoured', 'trochoidal-rough': 'honoured', finish: 'honoured', 'multi-region': 'honoured', 'split-finish': 'refused', 'open-chain': 'refused' })
 }

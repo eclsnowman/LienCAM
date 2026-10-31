@@ -1,0 +1,12 @@
+/* WO-3305: the Sketches window list. Tokens only. */
+.ui2-sketch-input-intro { margin: 0 0 var(--sp4); color: var(--tx2); font: var(--f-body)/1.4 var(--sans); overflow-wrap: anywhere; }
+.ui2-sketch-input-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp2); min-width: 0; }
+.ui2-sketch-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp3); min-height: var(--h-row); padding: var(--sp2) var(--sp3); border-radius: var(--r-sm, 4px); background: var(--ctl); }
+.ui2-sketch-input-row[data-status='ok'] { box-shadow: inset 2px 0 0 var(--ok); }
+.ui2-sketch-input-row[data-status='warn'] { box-shadow: inset 2px 0 0 var(--warn); }
+.ui2-sketch-input-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx); font: var(--f-body)/1.2 var(--sans); }
+.ui2-sketch-input-reason { grid-column: 1 / -1; margin: 0; color: var(--tx2); font: var(--f-cap)/1.4 var(--sans); overflow-wrap: anywhere; }
+/* Use sits at the row's right end: open its reason tip leftward so a hidden tip never widens the card. */
+[data-ui2] .ui2-sketch-input-row .kit-tip { left: auto; right: 0; }
+/* The window is zoomed with the interface scale: keep the Use button at the hit size after scaling. */
+.ui2-sketch-input-row button { min-height: calc(var(--min-hit) / var(--ui2-scale, 1)); min-width: calc(var(--min-hit) / var(--ui2-scale, 1)); }

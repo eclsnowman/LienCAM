@@ -108,9 +108,21 @@ describe('WO-2462 public platform test list', () => {
     const lists: { before: PublicList; after: PublicList } = JSON.parse(execFileSync(process.execPath,
       ['--input-type=module', '-e', script], { cwd: ROOT, encoding: 'utf8', windowsHide: true, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 }))
     const removed = lists.before.kept.filter(path => !lists.after.kept.includes(path))
-    expect(removed).toEqual(Object.keys(expectedReasons).sort())
+    // WO-3266: a candidate that is already excluded as private (the goodspec
+    // tripwire now imports a private host-independent helper) cannot be "newly
+    // removed" by the platform exceptions.
+    expect(Object.keys(expectedReasons)).toHaveLength(8)
+    const alreadyPrivate = new Set(lists.before.excluded.map(entry => entry.path))
+    expect(removed).toEqual(Object.keys(expectedReasons).filter(path => !alreadyPrivate.has(path)).sort())
     expect(lists.after.kept.filter(path => !lists.before.kept.includes(path))).toEqual([])
-    expect(lists.after.excluded.filter(entry => !removed.includes(entry.path))).toEqual(lists.before.excluded)
+    const candidates = new Set(Object.keys(expectedReasons))
+    expect(lists.after.excluded.filter(entry => !candidates.has(entry.path)))
+      .toEqual(lists.before.excluded.filter(entry => !candidates.has(entry.path)))
+    // A candidate that was already private keeps its privacy reasons and gains the
+    // platform one; it is simply not part of the newly removed set.
+    for (const path of Object.keys(expectedReasons).filter(path => alreadyPrivate.has(path))) {
+      expect(lists.after.excluded.find(entry => entry.path === path)?.reasons).toContain(expectedReasons[path])
+    }
     for (const path of removed) expect(lists.after.excluded.find(entry => entry.path === path)?.reasons).toEqual([expectedReasons[path]])
     expect(lists.after.kept).toContain(face)
   }, 120_000)

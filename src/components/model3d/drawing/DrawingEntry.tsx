@@ -10,7 +10,7 @@
 // section and the editor re-read the records after a write - plus the body
 // reading the entry and the editor both need.
 
-import { useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { ChevronDown, ChevronRight, FileText, Trash2 } from 'lucide-react'
 import { useText } from '../../../i18n'
 import { useUiPrefs } from '../../../store/uiPrefs'
@@ -31,8 +31,9 @@ import {
   type DrawingViewName,
 } from '../../../lib/drawing/document'
 import { MESH_OCCLUSION_PRODUCER, standardViewFrame } from '../../../lib/drawing/project'
-import { contentFingerprint } from '../../../lib/drawing/meshSource'
+import { contentFingerprint, MESH_DRAWING_PRODUCER, type MeshDrawingSource } from '../../../lib/drawing/meshSource'
 import type { SourceRevision, ViewFrame } from '../../../lib/drawing/types'
+import { drawingsModelPort, drawingsSignature, type DrawingsModel } from './drawingModePort'
 import './drawing.css'
 
 // ---------------------------------------------------------------------------
@@ -103,10 +104,24 @@ export interface DrawingBody {
   bodyId: string
   lineageId?: string
   name: string
+  /**
+   * WO-3092: a body that is a mesh (an STL kept as an STL) reads its own
+   * triangles - its bytes with its edit journal replayed - instead of being
+   * tessellated through a kernel handle. Absent for a kernel body.
+   */
+  mesh?: MeshBodyReader
+}
+
+/** WO-3092: how a mesh body is read for a drawing. */
+export interface MeshBodyReader {
+  /** changes whenever what the read returns changes (the row, its edit journal) */
+  key: string
+  read(): Promise<BodyMesh>
 }
 
 /** What the Model page knows about a drawing's source right now. */
-export type DrawingSourceStatus = 'present' | 'deleted' | 'off' | 'failed'
+/** WO-3092: 'closed' - a mesh part whose STL is not open in the Model screen. */
+export type DrawingSourceStatus = 'present' | 'deleted' | 'off' | 'failed' | 'closed'
 
 export interface BodyMesh {
   mesh: { positions: Float32Array; indices: Uint32Array }
@@ -157,6 +172,29 @@ export async function readBodyMesh(client: GeomClient, handle: BodyHandle): Prom
   }
 }
 
+/**
+ * WO-3092: a mesh body's read, from the WO-2988 adapter's source (the row's
+ * bytes with its journal replayed). An absent source throws the reason, so
+ * the entry and the editor say it like any other failed read.
+ */
+export function meshBodyRead(src: MeshDrawingSource): BodyMesh {
+  if (src.mesh === undefined || src.state.kind !== 'mesh') {
+    throw new Error(src.problem === 'unreadable' ? 'its STL could not be read' : 'its STL file is not in this project any more')
+  }
+  return {
+    mesh: { positions: src.mesh.positions, indices: src.mesh.indices },
+    box: meshBox(src.mesh.positions),
+    revision: src.state.revision,
+  }
+}
+
+/** The body as a drawing reads it: a mesh body reads itself, a kernel body is tessellated. */
+export async function readDrawingBody(body: DrawingBody, client: GeomClient | null, handle: BodyHandle | undefined): Promise<BodyMesh> {
+  if (body.mesh !== undefined) return body.mesh.read()
+  if (client === null || handle === undefined) throw new Error('geometry engine not ready')
+  return readBodyMesh(client, handle)
+}
+
 export function standardFrames(box: DrawingSourceBox | null): Record<DrawingViewName, ViewFrame> {
   const centre: [number, number, number] = box === null
     ? [0, 0, 0]
@@ -189,17 +227,14 @@ export async function createDrawingOfBody(input: {
 }): Promise<{ drawing: DrawingDocument; problem?: string }> {
   let read: BodyMesh | null = null
   let problem: string | undefined
-  if (input.client !== null && input.handle !== undefined) {
-    try {
-      read = await readBodyMesh(input.client, input.handle)
-    } catch (err) {
-      problem = err instanceof Error ? err.message : String(err)
-    }
-  } else {
-    problem = 'geometry engine not ready'
+  try {
+    read = await readDrawingBody(input.body, input.client, input.handle)
+  } catch (err) {
+    problem = err instanceof Error ? err.message : String(err)
   }
   const records = getDrawingRecords(input.modelItemId)
-  const revision: SourceRevision = read?.revision ?? { geometryFingerprint: '', frameFingerprint: BODY_LOCAL_FRAME, producerVersion: MESH_OCCLUSION_PRODUCER }
+  const isMesh = input.body.mesh !== undefined
+  const revision: SourceRevision = read?.revision ?? { geometryFingerprint: '', frameFingerprint: BODY_LOCAL_FRAME, producerVersion: isMesh ? MESH_DRAWING_PRODUCER : MESH_OCCLUSION_PRODUCER }
   const drawing = createDrawingDocument({
     id: nextDrawingId(records, reservedDrawingIds(input.modelItemId)),
     name: input.name,
@@ -207,7 +242,8 @@ export async function createDrawingOfBody(input: {
       modelItemId: input.modelItemId,
       documentId: input.documentId,
       lineageId: bodyLineage(input.body),
-      kind: 'model-brep',
+      // WO-3092: an STL kept as an STL is a mesh source (WO-2988).
+      kind: isMesh ? 'mesh' : 'model-brep',
       observedRevision: revision,
     },
     frames: standardFrames(read?.box ?? null),
@@ -290,6 +326,30 @@ export function DrawingEntry({ modelItemId, documentId, bodies, selectedId, getC
     saveItemDrawings(modelItemId, restoreDrawingDocument(getDrawingRecords(modelItemId), drawing).records)
   }
 
+  // WO-3301: the New UI's Drawings section and Drawing mode read this same list and the same actions
+  const model: DrawingsModel = {
+    modelItemId,
+    drawings: records.documents.map((d) => ({ id: d.id, name: d.name, sourceGone: sourceStatus(d.source.lineageId) === 'deleted' })),
+    openId,
+    canCreate: target !== null && !busy,
+    creating: busy,
+    bodyCount: bodies.length,
+    removedName,
+    notice,
+    create: () => { void create() },
+    open: (drawingId) => setOpenDrawing(modelItemId, drawingId),
+    close: () => setOpenDrawing(modelItemId, null),
+    remove: (drawingId) => {
+      const drawing = records.documents.find((d) => d.id === drawingId)
+      if (drawing !== undefined) remove(drawing)
+    },
+    undoRemove,
+  }
+  const signature = drawingsSignature(model)
+  const [owner] = useState(() => ({}))
+  useEffect(() => { drawingsModelPort.update(model, signature, owner) })
+  useEffect(() => () => drawingsModelPort.release(owner), [owner])
+
   return (
     <div className="tree-section" data-testid="workbench-section-drawings">
       <div
@@ -310,7 +370,8 @@ export function DrawingEntry({ modelItemId, documentId, bodies, selectedId, getC
             className="drawing-entry-create"
             data-testid="drawing-create"
             disabled={target === null || busy}
-            title={target === null ? t('entry.createNeedsBody') : t('entry.createTip')}
+            // WO-3092: with bodies listed, the reason is which one - never "select a body" as if there were none.
+            title={target !== null ? t('entry.createTip') : bodies.length > 1 ? t('entry.createPickOne', { count: bodies.length }) : t('entry.createNeedsBody')}
             onClick={() => { void create() }}
           >
             <FileText size={12} /> {busy ? t('entry.creating') : t('entry.create')}

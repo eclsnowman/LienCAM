@@ -1,4 +1,6 @@
 import { textFor, useText as useShellText } from '../../i18n'
+import { CamShortcutSettings } from '../settings/CamShortcutSettings'
+import { GamepadJogSettings } from '../machine/GamepadJogSettings'
 import { Settings as SettingsIcon, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useCamStore } from '../../store'
@@ -13,7 +15,9 @@ import { APP_VERSION, GIT_COMMIT_LABEL, GIT_BRANCH, BUILD_DATE } from '../../ver
 import { CURRENT_PROJECT_SCHEMA_VERSION } from '../../store/migrations/projectMigrations'
 import { UI_THEME_IDS, UI_THEME_LABELS, type UiThemeId } from '../../theme/uiTheme'
 import { AVAILABLE_LANGUAGES, languageName, machineTranslationNote, useText } from '../../i18n'
+import { setNewUi, useNewUi } from '../../ui2/newUiSwitch'
 import { UserDataStoragePanel } from './UserDataStoragePanel'
+import { useGuidedSetup } from './GuidedSetupModal'
 import { writeGrblSettingAndReadBack } from '../../lib/machine/machineSession'
 import { controllerSurface } from '../../lib/machine/controllerSurface'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
@@ -140,6 +144,8 @@ export function SettingsModal() {
   // WO-1904: the ONE remembered DXF-import choice both import routes read.
   const dxfKeepOrigin    = useUiPrefs((s) => s.dxfKeepOrigin)
   const setDxfKeepOrigin = useUiPrefs((s) => s.setDxfKeepOrigin)
+  const newUi = useNewUi()
+  const newUiText = useText('ui2-settings-row.wo3288')
   const uiScale    = useUiPrefs((s) => s.uiScale)
   const setUiScale = useUiPrefs((s) => s.setUiScale)
   const uiColorMode = useUiPrefs((s) => s.uiColorMode)
@@ -149,6 +155,7 @@ export function SettingsModal() {
   const language = useUiPrefs((s) => s.language)
   const setLanguage = useUiPrefs((s) => s.setLanguage)
   const languageText = useText('language')
+  const guidedText = useText('guided-setup.wo3256')
   const machine = useCamStore((s) => s.project.machine)
   const connectionKind = useMachineControl((s) => s.connectionKind)
   const surface = controllerSurface(machine)
@@ -272,6 +279,11 @@ export function SettingsModal() {
 
         {/* Body — a growable list of preference sections */}
         <div className="modal-body">
+          <div className="mform-section-header">{guidedText('settingsHeading')}</div>
+          <div className="mform-row" style={{ gap: 10 }}>
+            <button className="modal-btn modal-btn-ghost" onClick={() => useGuidedSetup.getState().show()}>{guidedText('openerButton')}</button>
+          </div>
+          <div className="mform-hint">{guidedText('settingsHint')}</div>
           <div className="mform-section-header">Opening projects</div>
           <label className="mform-row" style={{ gap: 10 }}>
             <input type="checkbox" checked={projectOpenDirectly} onChange={(event) => setProjectOpenDirectly(event.target.checked)} />
@@ -499,9 +511,27 @@ export function SettingsModal() {
               <span>{shellText('SettingsModal.programListingColours')}</span>
             </label>
           </div>
+          <div className="mform-row">
+            <label className="op-check-label">
+              <input
+                data-testid="settings-new-ui"
+                type="checkbox"
+                checked={newUi}
+                onChange={(e) => setNewUi(e.target.checked)}
+              />
+              <span>{newUiText('newUi')}</span>
+            </label>
+          </div>
+          <div className="mform-hint">{newUiText('newUiHint')}</div>
 
           {/* WO-2319: lists exactly the languages that have a catalog under
               src/i18n/locales/ (English, and the German pilot from WO-2329). */}
+          <CamShortcutSettings />
+
+          {/* WO-3259: the gamepad's step-jog mapping and its session-only Enable.
+              Nothing in Settings moves the machine. */}
+          <GamepadJogSettings />
+
           <div className="mform-section-header" data-testid="settings-language-header">{languageText('section')}</div>
 
           <div className="mform-row" data-testid="settings-language-row" style={{ flexWrap: 'wrap' }}>

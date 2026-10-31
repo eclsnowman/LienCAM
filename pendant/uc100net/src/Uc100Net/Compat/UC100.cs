@@ -692,6 +692,16 @@ public static class UC100
         }
     }
 
+    /// <summary>
+    /// GetSoftLimit: the soft-limit enable SetSoftLimit last stored, read as
+    /// GetOffline reads its flag (WO-3277). The bridge reads it back after
+    /// Apply and at Connect (Machine.cs TryGetSoftLimitEnabled).
+    /// </summary>
+    public static int GetSoftLimit(ref bool SoftLimitEnable)
+    {
+        lock (gate) { SoftLimitEnable = softLimitEnable; return SessionUnavailable ? NotOpen : OK; }
+    }
+
     /// <summary>ClearSoftlimitState: clears Stat.SoftLimit only; the soft-limit stop stays latched until SetEstopState (MEASURED).</summary>
     public static int ClearSoftlimitState()
     {

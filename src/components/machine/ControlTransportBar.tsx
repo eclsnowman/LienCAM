@@ -43,7 +43,7 @@ import {
   estopControlMode,
   estopNeedsReset,
   estopTripNeedsReset,
-  operatorStopState,
+  operatorStopSentenceState,
   nonProgramActionStatus,
   subscribeNonProgramActionStatus,
   guidedToolMeasureState,
@@ -74,6 +74,7 @@ import {
 import { activeMacroRun, subscribeMacroRun } from '../../lib/machine/macros/macroRuntime'
 import {
   authorize,
+  ESTOP_TRIPPED_LINE,
   RE_ARM_RESETTING,
   type OperatorAuthorityFacts,
 } from '../../lib/machine/operatorAuthority'
@@ -307,7 +308,10 @@ export function bridgePresenceIssue(
 }
 
 /** The app latch is an operator state, not a controller state. While it is up,
- * it outranks the last status poll so the chip cannot say Idle beside CLEAR. */
+ * it outranks the last status poll so the chip cannot say Idle beside CLEAR.
+ * WO-3190 (CT-2): `estopTripped` is the latch itself (estopNeedsReset, the
+ * operator authority's `estopLatched`) - the connect-time latch included, not
+ * only an actual trip - so the chip reads E-STOP whenever CLEAR is up. */
 export function machineStateChipLabel(input: {
   machineState: string
   alarmMessage?: string | null
@@ -628,7 +632,7 @@ export function ControlTransportBar({
   )
   useSyncExternalStore(subscribeNonProgramActionStatus, nonProgramActionStatus, () => null)
   const job = useMachineControl((s) => s.job)
-  const operatorStop = useSyncExternalStore(subscribeOperatorStop, operatorStopState, () => null)
+  const operatorStop = useSyncExternalStore(subscribeOperatorStop, operatorStopSentenceState, () => null)
   const programReadiness = useMachineControl((s) => s.programReadiness)
   const programFit = useMachineControl((s) => s.programFit)
   const singleBlock = useMachineControl((s) => s.singleBlock)
@@ -925,8 +929,10 @@ export function ControlTransportBar({
   // off-table program, a program not ready) is not repeated here - greyed
   // CYCLE START carries it on hover and the console holds it. The operator, 10-16:
   // "Redundancy of what's in the terminal and at the top of the screen".
+  // WO-3087 (O61 laptop 10-22): an E-STOP that actually tripped is said as the
+  // E-STOP the chip shows, not as the connect-time software latch.
   const nextAction = connected && estopTripped
-    ? ESTOP_BLOCKS_CYCLE_START
+    ? estopActuallyTripped ? ESTOP_TRIPPED_LINE : ESTOP_BLOCKS_CYCLE_START
     : stoppedLine ?? (nextActionIsCycleStartRefusal(state) ? '' : state.nextAction)
 
   // S remains the physical-controller-style shortcut for the canonical
@@ -1168,7 +1174,7 @@ export function ControlTransportBar({
         <>
           <span className="control-strip-sep" aria-hidden="true" />
           <span
-            className={`control-state-chip control-state-${presenceIssue || (connected && estopActuallyTripped) ? 'alarm' : programPartsTransportState()?.held === true && machineState !== 'alarm' && machineState !== 'door' ? 'hold' : job.phase === 'streaming' && machineState === 'idle' ? 'run' : machineState}`}
+            className={`control-state-chip control-state-${presenceIssue || (connected && estopTripped) ? 'alarm' : programPartsTransportState()?.held === true && machineState !== 'alarm' && machineState !== 'door' ? 'hold' : job.phase === 'streaming' && machineState === 'idle' ? 'run' : machineState}`}
             data-testid="control-state-chip"
             title={presenceIssue?.detail}
           >
@@ -1176,7 +1182,7 @@ export function ControlTransportBar({
               machineState,
               alarmMessage: alarm?.message,
               softLimitLatched,
-              estopTripped: connected && estopActuallyTripped,
+              estopTripped: connected && estopTripped,
               programHeld: programPartsTransportState()?.held === true,
               programRunning: job.phase === 'streaming',
             })}

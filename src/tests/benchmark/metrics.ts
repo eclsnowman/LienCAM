@@ -1102,6 +1102,7 @@ const MOVE_ROLE_TO_IR_ROLE = {
   // STOCK_CUTTING_BY_ROLE table says so); 'rapid' is the IR role that is
   // replayed but never measured.
   loop_back: 'rapid',
+  retract: 'rapid', // non-cutting preview withdrawal: replayed, never measured
 } as const satisfies Record<MoveRole, IrMoveRole>
 
 /**

@@ -593,7 +593,10 @@ describe('buildAdaptiveClearingToolpath (engine entry)', () => {
     // wall-follow, so it does not count here. The invariant below is unchanged.
     // WO-2038: the same depth-agnostic planned stream, now roughed at -2 (floor stock 1)
     // and replayed at the true floor -3.
-    expect(roughWallFollow).toHaveLength(6)
+    // WO-3067 RE-PIN (6 -> 10, a count): steering smoothing ships ON (owner 2026-10-22 "Turn it
+    // on (recommended)"); the smoothed passes leave four more cusp rides at this level. The
+    // invariant below is unchanged.
+    expect(roughWallFollow).toHaveLength(10)
     expect(floor.length - roughPrimary.length).toBe(roughWallFollow.length)
     // The extra floor-finish points are the exact rough wall-follow geometry promoted
     // to the finish role/rate, not a duplicate adaptive cut pass.

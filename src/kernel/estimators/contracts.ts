@@ -67,6 +67,28 @@ export interface DeflectionProxyValue {
   readonly chipLoadMm: number
 }
 
+/** WO-3227: the programmed cut of a flat end mill on its side (cuttingLoad.ts). */
+export interface ProgrammedCutLoad {
+  /** fz, mm per tooth. */
+  readonly feedPerToothMm: Estimate<number>
+  /** Contact angle phi, radians. */
+  readonly engagementAngleRad: Estimate<number>
+  /** hmax, mm. */
+  readonly maxChipMm: Estimate<number>
+  /** hm, mm: the Kienzle chip. */
+  readonly meanChipMm: Estimate<number>
+  /** Q, cm3/min. */
+  readonly removalRateCm3Min: Estimate<number>
+  /** kc at hm, N/mm2; needs cutting coefficients. */
+  readonly specificForceNMm2: Estimate<number>
+  /** Net spindle power, W; needs cutting coefficients. */
+  readonly powerW: Estimate<number>
+  /** Spindle torque, N*m; needs cutting coefficients. */
+  readonly torqueNm: Estimate<number>
+  /** hmax is above zero and below RUBBING_CHIP_THICKNESS_MM: the edge may rub rather than cut. */
+  readonly rubbing: boolean
+}
+
 export type EstimateMode = 'post-plan' | 'pre-plan'
 
 /** One estimate set per operation and mode. Deterministic: two runs give equal sets. */

@@ -357,9 +357,13 @@ const MAIN_DIGESTS: Record<string, string> = {
   // WO-3059 repin, bisected on this test alone (contour and pocket unchanged): 87d3dc5416bef44e
   // at 23fbd9b53a -> 8ad05b813d948296 at WO-3057's merge f8afbbb133 (665ce500e9: WO-2850's
   // travelled heading only on a stock-outline component). Same digest on Windows and Spark.
-  adaptive: '8ad05b813d948296',
+  // WO-3083 repin (entries start 1 mm above the material; intra-op hops at Retract): adaptive
+  // 8ad05b813d948296 -> 61095c9a13063400 (its helix/plunge entries, attempt 1), contour
+  // 623c82d0e9c24b75 -> e2278b1de13370fa (entry from Top + 1, attempt 1; hops at Retract, attempt 2).
+  // Pocket unchanged.
+  adaptive: '61095c9a13063400',
   // WO-2701 repin: contour's one re-entry plunge F1000 -> F300 (wo2694-contour-{main,branch}.nc).
-  contour: '623c82d0e9c24b75',
+  contour: 'e2278b1de13370fa',
   // WO-2870 repin: Face cleared this Pocket's region, so it has nothing left to
   // cut; its 14 G0 dips to Z-1/-3/-4 became one line (evidence/WO-2870/journey-*.nc).
   pocket: 'dceb2ea071701b7a',

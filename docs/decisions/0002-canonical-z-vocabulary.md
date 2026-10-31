@@ -79,6 +79,52 @@ resolver; there is no reason to carry raw WCS-relative values.
   height above `retractZ`) must either use the canonical five-plane vocabulary
   or make a case for a new canonical plane — there is no informal escape.
 
+## Amendment 1 (2026-10-23, WO-3083): where an entry starts - one rule for every operation
+
+`feedZ` is no longer where an entry starts by default. Every helix, ramp and plunge
+entry starts `ENTRY_CLEARANCE_MM` (1 mm, Pocket's "Helix start above material"
+default) above the highest material under its footprint, reached by rapid; the
+feed starts there. The rule lives in one place, `src/lib/cam/moves/index.ts`
+(`entryStartZ`, `entryStartOver`, `entryStartAlong`, `entryAbove`), and reads the
+material as Pocket always did (WO-1972): the remaining stock the earlier
+operations left (the highest column over the footprint, padded one cell - too
+high, never too low), else the stock block as loaded, else the resolved Top. An
+operator whose Feed height sits lower than that start but still above the
+material keeps it (the rule never adds air an operator took out). A Feed height
+at or below the material no longer rapids into it.
+
+Hops between the features of one operation (holes, loops, orbits, passes) cross
+at `retractZ` (moves `hopTo` / `liftTo`); the first entry comes down through
+`clearanceZ` and the final exit rises to it. A hop whose own corridor crosses
+workholding is lifted by the reach trim (`raiseTraverses`), never by a
+setup-wide raise. Builders whose links all ride `clearanceZ` (contour, face) pass
+their finished stream through moves `hopsAtRetract`: every rapid AT Clearance
+between the first cut and the last becomes a Retract crossing, lifting straight
+up first. Drill keeps its retract mode (G98 to the initial plane by default):
+its native canned cycle's return plane is the post's. G98 posts R at material
++ 1 and hops at Retract: the stream rises out of each hole to Retract, and the
+post crosses to the first hole at Clearance, drops to Retract and starts the
+cycle there, so the initial plane G98 returns to IS the hop plane; after G80 it
+rises to Clearance, where the stream leaves the op. G99 returns to R between
+holes, so its R stays the operator's Feed plane (as before this amendment) -
+an R 1 mm over the part would hop the machine there while the stream showed
+Retract. A drill hop the reach trim raised over workholding (either mode) is
+posted by ending the cycle (G80), crossing at the raised Z and restarting the
+cycle in full, so a canned cycle's return plane never crosses a clamp
+(post/cannedCycle.ts `liftZ`).
+
+Reason: owner release review 2026-10-23 (example 04, Chamfer 3): "chamfer start
+height helix entry is really heigh as well ... This is a common theme across
+several operations"; (Drill 1) "We don't need to go that high unless a
+reposition move would go over a clamp". Three operations answered "where does
+an entry start" three ways: the Feed plane Top + 5 (chamfer, contour, drill,
+face, v-carve, thread mill, 3D rough first entry), AT the material after a fed
+plunge through 5 mm of air (bore, adaptive clearing 2D - WO-3077), material + 1
+(pocket only). A 3 deg chamfer ramp from Top + 5 spent ~95 mm in air per hole.
+Proof: `src/tests/cam/helixEntryHeights.wo3083.test.ts` through the production
+route on the shipped examples; before/after rows in
+`src/tests/evidence/WO-3083/`.
+
 ## References
 
 - `src/lib/cam/heights.ts` — `resolveHeights` implementation; Phase 1 Commit 1

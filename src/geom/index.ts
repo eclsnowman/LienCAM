@@ -43,6 +43,7 @@ import type {
   SweepRequest,
   TessBuffers,
   TessQuality,
+  TransformBodyRequest,
   Vec3,
 } from './geom-service.ts'
 
@@ -116,6 +117,7 @@ export function createGeomService(): GeomClient {
     makeLoft: (req: LoftRequest): Promise<OpResult> => remote.makeLoft(req), // GEO-5
     makeHole: (req: HoleRequest): Promise<OpResult> => remote.makeHole(req), // GEO-5
     applyBodyPattern: (req: PatternRequest): Promise<OpResult> => remote.applyBodyPattern(req), // GEO-5
+    transformBody: (req: TransformBodyRequest): Promise<OpResult> => remote.transformBody(req), // WO-3244
     makeSolidFromPlanarFaces: (req: PlanarFaceSet): Promise<OpResult> => remote.makeSolidFromPlanarFaces(req), // MSH-3
     recognizeFeatures: (h: BodyHandle): Promise<FeatureVerdict[]> => remote.recognizeFeatures(h) as Promise<FeatureVerdict[]>, // GEO-6
     queryFeatures: (h: BodyHandle, query: FeatureQuery): Promise<FeatureVerdict[]> => remote.queryFeatures(h, query) as Promise<FeatureVerdict[]>, // GEO-6
@@ -170,6 +172,7 @@ export function createLocalGeomService(opts: GeomEngineOptions = {}): GeomClient
     makeLoft: (req: LoftRequest) => engine.makeLoft(req), // GEO-5
     makeHole: (req: HoleRequest) => engine.makeHole(req), // GEO-5
     applyBodyPattern: (req: PatternRequest) => engine.applyBodyPattern(req), // GEO-5
+    transformBody: (req: TransformBodyRequest) => engine.transformBody(req), // WO-3244
     makeSolidFromPlanarFaces: (req: PlanarFaceSet) => engine.makeSolidFromPlanarFaces(req), // MSH-3
     recognizeFeatures: (h: BodyHandle) => engine.recognizeFeatures(h), // GEO-6
     queryFeatures: (h: BodyHandle, query: FeatureQuery) => engine.queryFeatures(h, query), // GEO-6

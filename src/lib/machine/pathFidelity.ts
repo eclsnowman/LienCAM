@@ -334,6 +334,38 @@ export type ProgramFramedMove = QueuedMove & {
   /** Fix round 2: an arc whose start is such a position - its centre is this
    *  offset (I, J) from where it starts. */
   centreOffset?: MachineVec3
+  /** WO-3263: a G53 feed move's MACHINE-coordinate target, the axes its block
+   *  names. The move runs from wherever the tool is to there; the analysis
+   *  places it through the work origin the status frames themselves report
+   *  (`MachineFramePlacement`), never through a stored offset table. */
+  machineFrameTarget?: Partial<MachineVec3>
+}
+
+/** WO-3263: how a machine-coordinate target becomes a point of the commanded
+ *  frame - that frame's origin in machine coordinates and its XY rotation. */
+export interface MachineFramePlacement {
+  origin: MachineVec3
+  rotationDeg: number
+}
+
+/** WO-3263: where a G53 feed move ends, in the frame `from` is in. `from` is
+ *  turned into machine coordinates, the named axes are replaced by the
+ *  block's machine target, and the result is turned back. An axis the block
+ *  does not name stays where the machine is, as the controller leaves it. */
+export function placeMachineFrameTarget(
+  from: MachineVec3,
+  target: Partial<MachineVec3>,
+  placement: MachineFramePlacement,
+): MachineVec3 {
+  const { origin, rotationDeg } = placement
+  const turned = rotateXY(rotationDeg, from.x, from.y)
+  const machine = {
+    x: target.x ?? origin.x + turned.x,
+    y: target.y ?? origin.y + turned.y,
+    z: target.z ?? origin.z + from.z,
+  }
+  const back = rotateXY(-rotationDeg, machine.x - origin.x, machine.y - origin.y)
+  return { x: back.x, y: back.y, z: machine.z - origin.z }
 }
 
 /** A modelled move whose start the program itself stated after unmodelled
@@ -410,6 +442,9 @@ export function resolveMoveSpans(
   startPos: MachineVec3,
   frameChanges: readonly ResolvedPathFidelityFrameChange[] = [],
   restartsAt: readonly MoveRestart[] = [],
+  /** WO-3263: places a G53 feed move's machine target (`machineFrameTarget`)
+   *  in the frame the program started in. Required when one is present. */
+  machineFrame: MachineFramePlacement | null = null,
 ): MoveSpan[] {
   const spans: MoveSpan[] = []
   let pos: MachineVec3 = { ...startPos }
@@ -455,6 +490,16 @@ export function resolveMoveSpans(
         z: move.to.z ?? from.z,
       }
       for (const key of framed.toLineStart ?? []) to[key] = lineStart[key]
+      if (framed.machineFrameTarget !== undefined && machineFrame !== null) {
+        // The start frame's coordinates, placed, then shifted back into the
+        // frame the program is in now - the same rebasing every span gets.
+        const placed = placeMachineFrameTarget({
+          x: from.x - frameShift.x,
+          y: from.y - frameShift.y,
+          z: from.z - frameShift.z,
+        }, framed.machineFrameTarget, machineFrame)
+        to = { x: placed.x + frameShift.x, y: placed.y + frameShift.y, z: placed.z + frameShift.z }
+      }
       lengthMm = dist3(from, to)
       feedMmMin = move.feedMmMin
     } else if (move.kind === 'arc') {
@@ -971,7 +1016,22 @@ export function analysePathFidelity(input: PathFidelityInput): PathFidelityRepor
     })
   }
 
-  const spans = resolveMoveSpans(input.moves, input.startPos, frameChanges, input.restartsAt)
+  // WO-3263: a G53 feed move's target is a machine position. In a machine-
+  // frame comparison it is used as it is; in a work-frame one it is placed by
+  // the work origin the first status frame carrying both positions reports -
+  // the frame `baseOffset` is, and that every sample is normalised into.
+  const machineFrame: MachineFramePlacement | null = commandedFrame === 'machine'
+    ? { origin: { x: 0, y: 0, z: 0 }, rotationDeg: 0 }
+    : baseOffset === null ? null : { origin: baseOffset, rotationDeg: frameRotation }
+  if (machineFrame === null
+    && input.moves.some((move) => (move as ProgramFramedMove).machineFrameTarget !== undefined)) {
+    return cannotAssess(
+      'no status frame during this job carried both a machine and a work position, so its G53 '
+        + 'machine-coordinate moves could not be placed against the work path.',
+      'none',
+    )
+  }
+  const spans = resolveMoveSpans(input.moves, input.startPos, frameChanges, input.restartsAt, machineFrame)
   const byId = new Map<number, MoveSpan>()
   for (const span of spans) byId.set(span.id, span)
 
@@ -2035,7 +2095,28 @@ export function commandedPathFromProgram(
     ? to
     : Object.fromEntries((['x', 'y', 'z'] as const).filter((key) => !stale.has(key)).map((key) => [key, to[key]]))
 
-  for (const line of program.lines) {
+  // WO-3272: a G53 rapid whose very next block is the program's own work
+  // motion is a lift before travel (the post's setup entry: `G53 G0 Z<safe>`,
+  // then `G0 X Y`). Nothing between them stops the program or runs a macro,
+  // so the machine flies straight on and the lift is placed like a G53 feed.
+  // A G53 rapid followed by anything else - another G53, an M-code, a stop,
+  // the end - is a park where the machine holds and the operator may move it
+  // (WO-2437), and it keeps losing the position.
+  const WORK_MOTION_G: ReadonlySet<number> = new Set([0, 1, 2, 3, 81, 82, 83, 98, 99])
+  const liftBeforeWorkMotion = (index: number): boolean => {
+    const next = program.lines.slice(index + 1).find((candidate) => candidate.words.length > 0)
+    return next !== undefined
+      && segmentByLine.has(next.number)
+      && next.words.every((w) => w.letter !== 'M' && w.letter !== 'T'
+        && (w.letter !== 'G' || WORK_MOTION_G.has(w.value)))
+  }
+  // WO-3272: the program's first motion is a block this derivation cannot
+  // place. Until it runs the machine sits where the program started, and the
+  // frames flown there are measured against that point, never against the
+  // first move after the gap.
+  let gapBeforeFirstMove = false
+
+  for (const [lineIndex, line] of program.lines.entries()) {
     const gWords = line.words.filter((w) => w.letter === 'G' && !Number.isNaN(w.value))
     for (const w of gWords) {
       // G90.1 makes I/J ABSOLUTE centres rather than offsets from the start,
@@ -2046,13 +2127,28 @@ export function commandedPathFromProgram(
       if (modal !== undefined) return refuse(modal)
     }
 
-    const losesPosition = gWords.some((w) => POSITION_LOSING.has(Math.trunc(w.value)))
+    const seg = segmentByLine.get(line.number)
+    // WO-3263: a G53 FEED move is a straight line to a machine-coordinate
+    // target, from wherever the tool is. That is geometry the analysis can
+    // place - each status frame carries the machine position and the work
+    // position together - so it is modelled, not excluded. WO-3272: so is a
+    // G53 rapid lifting before the program's own travel (`liftBeforeWorkMotion`).
+    // A G53 park and a G53 block that also names G28/G30 still lose the
+    // position. Inside an active drilling cycle a G53 block is not a feed
+    // move; it keeps losing the position, as before.
+    const cycleActive = !gWords.some((w) => [0, 1, 2, 3, 80].includes(w.value))
+      && (cycle !== null || gWords.some((w) => w.value === 81 || w.value === 82 || w.value === 83))
+    const machineFeed = gWords.some((w) => w.value === 53)
+      && !gWords.some((w) => Math.trunc(w.value) === 28 || Math.trunc(w.value) === 30)
+      && !cycleActive
+      && seg !== undefined && seg.arc === undefined
+      && (seg.kind === 'feed' || (seg.kind === 'rapid' && liftBeforeWorkMotion(lineIndex)))
+    const losesPosition = !machineFeed && gWords.some((w) => POSITION_LOSING.has(Math.trunc(w.value)))
     const frameWord = gWords.findLast((w) => PROGRAM_FRAMES.has(w.value))
     if (frameWord !== undefined && frameWord.value !== programFrame) {
       programFrame = frameWord.value
       if (positionKnown) stale = new Set(['x', 'y', 'z'])
     }
-    const seg = segmentByLine.get(line.number)
     const f = coordOf(line, 'F')
     if (f !== null) feed = f
     if (gWords.some((w) => w.value === 98)) returnToInitial = true
@@ -2091,6 +2187,7 @@ export function commandedPathFromProgram(
         : null
       const steps = typeof expanded === 'string' ? null : expanded
       if (steps === null) {
+        if (positionKnown && moves.length === 0) gapBeforeFirstMove = true
         unmodelledMoveIds.push(line.number)
         positionKnown = false
         continue
@@ -2133,9 +2230,43 @@ export function commandedPathFromProgram(
       // coordinates) and this derivation cannot say where to in the program's
       // own frame. Exclude the block by id, and stay lost until a block states
       // all three axes.
+      if (positionKnown && moves.length === 0) gapBeforeFirstMove = true
       unmodelledMoveIds.push(line.number)
       positionKnown = false
       stale.clear()
+      continue
+    }
+    if (machineFeed) {
+      const machineFrameTarget: Partial<MachineVec3> = {}
+      for (const [letter, key] of [['X', 'x'], ['Y', 'y'], ['Z', 'z']] as const) {
+        const value = coordOf(line, letter)
+        if (value !== null) machineFrameTarget[key] = value
+      }
+      if (!positionKnown) {
+        // From an unknown start its path is unknown too: excluded, and the
+        // position stays lost - its end is a machine point this derivation
+        // cannot name in the program's own frame.
+        unmodelledMoveIds.push(line.number)
+        continue
+      }
+      if (restart !== null) restartsAt.push({ moveId: line.number, at: restart })
+      restart = null
+      moves.push({
+        id: line.number,
+        kind: 'line',
+        to: {},
+        feedMmMin: seg!.feed === undefined || !(seg!.feed > 0) ? options.rapidFeedMmMin : seg!.feed,
+        machineFrameTarget,
+      } as ProgramFramedMove)
+      // Where it ends in the program's frame is the analysis's to place, so a
+      // later block takes the axes it moved from where the analysis puts them
+      // (`carried` - the frame-change mechanism). Under a turned work system
+      // a machine X or Y moves both work X and Y.
+      if (machineFrameTarget.x !== undefined || machineFrameTarget.y !== undefined) {
+        stale.add('x')
+        stale.add('y')
+      }
+      if (machineFrameTarget.z !== undefined) stale.add('z')
       continue
     }
     if (seg === undefined) {
@@ -2216,6 +2347,10 @@ export function commandedPathFromProgram(
   if (moves.length === 0) {
     return refuse('this program commands no motion this check can model')
   }
+  // WO-3272: where the machine waits before that gap - a stationary point at
+  // the start (id 0 names no source line), so a frame flown there is measured
+  // against where the program left the tool, not the first move after the gap.
+  if (gapBeforeFirstMove) moves.unshift({ id: 0, kind: 'marker' })
   // WO-2687 fix round: the program's own G54..G59. The controller reports work
   // positions in the frame the program selects from that line on (UCCNC does,
   // and so does the simulator), while `startPos` was read in the frame selected

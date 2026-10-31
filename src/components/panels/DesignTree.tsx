@@ -53,6 +53,7 @@ import { resolveStockMembershipState, derivedStockMembers } from '../../store/st
 import { resolveSetupWorkOffset } from '../../lib/post/workOffsets'
 import { DERIVED_STOCK_ID } from '../../store/migrateHierarchy'
 import { GeometryColorSwatch } from './GeometryColorSwatch'
+import { useCamShortcutHints } from '../settings/CamShortcutMap'
 
 // ── Viewport handle ────────────────────────────────────────────────────────────
 import type { Vec3 } from '../../types'
@@ -288,6 +289,7 @@ function loopLabel(loop: Loop2D, units: Units): string {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export function DesignTree() {
+  const camHints = useCamShortcutHints()
   useText('app-shell-settings-menus')
   const project              = useCamStore((s) => s.project)
   const cutTimeMotion        = useMemo(() => machineCutTimeMotion(project.machine), [project.machine])
@@ -3760,7 +3762,7 @@ export function DesignTree() {
               <button
                 className="tree-section-add-btn tree-section-regen-btn"
                 onClick={(e) => { e.stopPropagation(); computeAllToolpaths() }}
-                data-tooltip={shellText('DesignTree.regenerateAllToolpathsShiftG')}
+                data-tooltip={camHints.regenerateAll}
               >
                 <RefreshCw size={10} />
                 <span>{shellText('DesignTree.rEGENALL')}</span>
@@ -4260,6 +4262,7 @@ function SetupNode({
   selectedOpFolderId, onSelectOpFolder,
 }: SetupNodeProps) {
   useText('app-shell-settings-menus')
+  const camHints = useCamShortcutHints()
   const [opDragOverIdx, setOpDragOverIdx] = useState<number | null>(null)
   const [opFolderDropTargetId, setOpFolderDropTargetId] = useState<string | null>(null)
   const [opRootDropActive, setOpRootDropActive] = useState(false)
@@ -4485,7 +4488,7 @@ function SetupNode({
             ? shellText('DesignTree.unsuppressOperationBeforeComputing')
             : op.status === 'computing'
               ? shellText('DesignTree.computing3')
-              : shellText('DesignTree.computeToolpathG')}
+              : camHints.computeToolpath}
           aria-label={!op.enabled ? shellText('DesignTree.unsuppressOperation') : op.status === 'computing' ? shellText('DesignTree.computing3') : shellText('DesignTree.computeToolpath')}
         ><Play size={10} /></button>
         <button className="tree-icon-btn tree-icon-btn-danger" onClick={(e) => { e.stopPropagation(); onRemoveOp(op.id) }} data-tooltip={shellText('DesignTree.delete2')}
@@ -4655,7 +4658,7 @@ function SetupNode({
         )}
         <span className="tree-setup-meta">{wcsLabel}</span>
         <div className="tree-setup-actions">
-          <button className="tree-icon-btn" onClick={(e) => { e.stopPropagation(); onNewOp() }} data-tooltip={shellText('DesignTree.addOperationN')}
+          <button className="tree-icon-btn" onClick={(e) => { e.stopPropagation(); onNewOp() }} data-tooltip={camHints.addOperation}
           aria-label={shellText('DesignTree.addOperation')}>
             <Plus size={11} />
           </button>
@@ -4774,7 +4777,7 @@ function SetupNode({
                   className="tree-icon-btn tree-icon-btn-compute"
                   disabled={op.status === 'computing' || !op.enabled}
                   onClick={(e) => { e.stopPropagation(); onComputeOp(op.id) }}
-                  data-tooltip={op.status === 'computing' ? shellText('DesignTree.computing4') : shellText('DesignTree.computeToolpathG')}
+                  data-tooltip={op.status === 'computing' ? shellText('DesignTree.computing4') : camHints.computeToolpath}
                   aria-label={op.status === 'computing' ? shellText('DesignTree.computing4') : shellText('DesignTree.computeToolpath')}
                 ><Play size={10} /></button>
                 <button className="tree-icon-btn tree-icon-btn-danger" onClick={(e) => { e.stopPropagation(); onRemoveOp(op.id) }} data-tooltip={shellText('DesignTree.delete2')}

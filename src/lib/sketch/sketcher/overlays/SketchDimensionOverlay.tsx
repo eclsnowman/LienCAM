@@ -1,8 +1,11 @@
 import { useText } from '../../../../i18n'
 import { useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Ruler, Eye } from 'lucide-react'
 import { useSketcherTool } from '../useSketcherTool'
 import { sketcherToolStore } from '../toolStore'
+import { sketcherTools } from '../toolController'
+import { isTypingTarget } from '../../tools/shortcuts'
 import { useSelectAllOnClick } from '../../../../components/ui/selectAllOnClick'
 import { dimensionDisplay } from '../sketchLayer'
 import { dimPreview } from '../../tools/dimTool'
@@ -333,6 +336,34 @@ export function SketchDimensionOverlay({ port }: Props) {
   const previewValueRef = useRef<HTMLSpanElement>(null)
   const previewModeRef = useRef<HTMLSpanElement>(null)
   const connectorRef = useRef<SVGLineElement>(null)
+
+  // WO-3110: like useTypeToSet in the draw-value overlay, numeric entry
+  // claims capture phase before 1/2/3 can arm Pattern. Here the editor does
+  // not exist until placement, so mount it synchronously, then seed its
+  // first character. All subsequent keys use the existing editor contract.
+  useEffect(() => {
+    if (!isSketch || dimEditor || sketchTool !== 'smart-dimension' ||
+      sketchToolChain?.kind !== 'dim' || !sketchToolChain.operandIds.length) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || !/^[0-9.-]$/.test(event.key)) return
+      if (isTypingTarget(event.target) || isTypingTarget(document.activeElement)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const cursor = port.getSurface()?.getLastSketchCursor()
+      if (!cursor) return
+      flushSync(() => sketcherTools.placeDimensionForTyping(cursor))
+      const input = rootRef.current?.querySelector<HTMLInputElement>(
+        '.sketch-dim-editor input.sketch-dim-input:not(:disabled)',
+      )
+      if (input) {
+        input.value = event.key
+        input.focus({ preventScroll: true })
+        input.setSelectionRange(input.value.length, input.value.length)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [isSketch, dimEditor, sketchTool, sketchToolChain, port])
 
   // Smart-dim live preview: the inferred dimension type/value for the
   // accumulated operand set, as a label beside the cursor. Its TEXT only

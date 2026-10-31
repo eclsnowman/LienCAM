@@ -1,0 +1,204 @@
+/* WO-3285 (UI M2 W1-H): the New UI shell frame. Colours and sizes are the custom properties of
+   src/theme/tokens.ts, emitted under [data-ui2]; the per-class values (widths, band, strip) arrive as
+   --ui2-* custom properties computed in layout.ts, so no threshold is repeated here. The kit parts keep
+   their own look: what is styled for them below sits at zero specificity (:where) and only fills
+   the gap until their lanes style them. Today's panels are hosted unchanged inside .ui2-host. */
+
+.ui2-shell {
+  --ui2-scale: 1;
+  --hit: calc(var(--min-hit) / var(--ui2-scale));
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: calc(100vw / var(--ui2-scale));
+  height: calc(100vh / var(--ui2-scale));
+  zoom: var(--ui2-scale);
+  display: grid;
+  grid-template-rows: var(--h-app) auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--app);
+  color: var(--tx);
+  font: var(--f-body) / 1.35 var(--sans);
+}
+
+.ui2-shell-gallery { grid-template-rows: minmax(0, 1fr); }
+
+/* spec 5.1 rule 4: the kit sizes a Select at its design height; at a small interface scale the
+   shell lifts it to the 20 px floor (the kit's own rule has the same specificity, so this is more); the select inside sits within the 1 px border, hence the 2 px */
+.ui2-shell[data-ui2] .kit-select { height: max(var(--h-ctl), calc(var(--hit) + 2px)); }
+
+/* ---- fallback look for the kit parts (zero specificity: a kit lane's own rule always wins) */
+:where(.ui2-shell) :where(.kit-button, .kit-select, .kit-textfield, input.kit-textfield) {
+  min-height: max(var(--h-ctl), var(--hit));
+  min-width: var(--hit);
+  padding: 0 var(--sp4);
+  border: 1px solid var(--ctl-bd);
+  border-radius: var(--r-md);
+  background: var(--ctl);
+  color: var(--tx);
+  font: inherit;
+}
+:where(.ui2-shell) :where(.kit-button) { background: var(--head); border-color: var(--b1); cursor: pointer; white-space: nowrap; }
+:where(.ui2-shell) :where(.kit-button:hover) { background: var(--ctl-hover); }
+:where(.ui2-shell) :where(.kit-card) {
+  background: var(--panel);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+}
+:where(.ui2-shell) :where(.kit-card-header) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp4);
+  min-height: var(--h-head);
+  padding: 0 var(--sp5);
+  background: var(--head);
+  border-bottom: 1px solid var(--b2);
+  font-size: var(--f-title);
+  font-weight: 600;
+}
+:where(.ui2-shell) :where(.kit-card-title) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.ui2-shell) :where(.kit-card-close) { min-width: var(--hit); min-height: var(--hit); background: none; border: 0; color: var(--tx2); cursor: pointer; }
+:where(.ui2-shell) :where(.kit-ribbongroup) { display: flex; flex-direction: column; justify-content: space-between; padding: 0 var(--sp5); border-right: 1px solid var(--b3); }
+:where(.ui2-shell) :where(.kit-ribbongroup-tools) { display: flex; align-items: center; gap: var(--sp3); padding: var(--sp4) 0; }
+:where(.ui2-shell) :where(.kit-ribbongroup-caption) { min-height: var(--hit); border: 0; background: none; color: var(--tx2); font-size: var(--f-cap); cursor: pointer; }
+:where(.ui2-shell) :where(.kit-showcard) { background: var(--panel); border: 1px solid var(--b1); border-radius: var(--r-lg); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+:where(.ui2-shell) :where(.kit-showcard-header) { min-height: max(var(--h-ctl), var(--hit)); padding: 0 var(--sp5); border: 0; background: var(--head); color: var(--tx); font: inherit; font-weight: 600; cursor: pointer; text-align: left; border-radius: var(--r-lg); }
+:where(.ui2-shell) :where(.kit-showcard-list) { list-style: none; margin: 0; padding: var(--sp3) var(--sp5); }
+:where(.ui2-shell) :where(.kit-showcard-list input) { min-width: 0; min-height: 0; margin-right: var(--sp3); }
+:where(.ui2-shell) :where(.kit-viewcube) { display: grid; grid-template-columns: repeat(4, auto); gap: var(--sp2); padding: var(--sp3); background: var(--panel); border: 1px solid var(--b1); border-radius: var(--r-lg); }
+:where(.ui2-shell) :where(.kit-viewcube button)::after { content: attr(data-view); text-transform: uppercase; }
+:where(.ui2-shell) :where(.kit-viewcube button) { min-width: var(--hit); min-height: var(--hit); border: 1px solid var(--b1); border-radius: var(--r-sm); background: var(--head); color: var(--tx2); font-size: var(--f-micro); cursor: pointer; }
+
+/* ---- app bar */
+.ui2-appbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp5);
+  min-width: 0;
+  padding: 0 var(--sp4);
+  overflow: hidden;
+  background: var(--app);
+  border-bottom: 1px solid var(--b2);
+}
+.ui2-brand { font-size: var(--f-title); font-weight: 700; color: var(--acc-ink); letter-spacing: 0.02em; }
+.ui2-appbar-actions, .ui2-appbar-look { display: flex; align-items: center; gap: var(--sp3); min-width: 0; }
+.ui2-appbar-look { margin-left: auto; }
+
+/* ---- ribbon card: tab row (30) over the group band */
+.ui2-ribbon {
+  display: grid;
+  grid-template-rows: var(--h-tab) var(--ui2-band-h);
+  margin: var(--sp4) var(--sp4) 0;
+  min-width: 0;
+  overflow: visible;
+  background: var(--panel);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+}
+.ui2-ribbon[data-bare="true"] { grid-template-rows: var(--h-tab); }
+.ui2-tabrow { display: flex; align-items: stretch; justify-content: space-between; min-width: 0; border-bottom: 1px solid var(--b2); }
+.ui2-tabs { display: flex; min-width: 0; }
+.ui2-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp3);
+  min-height: var(--hit);
+  padding: 0 var(--sp5);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--tx2);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ui2-tab[aria-selected="true"] { color: var(--acc-ink); font-weight: 600; border-bottom-color: var(--acc); }
+.ui2-tab-key { font: var(--f-micro) var(--mono); color: var(--tx3); }
+.ui2-search { position: relative; display: flex; align-items: center; padding: 0 var(--sp4); }
+.ui2-search input { width: 180px; min-height: var(--hit); border: 1px solid var(--ctl-bd); border-radius: var(--r-md); background: var(--ctl); color: var(--tx); }
+.ui2-appbar .kit-select, .ui2-gallery-head .kit-select { background: var(--ctl); color: var(--tx); border: 1px solid var(--ctl-bd); }
+.ui2-search-results {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 260px;
+  margin: 0;
+  padding: var(--sp2);
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+}
+.ui2-search-results button { display: flex; justify-content: space-between; gap: var(--sp5); width: 100%; min-height: var(--hit); padding: 0 var(--sp4); border: 0; background: none; color: var(--tx); font: inherit; text-align: left; cursor: pointer; }
+.ui2-search-results button:hover { background: var(--ctl-hover); }
+.ui2-search-place { color: var(--tx3); font-size: var(--f-cap); }
+.ui2-search-none { padding: var(--sp3) var(--sp4); color: var(--tx2); }
+.ui2-band { display: flex; align-items: stretch; min-width: 0; overflow: hidden; }
+.ui2-ribbon[data-captions="false"] .kit-ribbongroup-caption { display: none; }
+
+/* ---- main: Browser | clear view | Properties */
+.ui2-main { position: relative; min-height: 0; margin: var(--sp4); }
+.ui2-cam {
+  display: grid;
+  grid-template-columns: var(--ui2-browser-w) minmax(0, 1fr) var(--ui2-props-w);
+  gap: var(--sp4);
+  height: 100%;
+  min-height: 0;
+}
+.ui2-cam[data-active="false"], .ui2-full[data-active="false"] { display: none; }
+.ui2-full { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--b1); border-radius: var(--r-lg); background: var(--panel); }
+
+.ui2-slot { position: relative; min-width: 0; min-height: 0; }
+.ui2-slot > .kit-card { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ui2-slot .kit-card-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ui2-slot .kit-card-footer { flex: none; }
+
+/* today's panels, hosted as they are; the shell resets only the box the old shell gave them */
+.ui2-shell .ui2-host { flex: 1; width: 100%; min-width: 0; min-height: 0; border: 0; background: transparent; }
+
+/* compact: the Browser is an icon rail; its card opens over the view */
+.ui2-slot[data-railed="true"] { width: var(--ui2-browser-w); }
+.ui2-slot[data-railed="true"] > .kit-card { display: none; position: absolute; z-index: 20; left: 0; top: 0; width: var(--w-browser); }
+.ui2-slot[data-railed="true"][data-open="true"] > .kit-card { display: flex; }
+.ui2-rail-button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--tx2);
+  cursor: pointer;
+}
+
+.ui2-view { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--view); border: 1px solid var(--b1); border-radius: var(--r-lg); }
+.ui2-viewport { position: absolute; inset: 0; }
+.ui2-viewport .view-cube-wrap { display: none; }
+.ui2-overlays { position: absolute; inset: 0; z-index: 6; pointer-events: none; --ui2-sim-h: 0px; }
+.ui2-overlay { position: absolute; bottom: calc(var(--sp4) + var(--ui2-sim-h)); pointer-events: auto; }
+.ui2-overlay-left { left: var(--sp4); }
+.ui2-overlay-right { right: var(--sp4); }
+
+/* ---- strip */
+.ui2-strip { position: relative; height: var(--ui2-strip-h); margin: 0 var(--sp4) var(--sp4); }
+.ui2-strip-inner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; }
+
+/* ---- kit gallery */
+.ui2-gallery { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; }
+.ui2-gallery-head { display: flex; align-items: center; min-width: 0; height: var(--h-app); padding: 0 var(--sp4); border-bottom: 1px solid var(--b2); }
+.ui2-gallery-title { margin: 0; font-size: var(--f-title); font-weight: 600; }
+.ui2-gallery-body { min-height: 0; overflow: auto; padding: var(--sp5); background: var(--view); display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sp5); align-content: start; }
+.ui2-gallery-part { min-width: 0; padding: var(--sp5); background: var(--panel); border: 1px solid var(--b1); border-radius: var(--r-lg); }
+.ui2-gallery-part-name { margin: 0 0 var(--sp4); font-size: var(--f-sec); font-weight: 600; color: var(--tx2); }
+.ui2-gallery-none { margin: 0; color: var(--tx3); }
+
+/* WO-3306: what lanes register. Nothing registered draws none of these. */
+.ui2-sections { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp3); }
+.ui2-overlay-extra { display: flex; flex-direction: column; gap: var(--sp2); margin-bottom: var(--sp2); }
+.ui2-strip-extra { display: flex; flex-wrap: wrap; gap: var(--sp2); margin-bottom: var(--sp2); }
+.ui2-windows { zoom: var(--ui2-scale, 1); }

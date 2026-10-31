@@ -1,5 +1,6 @@
 import { textFor, useText } from '../../../i18n'
 const controlText = textFor('control-screens-not-probing')
+const networkText = textFor('machine-definition.wo3207')
 
 import { type MachineConfig } from '../../../types'
 import { type MachineConnectionKind } from '../../../lib/machine/machineSession'
@@ -27,6 +28,62 @@ import { hasLegacyBridgeStatusHost } from '../../../lib/machine/bridgeHost'
 import { useCallback } from 'react'
 import { chooseMachinePath } from '../../../lib/machine/bridgeHost'
 import { useEffect } from 'react'
+
+type LinuxNetworkResult = { ok: boolean; message: string; commands?: string }
+type LinuxNetworkHost = {
+  platform?: string
+  controllerNetworkPorts?: () => Promise<{ ports: string[]; message?: string }>
+  setupControllerNetwork?: (input: { port: string; address: string }) => Promise<LinuxNetworkResult>
+  serialPermission?: (port: string) => Promise<string | null>
+}
+
+// The desktop host owns OS access. This serial check never opens the adapter.
+export function useLinuxControllerSetup(enabled: boolean, serialPort?: string) {
+  const host = typeof window === 'undefined' ? undefined
+    : (window as Window & { liencamHost?: LinuxNetworkHost }).liencamHost
+  const available = enabled && host?.platform === 'linux' && typeof host.setupControllerNetwork === 'function'
+  const [ports, setPorts] = useState<string[]>([])
+  const [port, setPort] = useState('')
+  const [address, setAddress] = useState('10.10.10.20/24')
+  const [message, setMessage] = useState('')
+  const [result, setResult] = useState<LinuxNetworkResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [permission, setPermission] = useState<{ port: string; message: string } | null>(null)
+  const listPorts = host?.controllerNetworkPorts
+  const checkSerial = host?.serialPermission
+  useEffect(() => {
+    if (!available || !listPorts) return
+    let active = true
+    void listPorts().then(value => {
+      if (!active) return
+      setPorts(value.ports)
+      setPort(current => current || (value.ports.length === 1 ? value.ports[0] : ''))
+      setMessage(value.message ?? '')
+    }).catch(error => { if (active) setMessage(networkText('listPortsError', { error: String(error) })) })
+    return () => { active = false }
+  }, [available, listPorts])
+  useEffect(() => {
+    if (!available || !serialPort || !checkSerial) return
+    let active = true
+    const refresh = () => {
+      void checkSerial(serialPort).then(value => {
+        if (active) setPermission(value ? { port: serialPort, message: value } : null)
+      }).catch(() => { if (active) setPermission(null) })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 3000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [available, serialPort, checkSerial])
+  const setup = async () => {
+    if (!available || !host?.setupControllerNetwork || busy) return
+    setBusy(true)
+    try { setResult(await host.setupControllerNetwork({ port, address })) }
+    catch (error) { setResult({ ok: false, message: networkText('setupError', { error: String(error) }) }) }
+    finally { setBusy(false) }
+  }
+  return { available, ports, port, setPort, address, setAddress, message, result, busy, setup,
+    serialPermission: available && permission !== null && permission.port === serialPort ? permission.message : null }
+}
 import { subscribeMachineSpindleLinkApply } from '../../../lib/machine/machineSession'
 import { machineSpindleLinkApplyInFlight } from '../../../lib/machine/machineSession'
 import { type VfdPath } from './SpindleLinkSection'
@@ -703,6 +760,13 @@ export function useMachineDefinitionPanel({
   const spindleDefinition = spindleStoredIsStated
     ? source.spindleLinkDefinition
     : (spindleLinkIsForeign ? null : spindleLink.declared)
+
+  const linuxSetup = useLinuxControllerSetup(setupKind === 'bridge',
+    // The port picker remembers a per-computer override (WO-1000). A saved
+    // definition may still say COM3 after moving the machine to Linux.
+    (spindleLink.connected && !spindleLinkIsForeign ? spindleLink.reportedPort : null)
+      ?? localLink?.vfdPort
+      ?? (spindleDefinition?.link.transport === 'rtu' ? spindleDefinition.link.port : undefined))
 
   /** Text the VFD document rejected, stamped with its machine so a malformed
    * slave address can neither be stored nor appear over another machine. */
@@ -1805,7 +1869,7 @@ export function useMachineDefinitionPanel({
   // naming them would rebuild the exact class of defect that cost this project
   // an evening - a report that says something happened without saying what.
   const importIssues = draft.controllerDefinition?.importIssues ?? []
-  return { absentAxisRow, editsConnectedMachine, allSettingsTyped, applyIsCurrent, applyState, applyTooltip, applying, assignedPins, authorityState, authorityText, bridgeAction, bridgeCapability, bridgeHello, bridgePort, bridgeProcessState, bridgeTextBlurred, bridgeTextFocused, commit, connectedMachineName, connectionBusy, connectionKind, connectionPhase, controllerSetupHighlighted, controllerSetupRef, def, defineController, defineHoming, detectedInstallRoot, dirty, draft, editDraft, enabledAxes, handleApply, handleBridgeAction, hideEmpty, importIssues, legacyBridgeStatusHost, linuxcncHello, linuxcncJoints, linuxcncOwnsSpindle, localLink, notAcceptedCount, noteBridgeSettingChanged, order, panelBodyRef, patchAxis, patchAxisPin, patchAxisSoftLimit, patchHoming, patchIoPin, pinProblem, pinText, polarityBoxFor, problems, rememberBridgeSetting, rememberPickedPath, revert, saved, section, sectionProblemCount, serialBaud, setAllSettingsTyped, setHideEmpty, setHomingOrderAt, setMachineBridgePort, setSection, setSettingSearch, setSkewTyped, settingSearch, setupKind, skewTyped, slavedAxis, source, spindleLink, spindleLinkIsForeign, spindleLinkOtherMachine, spindleStoredIsStated, toggleAxisEnabled, uccnc, unsent, unsetSoftLimitAxes, vfdEdit, visiblePins }
+  return { linuxSetup, absentAxisRow, editsConnectedMachine, allSettingsTyped, applyIsCurrent, applyState, applyTooltip, applying, assignedPins, authorityState, authorityText, bridgeAction, bridgeCapability, bridgeHello, bridgePort, bridgeProcessState, bridgeTextBlurred, bridgeTextFocused, commit, connectedMachineName, connectionBusy, connectionKind, connectionPhase, controllerSetupHighlighted, controllerSetupRef, def, defineController, defineHoming, detectedInstallRoot, dirty, draft, editDraft, enabledAxes, handleApply, handleBridgeAction, hideEmpty, importIssues, legacyBridgeStatusHost, linuxcncHello, linuxcncJoints, linuxcncOwnsSpindle, localLink, notAcceptedCount, noteBridgeSettingChanged, order, panelBodyRef, patchAxis, patchAxisPin, patchAxisSoftLimit, patchHoming, patchIoPin, pinProblem, pinText, polarityBoxFor, problems, rememberBridgeSetting, rememberPickedPath, revert, saved, section, sectionProblemCount, serialBaud, setAllSettingsTyped, setHideEmpty, setHomingOrderAt, setMachineBridgePort, setSection, setSettingSearch, setSkewTyped, settingSearch, setupKind, skewTyped, slavedAxis, source, spindleLink, spindleLinkIsForeign, spindleLinkOtherMachine, spindleStoredIsStated, toggleAxisEnabled, uccnc, unsent, unsetSoftLimitAxes, vfdEdit, visiblePins }
 }
 
 export type MachineDefinitionPanelState = ReturnType<typeof useMachineDefinitionPanel>

@@ -33,8 +33,14 @@ import type { ResolvedFeedrates } from '../../feedrates'
 import type { FeatureResult, AdaptivePass, FinishApproach } from './processFeature'
 import { MIN_DESCENT_HELIX_RADIUS } from './processFeature'
 import { operatorNotice } from './operatorNotices'
-import { floorHop, floorHopAlong, helixDescent, helixFits } from '../../moves'
+import { entryAbove, floorHop, floorHopAlong, helixDescent, helixFits, rapidEntryAt } from '../../moves'
 import { FLOOR_HOP_FALLBACK_BAND_MM, makeFloorHopCorridorProof } from './rapidCorridor'
+import { effectiveMoveRole, isStockCuttingRole } from '../../stockCuttingRoles'
+import { maxTraverseIntrusion, removeSweep, ZDexelField } from '../../../../cam3d/stock'
+import { replaySagittaFor, toolpathMovesToLinearSweeps } from '../../../../cam3d/rough/replayStock'
+import {
+  DESCENT_STANDOFF_MM, LOW_TRAVEL_HEADROOM_MM, TRAVERSE_INTRUSION_TOLERANCE_MM,
+} from '../../../../cam3d/rough/traverseSafety'
 
 /** Material side of travel for the context's direction (./millingDirection, WO-1896). */
 function materialSideOf(ctx: EmitContext): MaterialSide {
@@ -104,7 +110,8 @@ export function emitFeature(result: FeatureResult, ctx: EmitContext): ToolpathMo
   const guarded = { ...ctx, floorHopIsClear: makeFloorHopCorridorProof(
     ctx.floorHopToolRadius ?? 0, ctx.floorHopAssemblyRadius ?? ctx.floorHopToolRadius ?? 0,
   ) }
-  return floor === undefined ? emitFeatureLegacy(result, guarded) : emitFeatureWithFloorFinish(result, guarded, floor)
+  const moves = floor === undefined ? emitFeatureLegacy(result, guarded) : emitFeatureWithFloorFinish(result, guarded, floor)
+  return liftLinksOverUnclearedStock(moves, ctx)
 }
 
 /** The Z the pass stream is replayed at once more for floor finishing, or undefined when no
@@ -361,7 +368,7 @@ function emitEntry(
   passStartDepth: number, passEndDepth: number,
   ctx: EmitContext, helixAngleRad: number, minHelixR: number,
 ): void {
-  const { clearanceZ, retractZ, feedZ } = ctx.heights
+  const { clearanceZ, retractZ } = ctx.heights
   const { plungeRate } = ctx.feeds
   const c = entry.point
 
@@ -388,10 +395,9 @@ function emitEntry(
 
   if (!useHelix) {
     // Straight plunge: safe rapid approach over the entry, then feed down to depth.
+    // WO-3083: rapid down to just above the level's material, feed from there.
     leaveVertically(moves, c, clearanceZ)
-    moves.push({ type: 'rapid', x: c.x, y: c.y, z: clearanceZ, role: 'rapid' })
-    moves.push({ type: 'rapid', x: c.x, y: c.y, z: retractZ, role: 'rapid' })
-    moves.push({ type: 'rapid', x: c.x, y: c.y, z: feedZ, role: 'rapid' })
+    rapidEntryAt(moves, c, entryAbove(passStartDepth, undefined, ctx.heights.feedZ), retractZ, clearanceZ)
     moves.push({ type: 'feed', x: c.x, y: c.y, z: passEndDepth, feed: plungeRate, role: 'plunge' })
     return
   }
@@ -411,12 +417,15 @@ function emitHelixRamp(
   passStartDepth: number, passEndDepth: number,
   ctx: EmitContext, helixAngleRad: number,
 ): { x: number; y: number } {
-  const { clearanceZ, retractZ, feedZ } = ctx.heights
-  const { plungeRate, rampRate } = ctx.feeds
+  const { clearanceZ, retractZ } = ctx.heights
+  const { rampRate } = ctx.feeds
+  // WO-3083 (folds WO-3077): the helix starts ENTRY_CLEARANCE_MM above the level's material -
+  // reached by rapid - instead of AT it after a fed plunge through the air from the Feed plane.
+  const startZ = entryAbove(passStartDepth, undefined, ctx.heights.feedZ)
   const r = Math.max(helixR - HELIX_EDGE_BACKOFF, helixR * AP.helix.minRadiusFraction)
   const tanAngle = Math.tan(helixAngleRad)
   const depthPerCircle = 2 * Math.PI * helixR * tanAngle
-  const passDepth = passStartDepth - passEndDepth
+  const passDepth = startZ - passEndDepth
   const maxfi = depthPerCircle > 1e-9 ? (passDepth / depthPerCircle) * 2 * Math.PI : 2 * Math.PI
   // The helix bores into material that surrounds it: material on the right is CCW.
   const travelSign = materialSideOf(ctx) === 'right' ? 1 : -1
@@ -424,19 +433,22 @@ function emitHelixRamp(
   const startX = c.x + r * Math.cos(offsetFi)
   const startY = c.y + r * Math.sin(offsetFi)
 
-  // Safe approach to the helix start, then descend to the level's start depth.
+  // Safe approach to the helix start, down to just above the level's material.
   leaveVertically(moves, { x: startX, y: startY }, clearanceZ)
-  moves.push({ type: 'rapid', x: startX, y: startY, z: clearanceZ, role: 'rapid' })
-  moves.push({ type: 'rapid', x: startX, y: startY, z: retractZ, role: 'rapid' })
-  moves.push({ type: 'rapid', x: startX, y: startY, z: feedZ, role: 'rapid' })
-  moves.push({ type: 'feed', x: startX, y: startY, z: passStartDepth, feed: plungeRate, role: 'plunge' })
+  rapidEntryAt(moves, { x: startX, y: startY }, startZ, retractZ, clearanceZ)
 
   // Spiral down to the level depth (the final move lands exactly on passEndDepth).
-  return helixDescent(moves, {
-    centre: c, radius: r, pitchRadius: helixR, fromZ: passStartDepth, toZ: passEndDepth,
+  const first = moves.length
+  const end = helixDescent(moves, {
+    centre: c, radius: r, pitchRadius: helixR, fromZ: startZ, toZ: passEndDepth,
     tanAngle, feed: rampRate, startAngle: offsetFi, direction: travelSign,
     sampling: { kind: 'fixed', stepRad: HELIX_FI_STEP, maxPoints: MAX_HELIX_POINTS },
   })
+  // WO-3270: the spiral's first point is where the rapid stopped. Fed there, it is a zero-length
+  // G1 between the rapid and the descent, and the entry reads as no entry at all.
+  const rapid = moves[first - 1], start = moves[first]
+  if (rapid?.type === 'rapid' && start && start.x === rapid.x && start.y === rapid.y && start.z === rapid.z) moves.splice(first, 1)
+  return end
 }
 
 /** Cut pass: feed along the dense polyline at the level depth. */
@@ -732,7 +744,7 @@ function emitFinishApproach(
   minHelixR: number,
 ): void {
   if (!approach) return
-  const { clearanceZ, retractZ, feedZ } = ctx.heights
+  const { clearanceZ, retractZ } = ctx.heights
   const { plungeRate, rampRate, leadInRate } = ctx.feeds
 
   // WO-466 TIER 2.5: THE TOOL NEVER LEAVES THE FLOOR. The planner proved the first stretch
@@ -774,7 +786,7 @@ function emitFinishApproach(
       moves.push({ type: 'rapid', x: d.x, y: d.y, z, role: 'rapid' })
     } else {
       moves.push({ type: 'rapid', x: d.x, y: d.y, z: retractZ, role: 'rapid' })
-      moves.push({ type: 'rapid', x: d.x, y: d.y, z: feedZ, role: 'rapid' })
+      moves.push({ type: 'rapid', x: d.x, y: d.y, z: entryAbove(passStartDepth, undefined, ctx.heights.feedZ), role: 'rapid' })
       moves.push({ type: 'feed', x: d.x, y: d.y, z, feed: plungeRate, role: 'plunge' })
     }
   }
@@ -1102,7 +1114,9 @@ function emitLink(
     if (!link.clearAirLanding) moves.push({ type: 'feed', x: b.x, y: b.y, z, feed: ctx.feeds.plungeRate, role: 'plunge' })
     return
   }
-  const stayDownZ = link.microLift ? z + link.microLift.z : clearanceZ
+  // WO-3323: the micro-lift's LIFT_DISTANCE hover is capped at the clearance height, as every
+  // floor hop is (floorHopAt): a 0.1 mm cut under a 0.1 mm Clearance hovered at 1.9.
+  const stayDownZ = link.microLift ? Math.min(clearanceZ, z + link.microLift.z) : clearanceZ
   moves.push({ type: 'rapid', x: a.x, y: a.y, z: stayDownZ, role: 'rapid' })
   const hd = link.helixDescent
   if (hd && hd.radius >= minHelixR) {
@@ -1134,6 +1148,10 @@ function emitLink(
     moves.push({ type: 'rapid', x: b.x, y: b.y, z, role: 'rapid' })
     return
   }
+  // WO-3083: a landing from Clearance rapids down to just above the level's material first
+  // (it used to plunge the whole way from Clearance at plunge rate).
+  const landStartZ = entryAbove(passStartDepth, undefined, ctx.heights.feedZ)
+  if (stayDownZ > landStartZ) moves.push({ type: 'rapid', x: b.x, y: b.y, z: landStartZ, role: 'rapid' })
   moves.push({ type: 'feed', x: b.x, y: b.y, z, feed: ctx.feeds.plungeRate, role: 'plunge' })
 }
 
@@ -1191,4 +1209,160 @@ function floorHopAt(ctx: EmitContext, z: number): number {
   const hop = ctx.floorHopMm
   if (hop === undefined || !Number.isFinite(hop) || hop <= 0) return 0
   return Math.max(0, Math.min(hop, ctx.heights.clearanceZ - z))
+}
+
+// WO-3204: links stay in cleared stock. Operator's WO-096 rule (cam3d/rough/traverseSafety.ts):
+// "It is ok to travel below the travel height providing the code generator knows the stock is
+// cleared ... it can only do so if it knows that is cleared territory. And it needs to be stock
+// aware to do so." The planner's links (fast_traverse keep-downs, loopbacks, their fed terminal
+// approaches, floor hops and micro-lifts) are DESIGNED to run over cleared floor, but the design
+// is a 2D belief: replaying the program into the stock showed them crossing material that was
+// still standing (WO-3197, first witness Tee move 769). So the emitted program is walked once
+// more in order against the same in-process stock the 3D rougher proves its links with
+// (ZDexelField + removeSweep + maxTraverseIntrusion, no second model): every cutting move is
+// replayed as it passes, and every run of non-cutting moves is asked, in the stock state AT
+// THAT POINT, whether its corridor is clear. A proven run is kept move for move (stay-down
+// stays wherever it is proven); an unproven one is replaced by the enforceTraverseSafety
+// route -- straight up where the tool stands (a lift meets nothing new), across at the
+// lowest height the stock proves clear (the depth itself when the straight chord is clear,
+// else the highest material under it plus LOW_TRAVEL_HEADROOM_MM, else Clearance), and a
+// guarded descent: rapid only as deep as the stock proves empty, then feed 'plunge'. Only a
+// TRAVERSE (rapid, or feed-less fast_traverse) meeting material unproves a run: a move that
+// carries a cutting feed and meets material is an engagement and is labelled 'lead_in'.
+//
+// RESOLUTION. The field samples each column at its centre, so neither removal nor query can
+// resolve material within half a cell diagonal of the cutter's edge. Both are narrowed by
+// that same amount: a link retracing a cut path is then proven by the very columns the cut
+// removed, and on a 0.1 mm grid any column the WO-3197 oracle (0.2 mm grid, query narrowed
+// by its half diagonal, full-radius removal) finds standing inside its query is standing,
+// unremoved, inside this query too, whatever the two grids' alignment.
+//
+// THE STOCK IT KNOWS. The emitter is handed no stock box, so the field is the feature's own
+// footprint filled solid to heights.topZ -- the same premise every entry here already rapids
+// down on (nothing stands above the level's start). Material outside the real stock is
+// therefore assumed present (a link may lift that need not); material cleared by an earlier
+// operation or feature is assumed present too. Both only ever lift more, never less.
+//
+// WHICH TOOLS. The cutter is the flat end mill the production entry names
+// (floorHopToolRadius, flat end mills only). Other cutters, and synthetic contexts that name
+// none, emit exactly as before.
+const STOCK_GUARD_CELL_MM = 0.1
+const GUARD_EPS = 1e-9
+
+function liftLinksOverUnclearedStock(moves: ToolpathMove[], ctx: EmitContext): ToolpathMove[] {
+  const toolRadius = finitePositive(ctx.floorHopToolRadius)
+  if (toolRadius === 0 || moves.length < 2) return moves
+  const { clearanceZ, topZ } = ctx.heights
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const m of moves) {
+    // An arc may bulge past its endpoints by up to its radius; its centre bounds that.
+    const reach = (m.type === 'arc_cw' || m.type === 'arc_ccw') && Number.isFinite(m.cx) && Number.isFinite(m.cy)
+      ? Math.hypot(m.x - m.cx!, m.y - m.cy!) : 0
+    const cx = reach > 0 ? m.cx! : m.x, cy = reach > 0 ? m.cy! : m.y
+    minX = Math.min(minX, cx - reach, m.x); maxX = Math.max(maxX, cx + reach, m.x)
+    minY = Math.min(minY, cy - reach, m.y); maxY = Math.max(maxY, cy + reach, m.y)
+    minZ = Math.min(minZ, m.z)
+  }
+  if (![minX, minY, minZ, maxX, maxY, topZ, clearanceZ].every(Number.isFinite) || !(topZ > minZ)) return moves
+  const pad = toolRadius + 4 * STOCK_GUARD_CELL_MM
+  const field = ZDexelField.fromBox({
+    minX: minX - pad, minY: minY - pad, minZ: minZ - 1, maxX: maxX + pad, maxY: maxY + pad, maxZ: topZ,
+  }, STOCK_GUARD_CELL_MM)
+  const reachRadius = toolRadius - field.cell * Math.SQRT1_2
+  if (!(reachRadius > 0)) return moves
+  const cutter = { kind: 'flat' as const, diameter: 2 * reachRadius }
+  const sagitta = replaySagittaFor(field)
+  const tol = TRAVERSE_INTRUSION_TOLERANCE_MM
+  const hitAlong = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) =>
+    maxTraverseIntrusion(field, { x0, y0, z0, x1, y1, z1 }, cutter)
+  const out: ToolpathMove[] = [moves[0]]
+  const cut = (m: ToolpathMove): void => {
+    for (const sweep of toolpathMovesToLinearSweeps([out[out.length - 1], m], sagitta)) removeSweep(field, sweep, cutter)
+    out.push(m)
+  }
+  // Judge a run of non-cutting moves in the stock state it starts in. A pure vertical lift is
+  // not asked: the body already occupies everything above the tip, so raising it meets
+  // nothing. A TRAVERSE (a rapid, or a feed-less fast_traverse at the machine traverse rate)
+  // that meets standing material makes the run unproven: null. A move that carries a cutting
+  // feed (the fed terminal approach WO-2835 lands with, at leadInRate, planned to slow down
+  // before the frontier) and meets material is an engagement, not travel: its index is
+  // returned and it is replayed as the 'lead_in' it is -- same G1, same feed, now removing in
+  // the stock what it cuts.
+  const judgeRun = (from: ToolpathMove, run: readonly ToolpathMove[]): Set<number> | null => {
+    const engaged = new Set<number>()
+    let p = from
+    for (let k = 0; k < run.length; k++) {
+      const q = run[k]
+      if (q.type === 'arc_cw' || q.type === 'arc_ccw') return null // no non-cutting arc is emitted; never assume one
+      const vertical = Math.hypot(q.x - p.x, q.y - p.y) <= GUARD_EPS
+      if (!(vertical && q.z >= p.z) && hitAlong(p.x, p.y, p.z, q.x, q.y, q.z).intrusionMm > tol) {
+        if (q.type !== 'feed' || finitePositive(q.feed) === 0) return null
+        engaged.add(k)
+      }
+      p = q
+    }
+    return engaged
+  }
+  const reroute = (from: ToolpathMove, to: ToolpathMove): void => {
+    const lowZ = Math.max(from.z, to.z)
+    const atDepth = hitAlong(from.x, from.y, lowZ, to.x, to.y, lowZ)
+    let travelZ = Math.max(clearanceZ, lowZ)
+    let keptDown = false
+    if (atDepth.intrusionMm <= tol) {
+      // The straight chord is itself proven: still stay-down, through cleared stock.
+      travelZ = lowZ
+      keptDown = true
+    } else if (Number.isFinite(atDepth.contactTipZ)) {
+      const overZ = Math.max(lowZ, atDepth.contactTipZ + LOW_TRAVEL_HEADROOM_MM)
+      if (overZ < clearanceZ - GUARD_EPS
+        && hitAlong(from.x, from.y, overZ, to.x, to.y, overZ).intrusionMm <= tol - LOW_TRAVEL_HEADROOM_MM) travelZ = overZ
+    }
+    // WO-3274: the planner priced this connection against a lift that hovers LIFT_DISTANCE over
+    // the level (processFeature attachMicroLift). Emitted, that hover is kept where the stock
+    // proves it clear, and where it does not this same reroute lifts it again from the hover.
+    // A reroute of the kept-down route that climbed higher than the lift's would make the
+    // kept-down choice slower than the lift it beat (gt_two_island, gt_fix5: clearance against
+    // the lift's hover at the stock top). So it flies at the lowest of those hover heights,
+    // LIFT_DISTANCE steps over the level, that the stock proves clear at the same tolerance
+    // every kept run is held to.
+    if (!keptDown && Number.isFinite(atDepth.contactTipZ)) {
+      const step = AP.caps.liftDistanceMm
+      for (let k = Math.max(1, Math.ceil((atDepth.contactTipZ - tol - lowZ) / step - GUARD_EPS)); ; k++) {
+        const hoverZ = lowZ + k * step
+        if (!(hoverZ < travelZ - GUARD_EPS)) break
+        if (hitAlong(from.x, from.y, hoverZ, to.x, to.y, hoverZ).intrusionMm <= tol) { travelZ = hoverZ; break }
+      }
+    }
+    if (from.z < travelZ - GUARD_EPS) out.push({ type: 'rapid', x: from.x, y: from.y, z: travelZ, role: 'rapid' })
+    out.push(keptDown
+      ? { type: 'feed', x: to.x, y: to.y, z: travelZ, role: 'fast_traverse' }
+      : { type: 'rapid', x: to.x, y: to.y, z: travelZ, role: 'rapid' })
+    if (!(to.z < travelZ - GUARD_EPS)) return
+    // Guarded descent (traverseSafety descendSafely): the rapid stops DESCENT_STANDOFF_MM above
+    // the highest material under the cutter; any remaining depth is fed as a plunge.
+    const probe = hitAlong(to.x, to.y, to.z, to.x, to.y, to.z)
+    const rapidFloorZ = probe.intrusionMm > -DESCENT_STANDOFF_MM
+      ? Math.min(travelZ, probe.contactTipZ + DESCENT_STANDOFF_MM) : to.z
+    if (rapidFloorZ <= to.z + GUARD_EPS) {
+      out.push({ type: 'rapid', x: to.x, y: to.y, z: to.z, role: 'rapid' })
+      return
+    }
+    if (rapidFloorZ < travelZ - GUARD_EPS) out.push({ type: 'rapid', x: to.x, y: to.y, z: rapidFloorZ, role: 'rapid' })
+    cut({ type: 'feed', x: to.x, y: to.y, z: to.z, feed: ctx.feeds.plungeRate, role: 'plunge' })
+  }
+  for (let i = 1; i < moves.length;) {
+    if (isStockCuttingRole(effectiveMoveRole(moves[i]))) {
+      cut(moves[i++])
+      continue
+    }
+    let end = i
+    while (end < moves.length && !isStockCuttingRole(effectiveMoveRole(moves[end]))) end++
+    const run = moves.slice(i, end)
+    const from = out[out.length - 1]
+    const engaged = judgeRun(from, run)
+    if (engaged === null) reroute(from, run[run.length - 1])
+    else run.forEach((m, k) => { if (engaged.has(k)) cut({ ...m, role: 'lead_in' }); else out.push(m) })
+    i = end
+  }
+  return out
 }

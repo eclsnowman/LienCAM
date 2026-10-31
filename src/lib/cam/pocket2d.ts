@@ -23,7 +23,7 @@ import { offsetLoop } from './face2d/clipperOffset'
 import { resolveHeights } from './heights'
 import { resolveFeedrates } from './feedrates'
 import { assertPocketEntryAllowed } from './pocketEntryPolicy'
-import { helixDescent, helixFits, MIN_HELIX_RADIUS_MM, rampDescent, resolveFloorHopMm } from './moves'
+import { entryStartZ, helixDescent, helixFits, MIN_HELIX_RADIUS_MM, rampDescent, resolveFloorHopMm, usableStock } from './moves'
 import { assertToolFluteReach, operatorLoopRef } from './toolFluteReach'
 import { directionForTool } from '../tool/cutHand'
 import { clearanceAllowanceMmOf, type ToolReachInputs } from './holderClearanceGate'
@@ -31,7 +31,6 @@ import { applyRestAir2d } from './restAir2d'
 import { appendCornerRelief } from './cornerRelief2d'
 import { roundPocketRingCorners } from './pocketRingCorners'
 import { EngagementFeedQuantizer, SweptMaterialIndex, nominalEngagement } from './engagement2d'
-import { highestMaterialOver } from './smartHeights/earlierMaterial'
 import type { StockState } from './stockState'
 import {
   reduceRegionAroundKeepOuts, workholdingDepthBands, workholdingIslandNotice,
@@ -1652,11 +1651,6 @@ interface Ctx {
 // stock remaining." A helix begins entryClearance above the highest material
 // still standing under its footprint, and between levels the tool stays down.
 
-function usableStock(stock: StockState | undefined): StockState | undefined {
-  if (!stock || !(stock.resolutionMm > 0) || !(stock.nx > 0) || !(stock.ny > 0)) return undefined
-  return stock.topZ?.length === stock.nx * stock.ny ? stock : undefined
-}
-
 /**
  * Where a helix at `ctr` descending to `depth` begins. The material under it is
  * the highest the remaining stock holds over the helix's swept square, padded by
@@ -1668,22 +1662,10 @@ function usableStock(stock: StockState | undefined): StockState | undefined {
 function helixStartZ(
   ctx: Ctx, ctr: Pt2, helixR: number, ceilingZ: number | undefined, depth: number,
 ): number {
-  const reach = helixR + ctx.toolRadius
-  let surfaceZ: number | undefined
-  if (ctx.remaining) {
-    const pad = reach + ctx.remaining.resolutionMm
-    surfaceZ = highestMaterialOver(ctx.remaining, {
-      minX: ctr.x - pad, minY: ctr.y - pad, maxX: ctr.x + pad, maxY: ctr.y + pad,
-    })
-  } else if (ctx.stockBlock) {
-    const b = ctx.stockBlock
-    const over = ctr.x + reach >= b.min.x && ctr.x - reach <= b.max.x &&
-      ctr.y + reach >= b.min.y && ctr.y - reach <= b.max.y
-    if (over && Number.isFinite(b.max.z)) surfaceZ = b.max.z
-  }
-  let materialZ = surfaceZ ?? ceilingZ ?? ctx.topZ
-  if (ceilingZ !== undefined) materialZ = Math.min(materialZ, ceilingZ)
-  return Math.max(materialZ, depth) + ctx.entryClearance
+  // WO-3083: the one entry rule every operation shares (moves/index.ts).
+  return entryStartZ({ ...(ctx.remaining ? { remaining: ctx.remaining } : {}),
+    ...(ctx.stockBlock ? { stockBlock: ctx.stockBlock } : {}), topZ: ctx.topZ },
+  ctr, helixR + ctx.toolRadius, depth, { ceilingZ, clearance: ctx.entryClearance })
 }
 
 /**

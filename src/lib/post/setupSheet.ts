@@ -163,21 +163,46 @@ function workholdingLines(
     // the cut loops are resolved at compute time and are not in the saved
     // plan (the tab preview is dropped on save), so locations saved on some
     // loop may belong to one the cut ignores: say how they are set, not a total.
+    // WO-3220: 'none' is a loop an applied suggestion left without tabs.
     const loopIds = Array.isArray(params.loopIds) ? params.loopIds : []
-    const placed = Object.entries(params.tabLocations ?? {})
-      .filter(([loopId, at]) => (loopIds.length === 0 || loopIds.includes(loopId)) && Array.isArray(at) && at.length > 0)
+    const cutLocations = Object.entries(params.tabLocations ?? {})
+      .filter(([loopId]) => loopIds.length === 0 || loopIds.includes(loopId))
+    const placed = cutLocations
       .map(([, at]) => at)
-    const howMany = placed.length === 0
+      .filter((at): at is number[] => Array.isArray(at) && at.length > 0)
+    const none = cutLocations.filter(([, at]) => at === 'none').length
+    const contours = (n: number) => `${n} ${n === 1 ? 'contour' : 'contours'}`
+    const howMany = placed.length === 0 && none === 0
       ? `${count} tabs per contour`
       : loopIds.length === 0
-        ? `${count} tabs per contour unless placed by hand`
-        : `${placed.reduce((sum, at) => sum + at.length, 0)} tabs placed by hand on ${placed.length} ` +
-          `${placed.length === 1 ? 'contour' : 'contours'}` +
-          (placed.length < new Set(loopIds).size ? `, ${count} per other contour` : '')
+        ? `${count} tabs per contour unless placed by hand` + (none > 0 ? ' or set to none' : '')
+        : [
+          placed.length > 0 ? `${placed.reduce((sum, at) => sum + at.length, 0)} tabs placed by hand on ${contours(placed.length)}` : '',
+          none > 0 ? `no tabs on ${contours(none)}` : '',
+          placed.length + none < new Set(loopIds).size ? `${count} per other contour` : '',
+        ].filter((part) => part !== '').join(', ')
     rows.push(
       `    Tabs, operation ${n} ${quoted(op.name)}: ${howMany}, ` +
       `${dim(width, decimals, units)}${suffix} wide x ${dim(height, decimals, units)}${suffix} high, ` +
       `${params.tabShape === 'triangular' ? 'triangular' : 'box'}`,
+    )
+  }
+  // WO-3221: a posted tab removal contour names the tabbed contour it cuts the
+  // tabs from, how many, and how the setup says the part is held once they go.
+  for (const { op, n } of numbered) {
+    if (op.type !== 'contour_2d') continue
+    const binding = (op.params as Partial<ContourParams>).tabRemovalSource
+    if (!binding || !Array.isArray(binding.targets) || !Array.isArray(binding.loopIds)) continue
+    const posted = numbered.find(({ op: candidate }) => candidate.id === binding.sourceOperationId)
+    const source = setup.operations.find((candidate) => candidate.id === binding.sourceOperationId)
+    const sourceText = posted
+      ? `operation ${posted.n} ${quoted(posted.op.name)}`
+      : source ? quoted(source.name) : quoted(String(binding.sourceOperationId))
+    const contours = binding.loopIds.length === 1 ? 'contour' : 'contours'
+    rows.push(
+      `    Tab removal, operation ${n} ${quoted(op.name)}: removes all ${binding.targets.length} tabs of ` +
+      `${sourceText} on ${binding.loopIds.length} ${contours}, tabs off; ` +
+      (method ? `holding method ${method}` : 'no holding method chosen'),
     )
   }
   return rows.length > 0 ? ['  Workholding:', ...rows] : []

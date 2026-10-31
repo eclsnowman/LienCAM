@@ -6,8 +6,8 @@
 //   - rapid moves  -> G0
 //   - every feed role (incl. fast_traverse, at its clamped feed) -> G1
 //   - arc moves (arc_cw/arc_ccw):
-//       * capabilities.arcs === false -> ARC_UNSUPPORTED error, abort. We do
-//         NOT linearize and we NEVER throw (ADR-0003).
+//       * capabilities.arcs === false -> G1 chords at the post arc tolerance
+//         (WO-3107, owner-approved SP-1). Reuse the GRBL precision sampler.
 //       * capabilities.arcs === true  -> G2 (cw) / G3 (ccw) with X/Y/Z + I/J
 //         center offsets and a modal F. Before the per-section walk, each
 //         operation's dense feed runs are collapsed to lines + arcs via
@@ -34,10 +34,11 @@ import { assembleSections } from './assemble'
 import { collapsePolyline } from './arcfit'
 import { arcAsLines, grblArcNeedsLines } from './arcfit/grblPrecision'
 import { reconstructDrillCycles } from './cannedCycle'
-import type { DrillCycleProgram } from './cannedCycle'
+import { enforceOperationTravel, minimumTravelZInFrame } from '../heights/minimumTravelZ'
+import type { DrillCycleProgram, DrillHole } from './cannedCycle'
 import { toWork, toWorld } from '../program/coords'
 import { g10Line } from './coords'
-import { dimWord, sWord, unitsWord, word, type PostUnits } from './format'
+import { dimWord, fmtNum, sWord, unitScale, unitsWord, word, type PostUnits } from './format'
 import { createModalState } from './modal'
 import { resolveCoolantWord, resolveVacuum } from './resolve'
 import type { PostCapabilities, PostConfig, PostDiagnostic, PostInput, PostMachineAction, PostOperation, EmittedOperationSpan } from './types'
@@ -45,12 +46,15 @@ import { callableMachineMacros, machineSafeZ } from '../../types'
 import { workholdingStopPark } from '../machine/macros/clampPauseMacro'
 
 // --- arc-collapse fallback literals -----------------------------------------
-// Consulted only when capabilities.arcs === true. Each mirrors the per-dialect
-// capability/option default so a config that omits the tuning knob still gets a
-// sane collapse rather than a crash.
+// Each mirrors the per-dialect default. The tolerance also bounds native-arc
+// linearization when arc output is disabled.
 const DEFAULT_ARC_TOLERANCE = 0.05
 const DEFAULT_MAX_ARC_RADIUS = 1e4
 const DEFAULT_MIN_SWEEP_DEG = 2
+// WO-1384: written start and end radii of a posted arc agree within 0.002 mm
+// at 3 decimals, i.e. two units in the last written digit (see writtenArcNeedsLines).
+const WRITTEN_ARC_RADIUS_BUDGET_MM = 0.002
+const WRITTEN_ARC_RADIUS_BUDGET_UNITS = 2
 
 interface EmitResult {
   lines: string[]
@@ -162,6 +166,22 @@ function computeSafeWorkZ(input: PostInput): number {
     }
   }
   return safeWorkZ
+}
+
+// WO-3123: only the machine's authored safe height owns an unknown-position
+// start. Never substitute machine zero (bottom of travel on the LienCNC kit),
+// including a small value that the selected output precision rounds to zero.
+function startSafeMachineZ(input: PostInput, config: PostConfig): number | null {
+  if (config.capabilities.machineCoordinates === false) return null
+  const z = machineSafeZ(input.machine)?.z
+  return z !== undefined && dimWord('Z', z, config.format.xyzDecimals, config.format.units) !== 'Z0' ? z : null
+}
+
+function startHeightNotice(input: PostInput, config: PostConfig): string[] {
+  if (startSafeMachineZ(input, config) !== null) return []
+  const why = config.capabilities.machineCoordinates === false
+    ? 'G53 is unavailable in this post' : 'Machine safe Z is missing or rounds to zero'
+  return [comment(`${why}; using work clearance for start/restart`, config)]
 }
 
 // --- framing units substitution ----------------------------------------------
@@ -336,6 +356,7 @@ export function emitProgram(
   // not available; we keep this minimal and comment per-op instead). The
   // {units} token in the framing becomes G20/G21 per format.units.
   for (const line of config.framing.programStart) push(framingLine(line, units))
+  for (const line of startHeightNotice(input, config)) push(line)
 
   // ---- SETUP SECTION ----
   // The WCS select (+ optional G10) and the per-op walk live in the reusable
@@ -358,9 +379,9 @@ export function emitProgram(
   const safeWorkZ = section.safeWorkZ
   const operationSpans = shiftSpans(section.operationSpans, preambleCount)
 
-  // If the section aborted (e.g. ARC_UNSUPPORTED), do not emit the postamble:
+  // If the section aborted (e.g. ARC_MALFORMED), do not emit the postamble:
   // the same early-return behavior the per-op walk had before the extraction.
-  if (section.diagnostics.some((d) => d.code === 'ARC_UNSUPPORTED' || d.code === 'ARC_MALFORMED')) {
+  if (section.diagnostics.some((d) => d.code === 'ARC_MALFORMED')) {
     return { lines, diagnostics, operationSpans }
   }
 
@@ -457,12 +478,11 @@ function emitSetupSection(
   // branch to restart the spindle the pause stopped. Cleared after one use so a
   // later same-tool op in this section does not redundantly re-emit M3.
   let pendingPauseRestart = opts.incomingSpindleStopped ?? false
-  // WO-2023: set when a tool is loaded (the program's first tool, or any tool
-  // change). Where the machine sits then is unknown to the program - a park,
-  // or the tool setter after an M6 measure - and often LOW, so the next move
-  // must lift Z alone before any XY travel. Consumed by the first move walked
-  // after it (see emitLiftBeforeTravel); it survives an op that emits no moves.
-  let liftBeforeTravel = false
+  // WO-2023/WO-3123: setup entry, tool load, stop or macro leaves the head
+  // at an unknown position. Approach at authored machine safe Z, then XY,
+  // then work Z; absent that setting retain the work-clearance fallback.
+  // Consumed by the first move, surviving operations that emit no moves.
+  let liftBeforeTravel = true // WO-3123: every setup entry, including the same tool
   // WO-2693: where the last walked move left the tool (WORK Z), for the lift
   // before a spindle-off (liftBeforeSpindleOff). Unknown at section entry: a
   // previous section ends on its own trailing retract.
@@ -632,7 +652,11 @@ function emitSetupSection(
     // Adaptive emits semantic finish/traverse roles without inventing a number.
     // The post owns resolved machine/tool feeds, so materialise those roles here
     // before arc grouping and emission. Unknown feed-less roles stay feed-less.
-    const resolvedMoves = moves.map((move) => applyResolvedMoveFeed(move, feeds))
+    // Copy/nest assembly can add travel after CAM's guarded publication. Apply
+    // the same floor to that final stream, retaining Off and legacy direct callers.
+    const floor = op.heights ? minimumTravelZInFrame(op.heights, wcs.origin.z, 0,
+      op.resolvedHeights ? op.resolvedHeights.machine.retract : undefined) : undefined
+    const resolvedMoves = (op.heights ? enforceOperationTravel(moves, op.heights, wcs.origin.z, 0, op.resolvedHeights ? { clearanceZ: op.resolvedHeights.machine.clearance, retractZ: op.resolvedHeights.machine.retract, feedZ: op.resolvedHeights.machine.feed } : undefined, op.type) : moves).map((move) => applyResolvedMoveFeed(move, feeds))
     // WO-2697: the machine's vacuum word is how ITS controller starts the
     // extractor (LienCNC V2: a UCCNC M7 macro on a relay). Post Process may
     // post in any format (WO-2285, "to post for another controller"); in
@@ -773,7 +797,7 @@ function emitSetupSection(
     // When the controller supports arcs, collapse this op's dense feed runs into
     // the minimal set of lines + arcs (collapsePolyline is pure and treats
     // rapid/role/feed boundaries internally). When arcs are off, walk the moves
-    // verbatim so output stays byte-identical to the linear-only behavior.
+    // without fitting; emitMove samples any native arcs at the output seam.
     const caps = config.capabilities
 
     // Drill canned-cycle branch: when the controller supports canned cycles and
@@ -785,13 +809,14 @@ function emitSetupSection(
     // copies would silently drop that travel (clamp-crash risk), so skip the
     // canned-cycle reconstruction and emit the verbatim move walk below.
     if (op.type === 'drill' && caps.cannedCycles && !nestExpanded) {
-      const recon = reconstructDrillCycles(op, resolvedMoves)
+      const recon = reconstructDrillCycles(op, resolvedMoves, wcs.origin.z)
       if (recon.ok) {
-        emitDrillCycles(push, recon.program, wcs, modal, xyz, feedDec, units, config)
+        emitDrillCycles(push, recon.program, wcs, modal, xyz, feedDec, units, config,
+          liftBeforeTravel ? startSafeMachineZ(input, config) : null)
         // The cycle returns to its own plane, which this walk does not track.
         toolWorkZ = null
-        // The canned block already opens with a Z-only rapid to its clearance
-        // plane before the first hole's XY, so it satisfies the pending lift.
+        // The native block owns its high approach and establishes G98 initial
+        // Z after positioning over the first hole, satisfying the pending lift.
         liftBeforeTravel = false
         continue // skip the linear walk for this section
       }
@@ -825,22 +850,18 @@ function emitSetupSection(
     // The previous move's WORLD position, threaded into emitMove so an arc can
     // compute I/J as a WCS-rotated delta from world centers. Null until the first move.
     let prevWorld: { x: number; y: number; z: number } | null = null
+    // The stream's first point has no recorded incoming segment. The post owns
+    // that approach, including a same-tool operation and a floor above Clearance.
+    let floorApproach = floor !== undefined
     for (const mv of walkMoves) {
-      if (liftBeforeTravel) {
-        emitLiftBeforeTravel(push, mv, wcs, safeWorkZ, xyz, units)
+      if (liftBeforeTravel || floorApproach) {
+        emitLiftBeforeTravel(push, mv, wcs,
+          Math.max(safeWorkZ, floor === undefined ? -Infinity : floor - wcs.origin.z), xyz, units,
+          liftBeforeTravel ? startSafeMachineZ(input, config) : null)
         liftBeforeTravel = false
+        floorApproach = false
       }
       const motion = emitMove(push, mv, wcs, modal, xyz, feedDec, units, config, prevWorld, diagnostics, op.id)
-      if (motion === 'arc_unsupported') {
-        diagnostics.push({
-          level: 'error',
-          code: 'ARC_UNSUPPORTED',
-          message: `Operation "${op.name}" contains an arc move, but the "${config.label}" postprocessor does not support arc output in this phase. Arc emission is not yet implemented.`,
-          opId: op.id,
-        })
-        aborted = true
-        break
-      }
       if (motion === 'arc_malformed') {
         aborted = true
         break
@@ -866,7 +887,7 @@ function emitSetupSection(
   }
   closeSpan()
 
-  // If the walk aborted (e.g. ARC_UNSUPPORTED), return what we have. The caller
+  // If the walk aborted (e.g. ARC_MALFORMED), return what we have. The caller
   // (program composition) skips the postamble when an abort diagnostic is
   // present, mirroring the pre-extraction early return. No trailing retract on
   // an aborted section.
@@ -938,6 +959,9 @@ export function emitCombinedProgram(
 
   // ---- PREAMBLE (ONCE) ---- ({units} -> G20/G21 per format.units)
   for (const line of config.framing.programStart) push(framingLine(line, units))
+  if (inputs.some(input => startSafeMachineZ(input, config) === null)) {
+    for (const line of startHeightNotice(inputs.find(input => startSafeMachineZ(input, config) === null)!, config)) push(line)
+  }
 
   const n = inputs.length
 
@@ -1012,7 +1036,7 @@ export function emitCombinedProgram(
     lastEndWorkZ = section.endWorkZ
 
     // Abort (mirror emitProgram): on an arc abort, return WITHOUT the postamble.
-    if (section.diagnostics.some((d) => d.code === 'ARC_UNSUPPORTED' || d.code === 'ARC_MALFORMED')) {
+    if (section.diagnostics.some((d) => d.code === 'ARC_MALFORMED')) {
       return { lines, diagnostics, operationSpans }
     }
 
@@ -1045,9 +1069,10 @@ export function emitCombinedProgram(
 
 // --- drill canned-cycle emission ---------------------------------------------
 // Render a reconstructed DrillCycleProgram as a native canned cycle: a rapid to
-// the initial (clearance) plane, then one G81/G82/G83 block per hole with the
+// the initial plane, then one G81/G82/G83 block per hole with the
 // G-word/R/Q/P/F set on the first hole and modal-suppressed thereafter, closed
-// by G80. The canned block bypasses the modal state machine, so we force-reset
+// by G80. A hole whose hop was raised over workholding ends the cycle, crosses
+// at its lift height and restarts it (WO-3083). The canned block bypasses the modal state machine, so we force-reset
 // the modal memory afterward (the next section opens fully-qualified).
 
 function emitDrillCycles(
@@ -1059,10 +1084,27 @@ function emitDrillCycles(
   feedDec: number,
   units: PostUnits,
   config: PostConfig,
+  safeZMachine: number | null,
 ): void {
-  // Rapid to the initial (clearance) plane so a G98 return goes back to a safe
-  // height. Transform the WORLD initial Z into WORK Z.
-  const initialWorkZ = toWork({ x: 0, y: 0, z: program.initialZ }, wcs).z
+  // Rapid to the initial plane so a G98 return goes back to it. Transform the
+  // WORLD initial Z into WORK Z.
+  const workZ = (z: number) => toWork({ x: 0, y: 0, z }, wcs).z
+  const initialWorkZ = workZ(program.initialZ)
+  const rapidOver = (h: DrillHole) => {
+    const w = toWork({ x: h.x, y: h.y, z: h.bottomZ }, wcs)
+    push(`G0 ${dimWord('X', w.x, xyz, units)} ${dimWord('Y', w.y, xyz, units)}`)
+  }
+  // WO-3083: a G98 cycle whose initial plane is the low hop plane (Retract) below the op's
+  // clearance crosses to the first hole at Clearance, as the stream does, and only then drops
+  // to the plane it returns to between holes.
+  const lowG98 = program.returnMode === 'G98' && program.clearanceZ > program.initialZ + 1e-9
+  if (safeZMachine !== null) {
+    push(`G53 G0 ${dimWord('Z', safeZMachine, xyz, units)}`)
+    rapidOver(program.holes[0])
+  } else if (lowG98) {
+    push(`G0 ${dimWord('Z', workZ(program.clearanceZ), xyz, units)}`)
+    rapidOver(program.holes[0])
+  }
   push(`G0 ${dimWord('Z', initialWorkZ, xyz, units)}`)
 
   // The R approach plane in WORK coords (constant across all holes).
@@ -1078,7 +1120,17 @@ function emitDrillCycles(
   let prevWorkZ: number | null = null
   program.holes.forEach((h, i) => {
     const w = toWork({ x: h.x, y: h.y, z: h.bottomZ }, wcs)
-    if (i === 0) {
+    // WO-3083: the hop into this hole was raised over workholding. A canned cycle hops at its
+    // own return plane, which would cross the clamp, so end the cycle, lift, cross, come back
+    // down to the plane the cycle returns to, and restart it in full.
+    const lifted = i > 0 && h.liftZ !== undefined
+    if (lifted) {
+      push('G80')
+      push(`G0 ${dimWord('Z', workZ(h.liftZ!), xyz, units)}`)
+      rapidOver(h)
+      if (program.returnMode === 'G98') push(`G0 ${dimWord('Z', initialWorkZ, xyz, units)}`)
+    }
+    if (i === 0 || lifted) {
       const parts: string[] = [
         program.returnMode,
         program.gWord,
@@ -1110,6 +1162,8 @@ function emitDrillCycles(
   // Cancel the canned cycle. The block bypassed modal tracking, so reset modal
   // memory: the next section must open with a fully-qualified block.
   push('G80')
+  // WO-3083: the stream leaves the op at its clearance plane; a low G98 cycle ended below it.
+  if (lowG98 || program.restoreClearance) push(`G0 ${dimWord('Z', workZ(program.clearanceZ), xyz, units)}`)
   modal.forceReset()
 }
 
@@ -1224,16 +1278,11 @@ function emitProgramEnd(
   }
 }
 
-// --- lift before travel (WO-2023) --------------------------------------------
-// After a tool is loaded the machine may sit anywhere, often low (a park, the
-// tool setter after an M6 measure). A first move of `G0 X.. Y.. Z15` from there
-// travels diagonally while climbing. So ahead of that move: a Z-only rapid to
-// the clearance height, then - only when the move does not already travel at
-// that height - an XY-only rapid at it. The move itself is then emitted
-// unchanged (the modal was reset, so it stays fully qualified) and what is
-// left of it is a pure XY move or a pure descent. These lines bypass the modal
-// on purpose: the move after them re-emits every word, so the modal memory
-// stays exactly what it was before this was added.
+// --- lift before travel (WO-2023 / WO-3123) ---------------------------------
+// Unknown-position starts use authored machine safe Z, then XY before the
+// original work move descends. Local floor-only approaches and machines with
+// no safe-Z setting retain their work-clearance lift. These lines bypass modal
+// memory; the original fully-qualified move and all following cuts stay intact.
 function emitLiftBeforeTravel(
   push: (line: string) => void,
   mv: ToolpathMove,
@@ -1241,11 +1290,17 @@ function emitLiftBeforeTravel(
   safeWorkZ: number,
   xyz: number,
   units: PostUnits,
+  safeZMachine: number | null,
 ): void {
   const w = toWork(mv, wcs)
+  const isArc = mv.type === 'arc_cw' || mv.type === 'arc_ccw'
+  if (safeZMachine !== null) {
+    push(`G53 G0 ${dimWord('Z', safeZMachine, xyz, units)}`)
+    if (!isArc) push(`G0 ${dimWord('X', w.x, xyz, units)} ${dimWord('Y', w.y, xyz, units)}`)
+    return
+  }
   const liftZ = dimWord('Z', Math.max(safeWorkZ, w.z), xyz, units)
   push(`G0 ${liftZ}`)
-  const isArc = mv.type === 'arc_cw' || mv.type === 'arc_ccw'
   if (isArc) return
   if (mv.type === 'rapid' && dimWord('Z', w.z, xyz, units) === liftZ) return
   push(`G0 ${dimWord('X', w.x, xyz, units)} ${dimWord('Y', w.y, xyz, units)}`)
@@ -1253,7 +1308,30 @@ function emitLiftBeforeTravel(
 
 // --- single-move emission ----------------------------------------------------
 
-type MoveResult = 'ok' | 'arc_unsupported' | 'arc_malformed'
+/** WO-3215: judge the arc a controller reads from the rounded X/Y/I/J words,
+ * not the CAM circle. Its start radius (|I,J|) and end radius must agree within
+ * WO-1384's budget on every dialect; rounding error is independent of radius.
+ * The budget follows the written resolution: two units in the last written
+ * digit, never below 0.002 mm. Metric 3-decimal words keep 0.002 mm; inch
+ * 3-decimal words (one unit = 0.0254 mm) get 0.002 in, so an arc the inch
+ * words round ordinarily stays an arc. A vanishing offset, or an open arc whose endpoints round together (a whole
+ * revolution as written), cannot be written as this arc either. */
+function writtenArcNeedsLines(start: { x: number; y: number }, end: { x: number; y: number },
+  i: number, j: number, decimals: number, units: PostUnits): boolean {
+  const scale = unitScale(units)
+  const rounded = (v: number) => Number(fmtNum(v / scale, decimals)) * scale
+  const dx = rounded(end.x) - rounded(start.x)
+  const dy = rounded(end.y) - rounded(start.y)
+  const ri = rounded(i)
+  const rj = rounded(j)
+  const radius = Math.hypot(ri, rj)
+  if (radius === 0 || (dx === 0 && dy === 0 && Math.hypot(end.x - start.x, end.y - start.y) > 1e-9)) return true
+  const budget = Math.max(WRITTEN_ARC_RADIUS_BUDGET_MM, WRITTEN_ARC_RADIUS_BUDGET_UNITS * 10 ** -decimals * scale)
+  // 1e-9 keeps float noise from reading a block the post-check would flag as inside.
+  return Math.abs(Math.hypot(dx - ri, dy - rj) - radius) > budget - 1e-9
+}
+
+type MoveResult = 'ok' | 'arc_malformed'
 
 function emitMove(
   push: (line: string) => void,
@@ -1272,10 +1350,7 @@ function emitMove(
   const isArc = mv.type === 'arc_cw' || mv.type === 'arc_ccw'
 
   if (isArc) {
-    // Arc with arcs disabled -> fail loud, do not linearize (unchanged behavior).
-    if (!caps.arcs) return 'arc_unsupported'
-
-    // Arc with arcs enabled but missing geometry -> fail loud (ADR-0003); never
+    // Missing geometry remains an error with either output setting; never
     // emit a malformed arc. Need both centers and a predecessor for I/J.
     if (typeof mv.cx !== 'number' || typeof mv.cy !== 'number' || prevWorld === null) {
       diagnostics.push({
@@ -1287,6 +1362,25 @@ function emitMove(
         opId,
       })
       return 'arc_malformed'
+    }
+
+    // WO-3107: sample in canonical world mm, then use the ordinary G1 seam
+    // for WCS, units, modal feed and coordinates. The caller retains the native
+    // endpoint as continuation state and emits its dwell exactly once.
+    if (!caps.arcs) {
+      const tolerance = config.options.arcTolerance ?? DEFAULT_ARC_TOLERANCE
+      const radius = Math.hypot(prevWorld.x - mv.cx, prevWorld.y - mv.cy)
+      const endRadius = Math.hypot(mv.x - mv.cx, mv.y - mv.cy)
+      if (![mv.cx, mv.cy, mv.x, mv.y, mv.z, prevWorld.x, prevWorld.y, prevWorld.z, tolerance].every(Number.isFinite)
+        || !(radius > 0) || !(tolerance > 0) || Math.abs(radius - endRadius) > tolerance / 2) {
+        diagnostics.push({ level: 'error', code: 'ARC_MALFORMED', opId,
+          message: 'An arc needs finite positions and center, a positive radius and tolerance, and matching endpoint radii to emit line segments.' })
+        return 'arc_malformed'
+      }
+      for (const line of arcAsLines(prevWorld, mv, tolerance)) {
+        emitMove(push, line, wcs, modal, xyz, feedDec, units, config, prevWorld, diagnostics, opId)
+      }
+      return 'ok'
     }
 
     const w = toWork(mv, wcs)
@@ -1310,7 +1404,11 @@ function emitMove(
     // WO-2313: native helices bypass arc fitting and may have radii far below
     // minArcRadius. Test their WRITTEN endpoints and offsets at the last seam.
     // Do this before changing modal state, so a G1 fallback cannot inherit G2/3.
-    if (grbl && grblArcNeedsLines(toWork(prevWorld, wcs), w, i, j, xyz, units)) {
+    // WO-3215: every dialect posts lines when the written arc misses WO-1384's
+    // budget; GRBL keeps its own controller check alongside.
+    const writtenStart = toWork(prevWorld, wcs)
+    if (writtenArcNeedsLines(writtenStart, w, i, j, xyz, units)
+      || (grbl && grblArcNeedsLines(writtenStart, w, i, j, xyz, units))) {
       for (const line of arcAsLines(prevWorld, mv, config.options.arcTolerance ?? DEFAULT_ARC_TOLERANCE)) {
         emitMove(push, line, wcs, modal, xyz, feedDec, units, config, prevWorld, diagnostics, opId)
       }

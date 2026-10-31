@@ -246,19 +246,21 @@ describe('contour2d — multi-region', () => {
     expect(rightCuts).toBeGreaterThan(0)
   })
 
-  it('retracts + repositions (rapid at clearance) between the two islands', () => {
+  it('retracts + repositions (rapid at Retract, WO-3083) between the two islands', () => {
     const payload = makeHourglassPayload(
       makeContourParams({ side: 'inner' }),
       makePasses({ stockToLeave: 2, finishPasses: 1 }),
     )
     const moves = buildContourToolpath(payload)
 
-    // Each region does its own rapidEntry (3 clearance-or-lower rapids incl. one
-    // at clearance) + retractFrom (one rapid back to clearance). With 2 rough
-    // regions x 3 depths and 2 finish regions, there are MANY clearance rapids;
-    // a single-region cut would have far fewer. Assert there is more than one
-    // island-entry/exit cycle.
-    expect(clearanceRapids(moves)).toBeGreaterThan(2)
+    // Each region does its own entry + retract. WO-3083 rule 2: between the first entry and the
+    // final exit every hop crosses at Retract (5); Clearance (10) is only the first and last.
+    // With 2 rough regions x 3 depths and 2 finish regions there are MANY Retract hops; a
+    // single-region cut would have far fewer. Assert more than one island-entry/exit cycle.
+    expect(clearanceRapids(moves)).toBe(2)
+    const islandHops = moves.filter((m, i) => i > 0 && m.type === 'rapid' && m.z === 5
+      && Math.hypot(m.x - moves[i - 1].x, m.y - moves[i - 1].y) > 1e-6)
+    expect(islandHops.length).toBeGreaterThan(2)
 
     // Finish entries fire once per finish region -> >1 lead_in means 2 islands.
     expect(leadInCount(moves)).toBeGreaterThan(1)

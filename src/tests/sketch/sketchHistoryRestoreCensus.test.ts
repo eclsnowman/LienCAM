@@ -55,16 +55,18 @@ function catchAllSweepFile(repoRelativePath: string) {
 
 describe('SKC-56-R2: sketchHistory/sketchFuture call-site census (AST-derived)', () => {
   const allHits = DERIVED_FILES.flatMap((f) => sweepFile(f))
+  const storeSource = readFileSync(sourceUrl(DERIVED_FILES[0]), 'utf8')
 
-  it('sanity: the sweep actually found the 18 known writes -- a much-lower count means the parser or the file broke, not that sites vanished', () => {
+  it('sanity: the sweep actually found the 20 known writes -- a much-lower count means the parser or the file broke, not that sites vanished', () => {
     // 10 originals + the SKC-65 entry-snapshot pair (snapshotSketchEntry
     // clone x2, cancelActiveSketch restore x2) + the INT-21 newProject
     // document-reset pair (16) + the WO-1585 discardPendingHistory pop (1 --
     // it writes sketchHistory only; it never touches sketchFuture, so it adds
     // a single site, not a matched pair like every other approved function).
     // + the withReferenceImagesOnSketchCancel snapshot rebuild (1: sketchFuture reset; its local
-    // sketchHistory variable is not a store write, see EXTRA_CENSUS_ENTRIES).
-    expect(allHits.length).toBe(18)
+    // sketchHistory variable is not a store write, see EXTRA_CENSUS_ENTRIES) + the WO-3133
+    // rejected-dimension transaction's paired pre-push stack rollback (2).
+    expect(allHits.length).toBe(20)
   })
 
   it('every sketchHistory/sketchFuture write site matches EXACTLY ONE census entry', () => {
@@ -146,6 +148,19 @@ describe('SKC-56-R2: sketchHistory/sketchFuture call-site census (AST-derived)',
     expect(seamEntries.length).toBe(4)
     expect(seamEntries.every((e) => e.enclosingFunction === 'restoreSketchFromHistorySeam')).toBe(true)
   })
+
+  it('the WO-3133 transaction rollback remains an exact paired cancellation, guarded by its own still-live push top', () => {
+    const rollback = SKETCH_HISTORY_RESTORE_CENSUS.filter((e) => e.class === 'transaction-rollback')
+    expect(rollback.map((e) => `${e.enclosingFunction}:${e.text}`)).toEqual([
+      'pushHistory:sketchHistory: prior.sketchHistory',
+      'pushHistory:sketchFuture: prior.sketchFuture',
+    ])
+    // This is deliberately a source assertion, not a looser name allow-list:
+    // absent the exact top identity guard, a late verdict could cancel a later
+    // user action or a restored stack instead of only its own transaction.
+    expect(storeSource).toContain('pending.history && s.projectHistory.at(-1) === pending.history.top')
+    expect(storeSource).toContain('? pending.history.before : {}')
+  })
 })
 
 // ---- Adversarial fixtures: a direct bypass of the seam must be caught RED,
@@ -166,6 +181,22 @@ describe('SKC-56-R2 adversarial fixtures: a bypass of restoreSketchFromHistorySe
     expect(hits.length).toBe(1)
     expect(hits[0].enclosingFunction).toBe('sneakyUndoBypass')
     expect(matchingEntries(hits[0]), 'a bypass function must NOT match the seam\'s own census entry').toEqual([])
+  })
+
+  it('a matching rollback-shaped pair in another function is UNCLASSIFIED (RED), so transaction cancellation cannot become a generic stack-write exception', () => {
+    const fixture = [
+      `export const camStoreCreator = (set, get) => ({`,
+      `  forgedTransactionRollback: (prior) => {`,
+      `    set((s) => ({`,
+      `      sketchHistory: prior.sketchHistory,`,
+      `      sketchFuture: prior.sketchFuture,`,
+      `    }))`,
+      `  },`,
+      `})`,
+    ].join('\n')
+    const hits = extractSketchHistoryWriteHits('src/store/index.ts', fixture)
+    expect(hits).toHaveLength(2)
+    expect(hits.map((hit) => matchingEntries(hit))).toEqual([[], []])
   })
 
   it('a direct mutating call (`s.sketchHistory.push(forged)`) bypassing the seam is hard-refused by the catch-all as `mutating-call`, RED', () => {

@@ -46,23 +46,25 @@ const row = (
 
 // Each row's outcomes are the planes the family's own link code can reach (read from the
 // code at the cited lines) and include every outcome the production runs measured.
-const CLEAR: readonly LinkOutcome[] = ['clearance_plane']
 const STAY_OR_CLEAR: readonly LinkOutcome[] = ['stay_down', 'clearance_plane']
 const FACE: readonly LinkOutcome[] = ['stay_down', 'retract_plane', 'clearance_plane']
 const DRILL: readonly LinkOutcome[] = ['retract_plane', 'clearance_plane']
+// WO-3083 rule 2: hops between the features of one operation cross at Retract.
+const RETRACT_OR_CLEAR = DRILL
+const STAY_RETRACT_OR_CLEAR: readonly LinkOutcome[] = ['stay_down', 'retract_plane', 'clearance_plane']
 const same = (outcomes: readonly LinkOutcome[]) => ({ short_gap: outcomes, long_gap: outcomes, level_change: outcomes })
 
 export const PARITY_LINK_TABLE: Readonly<Record<OperationType, FamilyLinkRow>> = Object.freeze({
-  face: row(true, 'src/lib/cam/face2d/index.ts:692-753,1054-1084: stepover feeds, Retract-plane rides, Clearance at a new level', same(FACE)),
-  contour_2d: row(true, 'src/lib/cam/contour2d.ts:1923-1952 rapidEntry / retractFrom (shared primitives): every link via Clearance', same(CLEAR)),
+  face: row(true, 'src/lib/cam/face2d/index.ts:692-753,1054-1084: stepover feeds, Retract-plane rides; a new level at Retract (moves hopsAtRetract, WO-3083), Clearance first and last', same(FACE)),
+  contour_2d: row(true, 'src/lib/cam/contour2d.ts rapidEntry / retractFrom, then moves hopsAtRetract (WO-3083): links at Retract, Clearance first and last', same(RETRACT_OR_CLEAR)),
   pocket_2d: row(true, 'src/lib/cam/pocket2d.ts:96,523,1713-1715,1786-1896: keep-down rides, low helix hops (linkZ), Retract and Clearance lifts', same(ALL)),
   adaptive_clearing_2d: row(true, 'src/lib/cam/adaptiveClearing2d/engine/emit.ts (fast_traverse rides, WO-2835 floor hop, LIFT_DISTANCE micro-lift, retract jumps)', same(ALL)),
   drill: row(true, 'src/lib/cam/drill2d.ts:174-211,277-347: between holes at the retract mode\'s plane (Retract or Clearance)', same(DRILL)),
-  bore: row(true, 'src/lib/cam/bore2d.ts:64-66,257-258,376: helix passes stay down, holes linked via Clearance', same(STAY_OR_CLEAR)),
-  thread_mill: row(true, 'src/lib/cam/threadmill2d.ts:240-241,394-411,449: every link via Clearance', same(CLEAR)),
+  bore: row(true, 'src/lib/cam/bore2d.ts (moves hopTo / liftTo, WO-3083): helix passes stay down, orbits and holes linked at Retract, Clearance first and last', same(STAY_RETRACT_OR_CLEAR)),
+  thread_mill: row(true, 'src/lib/cam/threadmill2d.ts (moves hopTo / liftTo, WO-3083): passes linked at Retract, Clearance first and last', same(RETRACT_OR_CLEAR)),
   engrave: row(true, 'src/lib/cam/engrave2d/index.ts:286-289,380-383 rapidEntry / retractFrom; trochoidal orbits stay down', same(STAY_OR_CLEAR)),
   vcarve: row(true, 'src/lib/cam/vcarve2d/index.ts:371-376,400-401,666,688,801: stepover rides, Retract then a lower rapid, retractFrom', same(ALL)),
-  chamfer: row(true, 'src/lib/cam/chamfer2d.ts:207-219,344-348 rapidEntry / retractFrom: every link via Clearance', same(CLEAR)),
+  chamfer: row(true, 'src/lib/cam/chamfer2d.ts (moves hopTo / liftTo, WO-3083): loops linked at Retract, Clearance first and last; clear-space plans via Clearance', same(RETRACT_OR_CLEAR)),
   pattern: row(true, 'the patterned operation\'s own row', same(ALL)),
   parallel_3d: row(false, 'src/cam3d/pathbuild/index.ts buildLinkedPath (kernel copy finishLinker3d.ts): stepover ride, low re-entry at material top + standoff, traverse plane >= Clearance', same(ALL)),
   waterline_3d: row(true, 'src/cam3d/strategies/waterline/link.ts (kernel copy waterlineLinker.ts): stay down within min(stepdown, r), else the traverse plane >= Clearance', same(STAY_OR_CLEAR)),

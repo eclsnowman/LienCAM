@@ -261,10 +261,18 @@ beforeEach(() => {
   ;(globalThis as { Worker?: unknown }).Worker = class {
     onmessage: ((event: MessageEvent) => void) | null = null
     onerror: ((event: ErrorEvent) => void) | null = null
-    postMessage(data: { type: string; payload: Record<string, unknown> & { opId: string } }): void {
-      const moves = data.type === 'COMPUTE_DRILL' ? buildDrillToolpath(data.payload as never) : []
+    postMessage(data: { type?: string; payload?: Record<string, unknown> & { opId: string }; request?: unknown }): void {
+      // The off-page post-process worker (store/toolpathPostprocess.ts): report
+      // "cannot start a module worker" so it runs its own in-page fallback.
+      if (data.request !== undefined) {
+        queueMicrotask(() => this.onerror?.({ preventDefault() {} } as unknown as ErrorEvent))
+        return
+      }
+      if (data.type === undefined || data.payload === undefined) return
+      const payload = data.payload
+      const moves = data.type === 'COMPUTE_DRILL' ? buildDrillToolpath(payload as never) : []
       queueMicrotask(() => this.onmessage?.({
-        data: { type: 'TOOLPATH_COMPLETE', opId: data.payload.opId, moves, computeTimeMs: 1 },
+        data: { type: 'TOOLPATH_COMPLETE', opId: payload.opId, moves, computeTimeMs: 1 },
       } as MessageEvent))
     }
     terminate(): void { /* no-op */ }

@@ -1,4 +1,5 @@
 // WO-3002 (A3-09 steps 2 and 5): the feature interface's data contract.
+import type { CylinderFeature, HoleFeature, Vec2 } from '../../types'
 import type { P3 } from './signature'
 
 /** The CLOSED feature-type set. A recogniser output that maps to none of these
@@ -82,6 +83,9 @@ export interface FeatureCandidate {
   readonly type: FeatureType
   readonly geometry: FeatureGeometry
   readonly depth: DepthEvidence
+  /** Source facts for consumer rebinding. Not part of geometric identity.
+   *  Missing evidence/error remains unknown; old callers need not supply it. */
+  readonly evidence?: FeatureRecognitionEvidence
   /** the recogniser's own type text, verbatim */
   readonly sourceType: string
   /** the recogniser's own id or key, verbatim (never used for identity) */
@@ -107,6 +111,8 @@ export interface PartFeature extends FeatureCandidate {
 export interface PartFeatureList {
   readonly frame: PartFrame
   readonly source: FeatureSource
+  /** Caller-supplied ownership/version; not proof of freshness or a cache key. */
+  readonly scope?: FeatureSourceScope
   /** sorted by id */
   readonly features: readonly PartFeature[]
   /** one line per thing a recogniser could not give (a failed body, a skipped output) */
@@ -131,3 +137,122 @@ export interface IdentifiedEntity<T> {
   readonly sourceId: string
   readonly descriptor: T
 }
+
+/** Optional source ownership carried into the future revision-bound consumer.
+ *  PartFrame remains the coordinate authority. Runtime handles, transforms,
+ *  memoization and stale-response policy belong to the binder, not this data. */
+export interface FeatureSourceScope {
+  readonly projectId: string
+  readonly sourceGeometryId: string
+  readonly sourceFormat?: string
+  readonly modelItemId?: string
+  readonly bodyId?: string
+  readonly geometryVersion?: string | number
+}
+
+/** These are the existing structural adapter inputs, with optional producer
+ *  evidence fields. No recognizer, worker, document or store imports. */
+export type StepCylinderLike = Pick<HoleFeature, 'center' | 'diameter' | 'topZ' | 'bottomZ' | 'through'> & { kind?: CylinderFeature['kind'] }
+
+export interface ModelVerdictLike {
+  readonly featureKey: string
+  readonly featureClass: string
+  readonly removable: boolean
+  readonly refuseReason?: string
+  readonly faceIds: readonly string[]
+  readonly params: Readonly<Record<string, number | string>>
+  /** a counterbore's wide wall faces (a subset of faceIds) */
+  readonly counterboreFaceIds?: readonly string[]
+}
+
+type MeshP3 = P3
+export interface MeshRoundLike {
+  readonly id: string
+  readonly kind: string
+  readonly axis: { readonly origin: MeshP3; readonly direction: MeshP3 }
+  readonly diameterMm: number
+  readonly diametersMm: readonly number[]
+  readonly depthMm: number
+  readonly bands: readonly {
+    readonly surface: AxialBand['surface']
+    readonly diameterMm: number
+    readonly endDiameterMm?: number
+    readonly axialRangeMm: readonly [number, number]
+    readonly maxDeviationMm?: number
+    readonly sourceFacetIds?: readonly number[]
+    readonly includedAngleDeg?: number
+  }[]
+  readonly maxDeviationMm?: number
+  readonly coreRadiusMm?: number
+  readonly profile?: string
+  readonly sourceFacetIds: readonly number[]
+}
+export interface MeshRegionLike {
+  readonly id: string
+  readonly kind: string
+  readonly floorNormal: MeshP3
+  readonly corners?: readonly MeshP3[]
+  readonly centerline?: readonly [MeshP3, MeshP3]
+  readonly lengthMm: number
+  readonly widthMm: number
+  readonly depthMm: number
+  readonly maxDeviationMm?: number
+  readonly floorSourceFacetIds?: readonly number[]
+  readonly clearCorners?: readonly MeshP3[]
+  /** slot only */
+  readonly endStyle?: string
+  /** drafted pocket only: the lean of the wall on side k (corners[k] -> corners[k+1]) */
+  readonly wallDraftDeg?: readonly number[]
+  readonly sourceFacetIds: readonly number[]
+}
+export interface MeshBlendLike {
+  readonly id: string
+  readonly kind: string
+  readonly shape: string
+  readonly radiusMm?: number
+  readonly setbackMm?: readonly [number, number]
+  readonly includedAngleDeg: number
+  readonly lengthMm: number
+  readonly maxDeviationMm?: number
+  readonly tangencyErrorMm?: number
+  readonly angleDeg?: number
+  readonly edgeLine: { readonly ends: readonly [MeshP3, MeshP3] }
+  readonly sourceFacetIds: readonly number[]
+}
+/** Query evidence is descriptive, never a machining tolerance or cache key. */
+export interface MeshQueryEvidence {
+  readonly toleranceMm?: number
+  readonly facetCount?: number
+  readonly crackWeldsClosed?: number
+  readonly ambiguousCrackWelds?: number
+  readonly refusals?: readonly {
+    readonly reason: string
+    readonly facetCount: number
+    readonly sourceFacetIds: readonly number[]
+  }[]
+}
+export interface MeshRecognitionLike extends MeshQueryEvidence {
+  readonly features: readonly MeshRoundLike[]
+  readonly pockets?: readonly MeshRegionLike[]
+  readonly slots?: readonly MeshRegionLike[]
+  readonly draftedPockets?: readonly MeshRegionLike[]
+}
+
+export interface LoopLike {
+  readonly id: string
+  readonly points: readonly Vec2[]
+  readonly closed: boolean
+  readonly type: string
+  readonly layerId: string
+}
+
+/** The legacy DepthEvidence discriminator is retained for identity/clients.
+ *  These labels say HOW that number was obtained; a BREP source alone does
+ *  not promote a recognizer parameter estimate into an analytic floor. */
+export type FeatureRecognitionEvidence =
+  | { readonly source: 'step-cylinder-scan'; readonly depthProvenance: 'analytic-cylinder-span'; readonly cylinders: readonly StepCylinderLike[] }
+  | { readonly source: 'model-kernel'; readonly depthProvenance: 'recognizer-parameter-estimate' | 'unknown'; readonly verdict: ModelVerdictLike; readonly faces?: Readonly<Record<string, FaceDescriptor>> }
+  | { readonly source: 'stl-mesh'; readonly depthProvenance: 'fitted-mesh'; readonly kind: 'round'; readonly feature: MeshRoundLike; readonly query: MeshQueryEvidence }
+  | { readonly source: 'stl-mesh'; readonly depthProvenance: 'fitted-mesh'; readonly kind: 'region'; readonly feature: MeshRegionLike; readonly query: MeshQueryEvidence }
+  | { readonly source: 'stl-mesh'; readonly depthProvenance: 'unknown'; readonly kind: 'blend'; readonly feature: MeshBlendLike; readonly query: MeshQueryEvidence }
+  | { readonly source: 'sketch-2d'; readonly depthProvenance: 'operation-parameters'; readonly loop: LoopLike }

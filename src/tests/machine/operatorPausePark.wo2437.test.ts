@@ -295,7 +295,7 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
     expect(spindleBefore).toBeGreaterThan(0)
     expect(getMachineController().status().spindleRpm ?? 0).toBe(0)
 
-    // CYCLE START: B runs from the park - Z down alone first, then over.
+    // WO-3123: B restarts at authored machine safe Z, then XY, then down.
     const after: Sample[] = []
     let spindleAfter = 0
     expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
@@ -309,7 +309,7 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
     expect(spindleAfter).toBeGreaterThan(0)
     const firstMoveXY = after.findIndex((s) => Math.hypot(s.x - (PARK.x - OFFSET.X), s.y - (PARK.y - OFFSET.Y)) > 0.05)
     expect(firstMoveXY).toBeGreaterThan(0)
-    expect(after[firstMoveXY].z).toBeCloseTo(5, 1)
+    expect(after[firstMoveXY].z).toBeCloseTo(SAFE_Z - OFFSET.Z, 1)
     // Rehearsal round 4: every GRBL stop printed a false red "THE MACHINE LEFT
     // THE COMMANDED PATH" - the frames at the park scored against the G0 before it.
     expect(consoleText()).not.toContain('LEFT THE COMMANDED PATH')
@@ -390,7 +390,7 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
       const stopLine = gcode.split('\n').indexOf('M0') + 1
       expect(consoleText()).toContain(`"wo2437.nc" stopped at the M0 on line ${stopLine}. Press CYCLE START`)
 
-      // Cycle Start: B runs from the park - Z down alone first, then over.
+      // WO-3123: B restarts at authored machine safe Z, then XY, then down.
       const after: Sample[] = []
       expect(await executeOperatorCycleStart(), consoleText()).toBe(true)
       await advance(20_000, 50, sampler(after))
@@ -399,7 +399,7 @@ describe('WO-2437 operator stop on the simulator, through the real session', () 
       expect(cutA(after)).toBe(false)
       const firstMoveXY = after.findIndex((s) => Math.hypot(s.x - (PARK.x - OFFSET.X), s.y - (PARK.y - OFFSET.Y)) > 0.05)
       expect(firstMoveXY).toBeGreaterThan(0)
-      expect(after[firstMoveXY].z).toBeCloseTo(5, 1)
+      expect(after[firstMoveXY].z).toBeCloseTo(SAFE_Z - OFFSET.Z, 1)
       spindleOffBeforeAndOnAfter(gcode, stopLine)
     })
   }

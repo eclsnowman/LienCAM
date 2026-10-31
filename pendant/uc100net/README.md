@@ -27,3 +27,34 @@ python on PATH. Never run the fake-board exercises on a hardware network.
 The tests inherited several early-return SKIPPED paths; inspect detailed
 output for SKIPPED before claiming oracle coverage. Replay input stays in the
 owner's read-only handoff, not in a release asset.
+
+## Apple Silicon macOS: alpha, untested on macOS
+
+The same native AXBB-E firmware 1005 transport can be cross-published:
+
+```powershell
+dotnet publish pendant/uccnc-bridge/uccnc-bridge-net.csproj -c Release -r osx-arm64 --self-contained true -o pendant/uc100net/publish/osx-arm64
+```
+
+Package the ENTIRE osx-arm64 folder, including boards and .NET libraries,
+under resources/pendant/uccnc-bridge/native/osx-arm64. The Apple Silicon
+launcher selects this route and stages it in writable user-data under
+machine-bridge-native/osx-arm64. It never uses Wine or an automatic demo
+fallback. Intel Mac native control is unsupported; its installer remains
+available for design, simulation and posting.
+
+Linux O61 hardware proof is recorded in the WO-2897 assignment; it does not
+qualify macOS. No Mac controller readback is available. The poll thread
+requests managed ThreadPriority.Highest; macOS has no Linux SCHED_FIFO
+setup here. The current diagnostic string is a request, not proof of actual
+scheduling, refill timing or underflow behavior. No transport/motion code
+changes for Mac.
+
+The app and nested native executable are unsigned and not notarized.
+Downloaded/quarantined app launch, runtime loading and executable permission
+checks on a real Mac remain owed. Local-network/firewall permission prompts
+may affect discovery; exact prompt wording and allow/deny recovery have not
+been observed. Do not claim Linux fake-network oracle runs are Mac tests:
+the current isolated harness uses Linux network interfaces and cannot run
+unchanged on macOS. Mac fake-board replay/oracle and physical Mac + board
+qualification remain separate evidence owed before removing the label.

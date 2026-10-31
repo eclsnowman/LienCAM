@@ -18,7 +18,7 @@ interface Props {
   interactionMode: 'normal' | 'lay-on-face' | 'project-plane'
 }
 
-// The 11 toolpath move roles shown in the legend (single source for the list,
+// The 12 toolpath move roles shown in the legend (single source for the list,
 // the visible-count badge, and the flyout items).
 const LEGEND_ROLES = [
   { role: 'cut',      get label() { return tx('ViewportOverlay.Cut') },      dashed: false },
@@ -32,6 +32,7 @@ const LEGEND_ROLES = [
   { role: 'finish',   get label() { return tx('ViewportOverlay.Finish') },   dashed: false },
   { role: 'lead_in',  get label() { return tx('ViewportOverlay.Lead_in') },  dashed: false },
   { role: 'lead_out', get label() { return tx('ViewportOverlay.Lead_out') }, dashed: false },
+  { role: 'loop_back', get label() { return tx('ViewportOverlay.Loop_back') }, dashed: false },
 ]
 
 // Curated empty-sketch help, with every displayed key sourced from the same

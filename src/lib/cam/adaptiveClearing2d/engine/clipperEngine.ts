@@ -97,12 +97,25 @@ function withWasm<T>(fn: (own: (h: any) => any) => T): T {
   }
 }
 
+/** WO-2930: vertices copied across the JS/WASM boundary since the last reset -- `toWasm`
+ *  into a PathsD/PathD, `fromWasm` back out to plain loops. A deterministic count of the
+ *  marshalling the engine pays (wall time is not), read by the profile test. */
+const marshalled = { toWasm: 0, fromWasm: 0 }
+export function engineMarshalStats(): { toWasm: number; fromWasm: number } {
+  return { ...marshalled }
+}
+export function resetEngineMarshalStats(): void {
+  marshalled.toWasm = 0
+  marshalled.fromWasm = 0
+}
+
 function toPathsD(loops: Loops): any {
   const m = requireMod()
   const paths = new m.PathsD()
   try {
     for (const loop of loops) {
       if (loop.length === 0) continue
+      marshalled.toWasm += loop.length
       const flat: number[] = []
       for (const p of loop) flat.push(p.x, p.y)
       const pd = m.MakePathD(flat)
@@ -121,6 +134,7 @@ function pathDToLoop(p: any): Loop {
   const n = p.size()
   const v = p.view() // Float64Array over wasm memory, stride 3: x, y, z
   if (v.length !== n * 3) throw new Error(`adaptive engine: unexpected PathD.view() layout (${v.length} doubles for ${n} points)`)
+  marshalled.fromWasm += n
   const loop: Loop = new Array(n)
   for (let j = 0, k = 0; j < n; j++, k += 3) loop[j] = { x: v[k], y: v[k + 1] }
   return loop
@@ -297,6 +311,98 @@ export function capsuleSweep(initial: Loops): CapsuleSweep {
   }
 }
 
+// --- a fixed clip set kept in wasm memory ---------------------------------------
+
+/** WO-2930: a polygon set that stays in wasm memory so many Booleans can clip against
+ *  it without copying it in again each time. toolGeometry's box-clipped cleared and
+ *  region polygons are reused by ~12 angle probes a step and the next several steps;
+ *  before this, every probe re-sent the whole box polygon across the boundary. The
+ *  Clipper calls, their argument order and their inputs are the ones `intersection` /
+ *  `difference` make: an IntersectD result handed straight to the next Boolean holds the
+ *  same doubles it would after a copy out to JS and back, so only the copying goes. */
+export interface HeldLoops {
+  /** Free the wasm copy. Must be called once the set is replaced or no longer used. */
+  dispose(): void
+}
+interface HeldPaths extends HeldLoops { readonly paths: any }
+
+/** `intersection(a, b)`, kept in wasm instead of copied out. */
+export function intersectionHeld(a: Loops, b: Loops): HeldLoops {
+  const m = requireMod()
+  const paths = withWasm(own => {
+    const s = own(toPathsD(a)); const c = own(toPathsD(b))
+    return m.IntersectD(s, c, EVEN_ODD(), PREC)
+  })
+  return held(paths)
+}
+
+/** An empty held set: what `toPathsD([])` gives a Boolean as its clip. */
+export function emptyHeld(): HeldLoops {
+  return held(new (requireMod()).PathsD())
+}
+
+function held(paths: any): HeldPaths {
+  let live = paths
+  return {
+    paths,
+    dispose() { if (live) { live.delete(); live = null } },
+  }
+}
+
+/** Marshal `loops` translated by (dx, dy) -- each vertex written as (x + dx, y + dy),
+ *  the arithmetic `translate` uses -- straight into a PathsD, with no translated copy. */
+function toPathsDTranslated(loops: Loops, dx: number, dy: number): any {
+  const m = requireMod()
+  const paths = new m.PathsD()
+  try {
+    for (const loop of loops) {
+      if (loop.length === 0) continue
+      marshalled.toWasm += loop.length
+      const flat: number[] = new Array(loop.length * 2)
+      for (let j = 0, k = 0; j < loop.length; j++, k += 2) {
+        flat[k] = loop[j].x + dx
+        flat[k + 1] = loop[j].y + dy
+      }
+      const pd = m.MakePathD(flat)
+      try { paths.push_back(pd) } finally { pd.delete() }
+    }
+  } catch (e) {
+    paths.delete()
+    throw e
+  }
+  return paths
+}
+
+/** `difference(translate(subject, dx, dy), clip)` against a held clip set. */
+export function differenceTranslatedHeld(subject: Loops, dx: number, dy: number, clip: HeldLoops): Loops {
+  const m = requireMod()
+  return withWasm(own => {
+    const s = own(toPathsDTranslated(subject, dx, dy))
+    const res = own(m.DifferenceD(s, (clip as HeldPaths).paths, EVEN_ODD(), PREC))
+    return fromPathsD(res)
+  })
+}
+
+/** `difference(subject, clip)` against a held clip set. */
+export function differenceHeld(subject: Loops, clip: HeldLoops): Loops {
+  const m = requireMod()
+  return withWasm(own => {
+    const s = own(toPathsD(subject))
+    const res = own(m.DifferenceD(s, (clip as HeldPaths).paths, EVEN_ODD(), PREC))
+    return fromPathsD(res)
+  })
+}
+
+/** `intersection(subject, clip)` against a held clip set. */
+export function intersectionWithHeld(subject: Loops, clip: HeldLoops): Loops {
+  const m = requireMod()
+  return withWasm(own => {
+    const s = own(toPathsD(subject))
+    const res = own(m.IntersectD(s, (clip as HeldPaths).paths, EVEN_ODD(), PREC))
+    return fromPathsD(res)
+  })
+}
+
 // --- queries -------------------------------------------------------------------
 
 /** Sum of |area| of each loop -- the FreeCAD CUT-BITE convention (calcCutingArea,
@@ -339,6 +445,7 @@ export function pointInPolygon(pt: Pt, loop: Loop): -1 | 0 | 1 {
   return withWasm(own => {
     const flat: number[] = []
     for (const p of loop) flat.push(p.x, p.y)
+    marshalled.toWasm += loop.length
     const path = own(m.MakePathD(flat))
     const ptd = own(new m.PointD(pt.x, pt.y, 0)) // was leaked pre-fix (never deleted)
     const res = m.PointInPolygonD(ptd, path) // enum value: plain JS object, nothing to delete

@@ -7,6 +7,7 @@
 - [Performance and simulation engine](#settings-performance)
 - [Projection, DXF import, nesting, and navigation](#settings-defaults)
 - [Backing up your data](#settings-user-data)
+- [Updating LienCAM](#updating-liencam)
 - [Machine library](#machine-library)
 
 <a id="settings-tour"></a>
@@ -23,11 +24,11 @@ When a GRBL machine is connected over USB, two more sections appear above User D
 
 > **Tip:** When reporting a problem, copy the App version and Build lines from the About section - they identify exactly which build you are running.
 
-About in the header opens About LienCAM, with the version, build information, credits and licenses, plus GitHub project and Releases links. The desktop app checks for a newer published release shortly after launch and posts a notice with its link in the Console if one is available. Download and install the update yourself; the check does not install it. Offline or unavailable checks stay silent.
+About in the header opens About LienCAM, with the version, build information, credits and licenses, plus GitHub project and Releases links. The desktop app checks for a newer published release when it starts and, if one exists, offers to download it; nothing installs until you click Install and restart (see "Updating LienCAM"). If GitHub cannot be reached, LienCAM says nothing and keeps working.
 
 ![The Settings window scrolled to the top](images/settings-tour/settings-window.webp)
 
-See also: [Theme, interface scale, and light mode](Settings#settings-display), [Performance and simulation engine](Settings#settings-performance), [Projection, DXF import, nesting, and navigation](Settings#settings-defaults), [Backing up your data](Settings#settings-user-data), [mm and inch](Getting-around#units).
+See also: [Theme, interface scale, and light mode](Settings#settings-display), [Performance and simulation engine](Settings#settings-performance), [Projection, DXF import, nesting, and navigation](Settings#settings-defaults), [Backing up your data](Settings#settings-user-data), [Updating LienCAM](Settings#updating-liencam), [mm and inch](Getting-around#units).
 
 <a id="settings-display"></a>
 
@@ -97,11 +98,41 @@ Your machines, tool libraries, holders, preferences, fonts, post profiles, work 
 
 ![Settings, User Data section after Inspect backup... picked a backup file: the Restore preview with bundle time, checksum and 15 collections, each kind listed as current -\> incoming counts, and the Confirm restore and Cancel buttons](images/settings-user-data/restore-review.webp)
 
-On Windows, updating means closing LienCAM and running the newer installer over the existing installation, then opening it from its shortcut. Your setup stays in place; you do not need to restore a backup for a normal upgrade. Download a backup before updating. For a new or rebuilt PC, follow "Moving LienCAM to a new or rebuilt PC" for the controller software and profile steps as well as restoring your data.
+To update, use the offer LienCAM shows at start when a newer release exists (see "Updating LienCAM"); on Windows, closing LienCAM and running the newer installer over the existing installation also works. Either way your setup stays in place; you do not need to restore a backup for a normal update. Download a backup before updating. For a new or rebuilt PC, follow "Moving LienCAM to a new or rebuilt PC" for the controller software and profile steps as well as restoring your data.
 
 A change still being saved when you close the app is kept for the next launch. If saved data cannot be loaded, LienCAM starts with defaults for the affected data and holds back saves so it does not overwrite your stored copy. The console names the load failure; reload to try again.
 
-See also: [The Settings window](Settings#settings-tour), [Saving and opening projects](Getting-around#projects-save-open), [Moving LienCAM to a new or rebuilt PC](Control#moving-to-a-new-pc).
+See also: [The Settings window](Settings#settings-tour), [Saving and opening projects](Getting-around#projects-save-open), [Moving LienCAM to a new or rebuilt PC](Control#moving-to-a-new-pc), [Updating LienCAM](Settings#updating-liencam).
+
+<a id="updating-liencam"></a>
+
+## Updating LienCAM
+
+The desktop app looks for a newer release when it starts, downloads and checks it when you click Download, and installs it only when you click Install and restart.
+
+Each time the desktop app starts, it checks the LienCAM releases on GitHub. When a newer published release exists, one small offer appears: "LienCAM X is available", with Download and Not now. Not now, or Later once the file is downloaded, hides that version until the next start. While LienCAM stays open it checks again every 6 hours, silently, and offers only a release newer than the one you put off. LienCAM asks nothing else about updates.
+
+1. Click Download. LienCAM fetches the file made for this computer and checks it against the SHA-256 sums published with the release. It keeps the file only if it matches. A file that does not match is deleted and nothing is installed.
+2. When the download is checked, click Install and restart. Nothing is installed until you click it; Later hides the offer and changes nothing.
+3. Installing closes LienCAM and the machine bridge, so it is refused while a program is running. Finish or stop the program first, then click Install and restart again.
+
+| Your copy of LienCAM | What happens when you install |
+| --- | --- |
+| Windows, installed (setup.exe) | The installer runs quietly and LienCAM restarts on the new version. |
+| Linux AppImage | The AppImage file is replaced and LienCAM restarts. |
+| Windows portable (portable.exe) | A portable copy cannot replace itself. Click Show the file: LienCAM opens the folder with the checked file. Close LienCAM and start the new one. |
+| Linux tar.gz | This copy cannot replace itself. Click Show the file: LienCAM opens the folder with the checked file. Close LienCAM, unpack the new one and start it. |
+| macOS | This copy cannot replace itself. LienCAM opens the checked disk image; drag LienCAM to Applications, then quit this copy and start the new one. |
+
+Your settings, machine, tools, probing setup, saved posts and recent projects are kept across an update. You do not need to restore a backup afterwards. Downloading a backup first (Settings, User Data, Download backup) is still a good habit.
+
+If GitHub cannot be reached, LienCAM says nothing and keeps working on the version you have.
+
+> **Tip:** LienCAM run from source (a development checkout) does not update from releases. Update it with git pull instead.
+
+LienCAM builds are not code-signed yet. Windows may show the blue "Windows protected your PC" window the first time the new version runs; click More info, then Run anyway.
+
+See also: [The Settings window](Settings#settings-tour), [Backing up your data](Settings#settings-user-data), [Moving LienCAM to a new or rebuilt PC](Control#moving-to-a-new-pc).
 
 <a id="machine-library"></a>
 

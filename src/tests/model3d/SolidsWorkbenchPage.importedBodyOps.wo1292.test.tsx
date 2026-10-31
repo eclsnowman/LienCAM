@@ -43,6 +43,7 @@ const BODY_INPUT_CLASSIFICATION = {
   resizeHole: 'existing',
   form: 'creator',
   relief: 'existing',
+  bodyTransform: 'existing',
 } as const satisfies Record<WorkbenchBodyOpType, 'creator' | 'existing'>
 
 function hooks(): SolidsWorkbenchHooks {
@@ -301,8 +302,9 @@ describe('WO-1292 saved imported-body operations', () => {
   it('classifies every body operation and behaviorally covers every existing-body operation', () => {
     expect(Object.keys(BODY_INPUT_CLASSIFICATION).sort()).toEqual([...WORKBENCH_BODY_OP_TYPES].sort())
     const existingOps = WORKBENCH_BODY_OP_TYPES.filter((opType) => BODY_INPUT_CLASSIFICATION[opType] === 'existing')
-    expect(existingOps).toEqual(['boolean', 'fillet', 'defeature', 'chamfer', 'shell', 'draft', 'hole', 'pushPull', 'resizeHole', 'relief'])
+    expect(existingOps).toEqual(['boolean', 'fillet', 'defeature', 'chamfer', 'shell', 'draft', 'hole', 'pushPull', 'resizeHole', 'relief', 'bodyTransform'])
     // WO-2171: relief on an imported body (Relief on the rail, a face click, Apply) is driven in src/tests/relief/reliefMode.test.tsx
-    expect([...LIVENESS_GATE_OPS].sort()).toEqual(existingOps.filter((opType) => !['boolean', 'resizeHole', 'relief'].includes(opType)).sort())
+    // WO-3244: Mirror of an imported STEP body, saved and replayed, is driven in src/tests/cam/bodyTransformReplay.test.ts
+    expect([...LIVENESS_GATE_OPS].sort()).toEqual(existingOps.filter((opType) => !['boolean', 'resizeHole', 'relief', 'bodyTransform'].includes(opType)).sort())
   })
 })

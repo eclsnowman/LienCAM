@@ -149,13 +149,14 @@ describe('WO-1926 peck cycle shrinks toward a minimum', () => {
 
   it('WO-1886 full-retract and re-approach-rapid behaviour survives shrinking', () => {
     const moves = build(makeParams({ peckDepth: 5, peckDecrement: 1, minPeckDepth: 2 }))
+    // WO-3083: the hole is now left to Retract too (G98 hops at Retract), so only the
+    // z==retractZ rapids before the last plunge are inter-peck full retracts.
+    const lastPlunge = moves.map(m => m.role).lastIndexOf('plunge')
     const retractIndices = moves
-      .map((m, i) => (m.type === 'rapid' && Math.abs(m.z - RETRACT_Z) < 1e-9 ? i : -1))
+      .map((m, i) => (i < lastPlunge && m.type === 'rapid' && Math.abs(m.z - RETRACT_Z) < 1e-9 ? i : -1))
       .filter(i => i >= 0)
     // Every peck but the last full-retracts; each full retract is followed by a
     // RAPID re-approach to previous depth + clearance (never a plunge feed).
-    // retractMode 'clearance' -> the between-hole retract is to the clearance
-    // plane, so every z==retractZ rapid here is an inter-peck full retract.
     expect(retractIndices.length).toBe(plungeZs(moves).length - 1)
     for (const i of retractIndices) {
       const re = moves[i + 1]
@@ -168,8 +169,10 @@ describe('WO-1926 peck cycle shrinks toward a minimum', () => {
   it('chip_break honours the same decrement/minimum', () => {
     const moves = build(makeParams({ cycleType: 'chip_break', peckDepth: 5, peckDecrement: 1, minPeckDepth: 2 }))
     expect(plungeZs(moves)).toEqual([-5, -9, -12, -14, -16, -18, -20])
-    // Chip-break stays in the hole: partial retracts, no full retract to retractZ.
-    expect(moves.some(m => m.type === 'rapid' && Math.abs(m.z - RETRACT_Z) < 1e-9)).toBe(false)
+    // Chip-break stays in the hole: partial retracts, no full retract to retractZ between pecks
+    // (WO-3083: leaving the hole after the last peck now goes to Retract, the G98 hop plane).
+    const lastPlunge = moves.map(m => m.role).lastIndexOf('plunge')
+    expect(moves.slice(0, lastPlunge).some(m => m.type === 'rapid' && Math.abs(m.z - RETRACT_Z) < 1e-9)).toBe(false)
   })
 })
 

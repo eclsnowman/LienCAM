@@ -34,7 +34,16 @@
 // a Parameters-table edit is one Undo/Redo step on the same stack as every
 // other Model step, in order. Before this the table kept a private history
 // nothing in the product ever undid.
+//
+// WO-3202 (WO-3170 Slice B): the session also owns the memo of feature
+// recognition results for its bodies (partFeatureBinding.ts), so Resize Hole
+// and the picked-wall Bore read ONE result per committed body revision. The
+// page lends the session its committed body handles and kernel
+// (setLiveBodySource); the memo dies with the session, and only results that
+// are still true of the document at unmount are handed to the holder
+// (committedFeatureResults, documentHolder.registerLiveDocument).
 
+import { FeatureResultMemo, kernelSerial, type LiveBodySource, type ModelBodyFeatureResult } from '../lib/geometry/partFeatureBinding'
 import { CommandHistory, CompositeCommand, HISTORY_CAP, type Command, type TouchedStack } from './commands'
 import type { FeatureDag } from './dag'
 import type { ElementMap } from './element-map'
@@ -108,8 +117,12 @@ export class ModelSession<M extends ElementMap = ElementMap> {
   readonly touchedPast: TouchedStack = { current: [] }
   readonly touchedFuture: TouchedStack = { current: [] }
 
+  /** WO-3202: recognition results for this session's bodies, by token. */
+  readonly featureResults = new FeatureResultMemo()
+
   private readonly changeListeners = new Set<(notice: ModelChangeNotice) => void>()
   private historyGuard: HistoryGuard | null = null
+  private liveBodies: LiveBodySource | null = null
 
   constructor(init: ModelSessionInit<M>) {
     this.modelItemId = init.modelItemId
@@ -151,6 +164,39 @@ export class ModelSession<M extends ElementMap = ElementMap> {
     for (const listener of [...this.changeListeners]) {
       try { listener(notice) } catch (err) { console.warn('WO-3000: a model change listener threw', err) }
     }
+  }
+
+  /** WO-3202: the page lends its committed body handles and kernel here.
+   *  Pass null to withdraw them (the page's unmount). Withdrawing drops
+   *  every live result: the handles they name are going away. */
+  setLiveBodySource(source: LiveBodySource | null): void {
+    this.liveBodies = source
+    if (source === null) this.featureResults.retain((token) => token.route !== 'live')
+  }
+
+  liveBodySource(): LiveBodySource | null {
+    return this.liveBodies
+  }
+
+  /** WO-3202: completed live results still true of the document as it
+   *  stands right now -- same revision, the handle each names is still the
+   *  committed one, and no rebuild pending (a dirty or running node means a
+   *  handle about to be replaced). The holder carries only these across an
+   *  unmount, so a Bore read after the Model tab closes needs no replay. */
+  committedFeatureResults(): ModelBodyFeatureResult[] {
+    const source = this.liveBodies
+    if (source === null) return []
+    if (this.scheduler.dirtyIds().length > 0 || this.scheduler.hasRunning()) return []
+    const kernel = source.kernel()
+    if (kernel === null) return []
+    const revision = this.revision()
+    const kernelId = kernelSerial(kernel)
+    return this.featureResults.completedResults().filter((result) =>
+      result.token.route === 'live' &&
+      result.token.revision === revision &&
+      result.token.kernel === kernelId &&
+      source.handleOf(result.token.bodyId) === result.token.handle,
+    )
   }
 
   /** The model's edit counter: CommandHistory's own revision. */

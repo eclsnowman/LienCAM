@@ -64,6 +64,7 @@ import {
   useControlPanelCollapsed,
 } from './ControlPanelCollapseToggle'
 import { useControlJogKeys } from '../../hooks/useControlJogKeys'
+import { startControlGamepadJog } from '../../hooks/useControlGamepadJog'
 import {
   gotoWorkXYZero,
   machineWorkOffsetWriteInFlight,
@@ -233,7 +234,7 @@ const ControlConsoleRow = memo(function ControlConsoleRow({
   return (
     <div
       className={`control-console-line control-console-${line.dir} ${
-        line.severity === 'error' ? 'control-console-error' : ''
+        line.severity === 'error' ? 'control-console-error' : line.severity === 'warn' ? 'control-console-warn' : ''
       }`}
     >
       <span className="control-console-dir">{line.dir === 'tx' ? '>' : '<'}</span>
@@ -245,7 +246,12 @@ const ControlConsoleRow = memo(function ControlConsoleRow({
           {formatControlConsoleTime(line.at)}
         </span>
       )}
-      <span className="control-console-text">
+      {/* WO-3087: a warning (the bridge's "program STOPPED by E-STOP") reads
+          as one - it printed in the plain row colour. */}
+      <span
+        className="control-console-text"
+        style={line.severity === 'warn' ? { color: 'var(--warning)' } : undefined}
+      >
         {controlConsoleDisplayText(line.text, collapsed)}
       </span>
     </div>
@@ -1448,6 +1454,9 @@ export function ControlPage() {
   }, [availableConnectionKinds, kind, machine, phase, supported])
 
   useControlJogKeys()
+  // WO-3259: the gamepad's step jog, beside the keys; it reads nothing until
+  // its session Enable is on in Settings.
+  useEffect(() => startControlGamepadJog(kind), [kind])
 
   // WO-448: only ever true on a 'bridge' connection, and only once hello has
   // actually said so - never assumed from the connection kind alone.

@@ -12,8 +12,8 @@
 // live-project edit cannot reach back into a stored snapshot.
 
 import type { ImportedGeometry, MachineConfig, Operation, Project, PhysicalStock, Setup, Tool } from '../../types'
-import type { EmittedOperationSpan, PostConfig } from '../post/types'
-import { isSendableGcodeLine, prepareProgram } from '../gcode/text'
+import type { EmittedOperationSpan, PostConfig, PostInput } from '../post/types'
+import { isSendableGcodeLine, prepareProgram, yieldSetupLoadTask } from '../gcode/text'
 import type { StreamerPhase } from './controller'
 import { resolveSetupWorkOffset, WorkOffsetResolutionError } from '../post/workOffsets'
 import { buildPostInput } from '../post/buildPostInput'
@@ -24,7 +24,7 @@ import {
   type TransferWorkOffset,
   type TransferWorkOffsetTable,
 } from './transferCheck'
-import { buildPreviewModel } from './previewGeometry'
+import { buildPreviewModel, type PreviewModel } from './previewGeometry'
 import { isGrblFamily } from './machineChoice'
 
 export const PROGRAM_CONTEXT_VERSION = 1 as const
@@ -191,7 +191,16 @@ export function transferCheckJobFromProgram(
   programText: string,
   postedFor?: TransferCheckJob['postedFor'],
 ): TransferCheckJob {
-  const preview = buildPreviewModel(programText)
+  return transferCheckJobFromPreview(buildPreviewModel(programText), postedFor)
+}
+
+/** Adapt already-prepared parser facts without reading text again. The caller
+ * owns this preview; the check only reads it and always judges live machine,
+ * offset and motion inputs. Standalone text callers keep their original API. */
+export function transferCheckJobFromPreview(
+  preview: Readonly<PreviewModel>,
+  postedFor?: TransferCheckJob['postedFor'],
+): TransferCheckJob {
   return {
     moves: preview.moves,
     addressedAxes: preview.addressedAxes,
@@ -444,9 +453,47 @@ function preparedMotion(gcode: string): string {
  * blank-line, surrounding-whitespace, and percent-marker changes never change
  * it, while any change to the exact executable lines does.
  */
-export function computeMotionDigest(gcode: string): string {
-  return `sha256:${sha256Hex(preparedMotion(gcode))}`
+// Only two immutable text keys, so repeated store/context validation cannot
+// retain whole prior programs. This caches the pure digest, never validity or
+// readiness, and every context/span assertion still runs on the live values.
+const motionDigests = new Map<string, string>()
+function retainMotionDigest(text: string, digest: string): string {
+  motionDigests.delete(text)
+  motionDigests.set(text, digest)
+  if (motionDigests.size > 2) motionDigests.delete(motionDigests.keys().next().value!)
+  return digest
 }
+export function computeMotionDigest(gcode: string): string {
+  return motionDigests.get(gcode) ?? retainMotionDigest(gcode, `sha256:${sha256Hex(preparedMotion(gcode))}`)
+}
+
+/** Run the identical canonical preparation before adoption in bounded tasks.
+ * WebCrypto hashes the same UTF-8 bytes without a renderer SHA loop. Hosts
+ * without it retain the existing pure SHA implementation. No context verdict
+ * crosses a worker boundary, and cancellation cannot publish partial facts. */
+export async function prepareProgramContextAdoption(text: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+  if (motionDigests.has(text)) return
+  const raw = text.split(/\r?\n/)
+  const lines: string[] = []
+  let sliceStarted = performance.now()
+  for (let offset = 0; offset < raw.length; offset += 256) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+    for (const line of prepareProgram(raw.slice(offset, offset + 256).join('\n')).lines) lines.push(line.text)
+    if (performance.now() - sliceStarted >= 45 || offset + 256 >= raw.length) {
+      await yieldSetupLoadTask()
+      sliceStarted = performance.now()
+    }
+  }
+  const canonical = lines.join('\n')
+  const bytes = new TextEncoder().encode(canonical)
+  const digest = globalThis.crypto?.subtle
+    ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('')
+    : sha256Hex(canonical)
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+  retainMotionDigest(text, `sha256:${digest}`)
+}
+
 
 // ---------------------------------------------------------------------------
 // Manufacturing-intent fingerprint (drift detection)
@@ -534,7 +581,7 @@ function postedMachine(machine: MachineConfig): Omit<MachineConfig, 'toolTable' 
 /** Derive the canonical intent inputs from the live project + resolved setup +
  *  post config. Shared by buildProgramContext and compareProgramContext so both
  *  hash the identical, order-stable bytes. */
-function programIntentInputs(project: Project, setup: Setup, post: PostConfig): ProgramIntentInputs {
+function programIntentInputs(project: Project, setup: Setup, post: PostConfig, preparedPostInput?: PostInput): ProgramIntentInputs {
   const resolved = resolveSetupWorkOffset(project, setup)
   const stock =
     resolved.stockId === undefined
@@ -545,7 +592,7 @@ function programIntentInputs(project: Project, setup: Setup, post: PostConfig): 
   // nest-expanded section order and coordinates, resolved tools/feeds/spindle/
   // coolant, and the post freshness downgrade. It avoids trusting a stored
   // generation claim or raw setup order when either differs from what posts.
-  const postInput = buildPostInput(project, setup)
+  const postInput = preparedPostInput ?? buildPostInput(project, setup)
   const operations = postInput.setup.operations
     .map(({ op: operation, tool, feeds, spindle, coolant, moves, nestExpanded }): IntentOperation => ({
       id: operation.id,
@@ -955,8 +1002,14 @@ export function assertProgramContextMatchesProgram(
     if (operation.endLine > rawLines.length) {
       throw new Error('Refusing a program-context snapshot whose source spans exceed the program.')
     }
-    const sourceSlice = rawLines.slice(operation.startLine - 1, operation.endLine).join('\n')
-    if (prepareProgram(sourceSlice).lines.length === 0) {
+    // The contract asks whether any line streams, not for a second complete
+    // prepared program. Stop at the first executable line using the same
+    // canonical predicate; blank/comment/%-only spans still refuse.
+    let executable = false
+    for (let index = operation.startLine - 1; index < operation.endLine; index++) {
+      if (isSendableGcodeLine(rawLines[index])) { executable = true; break }
+    }
+    if (!executable) {
       throw new Error('Refusing a program-context snapshot whose source span contains no executable lines.')
     }
   }
@@ -984,6 +1037,7 @@ export function buildProgramContext(
   post: PostConfig,
   gcode: string,
   operationSpans: ReadonlyArray<EmittedOperationSpan>,
+  preparedPostInput?: PostInput,
 ): ProgramContextV1 {
   const resolved = resolveSetupWorkOffset(project, setup)
   const stock =
@@ -992,7 +1046,10 @@ export function buildProgramContext(
       : (project.stocks ?? []).find((candidate) => candidate.id === resolved.stockId) ?? null
 
   const spans = validateEmittedOperationSpans(gcode, setup, operationSpans)
-  const operations = operationDescriptors(project, setup, spans)
+  // WO-3125: descriptors and intent describe the same synchronous snapshot.
+  // Share its pure resolution here, never across builds or live comparisons.
+  const postInput = preparedPostInput ?? buildPostInput(project, setup)
+  const operations = operationDescriptors(setup, postInput, spans)
 
   const context: ProgramContextV1 = {
     version: PROGRAM_CONTEXT_VERSION,
@@ -1008,7 +1065,7 @@ export function buildProgramContext(
     operations,
     post: { id: post.id, label: post.label },
     motionDigest: computeMotionDigest(gcode),
-    projectFingerprint: programIntentDigest(programIntentInputs(project, setup, post)),
+    projectFingerprint: programIntentDigest(programIntentInputs(project, setup, post, postInput)),
     generatedAt: Date.now(),
   }
 
@@ -1026,7 +1083,7 @@ function wcsSnapshot(resolved: ReturnType<typeof resolveSetupWorkOffset>): Progr
 
 /** The per-setup snapshot (WO-412) - the same fields a version-1 context of
  *  this setup alone carries, including its own intent digest. */
-function setupSnapshot(project: Project, setup: Setup, post: PostConfig): ProgramContextSetupSnapshot {
+function setupSnapshot(project: Project, setup: Setup, post: PostConfig, postInput: PostInput): ProgramContextSetupSnapshot {
   const resolved = resolveSetupWorkOffset(project, setup)
   const stock =
     resolved.stockId === undefined
@@ -1038,7 +1095,7 @@ function setupSnapshot(project: Project, setup: Setup, post: PostConfig): Progra
     stock: stockSnapshot(setup, stock, resolved.fixtureOffset),
     targetParts: targetPartSnapshots(project, resolved.stockId),
     notes: setup.notes,
-    projectFingerprint: programIntentDigest(programIntentInputs(project, setup, post)),
+    projectFingerprint: programIntentDigest(programIntentInputs(project, setup, post, postInput)),
   }
 }
 
@@ -1046,8 +1103,8 @@ function setupSnapshot(project: Project, setup: Setup, post: PostConfig): Progra
  *  and describe each emitted operation. Shared by the one-setup and the
  *  multi-setup builders. */
 function operationDescriptors(
-  project: Project,
   setup: Setup,
+  postInput: PostInput,
   spans: ReadonlyArray<EmittedOperationSpan>,
   setupIdOnDescriptor = false,
 ): ProgramContextOperationDescriptor[] {
@@ -1057,7 +1114,7 @@ function operationDescriptors(
   // post validation refuses them BEFORE emission - so every resolved section has
   // exactly one span, in order. Neither side enforces the other; this check is
   // where a broken chain surfaces, and it names the operation that lost its span.
-  const emittedSections = buildPostInput(project, setup).setup.operations
+  const emittedSections = postInput.setup.operations
   if (emittedSections.length !== spans.length) {
     const spanned = new Set(spans.map((span) => span.opId))
     const missing = emittedSections.filter((section) => !spanned.has(section.op.id)).map((section) => `'${section.op.name}' (${section.op.id})`)
@@ -1123,10 +1180,13 @@ export function buildMultiSetupProgramContext(
   }
   const spans = validateEmittedOperationSpansForSetups(gcode, setups, operationSpans)
   const operations: ProgramContextOperationDescriptor[] = []
+  const postInputs: PostInput[] = []
   for (const setup of setups) {
-    operations.push(...operationDescriptors(project, setup, spans.filter((span) => span.setupId === setup.id), true))
+    const postInput = buildPostInput(project, setup)
+    postInputs.push(postInput)
+    operations.push(...operationDescriptors(setup, postInput, spans.filter((span) => span.setupId === setup.id), true))
   }
-  const snapshots = setups.map((setup) => setupSnapshot(project, setup, post))
+  const snapshots = setups.map((setup, index) => setupSnapshot(project, setup, post, postInputs[index]))
   const lead = snapshots[0]
   const context: ProgramContextV2 = {
     version: PROGRAM_CONTEXT_VERSION_V2,
@@ -1263,12 +1323,20 @@ export function validateEmittedOperationSpansForSetups(
  * context); project drift (identity, intent, or post-config change) is next;
  * otherwise the snapshot is current. Never mutates the snapshot.
  */
+export interface PreparedProgramIntent {
+  project: Project
+  setup: Setup
+  post: PostConfig
+  digest: string
+}
+
 export function compareProgramContext(
   context: ProgramContextV1 | null,
   liveProject: Project,
   liveProgramText: string | null,
   livePost: PostConfig,
   liveMotionDigest?: string,
+  preparedIntent?: PreparedProgramIntent,
 ): ProgramContextComparison {
   // WO-397: a program the app knows nothing about is 'no-context', never the word
   // that means "verified to match" (the F2 trap: WO-380/381 and any run guard read
@@ -1286,7 +1354,7 @@ export function compareProgramContext(
   // one stale setup makes the program 'project-changed' (the per-setup view is
   // compareProgramContextPerSetup).
   for (const snapshot of programContextSetups(context)) {
-    if (compareSetupIntent(snapshot, liveProject, livePost) !== 'current') return 'project-changed'
+    if (compareSetupIntent(snapshot, liveProject, livePost, preparedIntent) !== 'current') return 'project-changed'
   }
   return 'current'
 }
@@ -1297,6 +1365,7 @@ function compareSetupIntent(
   snapshot: ProgramContextSetupSnapshot,
   liveProject: Project,
   livePost: PostConfig,
+  preparedIntent?: PreparedProgramIntent,
 ): 'current' | 'project-changed' {
   const liveSetup = liveProject.setups.find((setup) => setup.id === snapshot.setup.id)
   if (liveSetup === undefined) return 'project-changed'
@@ -1306,7 +1375,8 @@ function compareSetupIntent(
   // a defect in buildPostInput or the canonical walk must never be dressed up
   // as a plausible 'project-changed' badge (ADR-0003).
   try {
-    const liveDigest = programIntentDigest(programIntentInputs(liveProject, liveSetup, livePost))
+    const liveDigest = preparedIntent?.project === liveProject && preparedIntent.setup === liveSetup && preparedIntent.post === livePost
+      ? preparedIntent.digest : programIntentDigest(programIntentInputs(liveProject, liveSetup, livePost))
     return liveDigest === snapshot.projectFingerprint ? 'current' : 'project-changed'
   } catch (err) {
     if (err instanceof WorkOffsetResolutionError) return 'project-changed'
@@ -1334,6 +1404,7 @@ export function compareProgramContextPerSetup(
   liveProgramText: string | null,
   livePost: PostConfig,
   liveMotionDigest?: string,
+  preparedIntent?: PreparedProgramIntent,
 ): ReadonlyArray<ProgramContextSetupVerdict> {
   if (context === null) return []
   const setups = programContextSetups(context)
@@ -1346,7 +1417,7 @@ export function compareProgramContextPerSetup(
   return setups.map((snapshot) => ({
     setup: snapshot.setup,
     wcsLabel: snapshot.wcs.label,
-    verdict: blanket ?? compareSetupIntent(snapshot, liveProject, livePost),
+    verdict: blanket ?? compareSetupIntent(snapshot, liveProject, livePost, preparedIntent),
   }))
 }
 

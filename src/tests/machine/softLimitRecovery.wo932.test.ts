@@ -87,41 +87,24 @@ describe('WO-932 soft-limit recovery', () => {
     expect(button.disabled).toBe(true)
   })
 
-  it('pins the two readback reset cycles and condition-specific safety handling', () => {
+  it('pins the latched Unlock to the controller reopen (the real board, 2026-10-30)', () => {
     const source = readFileSync('pendant/uccnc-bridge/Machine.cs', 'utf8')
     const bridgeSource = readFileSync('pendant/uccnc-bridge/Bridge.cs', 'utf8')
-    const resetStart = source.indexOf('bool RunSoftLimitResetCycle(out string err)')
-    const resetEnd = source.indexOf('// ---- WO-933:', resetStart)
-    const resetCycle = source.slice(resetStart, resetEnd)
-    expect(resetStart).toBeGreaterThan(0)
-    expect(resetEnd).toBeGreaterThan(resetStart)
-    expect(resetCycle).toContain('beforeRc == (int)UC100.ReturnVal.UC100_ESTOP || before.Estop')
-    expect(resetCycle).toContain('bool hardLimitOverrideActive = before.HardLimit')
-    expect(resetCycle).toContain('beforeRc == (int)UC100.ReturnVal.UC100_LIMIT')
-    expect(resetCycle).toContain('if (hardLimitOverrideActive)')
-    expect(resetCycle).toContain('lock (io.Api) overrideRc = UC100.LimitOverRide()')
-    expect(resetCycle).toContain('if (readback.HardLimit && !hardLimitOverrideActive)')
-    expect(resetCycle).toContain('for (int pass = 1; pass <= 2; pass++)')
-    expect(resetCycle).toContain('lock (io.Api) stopRc = UC100.Stop()')
-    expect(resetCycle).toContain('BoardOwner.Pump(250)')
-    expect(resetCycle).toContain('if (BoardOwner.AbortRequested)')
-    expect(resetCycle).toContain('lock (io.Api) statusRc = UC100.GetStatus(ref readback)')
-    expect(resetCycle).not.toContain('Thread.Sleep')
-    expect(resetCycle.indexOf('if (hardLimitOverrideActive)')).toBeLessThan(
-      resetCycle.indexOf('UC100.LimitOverRide()'),
-    )
     expect(bridgeSource).toMatch(
       /case "unlock":\s+PostCall\(ws, seq, BoardOwner\.Class\.Long, "unlock"/,
     )
-
     const unlockStart = source.indexOf('public bool Unlock(out string err)')
     const unlockEnd = source.indexOf('public bool ResetToIdle', unlockStart)
     const unlock = source.slice(unlockStart, unlockEnd)
     expect(unlockStart).toBeGreaterThan(0)
-    expect(unlockEnd).toBeGreaterThan(unlockStart)
-    expect(unlock).toContain('if (softLimitLatched)')
-    expect(unlock).toContain('if (!RunSoftLimitResetCycle(out err)) return false')
-    expect(unlock).toContain('AttemptSoftLimitRecovery("Unlock")')
+    expect(unlock).toContain('if (softLimitLatched) return ReopenToClearSoftLimit("Unlock", out err)')
+    const reopenStart = source.indexOf('bool ReopenToClearSoftLimit(string how, out string err)')
+    const reopen = source.slice(reopenStart, source.indexOf('// ---- WO-933:', reopenStart))
+    expect(reopenStart).toBeGreaterThan(0)
+    expect(reopen).toContain('rc == (int)UC100.ReturnVal.UC100_ESTOP || st.Estop')
+    expect(reopen).toContain('jobRunning || awaitingExecution || faultStopping')
+    expect(reopen).toContain('if (ReopenLostBoard()) return true')
+    expect(source).not.toContain('TRY ONE SHORT JOG')
   })
 })
 
@@ -215,9 +198,9 @@ describe.skipIf(!HAVE_CSC)('WO-1332 a move clamped to zero at the limit', () => 
     run = runFakeBoard(['wo1332'])
   }, 180_000)
 
-  it('latches, offers Unlock and clears on measured motion, on the fake board', () => {
+  it('latches, offers Unlock and clears on the proved reopen, on the fake board', () => {
     const section = checks(run.stdout, 'zerolength/')
-    expect(section.length).toBeGreaterThanOrEqual(17)
+    expect(section.length).toBeGreaterThanOrEqual(14)
     expect(failureDetail(run.stdout, 'zerolength/')).toBe('')
     const names = section.map((c) => c.name)
     expect(names).toContain('zerolength/THE LATCH SETS')
@@ -225,8 +208,8 @@ describe.skipIf(!HAVE_CSC)('WO-1332 a move clamped to zero at the limit', () => 
     expect(names).toContain(
       'zerolength/the legal move away from the limit is refused in words, not swallowed',
     )
-    expect(names).toContain('zerolength/the latch STAYS SET until the machine is seen to move')
-    expect(names).toContain('zerolength/THE LATCH CLEARS ON THAT MOTION')
+    expect(names).toContain('zerolength/Unlock reopens the controller connection')
+    expect(names).toContain('zerolength/THE LATCH CLEARS ON THE PROVED REOPEN')
     expect(names).toContain('zerolength/a later legal move runs')
   })
 
@@ -249,11 +232,8 @@ describe.skipIf(!HAVE_CSC)('WO-1332 a move clamped to zero at the limit', () => 
     expect(names).toContain(
       'endpointatlimit/the legal move away from the limit is refused in words, not swallowed',
     )
-    expect(names).toContain('endpointatlimit/Unlock is offered and runs the same recovery sequence')
-    expect(names).toContain(
-      'endpointatlimit/the latch STAYS SET until the machine is seen to move',
-    )
-    expect(names).toContain('endpointatlimit/THE LATCH CLEARS ON THAT MOTION')
+    expect(names).toContain('endpointatlimit/Unlock reopens the controller connection')
+    expect(names).toContain('endpointatlimit/THE LATCH CLEARS ON THE PROVED REOPEN')
     expect(names).toContain('endpointatlimit/a later legal move runs')
     expect(names).toContain('endpointatlimit/the negative side latches the same way')
   })

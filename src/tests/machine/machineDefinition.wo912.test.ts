@@ -276,7 +276,12 @@ const stripComments = (s: string): string =>
 // pin 1 -> 26, pin 2 -> 47, pin 3 -> 31, pin 4 -> 32. Four values in that
 // exact order, close together, is the table's fingerprint - it has no
 // arithmetic rule, so nothing else produces that sequence by accident.
-const UCPIN_TABLE_FINGERPRINT = /\b26\b[\s\S]{0,60}?\b47\b[\s\S]{0,60}?\b31\b[\s\S]{0,60}?\b32\b/
+// WO-3322: each value must be a WHOLE integer literal, never a fragment of a
+// decimal. The table holds integers; WO-3286's generated icon geometry
+// (iconData.ts, 1.7 MB of SVG coordinates such as 6.26 ... 31.42 32.x) matched
+// the old \b form on the digits either side of a decimal point.
+const UCPIN_TABLE_FINGERPRINT =
+  /(?<![\d.])26(?![\d.])[\s\S]{0,60}?(?<![\d.])47(?![\d.])[\s\S]{0,60}?(?<![\d.])31(?![\d.])[\s\S]{0,60}?(?<![\d.])32(?![\d.])/
 // The identifier check names a DECLARATION that could hold the table - a
 // binding, function, class or type whose name says UCpin / AxbbPinDef. The
 // bare word is not enough: since WO-1002 the bridge's translation is REPORTED
@@ -401,6 +406,18 @@ describe('WO-912 THE PIN RULE: a pin is carried as (port, pin), never computed',
     } finally {
       removeControlFiles()
     }
+  })
+
+  it('a decimal coordinate is not a pin value (WO-3322: the WO-3286 icon geometry)', () => {
+    // Digits either side of a decimal point are not integer literals; whole
+    // integers stay flagged in every shape, including the negative controls above.
+    for (const source of [
+      'const d = "<polyline points=\\"20.26 20.74,6.89 21.90,6.47 24.35,6.42 25.57,31.48 26.76,32.65\\"/>"',
+      'const p = [1.26, 2.47, 3.31, 4.32]',
+      'const p = [26.5, 47.5, 31.5, 32.5]',
+    ]) expect(UCPIN_TABLE_FINGERPRINT.test(stripComments(source)), JSON.stringify(source)).toBe(false)
+    expect(UCPIN_TABLE_FINGERPRINT.test('const t = [26,47,31,32]')).toBe(true)
+    expect(UCPIN_TABLE_FINGERPRINT.test('const t = { 1: 26, 2: 47, 3: 31, 4: 32 }')).toBe(true)
   })
 
   it('the cheap screen never hides a file the full check would flag', () => {

@@ -2,6 +2,7 @@
 import type { Translation } from '../../index'
 const words: Translation<'cam-operations-new-operation'> = {
   NewOperationModalBody: {
+    "part_on_other_stock": "La pieza «{{part}}» está en {{stock}}; esta configuración usa {{setupStock}}.",
     From_the_model: "Del modelo",
     Modeled_chamfers_reading: "Leyendo los chaflanes de esta pieza...",
     Modeled_chamfers_read_failed: "No se pudieron leer los chaflanes de esta pieza: {{p1}}",
@@ -77,5 +78,24 @@ const words: Translation<'cam-operations-new-operation'> = {
     Settle: 'Asentar', Set_projection_plane_click_a_face_or_stock_surface: 'Definir plano de proyección — haga clic en una cara o superficie del material en bruto para seccionar la geometría sobre ella',
     Set_projection_plane: 'Definir plano de proyección',
   },
+  "newOperationModalParts": {
+    "Heights_explained": "Cómo se usan estas alturas",
+    "Entry_explained": "La entrada suele comenzar justo por encima del material restante (aproximadamente 1 mm). Algunas familias usan otras reglas; consulte la ayuda.",
+    "Travel_explained": "La retracción es el salto normal entre elementos. Los enlaces comprobados pueden mantenerse más bajos; al cruzar una brida modelada, la trayectoria sube más, incluso por encima de la altura de seguridad.",
+    "Clearance_explained": "La altura de seguridad se usa en la primera aproximación y la salida final. Estos valores son planos de referencia, no todas las alturas de desplazamiento.",
+    "Reference_planes": "Planos de referencia (WCS Z)",
+    "Illustrative_route": "Recorrido local ilustrativo - sin escala",
+    "Entry_start": "Inicio de entrada",
+    "Ordinary_hop": "Salto normal",
+    "Clamp_crossing": "Cruce de brida",
+    "Material_left": "Material restante",
+    "Clearance": "Seguridad",
+    "Retract": "Retracción",
+    "Feed_height": "Altura de avance",
+    "Top_of_cut": "Inicio del corte",
+    "Bottom_of_cut": "Fondo del corte",
+    "Set_manually": "Definir manualmente",
+    "Auto_from_3D_model": "Automático desde modelo 3D"
+}
 }
 export default words

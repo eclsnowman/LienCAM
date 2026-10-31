@@ -45,7 +45,7 @@ vi.mock('../../lib/viewport/CNCViewport', () => typedMock<typeof import('../../l
 const { ProbingPanel, __resetProbingSessionForTest } = await import('../../components/machine/ProbingPanel')
 const { MachineStatusChip } = await import('../../components/toolbar/MachineStatusChip')
 const { deriveMachineChip } = await import('../../lib/machine/machineChip')
-const { getMachineController } = await import('../../lib/machine/machineSession')
+const { connectMachine, disconnectMachine, estopNeedsReset, getMachineController, pressEstop } = await import('../../lib/machine/machineSession')
 const { useCamStore } = await import('../../store')
 const { useMachineControl } = await import('../../store/machineControlStore')
 const { useMachineToolTable } = await import('../../store/machineToolTableStore')
@@ -80,11 +80,28 @@ const still = () => ({
   chip: chip().outerHTML,
 })
 
-beforeEach(() => {
+/** WO-3190 (CT-2): connecting arms the software stop and the header chip reads
+ * that latch as E-STOP. A probe run cannot start under it, so clear it the
+ * operator's way - CLEAR (pressEstop) on the connected simulator - before the
+ * store facts below take over. */
+async function connectAndClear(): Promise<void> {
+  vi.useFakeTimers()
+  const connecting = connectMachine('simulator')
+  await vi.advanceTimersByTimeAsync(1000)
+  await connecting
+  const cleared = pressEstop()
+  await vi.advanceTimersByTimeAsync(1500)
+  expect(await cleared).toMatchObject({ ok: true })
+  expect(estopNeedsReset()).toBe(false)
+  vi.useRealTimers()
+}
+
+beforeEach(async () => {
   __resetProbingSessionForTest()
   memory.clear()
   useCamStore.getState().newProject()
   useMachineToolTable.setState({ byMachine: {} })
+  await connectAndClear()
   useMachineControl.setState({
     connectionPhase: 'connected', connectionKind: 'serial', machineState: 'idle', activeWcs: 'G54',
     activeTool: null, tlo: null, homed: true, settings: { 23: '0', 27: '1', 130: '100', 131: '100', 132: '50' },
@@ -95,10 +112,15 @@ beforeEach(() => {
   const controller = getMachineController() as MachineController & Required<Pick<MachineController, 'homedAxesThisSession'>>
   vi.spyOn(controller, 'homedAxesThisSession').mockReturnValue({ X: true, Y: true, Z: true })
 })
-afterEach(() => {
+afterEach(async () => {
   cleanup()
   finishCycle = null
   vi.restoreAllMocks()
+  vi.useFakeTimers()
+  const pending = disconnectMachine()
+  await vi.advanceTimersByTimeAsync(100)
+  await pending
+  vi.useRealTimers()
 })
 
 function renderScreen() {

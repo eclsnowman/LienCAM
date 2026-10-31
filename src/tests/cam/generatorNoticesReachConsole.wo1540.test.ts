@@ -363,10 +363,16 @@ describe('WO-1540: a 3D parallel finish whose stock-edge overrun was withheld sa
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     // The store constructs its cam3d client (a Worker) before calling the adapter; the
     // adapter stand-in below never talks to it, so a silent thread is enough.
+    // The off-page post-process worker (store/toolpathPostprocess.ts) is told
+    // "cannot start a module worker" so it runs its own in-page fallback.
     vi.stubGlobal('Worker', class {
       onmessage: unknown = null
-      onerror: unknown = null
-      postMessage(): void {}
+      onerror: ((event: unknown) => void) | null = null
+      postMessage(data: unknown): void {
+        if (data && typeof data === 'object' && 'request' in data) {
+          queueMicrotask(() => this.onerror?.({ preventDefault() {} }))
+        }
+      }
       terminate(): void {}
       addEventListener(): void {}
       removeEventListener(): void {}

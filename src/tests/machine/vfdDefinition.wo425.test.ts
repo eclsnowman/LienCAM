@@ -70,9 +70,12 @@ describe("WO-425 the one definition that ships is Operator's, unverified", () =>
   })
 
   it("carries Operator's measured link timings unchanged", () => {
+    // WO-3072 (e4ccf21a81): the shipped link seeds its port per host -
+    // Operator's measured COM3 on Windows, the USB serial device on Linux. The
+    // measured timings below are the same either way.
     expect(HUANYANG_GT.link).toMatchObject({
       transport: 'rtu',
-      port: 'COM3',
+      port: process.platform === 'linux' ? '/dev/ttyUSB0' : 'COM3',
       baud: 19200,
       dataBits: 8,
       parity: 'none',

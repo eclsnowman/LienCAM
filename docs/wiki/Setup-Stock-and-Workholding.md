@@ -164,18 +164,28 @@ See also: [Fixture stack and CAM grid](Setup-Stock-and-Workholding#fixture-stack
 
 Every operation uses five height planes - clearance, retract, feed, top, and bottom - each measured from a reference you choose, and the Heights tab shows the WCS Z each one lands on.
 
-The five planes, from highest to lowest: Clearance is the safe rapid plane; Retract is the rapid plane between cuts; Feed is where rapid changes to feed before entering material; Top is where material starts; Bottom is where machining ends. The Setup modal's Default Operation Heights (Clearance above retract, Retract above stock top, Feed above top, Top offset from stock, Bottom offset from top) are what new operations in that setup start from.
+The five values are reference planes in WCS Z, not every height the tool visits. Clearance is used for the first approach and final exit. Retract is the normal hop between features. Stock-proven local links can stay lower; a crossing over modeled workholding can rise above Retract and even Clearance. Feed is an entry reference, often replaced by a stock-aware start. Top is the requested machining start, not necessarily the material actually left; Bottom is the requested machining end. Setup Default Operation Heights provide the starting references for new operations.
 
 1. Open the Heights tab of the operation editor. It lists Clearance Height, Retract Height, Feed Height, Top Height and Bottom Height, each with how it is figured (for example "Retract + 10.000 mm"), the WCS Z it lands on, and whether it is Smart (the app works it out) or a User Override.
 2. Press the arrow on a row to change it: pick what it is measured from - for example Retract, Stock top, Model top, Stock bottom, Model bottom, Geometry plane, Picked surface or WCS Z (absolute), depending on the row - then + or - and the offset.
 3. Top Height and Bottom Height start on the operation's own Smart policy. On 2D Pocket and 2D Adaptive Clearing, opening those rows also shows an End condition: Depth from stock top, To geometry datum, To stock bottom, Through stock, Stop above stock bottom, To selected surface, or Custom reference + offset.
-4. The diagram below the rows draws the five planes with their values.
+4. The diagram below the rows shows five reference planes and a separate illustrative local route over remaining material. Expand "How these heights are used" for a short explanation, or press ? for this Help topic.
 
 In the Properties panel, an operation's Heights group shows each plane's WCS value and marks it Smart or overridden; the Clearance, Retract and Feed values can be typed over there. When an operation's safety heights no longer follow the setup, a "Reset safety to setup" button puts them back.
 
 > **Tip:** Referenced heights follow their source: a Bottom Height measured from Stock bottom stays correct if you change the stock thickness, where a typed WCS Z (absolute) would not.
 
-![The Heights tab of the operation editor: the five height rows with their WCS values, the Bottom Height row open with its End condition, and the height diagram](images/height-references/heights-tab.webp)
+![The Heights tab of the operation editor: the collapsed explanation, five reference rows with WCS values, and the reference-plane and illustrative-route diagrams](images/height-references/heights-tab.webp)
+
+Minimize Z travel is checked by default, including operations saved before this switch existed. Checked keeps the current stock-proven stay-downs and low local links. Uncheck it to bring non-cutting XY links back to the resolved Retract plane. Unchecked uses Clearance for first approach and final exit, Retract for feature hops, and Feed for the rapid-to-feed transition. Higher workholding crossings remain higher and cutting geometry is preserved. The same switch is in Properties. Native G98 starts/returns at Retract with R at Feed; G99 uses R at Feed, with explicit Retract hops when needed. Checked/default keeps stock-aware entries.
+
+Most 2D entries start about 1 mm above the material proven under the entry footprint. A lower Feed can shorten that gap only while it remains above the material; raising Feed does not generally add air. Remaining-stock proof can cover a whole footprint, not just the plunge point. Ordinary hops use Retract, while proven cleared-floor links may remain lower and modeled clamp crossings lift higher. Clearance is not a ceiling on clamp avoidance.
+
+Pocket uses Linking \> Helix start above material (normally 1 mm) for its entry gap, rather than Feed. Engraving uses Feed directly. Patterns follow the child operation, and V-carve flat clearing follows Pocket.
+
+Drilling has controller-specific return planes. In native G98, the initial/return plane normally follows the Retract hop plane; the shared cycle R-plane is stock-aware, usually material + 1 mm. In native G99, the cycle R-plane and return use Feed directly, even when it differs from Retract. Expanded or streamed drilling uses the authored Retract for between-hole links. First approach and final exit still use Clearance; peck re-approaches and chip-break retracts have their own rules.
+
+3D roughing can enter closer on later entries (about 0.05 mm above proven material); finishing can keep proven local links low. Particular 3D routes bound entries with Feed and traverses with Clearance. These family rules and workholding checks determine actual travel, so the five reference planes alone do not describe every generated move.
 
 See also: [Setup and WCS](Setup-Stock-and-Workholding#setup-wcs), [Generated-plane truth](Setup-Stock-and-Workholding#height-truthfulness), [Seeing height planes](Setup-Stock-and-Workholding#height-planes-viewport).
 
@@ -185,7 +195,7 @@ See also: [Setup and WCS](Setup-Stock-and-Workholding#setup-wcs), [Generated-pla
 
 A generated toolpath remembers the height planes it was cut with, and the app never shows a saved path whose inputs no longer match.
 
-When an operation generates, it records what you asked for and the WCS Z and machine Z each plane resolved to. The Properties panel Heights group shows the WCS value of each plane the stored toolpath was cut with.
+When an operation generates, it records what you asked for and the WCS Z and machine Z each plane resolved to. The Properties panel Heights group shows resolved WCS reference values, not the Z of every generated entry or link. Actual travel also depends on remaining stock, the operation family and modeled workholding.
 
 If anything the toolpath depends on changes afterward - heights, tool, geometry, stock, WCS origin or work offset, or machine - the operation is marked Outdated (amber clock icon on its row) and its saved moves are discarded rather than drawn. The same check runs when a project file is opened, so a stale saved path can never pass as current. Regenerate the operation to cut it again with the current inputs.
 
@@ -199,7 +209,7 @@ See also: [Heights explained](Setup-Stock-and-Workholding#height-references), [O
 
 The viewport can draw the five height planes of the selected operation as colored planes, with a master toggle and a per-plane checklist.
 
-1. Select a generated operation in the design tree - the planes drawn are the ones that operation was cut with.
+1. Select a generated operation in the design tree. The colored sheets show its resolved reference planes, not every actual entry, local link or clamp-crossing height.
 2. Press the Display mode button (the cube with a gear beside the view cube) to open the Display Mode flyout.
 3. Check "Height planes" to turn the plane display on. Each plane is drawn as a faint tinted sheet with a dashed outline and center cross in its color.
 4. Use the per-plane checkboxes - Clearance, Retract, Feed Height, Top of Stock, Bottom of Cut, each with its color dot - to show only the planes you care about.

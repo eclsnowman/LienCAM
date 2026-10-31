@@ -129,7 +129,10 @@ describe('WO-3054 adaptive into a closed pocket: helix, or a plunge into an alre
     const row = (await scoreChain(chain, planned)).rows[0]
     expect(row.metrics['M-ENTRY-4.plunge'], 'entries ranked as plunges').toBe(0)
     expect(row.metrics.peakEngagementFraction as number, 'peak sustained engagement').toBeLessThanOrEqual(CEILING)
-    expect(row.metrics['M-SAFE-2'], 'M-SAFE-2 as on the helix-entry row (pre-existing, WO-3030/3037)').toBe(2)
+    // WO-3316: the pre-existing helix-entry row measured 2 mm of intrusion on a non-cutting
+    // move; this path now measures 0 (no rapid or link reaches the material left). The bound
+    // is the pre-existing row's, so the entry pattern is never worse than the one it replaces.
+    expect(row.metrics['M-SAFE-2'], 'M-SAFE-2 no worse than the pre-existing WO-3030/3037 row').toBeLessThanOrEqual(2)
     expect(notices, 'the console line').toContain(NOTE)
   }, 600_000)
 

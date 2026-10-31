@@ -1,3 +1,4 @@
+import { setupLoadInProgress } from '../machine/setupLoadPreparation'
 import { TOOLPATH_WINDOW_SIDE_LIMIT, type ToolpathWindowSegment } from '../simulation/toolpathWindow'
 import type { ReferenceImageRuntime } from '../../referenceImage/runtime'
 import * as THREE from 'three'
@@ -99,6 +100,7 @@ import { buildEdgeLineGeometry } from '../../viewport3d/tessGeometry'
 import type { VoxelField } from '../simulation/voxel/VoxelField'
 import { asNumber, asHex } from '../../theme/viewportColors'
 import { useCamStore } from '../../store'
+import { stepVertexColors } from '../import/stepPartColors'
 import { isWorkholdingGeometry } from '../../store/dispatchGeo'
 // GEO-25 (Q-50 viewport display theme): ONE shared theme definition, also
 // consumed by the Model workspace (SolidsWorkbenchPage.tsx). See that
@@ -488,12 +490,16 @@ const ROLE_COLORS: Record<string, number> = {
   helix:    asNumber('--role-helix'),
   ramp:     asNumber('--role-ramp'),
   plunge:   asNumber('--role-plunge'),
+  retract:  asNumber('--role-retract'),
   stepover: asNumber('--role-stepover'),
   fast_traverse: asNumber('--role-fast-traverse'),
   wall_follow: asNumber('--role-wall-follow'),
   finish:   asNumber('--role-finish'),
   lead_in:  asNumber('--role-lead-in'),
   lead_out: asNumber('--role-lead-out'),
+  // This is display-only: loop-backs remain non-cutting links, while gold
+  // keeps their independently toggled render group distinct from fast traverse.
+  loop_back: asNumber('--vp-wcs-origin'),
 }
 // V5 palette v3 (Operator directive 2026-06-12): dashes ONLY for rapids; every
 // other role is SOLID. rapid keeps its dashes AND its solid END CAPS so a
@@ -1248,7 +1254,8 @@ export class CNCViewport {
       rot: { x: number; y: number; z: number }
     ) => void,
     onPartSelect?: (id: string | null) => void,
-    onStockSelect?: (id: string | null, assignmentPartId?: string | null) => void
+    onStockSelect?: (id: string | null, assignmentPartId?: string | null) => void,
+    options: { zoomToCursor?: boolean } = {},
   ) {
     this.container = container
     this.onFaceSelect = onFaceSelect
@@ -1299,7 +1306,7 @@ export class CNCViewport {
     this.controls.minDistance = 5
     this.controls.maxDistance = 5000
     this.controls.target.set(0, 0, 0)
-    this.navController = createNavPresetController(this.controls, this.renderer.domElement)
+    this.navController = createNavPresetController(this.controls, this.renderer.domElement, { zoomToCursor: options.zoomToCursor })
     // Apply the default navigation preset explicitly so the bare-button mapping
     // is the single source of truth from frame one. The React bridge re-applies
     // the persisted appSettings preset right after construction (Viewport.tsx).
@@ -1393,6 +1400,9 @@ export class CNCViewport {
 
     this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown)
     this.renderer.domElement.addEventListener('click', this.handleClick)
+    for (const event of ['pointermove', 'pointerdown', 'pointerup', 'click', 'wheel', 'keydown']) {
+      this.container.addEventListener(event, this.requestLoadRender)
+    }
     // PP-MOVE-PICK: always-on Toolpath-view move hover (see handleMoveHoverMove).
     this.renderer.domElement.addEventListener('mousemove', this.handleMoveHoverMove)
 
@@ -1867,6 +1877,7 @@ export class CNCViewport {
    * work-to-machine transform. A null/invalid grid hides both grid and origin.
    */
   setMachinePreviewCoordinateFrame(input: MachinePreviewCoordinateFrameInput) {
+    this.loadRenderRequested = true
     const resolved = resolveMachinePreviewCoordinateFrame(input)
     this.programFrameGroup.position.set(
       resolved.programTranslation.x,
@@ -1908,6 +1919,7 @@ export class CNCViewport {
    * --accent-amber edges, so staleness is carried by line style as well as hue.
    */
   setIntendedStock(box: IntendedStockBox | null) {
+    this.loadRenderRequested = true
     for (const child of this.intendedStockGroup.children) {
       const drawable = child as THREE.Mesh | THREE.LineSegments
       drawable.geometry?.dispose?.()
@@ -2187,7 +2199,22 @@ export class CNCViewport {
       ? CNCViewport.WORKHOLDING_BODY_HEX
       : (fallbackColor ?? this.resolvePartTheme().bodyHex)
     this.setPartColor(id, hex)
-    this.partUsesThemeColor.set(id, !workholding && fallbackColor === undefined)
+    // Returning a fixture to workpiece restores its embedded palette. A user
+    // colour edit clears stepFaceColors in the store, so it stays a uniform edit.
+    const geo = useCamStore.getState().project.geometry.find(g => g.id === id)
+    const mat = this.partMaterials.get(id)
+    if (!workholding && geo?.stepFaceColors && mat) {
+      const selected = this.getPartSelectedMaterialStates().get(id)
+      if (selected) {
+        selected.color.set(0xffffff)
+        selected.vertexColors = true
+      } else {
+        mat.vertexColors = true
+        mat.color.set(0xffffff)
+      }
+      mat.needsUpdate = true
+    }
+    this.partUsesThemeColor.set(id, !workholding && !geo?.stepFaceColors && fallbackColor === undefined)
   }
 
   private resolvePartTheme(): ModeledBodyVisualStyle {
@@ -2632,8 +2659,12 @@ export class CNCViewport {
 
     const geoThemeBrep = this.resolvePartTheme()
     const workholdingBrep = this.isPartWorkholding(id)
+    const embedded = stepVertexColors(payload.mesh,
+      useCamStore.getState().project.geometry.find(g => g.id === id))
+    if (embedded) geometry.setAttribute('color', new THREE.BufferAttribute(embedded, 3))
     const material = createModeledBodyMaterial({
-      color: workholdingBrep ? CNCViewport.WORKHOLDING_BODY_HEX : (color ?? geoThemeBrep.bodyHex),
+      color: workholdingBrep ? CNCViewport.WORKHOLDING_BODY_HEX : embedded ? 0xffffff : (color ?? geoThemeBrep.bodyHex),
+      vertexColors: !!embedded && !workholdingBrep,
     })
 
     const mesh = new THREE.Mesh(geometry, material)
@@ -2715,7 +2746,7 @@ export class CNCViewport {
     }
     mesh.add(edgeLines)
     this.partEdgePositions.set(id, segPositions.subarray(0, w))
-    this.partUsesThemeColor.set(id, !workholdingBrep && color === undefined)
+    this.partUsesThemeColor.set(id, !workholdingBrep && !embedded && color === undefined)
 
     if (modeledBodyEdgeUsesFatLines(this.currentShadingMode)) {
       const fatEdges = this.buildPartEdgeOverlay(segPositions.subarray(0, w))
@@ -2968,8 +2999,12 @@ export class CNCViewport {
     const mat = this.partMaterials.get(id)
     if (!mat) return
     const selectedState = this.getPartSelectedMaterialStates().get(id)
+    mat.vertexColors = false
     if (selectedState === undefined) mat.color.setStyle(hexColor)
-    else selectedState.color.setStyle(hexColor)
+    else {
+      selectedState.color.setStyle(hexColor)
+      selectedState.vertexColors = false
+    }
     mat.needsUpdate = true
   }
 
@@ -3543,6 +3578,7 @@ export class CNCViewport {
   // viewport click can resolve to a specific move. Omitted -> drawn identically
   // but not move-pickable.
   renderToolpath(moves: ToolpathMove[], clear = true, moveOwners?: (MoveOwner | null)[]) {
+    this.loadRenderRequested = true
     if (clear) {
       this.toolpathGroup.clear()
       this.toolpathRoleLines.clear()
@@ -3577,6 +3613,7 @@ export class CNCViewport {
       : Math.max(0, Math.floor(firstRemainingMove))
     if (next === (this.toolpathDoneBoundary ?? null)) return
     this.toolpathDoneBoundary = next
+    this.loadRenderRequested = true
     this.applyToolpathDoneBoundary()
   }
 
@@ -3672,6 +3709,7 @@ export class CNCViewport {
    * active layer remain readable. Passing null restores the normal full path.
    */
   setSimulationToolpathPreview(moves: ToolpathMove[] | null) {
+    this.loadRenderRequested = true
     this.clearSimulationToolpathObjects()
     this.simulationToolpathPreviewActive = Boolean(moves && moves.length >= 2)
 
@@ -4057,10 +4095,12 @@ export class CNCViewport {
   }
 
   setStockVisible(v: boolean) {
+    this.loadRenderRequested = true
     this.stockVisibleRequested = v
     this.syncStaticStockVisibility()
   }
   setWorkpieceVisible(v: boolean) {
+    this.loadRenderRequested = true
     this.workpieceGroup.visible = v
     this.syncAllPartSectionCapVisibility()
     this._worldPlaneLoopGroups.forEach(g => { g.visible = v })
@@ -4100,6 +4140,7 @@ export class CNCViewport {
     })
   }
   setMachineVisible(v: boolean) {
+    this.loadRenderRequested = true
     this.machineGroup.visible = v
     this.machineTravelBorderGroup.visible = v
   }
@@ -4377,6 +4418,7 @@ export class CNCViewport {
 
   showToolMarker(visible: boolean) {
     if (visible && !this.toolMarkerGroup) {
+      this.loadRenderRequested = true
       this.toolMarkerGroup = this.buildToolMesh(this.toolGeoConfig ?? {
         type: 'flat_end_mill', diameter: 6, shankDiameter: 6,
         fluteLength: 20, shoulderLength: 20, overallLength: 50,
@@ -4384,11 +4426,18 @@ export class CNCViewport {
       })
       this.programFrameGroup.add(this.toolMarkerGroup)
     }
-    if (this.toolMarkerGroup) this.toolMarkerGroup.visible = visible
+    if (this.toolMarkerGroup) {
+      if (this.toolMarkerGroup.visible !== visible) this.loadRenderRequested = true
+      this.toolMarkerGroup.visible = visible
+    }
   }
 
   setToolMarkerPosition(x: number, y: number, z: number) {
-    if (this.toolMarkerGroup) this.toolMarkerGroup.position.set(x, y, z)
+    if (this.toolMarkerGroup) {
+      const position = this.toolMarkerGroup.position
+      if (position.x !== x || position.y !== y || position.z !== z) this.loadRenderRequested = true
+      position.set(x, y, z)
+    }
   }
 
   /**
@@ -4402,9 +4451,13 @@ export class CNCViewport {
    */
   setActiveToolpathSegment(points: ReadonlyArray<{ x: number; y: number; z: number }> | null) {
     if (!points || points.length < 2) {
-      if (this.activeProgramSegment) this.activeProgramSegment.visible = false
+      if (this.activeProgramSegment) {
+        if (this.activeProgramSegment.visible) this.loadRenderRequested = true
+        this.activeProgramSegment.visible = false
+      }
       return
     }
+    this.loadRenderRequested = true
     const positions = new Float32Array(points.length * 3)
     for (let i = 0; i < points.length; i++) {
       positions[i * 3] = points[i].x
@@ -4924,6 +4977,28 @@ export class CNCViewport {
     return this.fitBoundsPreservingView({ min: bbox.min, max: bbox.max })
   }
 
+  /** Frame points given in the toolpath's own coordinates (the program frame),
+   *  placed where the toolpath group draws them, keeping the view direction.
+   *  False when there is nothing finite to frame. */
+  fitProgramPointsPreservingView(points: ReadonlyArray<{ x: number; y: number; z: number }>): boolean {
+    if (points.length === 0) return false
+    this.toolpathGroup.updateWorldMatrix(true, false)
+    const bbox = new THREE.Box3()
+    const world = new THREE.Vector3()
+    for (const point of points) {
+      bbox.expandByPoint(world.set(point.x, point.y, point.z).applyMatrix4(this.toolpathGroup.matrixWorld))
+    }
+    return this.fitBoundsPreservingView({ min: bbox.min, max: bbox.max })
+  }
+
+  /** The same framing on the historic ISO direction, for the automatic fit at
+   *  Load (which resets the view angle); see fitProgramPointsPreservingView. */
+  fitProgramPointsIso(points: ReadonlyArray<{ x: number; y: number; z: number }>): boolean {
+    if (points.length === 0) return false
+    this.camera.position.copy(this.controls.target).add(new THREE.Vector3(0.7, -0.9, 0.6))
+    return this.fitProgramPointsPreservingView(points)
+  }
+
   /** Recenter and scale the orthographic camera around explicit world bounds
    *  while preserving the current camera direction. The fit is measured after
    *  the eye is reseated on the new center, so angled views account for the
@@ -5177,6 +5252,7 @@ export class CNCViewport {
   // controls.update() (view buttons, fit, restore). Coalesce to one save ~300ms
   // after the last change so a save reflects where the camera came to rest.
   private handleControlsChange = () => {
+    this.loadRenderRequested = true
     if (!this.cameraChangeHandler) return
     if (this.cameraChangeTimer) clearTimeout(this.cameraChangeTimer)
     this.cameraChangeTimer = setTimeout(() => {
@@ -9351,6 +9427,7 @@ export class CNCViewport {
     const attr = `${document.documentElement.getAttribute('data-theme') ?? ''}|${document.documentElement.getAttribute('data-color-mode') ?? ''}`
     if (attr === this.lastSeenThemeAttr) return
     this.lastSeenThemeAttr = attr
+    this.loadRenderRequested = true
     this.refreshThemeColors()
   }
 
@@ -9371,11 +9448,19 @@ export class CNCViewport {
     this.refreshZeroPointChoiceTheme()
   }
 
+  // Keep the single INT-13B frame loop and its suspend/resume ownership. During
+  // preparation only an actual interaction/resize/theme change needs a draw.
+  // Cheap rAF polling must never make a Load continuation wait for a GPU frame.
+  private loadRenderRequested = false
+  private requestLoadRender = () => { this.loadRenderRequested = true }
+
   private startRenderLoop() {
     const animate = () => {
       this.animFrameId = requestAnimationFrame(animate)
       this.syncThemeIfChanged()
       this.controls.update()
+      if (setupLoadInProgress() && !this.loadRenderRequested) return
+      this.loadRenderRequested = false
       {
         const dpr = this.renderer.getPixelRatio()
         this.sketcher.onFrame(
@@ -9474,6 +9559,7 @@ export class CNCViewport {
   }
 
   private handleResize() {
+    this.loadRenderRequested = true
     const w = this.container.clientWidth
     const h = this.container.clientHeight
     if (w === 0 || h === 0) return
@@ -9514,6 +9600,9 @@ export class CNCViewport {
   }
 
   dispose() {
+    for (const event of ['pointermove', 'pointerdown', 'pointerup', 'click', 'wheel', 'keydown']) {
+      this.container.removeEventListener(event, this.requestLoadRender)
+    }
     cancelAnimationFrame(this.animFrameId)
     this.stopObservingRendererDpr()
     window.removeEventListener('keydown', this.handlePartMoveModifierKey)

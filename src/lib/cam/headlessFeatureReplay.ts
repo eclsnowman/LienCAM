@@ -55,6 +55,7 @@ import {
   liveBodyFeatureIds,
   resolveBodyTargetLineage,
   resolveDrivenField,
+  resolveExtrudeSelection,
   resolveProfileSelector,
 } from './modelWorkbenchHelpers'
 import type { HoleFeaturePayload } from '../../components/model3d/dialogs/HoleDialog'
@@ -71,9 +72,12 @@ import type { PushPullFeaturePayload } from '../../components/model3d/dialogs/Pu
 import type { ResizeHoleFeaturePayload } from '../../components/model3d/dialogs/ResizeHoleDialog'
 import { buildFormBody, isFormFeaturePayload } from '../../form/formBody'
 import { isReliefFeaturePayload, pictureOf, reliefKernelFields, type ReliefKernelFields } from '../../relief/reliefFeature'
+import { resolveSweepPathChain } from '../../geom/sweep-path'
 import { loadCachedSTL } from '../stlCache'
 import { importStl } from '../../mesh/stl'
 import { convertPrismaticMesh } from '../../mesh/prismatic'
+import { replayBodyTransform, resolveReferencesThroughMirrors } from '../../doc/features/bodyTransform'
+import { bodyTransformRefusalText, mirrorCarryReplayText } from '../operatorLabels'
 
 /** Everything one headless pass shares across nodes. */
 export interface HeadlessReplayWorld {
@@ -90,6 +94,10 @@ type Result = OpResult
 
 export function kernelOpFailure(nodeId: string, reason: string): { ok: false; diagnostics: [{ code: 'KERNEL_OP_FAILED'; severity: 'error'; params: { id: string; reason: string } }] } {
   return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { id: nodeId, reason } }] }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 const Z_AXIS = { origin: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: 1 } }
@@ -326,8 +334,17 @@ function profilesOf(world: HeadlessReplayWorld, node: DagNodeSnapshot, sketchId:
 /** One 'feature' node, dispatched by opType onto the live executor's own
  *  kernel op and request. Returns undefined for an opType the workbench does
  *  not define, so the caller's by-name refusal stands for it. */
-export async function runHeadlessFeature(world: HeadlessReplayWorld, node: DagNodeSnapshot): Promise<Result | undefined> {
+export async function runHeadlessFeature(world: HeadlessReplayWorld, stored: DagNodeSnapshot): Promise<Result | undefined> {
   const { dag, client, bodyHandles } = world
+  // WO-3244: a feature authored on a body a Mirror later replaced keeps its
+  // own references; they are resolved through the Mirror's CURRENT plane here,
+  // the same resolver the Model screen runs, and never written back.
+  const throughMirrors = resolveReferencesThroughMirrors(dag, stored, (id) => extrudePlaneDef(dag, id, world.scheduler.statusOf(id)))
+  if (!throughMirrors.ok) {
+    const name = typeof stored.payload.name === 'string' ? stored.payload.name : undefined
+    return kernelOpFailure(stored.id, mirrorCarryReplayText(throughMirrors.error, name))
+  }
+  const node = throughMirrors.node
   const payload = node.payload
   const opType = payload.opType
   const live = (id: string): BodyHandle | undefined => lookupHeadlessLiveBody(dag, bodyHandles, id)
@@ -341,14 +358,22 @@ export async function runHeadlessFeature(world: HeadlessReplayWorld, node: DagNo
     if (typeof sketchId !== 'string' || sketchId.length === 0) {
       return kernelOpFailure(node.id, 'extrude feature has no sketch reference')
     }
-    const sel = profilesOf(world, node, sketchId, payload.profileSelector as ProfileSelector | undefined, 'extrude')
-    if (!sel.ok) return sel.failure
+    // WO-3237: the Model tab's own selection resolver, so a saved open chain
+    // replays as the same Thin open wall here and nothing else.
+    const sel = resolveExtrudeSelection(
+      sketchId,
+      dag.getNode(sketchId)?.payload.regions as ProfileRegion[] | undefined,
+      (payload.profileSelector ?? undefined) as ProfileSelector | undefined,
+      (id) => dag.getNode(id),
+    )
+    if (!sel.ok) return kernelOpFailure(node.id, `extrude profile selector ${sel.code} for '${sketchId}': ${sel.message}`)
     const driven = resolveDrivenField(dag, node, 'distance')
     const liveIds = () => liveBodyFeatureIds(dag, (id) => live(id) !== undefined)
     const build = buildExtrudeRequest({
       featureId: node.id,
       payload: payload as ExtrudeParamsInput,
       profiles: sel.profiles,
+      openChain: sel.openChain,
       distance: driven.value,
       lookupTarget: live,
       resolveBodyTarget: (id) => resolveBodyTargetLineage(dag, bodyFeatureIds(dag), liveIds(), id),
@@ -479,8 +504,29 @@ export async function runHeadlessFeature(world: HeadlessReplayWorld, node: DagNo
     const p = payload as unknown as SweepFeaturePayload
     const sel = profilesOf(world, node, p.sketchId, p.profileSelector, 'sweep')
     if (!sel.ok) return sel.failure
-    const path = buildAxisPathChain(p.axis, p.length)
-    const req: SweepRequest = { featureId: node.id, profile: sel.profiles[0], path, orientation: p.orientation, op: 'newBody' }
+    const pathSelector = (payload as { path?: unknown }).path
+    if (pathSelector === undefined) {
+      const path = buildAxisPathChain(p.axis, p.length)
+      const req: SweepRequest = { featureId: node.id, profile: sel.profiles[0], path, orientation: p.orientation, op: 'newBody' }
+      return finalizeBody(world, node, await client.makeSweep(req))
+    }
+    // WO-3231: a sketch-chain path, the live branch's own route -- the path
+    // sketch must be an input of this sweep that comes before it, and the ONE
+    // resolver (WO-3228) reads its CURRENT curves and plane. A path it cannot
+    // resolve builds nothing: never the dormant axis/length, never a straight
+    // substitute.
+    const order = dag.featureOrder()
+    const producer = isRecord(pathSelector) && typeof pathSelector.sketchId === 'string' ? pathSelector.sketchId : ''
+    if (!node.consumes.includes(producer) || order.indexOf(producer) === -1 || order.indexOf(producer) > order.indexOf(node.id)) {
+      return kernelOpFailure(node.id, `sweep path: the sweep path's sketch ${producer} is not an input that comes before this sweep.`)
+    }
+    const resolution = resolveSweepPathChain(pathSelector, (id) => dag.getNode(id))
+    if (!resolution.ok) {
+      return kernelOpFailure(node.id, `sweep path (${resolution.diagnostic.code}): ${resolution.diagnostic.message}`)
+    }
+    const req: SweepRequest = {
+      featureId: node.id, profile: sel.profiles[0], path: resolution.path, orientation: p.orientation, op: 'newBody', transition: 'rightCorner',
+    }
     return finalizeBody(world, node, await client.makeSweep(req))
   }
 
@@ -562,6 +608,16 @@ export async function runHeadlessFeature(world: HeadlessReplayWorld, node: DagNo
       return kernelOpFailure(node.id, `relief: its picture could not be read (${(e instanceof Error ? e.message : String(e)).slice(0, 120)})`)
     }
     return finalizeBody(world, node, await client.editFeature(reliefKernelRequest(node.id, body, res.boundTo[0], fields)))
+  }
+
+  if (opType === 'bodyTransform') {
+    // WO-3244: the same adapter the live executor calls.
+    return finalizeBody(world, node, await replayBodyTransform(node, {
+      client,
+      lookupLiveBody: live,
+      resolvePlane: (id) => extrudePlaneDef(dag, id, world.scheduler.statusOf(id)),
+      refusalText: bodyTransformRefusalText,
+    }))
   }
 
   return undefined

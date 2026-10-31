@@ -16,7 +16,7 @@ import { SketchLayer, type SketchViewState, type SketchOffset } from './sketchLa
 import { SketchOverlayPainter } from './overlayPainter'
 import { SketchInteraction } from './sketchInteraction'
 import { OrbitArbiter } from './orbitArbiter'
-import { bindSketcherDocument, setMeasureOpen } from './toolController'
+import { bindSketcherDocument, setMeasureOpen, clearCreationSize } from './toolController'
 import { sketcherToolStore, type SketcherToolState } from './toolStore'
 import { sketcherMenuStore } from './overlays/menuStore'
 import type {
@@ -84,6 +84,7 @@ type ToolOverlayInputs = Pick<
   SketcherToolState,
   | 'tool'
   | 'chain'
+  | 'creationSize'
   | 'filletRadius'
   | 'chamferSetback'
   | 'offsetDistance'
@@ -96,6 +97,7 @@ function toolOverlayInputs(state: SketcherToolState): ToolOverlayInputs {
   return {
     tool: state.tool,
     chain: state.chain,
+    creationSize: state.creationSize,
     filletRadius: state.filletRadius,
     chamferSetback: state.chamferSetback,
     offsetDistance: state.offsetDistance,
@@ -108,6 +110,7 @@ function toolOverlayInputs(state: SketcherToolState): ToolOverlayInputs {
 function sameToolOverlayInputs(a: ToolOverlayInputs, b: ToolOverlayInputs): boolean {
   return a.tool === b.tool &&
     a.chain === b.chain &&
+    a.creationSize === b.creationSize &&
     a.filletRadius === b.filletRadius &&
     a.chamferSetback === b.chamferSetback &&
     a.offsetDistance === b.offsetDistance &&
@@ -244,6 +247,7 @@ export class Sketcher {
     // have bound its own document most recently, so entering this session must reclaim tool
     // commits before the first canvas click.
     bindSketcherDocument(this.boundPort)
+    sketcherToolStore.setState({ creationSessionActive: true, creationDocumentId: this.boundPort?.getSketch()?.id ?? null })
     const cameraPose = this.host.saveCameraPose()
     this.host.onSessionEnter?.()
     this.layer.group.visible = true
@@ -337,6 +341,8 @@ export class Sketcher {
     this.unsubscribeToolOverlay()
     if (!session) return
     this.session = null
+    clearCreationSize()
+    sketcherToolStore.setState({ creationSessionActive: false, creationDocumentId: null })
     setMeasureOpen(false)
     this.host.onSessionExit?.()
     this.layer.group.visible = false
@@ -350,7 +356,15 @@ export class Sketcher {
   /** Re-render the active sketch (called reactively on store changes). `offset` is the display
    *  pose of the edited part (identity for a normal geo; the seed slot for a posed nest seed);
    *  it is mirrored onto the overlay carriers so interaction affordances render aligned. */
+  private creationDocument: Sketch | null = null
   updateSketch(sketch: Sketch | null, view?: SketchViewState, offset?: SketchOffset): void {
+    const previous = this.creationDocument
+    this.creationDocument = sketch
+    if (this.toolOverlayUnsubscribe && sketcherToolStore.getState().creationDocumentId !== sketch?.id) {
+      sketcherToolStore.setState({ creationDocumentId: sketch?.id ?? null })
+    }
+    if (previous && (previous.id !== sketch?.id || previous.entities !== sketch?.entities ||
+        previous.dimensions !== sketch?.dimensions)) clearCreationSize()
     this.offset = offset ?? { x: 0, y: 0, rotationDeg: 0 }
     this.layer.update(sketch, view, offset)
     this.painter.setOffset(this.offset)

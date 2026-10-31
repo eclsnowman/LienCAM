@@ -83,8 +83,15 @@ const SPEED_WORD = /S\s*[-+]?(?:\d+\.?\d*|\.\d+)/gi
 const TOOL_WORD = /T\s*(\d+)(?![0-9.])/i
 const TOOL_CHANGE_WORD = /M\s*0*6(?![0-9.])/i
 
+// Immutable source-line facts only. Active tool/probe answers remain live.
+const sourceCode = new Map<string, string>()
 function codeOf(raw: string): string {
-  return codeSpans(raw).map(([from, to]) => raw.slice(from, to)).join(' ')
+  const cached = sourceCode.get(raw)
+  if (cached !== undefined) return cached
+  const code = codeSpans(raw).map(([from, to]) => raw.slice(from, to)).join(' ')
+  if (sourceCode.size >= 32768) sourceCode.delete(sourceCode.keys().next().value!)
+  sourceCode.set(raw, code)
+  return code
 }
 
 /** Does this line carry an M3 or M4? (Not M30, M40, M03.5.) */

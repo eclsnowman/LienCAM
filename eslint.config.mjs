@@ -4,6 +4,94 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import { hasRawColour, isEngineSource } from './tools/ui-debt.mjs'
+
+// WO-3275 (UI M2 standards 1, 8 and 10): the New UI bans, as one local plugin. Each ban is its own
+// rule key, so no block here can replace another block's 'no-restricted-imports' or
+// 'no-restricted-syntax' (flat config replaces a repeated rule key; see the boundary notes
+// below). The colour and engine-import tests are shared with the ratchet (tools/ui-debt.mjs), so
+// the lint and the count agree. Positions computed at run time go through a CSS custom property
+// (style={{ '--kit-x': x + 'px' }}), which no rule bans. They are errors in the new code (UI_STRICT) and warnings on the old screens (UI_WARN),
+// so linting today's code gains no error.
+const jsxName = node => (node.name && node.name.type === 'JSXIdentifier' ? node.name.name : '')
+const isIntrinsic = node => /^[a-z]/.test(jsxName(node))
+const attr = (node, name) => node.attributes.find(a => a.type === 'JSXAttribute' && a.name && a.name.name === name)
+const attrString = a => {
+  if (!a || !a.value) return undefined
+  if (a.value.type === 'Literal') return a.value.value
+  if (a.value.type === 'JSXExpressionContainer' && a.value.expression.type === 'Literal') return a.value.expression.value
+  return undefined
+}
+const STYLE_COLOUR_OR_SIZE = /^(?:color|background|backgroundColor|border\w*|outline\w*|fill|stroke|boxShadow|width|height|minWidth|minHeight|maxWidth|maxHeight|fontSize|fontWeight|lineHeight|padding\w*|margin\w*|gap|rowGap|columnGap|inset|top|left|right|bottom|opacity)$/
+const uiRule = (description, create) => ({ meta: { type: 'problem', docs: { description }, schema: [] }, create })
+const liencamUi = {
+  rules: {
+    'no-raw-select': uiRule('Use the kit Select or Segmented, not a raw <select> (standard 1).', context => ({
+      JSXOpeningElement(node) {
+        if (jsxName(node) === 'select') context.report({ node, message: 'UI standard 1: use the kit Select or Segmented, not a raw <select>.' })
+      },
+    })),
+    'no-raw-number-input': uiRule('Use the kit NumberField, not <input type="number"> (standard 1).', context => ({
+      JSXOpeningElement(node) {
+        if (jsxName(node) === 'input' && attrString(attr(node, 'type')) === 'number') context.report({ node, message: 'UI standard 1: use the kit NumberField, not <input type="number">.' })
+      },
+    })),
+    'no-title-tooltip': uiRule('Use the kit Tooltip, not a title= attribute (standard 1).', context => ({
+      JSXOpeningElement(node) {
+        const a = isIntrinsic(node) ? attr(node, 'title') : undefined
+        if (a) context.report({ node: a, message: 'UI standard 1: use the kit Tooltip, not a title= attribute.' })
+      },
+    })),
+    'no-raw-colour': uiRule('Colours come from src/theme/tokens.ts custom properties (standard 2).', context => {
+      const check = (node, text) => {
+        if (typeof text === 'string' && hasRawColour(text)) context.report({ node, message: 'UI standard 2: use a token custom property (var(--...)) from src/theme/tokens.ts, not a raw colour.' })
+      }
+      return {
+        Literal(node) { check(node, node.value) },
+        TemplateElement(node) { check(node, node.value.raw) },
+      }
+    }),
+    'no-inline-style': uiRule('No inline colour or size styles; the kit and tokens own them (standard 1).', context => ({
+      JSXAttribute(node) {
+        if (!node.name || node.name.name !== 'style' || !node.value || node.value.type !== 'JSXExpressionContainer') return
+        const expr = node.value.expression
+        if (expr.type !== 'ObjectExpression') return
+        for (const prop of expr.properties) {
+          const key = prop.type === 'Property' ? (prop.key.type === 'Identifier' ? prop.key.name : prop.key.value) : undefined
+          if (typeof key === 'string' && STYLE_COLOUR_OR_SIZE.test(key)) context.report({ node: prop, message: `UI standard 1: inline style '${key}' - colours and sizes come from the kit and tokens.` })
+        }
+      },
+    })),
+    'no-number-format': uiRule('Numbers go through the units service, not toFixed or parseFloat (standard 8).', context => ({
+      CallExpression(node) {
+        const c = node.callee
+        const fixed = c.type === 'MemberExpression' && !c.computed && c.property.name === 'toFixed'
+        const parse = (c.type === 'Identifier' && c.name === 'parseFloat')
+          || (c.type === 'MemberExpression' && !c.computed && c.object.type === 'Identifier' && c.object.name === 'Number' && c.property.name === 'parseFloat')
+        if (fixed || parse) context.report({ node, message: 'UI standard 8: format and parse numbers with src/lib/units (formatLength, parseLength, ...), not toFixed or parseFloat.' })
+      },
+    })),
+    'no-engine-import': uiRule('Screens do not import CAM, kernel or wasm internals (standard 10).', context => {
+      const check = (node, source) => {
+        if (typeof source === 'string' && isEngineSource(source)) context.report({ node, message: 'UI standard 10: screens may not import lib/cam, cam3d, the kernel or wasm internals; use a view-model hook or a command.' })
+      }
+      return {
+        ImportDeclaration(node) { if (node.importKind !== 'type') check(node, node.source.value) },
+        ImportExpression(node) { if (node.source.type === 'Literal') check(node, node.source.value) },
+        ExportNamedDeclaration(node) { if (node.source && node.exportKind !== 'type') check(node, node.source.value) },
+        ExportAllDeclaration(node) { if (node.exportKind !== 'type') check(node, node.source.value) },
+      }
+    }),
+  },
+}
+const UI_RULES = ['no-raw-select', 'no-raw-number-input', 'no-title-tooltip', 'no-raw-colour', 'no-inline-style', 'no-number-format', 'no-engine-import']
+const uiRules = level => Object.fromEntries(UI_RULES.map(r => [`liencam-ui/${r}`, level]))
+/** New code: every ban is an error. */
+export const UI_STRICT = ['src/components/kit/**/*.{ts,tsx}', 'src/ui2/**/*.{ts,tsx}', 'src/commands/**/*.{ts,tsx}', 'src/notices/**/*.{ts,tsx}']
+/** Old screens: the same bans warn, so the ratchet (tools/ui-debt.mjs) can count them down. */
+export const UI_WARN = ['src/components/**/*.{ts,tsx}', 'src/App.tsx']
+/** The kit's inputs are the one place a raw select and a number input may live. */
+export const UI_KIT_INPUTS = ['src/components/kit/inputs/**/*.{ts,tsx}']
 
 export default defineConfig([
   // '.worktrees' holds full checkouts of THIS repository, each with its own
@@ -220,6 +308,9 @@ export default defineConfig([
       'src/spikes/**', // self-contained research area, own vitest config, no build entrypoint
       'src/cam3d/input/fixturePaths.ts', // NODE-TEST-ONLY per its own header, never bundled
       'src/components/**',
+      'src/ui2/**', // WO-3275: the New UI shell is UI code
+      'src/commands/**', // WO-3275: shortcut manager hooks
+      'src/notices/**', // WO-3275: the notice part
       'src/App.tsx', // legacy: entry point -> react
       'src/main.tsx', // legacy: entry point -> react
       'src/hooks/useControlJogKeys.ts', // legacy: hook -> react
@@ -269,6 +360,9 @@ export default defineConfig([
     // allowed to import react does not make them Node-hosted.
     files: [
       'src/components/**/*.{ts,tsx}',
+      'src/ui2/**/*.{ts,tsx}',
+      'src/commands/**/*.{ts,tsx}',
+      'src/notices/**/*.{ts,tsx}',
       'src/App.tsx',
       'src/main.tsx',
       'src/hooks/useControlJogKeys.ts',
@@ -293,5 +387,22 @@ export default defineConfig([
         message: 'Architecture boundary: browser-reachable code may not import node: builtins.',
       }],
     },
+  },
+  {
+    // WO-3275: the New UI bans - warnings on the old screens ...
+    files: UI_WARN,
+    ignores: UI_STRICT,
+    plugins: { 'liencam-ui': liencamUi },
+    rules: uiRules('warn'),
+  },
+  {
+    // ... errors in the new code (kit, ui2, commands, notices).
+    files: UI_STRICT,
+    plugins: { 'liencam-ui': liencamUi },
+    rules: uiRules('error'),
+  },
+  {
+    files: UI_KIT_INPUTS,
+    rules: { 'liencam-ui/no-raw-select': 'off', 'liencam-ui/no-raw-number-input': 'off' },
   },
 ])

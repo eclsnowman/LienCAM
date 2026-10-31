@@ -56,6 +56,12 @@ export const STATE_CENSUS: Readonly<Record<string, CensusEntry>> = {
   kernelCancelEpochRef: { ruling: 'internal', note: "WO-2796: Cancel generation counter - read before Import's async solid-count probe, checked after it, bumped on Cancel so a cancelled import never commits. No scene effect." },
   resizeHoleEditResolveRef: { ruling: 'internal', note: 'WO-2795: token that discards a stale owner-body hole recognition when the Resize Hole edit is begun, finished or re-picked. No scene effect.' },
   activeUi4ToolRef: { ruling: 'internal', note: 'ref mirror of activeUi4Tool kept current for an async effect closure -- see activeUi4Tool.' },
+  // WO-3324: classify the state added by WO-3244 (Mirror preview), WO-3202 (shared Resize Hole results) and the STL fillet dialog.
+  mirrorPreview: { ruling: 'transient', note: "WO-3244: the Mirror dialog's preview body state (idle/ready) - painted as a preview body while the dialog is open, retired on close; never history." },
+  mirrorPreviewRef: { ruling: 'internal', note: 'WO-3244: generation counter + handle of the Mirror preview body so a newer choice retires the older preview. No scene effect of its own.' },
+  resizeHoleResultsRef: { ruling: 'internal', note: 'WO-3202: per-body recognizeFeatures results shared by the Resize Hole pick and hover paths; bookkeeping behind resizeHoleVerdictsTick. No scene effect.' },
+  resizeHoleFeatureSelectionRef: { ruling: 'internal', note: 'WO-3202: the feature selection last made by a Resize Hole pick, read back through getResizeHoleFeatureSelection. No scene effect.' },
+  stlFilletEdgesRef: { ruling: 'internal', note: 'ref mirror of the stl-fillet dialog edges kept current for an async preview closure. No scene effect.' },
   selectedBodyRowId: {
     ruling: 'skip-when-live',
     note: 'Ordinary BODIES-row selection now drives the shared whole-body orange tint and exact topology outline. Named in skipped[] whenever non-null because that presentation is live interaction state, not dag-derived.',
@@ -372,6 +378,10 @@ export const STATE_CENSUS: Readonly<Record<string, CensusEntry>> = {
   profilePickPreview: {
     ruling: 'transient',
     note: "The armed profile pick's temporary projected outline/readout -- exists only while profilePickMode is live and is cleared with that dialog-scoped pick session; folded into the same open-dialog skipped[] entry.",
+  },
+  sweepPathPreview: {
+    ruling: 'transient',
+    note: "The open Sweep dialog's chosen sketch path, drawn in the viewport while the dialog is open; cleared when it closes. Folded into the open-dialog skipped[] entry.",
   },
   booleanBodyPickRole: {
     ruling: 'transient',

@@ -161,6 +161,8 @@ async function openWithPick(operation: string, toolName: string, pick: Pick) {
 }
 
 async function createAndCompute(operationType: string) {
+  // WO-3137 invalidates the preflight after an edit; await the current plan.
+  await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(screen.getByTestId('op-create'))
   const created = useCamStore.getState().project.setups[0].operations[0]
   expect(created.type).toBe(operationType)
@@ -244,7 +246,7 @@ describe('WO-3066: a new Pocket / Adaptive on a blind STL recess starts at its f
     // The kept height is 1.8 - 1.8 off the chain's own plane: a zero offset
     // that may print with either sign.
     await waitFor(() => expect(bottomRow().source).toMatch(/^Geometry plane [+-] 0\.000 mm$/))
-    expect(bottomRow().resolved).toBe('WCS 1.800 mm')
+    await waitFor(() => expect(bottomRow().resolved).toBe('WCS 1.800 mm'))
     expect((screen.getByTestId('standard-height-bottom-source-control') as HTMLSelectElement).value).toBe('geometry_plane')
     const { computed, zMin } = await createAndCompute('pocket_2d')
     expect(computed.params).toMatchObject({ heightReference: 'geometry_face' })

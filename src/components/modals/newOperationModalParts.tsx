@@ -6,6 +6,7 @@ const tx = textFor('cam-operations-new-operation')
 // hooks-order boundary trivially clean. Behaviour is byte-identical.
 
 import { NumericInput, type NumericKind } from '../ui/NumericInput'
+import { HelpLink } from '../ui/HelpLink'
 import { feedLabel, unitLabel, fmtDim } from '../../lib/ui/unitFormat'
 import type { Units, HeightParams } from '../../types'
 
@@ -104,6 +105,22 @@ export function NumberField({
   )
 }
 
+// Explanatory only: reference planes are not a promise about every generated move.
+export function HeightsExplainedNotice() {
+  useText('cam-operations-new-operation')
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+      <details data-testid="heights-explained" className="op-hint" style={{ flex: 1, border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '6px 10px' }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--accent)', fontWeight: 600 }}>{tx('newOperationModalParts.Heights_explained')}</summary>
+        <p>{tx('newOperationModalParts.Entry_explained')}</p>
+        <p>{tx('newOperationModalParts.Travel_explained')}</p>
+        <p>{tx('newOperationModalParts.Clearance_explained')}</p>
+      </details>
+      <HelpLink topic="height-references" />
+    </div>
+  )
+}
+
 // Heights diagram
 export function HeightDiagram({ heights, topOverride, bottomOverride, units }: {
   heights: HeightParams
@@ -153,6 +170,7 @@ export function HeightDiagram({ heights, topOverride, bottomOverride, units }: {
 
   return (
     <div className="op-heights-diag-wrap">
+      <div className="op-hint">{tx('newOperationModalParts.Reference_planes')}</div>
       <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="op-heights-diag">
         <rect x={STOCK_X} y={stockTopY}
           width={STOCK_W} height={Math.max(4, stockBotY - stockTopY)}
@@ -192,6 +210,39 @@ export function HeightDiagram({ heights, topOverride, bottomOverride, units }: {
           </text>
         ))}
       </svg>
+      {/* Separate schematic: never project invented travel onto the numeric Z scale. */}
+      <svg viewBox="0 0 600 114" className="op-heights-diag" role="img" aria-label={tx('newOperationModalParts.Illustrative_route')}>
+        <text x="8" y="14" fill="currentColor" fontSize="12">{tx('newOperationModalParts.Illustrative_route')}</text>
+        <path d="M 12 84 H 115 V 94 H 220 V 84 H 580 V 108 H 12 Z" fill="#1a2d45" stroke="#6690b0" />
+        <rect x="380" y="52" width="44" height="32" fill="#785c35" stroke="#d9b77c" />
+        <path d="M 46 74 V 84 M 46 74 H 150 V 58 H 280 V 74 H 338 V 34 H 468 V 74 H 558" fill="none" stroke="var(--accent)" strokeWidth="2" strokeDasharray="5 3" />
+        <circle cx="46" cy="74" r="3" fill="var(--accent)" />
+        <g fill="currentColor" fontSize="11">
+          <text x="12" y="65">{tx('newOperationModalParts.Entry_start')}</text>
+          <text x="156" y="49">{tx('newOperationModalParts.Ordinary_hop')}</text>
+          <text x="348" y="28">{tx('newOperationModalParts.Clamp_crossing')}</text>
+          <text x="228" y="104">{tx('newOperationModalParts.Material_left')}</text>
+        </g>
+      </svg>
     </div>
+  )
+}
+
+// WO-3188: Heights says in one plain line when the outline is plain 2D and a
+// height is assumed - what it assumed and where to change it. Never a refusal.
+const txHeights2d = textFor('heights-2d-source.wo3188')
+export function HeightlessOutlineNote({ kind, planeWcsZ, units }: {
+  kind: 'chamfer' | 'geometry'
+  /** The assumed geometry plane in WCS mm ('geometry' only). */
+  planeWcsZ?: number
+  units: Units
+}) {
+  useText('heights-2d-source.wo3188')
+  return (
+    <p className="op-hint" data-testid="heightless-outline-note" style={{ margin: '0 0 8px' }}>
+      {kind === 'chamfer'
+        ? txHeights2d('chamferAssumed')
+        : txHeights2d('geometryAssumed', { z: fmtDim(planeWcsZ ?? 0, units), unit: unitLabel(units) })}
+    </p>
   )
 }

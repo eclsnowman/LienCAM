@@ -263,10 +263,22 @@ describe('WO SKC-14C keystone: the package renders the whole sketch UI for a sto
     const { container } = mount()
     expect(container.querySelector('.sketch-live-dim-layer')).toBeNull()
 
+    // WO-3116 (011daf30a6) gave an AXIS-aligned rectangle the typed W/H editor in the draw
+    // bar and suppressed the live-dim labels for it so the two cannot contradict each other.
+    // That is the shipped behaviour this repin records; the live labels still own every
+    // chain the editor does not describe - a ROTATED rectangle here.
     act(() => {
       sketcherToolStore.setState({
         tool: 'rect-corner',
         chain: { kind: 'rect', mode: 'corner', anchor: { x: 0, y: 0 }, rotated: false },
+      })
+    })
+    expect(container.querySelector('.sketch-live-dim-layer')).toBeNull()
+
+    act(() => {
+      sketcherToolStore.setState({
+        tool: 'rect-corner',
+        chain: { kind: 'rect', mode: 'corner', anchor: { x: 0, y: 0 }, rotated: true },
       })
     })
     expect(container.querySelector('.sketch-live-dim-layer')).not.toBeNull()

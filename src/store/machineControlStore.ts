@@ -163,6 +163,10 @@ export function bridgePresence(
   }
 }
 
+/** WO-3191: which way the app last told the spindle to turn (M3 cw, M4 ccw,
+ *  M5 off). */
+export type CommandedSpindleDirection = 'cw' | 'ccw' | 'off'
+
 export interface CommandedAccessoryState {
   spindle: GrblParserState['spindle']
   coolant: GrblParserState['coolant']
@@ -395,6 +399,10 @@ export interface MachineControlState {
   /** Which local connection path is active. Used only to distinguish the
    *  profile-driven built-in simulator from a real serial controller. */
   connectionKind: 'serial' | 'simulator' | 'bridge' | 'gateway' | null
+  /** WO-3189: counts every change to the simulator's virtual part (seeded at
+   *  connect, placed, reset) so the Diagnostics card redraws what the
+   *  simulator holds. The part itself lives in the simulated controller. */
+  simulatedPartRevision: number
   connectionDetail: string | null
   grblVersion: string | null
   /**
@@ -425,6 +433,13 @@ export interface MachineControlState {
   wpos: MachinePosition | null
   feed: number | null
   spindleRpm: number | null
+  /** WO-3191: the direction of the last M3/M4/M5 the app actually sent to this
+   *  controller, by any route - the program stream, MDI or the spindle panel.
+   *  Written ONLY by `recordCommandedSpindle` (lib/machine/commandedSpindle).
+   *  Never the inverter's direction bit: this VFD reports the opposite way while
+   *  turning correctly (VFD-COMMISSIONING.md 4.9). Whether it turns is the
+   *  machine's report, not this. */
+  commandedSpindle: CommandedSpindleDirection
   /** Values reported by this controller session. Null is never rendered by
    *  itself: overrideAvailability says whether the channel is still unknown or
    *  was explicitly reported unsupported. */
@@ -688,6 +703,7 @@ const stampStreamTool = (config: StateCreator<MachineControlState>): StateCreato
 export const useMachineControl = create<MachineControlState>()(stampStreamTool((set) => ({
   connectionPhase: 'disconnected',
   connectionKind: null,
+  simulatedPartRevision: 0,
   connectionDetail: null,
   bridgeHello: null,
   bridgeControllerPresence: 'unknown',
@@ -699,6 +715,7 @@ export const useMachineControl = create<MachineControlState>()(stampStreamTool((
   wpos: null,
   feed: null,
   spindleRpm: null,
+  commandedSpindle: 'off',
   overrides: UNKNOWN_OVERRIDES,
   overrideAvailability: UNKNOWN_OVERRIDE_AVAILABILITY,
   inputs: null,
@@ -760,6 +777,7 @@ export const useMachineControl = create<MachineControlState>()(stampStreamTool((
             wpos: null,
             feed: null,
             spindleRpm: null,
+            commandedSpindle: 'off' as const,
             overrides: UNKNOWN_OVERRIDES,
             overrideAvailability: UNKNOWN_OVERRIDE_AVAILABILITY,
             singleBlock: false,

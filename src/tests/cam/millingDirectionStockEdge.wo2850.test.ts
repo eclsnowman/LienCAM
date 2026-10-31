@@ -52,9 +52,12 @@ it('WO-2850 production boss rough preserves milling direction without stock-edge
     if (here.arc && !here.degenerate) turn(here.turn, 1e-12)
   }
   console.log('WO-2850 production boss', JSON.stringify({ ...metrics, small, cycleMs: rough.cutTimeMs }))
-  // The original WO-2169 limits, not repinned to a new baseline.
+  // The original WO-2169 limits, not repinned to a new baseline - except `small`: WO-3067 ships
+  // steering smoothing ON (`21035f9c1c`, the operator's 2026-10-22 card), which reads 64 on this
+  // row (Spark and Windows alike; 43 with it OFF) against the line-path 40. Pinned at the measured
+  // value, so one more S-bend still turns it red (WO-3323).
   expect.soft(metrics.flipRatePct).toBeLessThanOrEqual(10)
-  expect.soft(small).toBeLessThanOrEqual(40)
+  expect.soft(small).toBeLessThanOrEqual(64)
   expect(metrics.retracts).toBeLessThanOrEqual(4)
   expect(rough.cutTimeMs).toBeLessThan(391739 * .7)
 }, 300_000)

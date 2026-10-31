@@ -22,6 +22,7 @@ const EXPECTED: Record<string, string> = {
   '--role-helix': '#ff8c00',   // v3: merged with ramp
   '--role-ramp': '#ff8c00',
   '--role-plunge': '#ff44ff',
+  '--role-retract': '#c6ff00',
   '--role-finish': '#ff85a8',
   '--role-stepover': '#44ff88',
   '--role-wall-follow': '#00d0a0',
@@ -131,15 +132,17 @@ describe('viewportColors bridge (node fallback path)', () => {
     expect(asNumber('--role-unknown')).toBe(0xffffff)
   })
 
-  it('roleColors exposes all 11 roles plus unknown, matching ROLE_COLORS', () => {
+  it('roleColors exposes all 13 roles plus unknown, matching ROLE_COLORS', () => {
     const expectedRoles: Record<string, string> = {
       rapid: '#ff4444',
       cut: '#00e5ff',
       helix: '#ff8c00',
       ramp: '#ff8c00',
       plunge: '#ff44ff',
+      retract: '#c6ff00',
       stepover: '#44ff88',
       fast_traverse: '#5ea0ff',
+      loop_back: '#ffd700',
       wall_follow: '#00d0a0',
       finish: '#ff85a8',
       lead_in: '#a78bfa',

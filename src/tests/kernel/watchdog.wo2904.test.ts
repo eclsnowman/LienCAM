@@ -33,6 +33,14 @@ async function start() {
   return { done, worker: WorkerStub.latest! }
 }
 function send(worker: WorkerStub, message: WorkerResponseMsg) { worker.onmessage?.({ data: message }) }
+// WO-3126: a result's stock witness is prepared across a 16 ms renderer frame
+// before it publishes. On the fake clock, let those frames pass while waiting.
+async function settled<T>(promise: Promise<T>): Promise<T> {
+  let finished = false
+  void promise.then(() => { finished = true }, () => { finished = true })
+  for (let frame = 0; !finished && frame < 50; frame++) await vi.advanceTimersByTimeAsync(20)
+  return promise
+}
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -72,7 +80,7 @@ describe('WO-2904 planar worker inactivity', () => {
     await vi.advanceTimersByTimeAsync(170_000)
     expect(operation().status).toBe('computing')
     send(worker, { type: 'TOOLPATH_COMPLETE', opId, moves: [], computeTimeMs: 2 } as WorkerResponseMsg)
-    await done
+    await settled(done)
     expect(operation().status).toBe('ready')
     await vi.advanceTimersByTimeAsync(180_000)
     expect(operation().status).toBe('ready')
@@ -81,7 +89,7 @@ describe('WO-2904 planar worker inactivity', () => {
   it('flips a registered engine stale and recomputes through production Post staging', async () => {
     const { done, worker } = await start()
     send(worker, { type: 'TOOLPATH_COMPLETE', opId, moves: [], computeTimeMs: 2 } as WorkerResponseMsg)
-    await done
+    await settled(done)
     const before = operation()
     const current = () => {
       const state = useCamStore.getState()
@@ -92,7 +100,7 @@ describe('WO-2904 planar worker inactivity', () => {
       resolvedHeightPlan: before.resolvedHeightPlan!, computeTimeMs: 3 }
     vi.stubEnv('LIENCAM_ENGINE', 'kernel')
     expect(current()).toBe(false)
-    const staged = await useCamStore.getState().stageOperationsForEmission(setupId, undefined)
+    const staged = await settled(useCamStore.getState().stageOperationsForEmission(setupId, undefined))
     expect(staged.recomputed.map(entry => entry.opId)).toEqual([opId])
     expect(injected.calls).toBe(1)
     expect(current()).toBe(true)

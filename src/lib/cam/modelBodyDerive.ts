@@ -1263,6 +1263,8 @@ export function deriveModelBodyBoreTarget(
   faceStableId: string,
   snapshot: GeometrySnapshot,
   verdicts: readonly FeatureVerdict[],
+  wallRim = false,
+  wallSnapshots?: Readonly<Record<string, GeometrySnapshot>>,
 ): ModelBodyBoreTargetResult {
   if (snapshot.type !== 'cylinder') {
     throw new ModelBodyDeriveError(
@@ -1323,7 +1325,10 @@ export function deriveModelBodyBoreTarget(
   }
   const baseTarget = derived.targets[0]
   const snapshotDiameter = Number(snapshot.radius) * 2
-  if (Math.abs(snapshotDiameter - baseTarget.diameter) > MODEL_BORE_DIAMETER_TOLERANCE) {
+  const stackWall = wallRim && verdict.featureClass === 'counterboreStack'
+  const majorWall = stackWall && (verdict.counterboreFaceIds ?? []).map(String).includes(faceStableId) &&
+    Math.abs(snapshotDiameter - Number(verdict.params.counterboreDiameter)) <= MODEL_BORE_DIAMETER_TOLERANCE
+  if (!majorWall && Math.abs(snapshotDiameter - baseTarget.diameter) > MODEL_BORE_DIAMETER_TOLERANCE) {
     throw new ModelBodyDeriveError(
       `Bore: selected wall diameter ${snapshotDiameter.toFixed(3)} does not match the recognized ` +
         `hole diameter ${baseTarget.diameter.toFixed(3)}. Pick the intended internal cylindrical wall.`,
@@ -1362,9 +1367,49 @@ export function deriveModelBodyBoreTarget(
     )
   }
 
+  // Conversion of an EXPLICIT STEP selection may carry either recognized
+  // stack wall. Default discovery/manual callers retain the minor-wall adapter.
+  // The entry anchors the major wall; the exit anchors the minor wall. Bbox
+  // midpoint gives the other rim, and exact area/(pi*d) must independently
+  // prove a complete 360-degree span inside the recognized stack envelope.
+  if (stackWall) {
+    const wallMid = rotateVec(rotationMatrixXYZ(frame.rotation), ...snapshot.centroid)[2] + frame.position.z
+    const entry = baseTarget.axis[2] >= 0 ? baseTarget.topZ : baseTarget.bottomZ
+    const exit = baseTarget.axis[2] >= 0 ? baseTarget.bottomZ : baseTarget.topZ
+    const anchor = majorWall ? entry : exit
+    const other = 2 * wallMid - anchor
+    const top = Math.max(anchor, other), bottom = Math.min(anchor, other)
+    const areaDepth = snapshot.area / (Math.PI * snapshotDiameter)
+    if (!(top > bottom) || top > baseTarget.topZ + 0.001 || bottom < baseTarget.bottomZ - 0.001 ||
+        !Number.isFinite(areaDepth) || Math.abs(areaDepth - (top - bottom)) > 0.001) {
+      throw new ModelBodyDeriveError('Bore: selected stepped wall does not prove a complete cylindrical span.')
+    }
+    baseTarget.topZ = top
+    baseTarget.bottomZ = bottom
+    baseTarget.diameter = snapshotDiameter
+    // A stack class alone does not say whether its minor wall exits the body.
+    // The recognizer's host-opening neighbours do: a horizontal opening at the
+    // exit plane proves through; a blind floor belongs to the feature's faces.
+    baseTarget.through = !majorWall && verdict.neighbourIds.some(id => {
+      const opening = wallSnapshots?.[String(id)]
+      if (!opening || opening.type !== 'plane') return false
+      const z = rotateVec(rotationMatrixXYZ(frame.rotation), ...opening.centroid)[2] + frame.position.z
+      const normal = rotateVec(rotationMatrixXYZ(frame.rotation), ...opening.normal)
+      return Math.abs(z - exit) < 0.001 && Math.abs(normal[2]) >= DRILL_AXIS_Z_DOT_MIN
+    })
+    // One common recognized feature may supply two independently selected
+    // cylinders. Its consumer identity must distinguish those two walls.
+    baseTarget.featureKey = `${verdict.featureKey}:wall:${faceStableId}`
+    baseTarget.sourceIdentity = { ...baseTarget.sourceIdentity, stableId: baseTarget.featureKey,
+      sourceFingerprint: smartHeightEvidenceFingerprint({ featureKey: baseTarget.featureKey,
+        diameter: snapshotDiameter, faceStableId, through: baseTarget.through }) }
+  }
+
   const loopId = modelBoreLoopId(faceStableId)
   const loop: Loop2D = {
     ...derived.loops[0],
+    ...(majorWall ? { points: circleLoopPoints(baseTarget.centerX, baseTarget.centerY, snapshotDiameter / 2),
+      area: Math.PI * (snapshotDiameter / 2) ** 2 } : {}),
     id: loopId,
     layerId: MODEL_BORE_LAYER_ID,
     name: `Bore dia ${baseTarget.diameter.toFixed(3)}`,
@@ -1825,4 +1870,50 @@ export function deriveModelBodyCircularEdgeOrigin(
     diameter: fit.radius * 2,
     localCenter: { x: fit.cx, y: fit.cy, z: localZ },
   }
+}
+
+
+/** WO-3169: adapt the shared recognition result to Bore's existing wall
+ * authority. Default discovery supplies one minor-wall candidate per feature.
+ * Conversion of explicit STEP selections may also carry an exact major wall;
+ * it remains a separate cylinder and never masquerades as the minor bore. */
+export function deriveModelBodyBoreCandidates(
+  geo: ImportedGeometry,
+  placements: readonly ModelItemPlacementRegistryEntry[],
+  result: import('../geometry/partFeatureBinding').ModelBodyFeatureResult,
+  unsupported: string[] = [],
+  wallRim = false,
+): Array<{ binding: import('./types').ModelBoreFeatureBinding; derived: ModelBodyBoreTargetResult }> {
+  const candidates = []
+  const reasons: string[] = []
+  for (const feature of result.features.features) {
+    const verdict = result.verdicts.find(v => v.featureKey === feature.sourceKey)
+    if (!verdict || !MODEL_DRILL_HOLE_CLASS_SET.has(verdict.featureClass)) continue
+    const countBefore = candidates.length
+    for (const face of [...verdict.faceIds].map(String).sort()) {
+      const snapshot = result.snapshots[face]
+      if (!snapshot || snapshot.type !== 'cylinder') continue
+      try {
+        const derived = deriveModelBodyBoreTarget(geo, placements, face, snapshot, result.verdicts, wallRim, result.snapshots)
+        candidates.push({
+          binding: {
+            ...(wallRim ? { wallRim: true } : {}),
+            featureId: feature.id, sourceKey: derived.target.featureKey, faceStableId: face,
+            loopId: derived.loop.id,
+            sourceVersion: result.token.revision,
+            sourceFingerprint: derived.cylinder.sourceIdentity!.sourceFingerprint,
+          },
+          derived,
+        })
+        if (!wallRim) break
+      } catch (err) {
+        reasons.push(err instanceof Error ? err.message : String(err))
+      }
+    }
+    if (candidates.length === countBefore) unsupported.push(`${feature.sourceKey}: ${reasons.at(-1) ?? 'No supported cylindrical hole wall.'}`)
+  }
+  if (candidates.length === 0) {
+    throw new ModelBodyDeriveError(`Bore: no supported internal holes. ${reasons[0] ?? 'Recognition found no cylindrical hole walls.'}`)
+  }
+  return candidates
 }

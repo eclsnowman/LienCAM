@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OperationStockAuthority, type OperationStockBackend, type OperationStockInputs,
   type StockBeforeRequest, type StockOperationInput, type StockRead, type StockToken } from '../../lib/cam/operationStockAuthority'
 import { applyConservativeStockOperation, createConservativeStockColumns, type ConservativeStockColumns } from '../../lib/cam/stockState'
@@ -29,9 +29,14 @@ function fixture() {
     set(next: Partial<OperationStockInputs>) { latest = { ...latest, ...next, changeRevision: latest.changeRevision + 1 } },
     raw(next: OperationStockInputs) { latest = next } }
 }
+// WO-3126: settlement leaves a 16 ms renderer frame around every backend step.
+// Timers are fake here, so each settle round lets one frame pass.
 async function settle(authority: OperationStockAuthority, req = request): Promise<StockRead> {
   let read = authority.readBefore(req)
-  for (let i = 0; i < 12; i++) { await Promise.resolve(); read = authority.readBefore(req) }
+  for (let i = 0; i < 30 && read.status === 'recomputing'; i++) {
+    await vi.advanceTimersByTimeAsync(20)
+    read = authority.readBefore(req)
+  }
   return read
 }
 function token(read: StockRead): StockToken { expect(read.status).toBe('ready'); return read.token }
@@ -47,6 +52,9 @@ function deferred<T>() {
 }
 
 describe('WO-2953 enabled operation stock authority', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }) })
+  afterEach(() => { vi.useRealTimers() })
+
   it('subtracts enabled predecessors only; suppress and unsuppress recalculate automatically', async () => {
     const f = fixture()
     const first = await settle(f.authority)
@@ -216,14 +224,15 @@ describe('WO-2953 enabled operation stock authority', () => {
     engine.apply = vi.fn(() => pending.promise)
     const a = new OperationStockAuthority(() => latest, engine)
     const old = a.readBefore(request)
-    await Promise.resolve() // initial stock finishes; predecessor apply is pending
+    // Initial stock finishes; predecessor apply is pending.
+    await vi.waitFor(() => expect(engine.apply).toHaveBeenCalledOnce())
     latest = { ...latest, changeRevision: 2, operations: [{ ...operation(), enabled: false }, operation('target')] }
     const removal = operation().removal
     if (removal.status !== 'ready') throw new Error('fixture')
     if (outcome === 'success') pending.resolve(applyConservativeStockOperation(createConservativeStockColumns(bounds, 1), removal.cuts))
     else pending.reject(new Error('old failure'))
     // Let settlement observe the new inputs itself, before any explicit read.
-    for (let i = 0; i < 4; i++) await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(20)
     const current = await settle(a)
     expect(top(a, current)).toBe(20)
     expect(a.isCurrent(old.token)).toBe(false)
@@ -237,7 +246,7 @@ describe('WO-2953 enabled operation stock authority', () => {
     engine.apply = vi.fn().mockImplementationOnce(() => pending.promise).mockImplementation(applyConservativeStockOperation)
     const a = new OperationStockAuthority(() => latest, engine)
     const old = a.readBefore(request)
-    await Promise.resolve()
+    await vi.waitFor(() => expect(engine.apply).toHaveBeenCalledOnce())
     // Unobserved edit-away/back must still advance the adapter's semantic serial.
     latest = { ...inputs(), changeRevision: 3 }
     const next = await settle(a)
@@ -272,6 +281,7 @@ describe('WO-2953 enabled operation stock authority', () => {
     vi.mocked(engine.create).mockImplementationOnce(() => pending.promise)
     const a = new OperationStockAuthority(() => latest, engine)
     const old = a.readBefore(request)
+    await vi.waitFor(() => expect(engine.create).toHaveBeenCalledOnce())
     a.disposeProject('session-1')
     const newFrame = { ...frame, projectEpoch: 'reopened' }
     latest = { ...inputs(), frame: newFrame, projectEpoch: 'reopened', operations: [operation('target')] }

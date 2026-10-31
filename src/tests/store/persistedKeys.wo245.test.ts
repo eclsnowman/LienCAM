@@ -35,6 +35,11 @@ const REQUIRED_KEYS = [
   'liencam.bridgeConsoleSaid',
   'liencam.firmwareConsoleSaid',
   'liencam.machine.programPreviewGrid',
+  // WO-3322: the New UI tryout's switch and shell look (WO-3275, WO-3285), never backed up.
+  'liencam.ui2.controlLayouts', // WO-3308 Control layouts, registered by WO-3322
+  'liencam.ui2.newUi',
+  'liencam.ui2.scale',
+  'liencam.ui2.theme',
   'liencam.userPosts',
   'liencamStockRemovalBody',
   'model3d.appearance',

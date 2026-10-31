@@ -38,6 +38,10 @@ let workerRequests: CapturedRequest[] = []
 function installWorkerCapture() {
   workerRequests = []
   class CapturingWorker {
+    constructor(url: string | URL) {
+      // WO-3085/3126 added separate postprocessing workers; this fake owns only toolpaths.
+      if (!String(url).includes('toolpathWorker')) throw new Error('Use the production fallback for other workers')
+    }
     onmessage: ((e: { data: unknown }) => void) | null = null
     onerror: ((e: unknown) => void) | null = null
     postMessage(data: CapturedRequest): void {

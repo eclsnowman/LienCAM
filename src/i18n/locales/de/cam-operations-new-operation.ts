@@ -6,6 +6,7 @@ import type { Translation } from '../../index'
 
 const camOperations: Translation<'cam-operations-new-operation'> = {
   "NewOperationModalBody": {
+    "part_on_other_stock": "Teil „{{part}}“ liegt auf {{stock}}; diese Aufspannung verwendet {{setupStock}}.",
     "From_the_model": "Aus dem Modell",
     "Modeled_chamfers_reading": "Die Fasen dieses Teils werden gelesen...",
     "Modeled_chamfers_read_failed": "Die Fasen dieses Teils konnten nicht gelesen werden: {{p1}}",
@@ -144,7 +145,26 @@ const camOperations: Translation<'cam-operations-new-operation'> = {
     "Settle": "Ablegen",
     "Set_projection_plane_click_a_face_or_stock_surface": "Projektionsebene festlegen — eine Fläche oder Rohteiloberfläche anklicken, um die Geometrie darauf zu schneiden",
     "Set_projection_plane": "Projektionsebene festlegen"
-  }
+  },
+  "newOperationModalParts": {
+    "Heights_explained": "So werden diese Höhen verwendet",
+    "Entry_explained": "Der Eintritt beginnt meist knapp über dem Restmaterial (etwa 1 mm). Einige Bearbeitungsarten verwenden andere Regeln; siehe Hilfe.",
+    "Travel_explained": "Rückzug ist der normale Sprung zwischen Merkmalen. Nachweislich freie Verbindungen können tiefer bleiben; über einer modellierten Spannpratze steigt die Bahn höher, auch über die Sicherheitshöhe.",
+    "Clearance_explained": "Die Sicherheitshöhe gilt beim ersten Anfahren und letzten Ausfahren. Die Werte sind Bezugsebenen, nicht jede Verfahrhöhe.",
+    "Reference_planes": "Bezugsebenen (WKS-Z)",
+    "Illustrative_route": "Beispiel einer lokalen Bahn - nicht maßstäblich",
+    "Entry_start": "Eintrittsbeginn",
+    "Ordinary_hop": "Normaler Rückzug",
+    "Clamp_crossing": "Spannpratze überqueren",
+    "Material_left": "Restmaterial",
+    "Clearance": "Sicherheitshöhe",
+    "Retract": "Rückzug",
+    "Feed_height": "Vorschubhöhe",
+    "Top_of_cut": "Bearbeitungsbeginn",
+    "Bottom_of_cut": "Bearbeitungsende",
+    "Set_manually": "Manuell festlegen",
+    "Auto_from_3D_model": "Automatisch aus 3D-Modell"
+}
 }
 
 export default camOperations

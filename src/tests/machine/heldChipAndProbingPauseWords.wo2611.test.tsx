@@ -18,6 +18,20 @@ const card = {
 } as const
 
 beforeEach(() => vi.useFakeTimers())
+
+/** WO-3190 (CT-2): connecting arms the software stop and the header chip reads
+ * that latch as E-STOP. A held or paused job cannot exist under it, so clear it
+ * the operator's way - CLEAR (pressEstop) on the connected simulator - before
+ * the route under test sets its own store facts. */
+async function connectAndClear(): Promise<void> {
+  const connecting = session.connectMachine('simulator')
+  await vi.advanceTimersByTimeAsync(1000)
+  await connecting
+  const cleared = session.pressEstop()
+  await vi.advanceTimersByTimeAsync(1500)
+  expect(await cleared).toMatchObject({ ok: true })
+  expect(session.estopNeedsReset()).toBe(false)
+}
 afterEach(async () => {
   cleanup()
   session.stopProbing()
@@ -46,7 +60,8 @@ describe('WO-2611 Held routes', () => {
   it.each(['run', 'jog', 'home'] as const)('motion %s stays Running with a card open', machineState => {
     expect(deriveMachineChip({ ...facts, machineState, toolChangeWaiting: true }).state).toBe('running')
   })
-  it.each(['awaiting-swap', 'ready'] as const)('subscribes to the %s card, then repaints after Continue', step => {
+  it.each(['awaiting-swap', 'ready'] as const)('subscribes to the %s card, then repaints after Continue', async step => {
+    await connectAndClear()
     const job = useMachineControl.getState().job
     useMachineControl.setState({ connectionPhase: 'connected', machineState: 'idle', toolChange: null,
       job: { ...job, phase: 'paused' } })
@@ -60,13 +75,15 @@ describe('WO-2611 Held routes', () => {
     act(() => useMachineControl.setState({ toolChange: null, machineState: 'run', job: { ...job, phase: 'streaming' } }))
     expect(chip.textContent).toBe('Running')
   })
-  it.each(['stopping', 'parking', 'probing', 'arming', 'failed'] as const)('card phase %s keeps its previous chip', step => {
+  it.each(['stopping', 'parking', 'probing', 'arming', 'failed'] as const)('card phase %s keeps its previous chip', async step => {
+    await connectAndClear()
     useMachineControl.setState({ connectionPhase: 'connected', machineState: 'idle',
       job: { ...useMachineControl.getState().job, phase: 'paused' }, toolChange: { ...card, step, warnings: [] } })
     render(<MachineStatusChip />)
     expect(screen.getByTestId('machine-status-chip').textContent).toBe('Running')
   })
-  it('clamp cards and generic paused jobs keep their previous chip', () => {
+  it('clamp cards and generic paused jobs keep their previous chip', async () => {
+    await connectAndClear()
     useMachineControl.setState({ connectionPhase: 'connected', machineState: 'idle',
       job: { ...useMachineControl.getState().job, phase: 'paused' },
       toolChange: { ...card, mode: 'clampPause', warnings: [] } })

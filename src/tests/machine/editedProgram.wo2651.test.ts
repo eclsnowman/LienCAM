@@ -494,12 +494,14 @@ for (const backend of ['simulator', 'bridge'] as const) describe(`WO-2651 Contro
   })
 
   if (backend === 'simulator') it('Run from here on the edited program (rows shifted, a target changed) plans and runs from the edited line', async () => {
-    const file = 'G21 G90 G54\nT1\n(roughing)\nG0 X10 Y0 Z-1\nG1 X11 F600\nG1 X12\nG1 X13\nG1 X14\nM30'
+    // At F600 a 50 ms frame can miss the turnaround by 0.5 mm (WO-2024).
+    // Slow this fixture so the unchanged 0.05 mm assertion resolves the edited target.
+    const file = 'G21 G90 G54\nT1\n(roughing)\nG0 X10 Y0 Z-1\nG1 X11 F60\nG1 X12\nG1 X13\nG1 X14\nM30'
     render(createElement(ProgramPanel))
     await openFile('part.nc', file)
     lineMenu(4, 'goto')
     // Rows after the edit: 3 G0 X10, 4 G1 X15 (new), 5 X11, 6 X12, 7 X23 (was X13), 8 X14.
-    const edited = file.replace('(roughing)\n', '').replace('G0 X10 Y0 Z-1\n', 'G0 X10 Y0 Z-1\nG1 X15 F600\n').replace('G1 X13', 'G1 X23')
+    const edited = file.replace('(roughing)\n', '').replace('G0 X10 Y0 Z-1\n', 'G0 X10 Y0 Z-1\nG1 X15 F60\n').replace('G1 X13', 'G1 X23')
     fireEvent.change(textarea(), { target: { value: edited } })
     fireEvent.click(screen.getByTestId('control-editor-apply'))
     await advance(300)
@@ -514,7 +516,7 @@ for (const backend of ['simulator', 'bridge'] as const) describe(`WO-2651 Contro
     expect(useMachineControl.getState().armedFromLine).toBe(7)
     await cycleStart()
     const xs: number[] = []
-    for (let i = 0; i < 200 && useMachineControl.getState().job.phase !== 'complete'; i++) {
+    for (let i = 0; i < 600 && useMachineControl.getState().job.phase !== 'complete'; i++) {
       await advance(50)
       xs.push(useMachineControl.getState().mpos?.x ?? NaN)
     }

@@ -1511,6 +1511,7 @@ export function PostProcessModal() {
       result={result}
       config={working}
       enabledOpCount={postableOpCount}
+      selectedOpCount={selectedOpCount}
       separateFiles={separateFiles.map((f) => f.filename)}
       previewFileIndex={previewFileIndex < separateFiles.length ? previewFileIndex : 0}
       previewFilename={previewFilename}
@@ -2446,6 +2447,7 @@ function PreviewPane({
   result,
   config,
   enabledOpCount,
+  selectedOpCount,
   separateFiles,
   previewFileIndex,
   previewFilename,
@@ -2469,6 +2471,7 @@ function PreviewPane({
   result: PostResult | null
   config: PostConfig
   enabledOpCount: number
+  selectedOpCount: number
   separateFiles: string[]
   previewFileIndex: number
   previewFilename: string | null
@@ -2504,11 +2507,12 @@ function PreviewPane({
   }, [editing, shownGcode, machine])
   // While the preview is edited, the header counts the edited buffer the same way the editor does (a final newline
   // ends the last line; it does not add one) - Rholand's 10-07 visual review.
-  const lineCount = editing
+  const hasSelection = selectedOpCount > 0
+  const lineCount = !hasSelection ? 0 : editing
     ? (shownGcode === '' ? 0 : shownGcode.replace(/\r?\n$/, '').split(/\r?\n/).length)
     : result?.meta?.lineCount ?? 0
   const dialect = config.label
-  const hasGcode = !!result && result.gcode.length > 0
+  const hasGcode = hasSelection && !!result && result.gcode.length > 0
   // Diagnostics are resolved by the parent (combined: orchestrator; separate:
   // selected file + any orchestrator-level conflicts); fall back to result's own.
   const diags = diagnostics ?? result?.diagnostics ?? []
@@ -2599,13 +2603,15 @@ function PreviewPane({
         </div>
       )}
 
-      {folded ? null : !result || result.gcode.length === 0 ? (
+      {folded ? null : !hasGcode ? (
         <div
           className="gcode post-gcode-empty"
           data-testid="post-gcode-preview"
           onContextMenu={openContextMenu}
         >
-          {enabledOpCount === 0
+          {!hasSelection
+            ? words("PostProcessModal.no_operations_selected")
+            : enabledOpCount === 0
             ? words("PostProcessModal.no_enabled_operations_to_post_enable_and")
             : !result || result.ok === false
               ? words("PostProcessModal.no_output_see_diagnostics_below")
@@ -2658,7 +2664,12 @@ function PreviewPane({
             <span>{words("PostProcessModal.edited_program_marked_lines", { value1: marks.length.toLocaleString() })}</span>
           </div>
         )}
-        {diags.length === 0 ? (
+        {!hasSelection ? (
+          <div className="diag-row diag-info" role="status">
+            <span className="diag-ico">[i]</span>
+            <span>{words("PostProcessModal.no_operations_selected")}</span>
+          </div>
+        ) : diags.length === 0 ? (
           <div className="diag-row diag-ok">
             <span className="diag-ico">{words("PostProcessModal.ok")}</span>
             <span>{editing

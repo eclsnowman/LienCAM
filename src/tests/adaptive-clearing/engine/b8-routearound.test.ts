@@ -144,10 +144,12 @@ describe('B8 route-around (rung b(1)): retracts drop vs the Stage 1 baseline', (
     // expanded track finds a safe 98.110 mm route within 258.752 mm; retaining
     // that lift would require manufacturing an unnecessary retract. Accepted
     // b8-1-comparison.json / independent-clearance.json retain old/new evidence.
-    // Keep the zero wrong-direction alternate-arc pin and require zero lifts;
-    // also prove the current routed travel's budget, pre-move load and clearance.
-    expect({ routedAround: g.routedAround, lifts }).toEqual({ routedAround: 0, lifts: 0 })
+    // Keep the zero wrong-direction alternate-arc pin; also prove the current
+    // routed travel's budget, pre-move load and clearance first.
+    // WO-3067 RE-PIN (lifts 0 -> 1, a count): steering smoothing ships ON on the owner's 2026-10-22
+    // "Turn it on (recommended)"; its smoothed, physically credited frontier needs one lift here.
     assertRoutedTravel(res, square, [island], params, graphRoutes)
+    expect({ routedAround: g.routedAround, lifts }).toEqual({ routedAround: 0, lifts: 1 })
   }, 300_000)
 
   it('SquareIsland gt fixture: the round-island wrap recovers its rejected repositions', () => {
@@ -170,10 +172,11 @@ describe('B8 route-around (rung b(1)): retracts drop vs the Stage 1 baseline', (
     // track arcs as chords and missed four legal graph traverses. The accepted
     // b8-2-comparison.json / independent-clearance.json show 11 -> 15 accepted
     // graph routes with unchanged 0.547733 mm minimum full-cutter clearance.
-    // Zero lifts is the proved keep-down win, never permission to reverse a
-    // cutting arc, overrun 3x direct, cross retained material or relax T5 load.
-    expect({ routedAround: g.routedAround, lifts }).toEqual({ routedAround: 0, lifts: 0 })
+    // WO-3067 RE-PIN (lifts 0 -> 1, a count): steering smoothing ships ON on the owner's 2026-10-22
+    // "Turn it on (recommended)"; this never grants permission to reverse a cutting arc,
+    // overrun 3x direct, cross retained material or relax T5 load (asserted first).
     assertRoutedTravel(res, boundary, holes, params, graphRoutes)
+    expect({ routedAround: g.routedAround, lifts }).toEqual({ routedAround: 0, lifts: 1 })
   }, 300_000)
 
   it('graph measurement is isolated per call and cannot mutate planner data', () => {

@@ -214,7 +214,11 @@ async function compute(op: Operation): Promise<ToolpathMove[]> {
 function finishStart(moves: readonly ToolpathMove[]): number {
   const i = moves.findIndex(m => m.role === 'lead_in')
   expect(i).toBeGreaterThan(3)
-  return i - 3
+  // WO-3083: the finish approach is the run of rapids standing over the finish entry (it was
+  // always three - Clearance, Retract, Feed; the hop now arrives at Retract and drops to Feed).
+  let k = i
+  while (k > 0 && moves[k - 1].type === 'rapid' && moves[k - 1].x === moves[i].x && moves[k - 1].y === moves[i].y) k--
+  return k
 }
 
 /** Smallest wall distance along every cutting chord (both ends below the stock top). */

@@ -195,7 +195,9 @@ describe('Face Smart Height V2 store integration', () => {
   it('re-resolves a durable selected target face and applies allowance once', async () => {
     const op = faceOp('target_face')
     load(op)
-    const preview = useCamStore.getState().previewFaceSmartHeights('setup-1', op)
+    // WO-2953/WO-3126: the synchronous preview reads the shared remaining-stock
+    // state; wait for it to settle instead of relying on an earlier test's.
+    const preview = await vi.waitFor(() => useCamStore.getState().previewFaceSmartHeights('setup-1', op))
 
     await useCamStore.getState().computeOperationToolpath('setup-1', op.id)
 
@@ -206,11 +208,11 @@ describe('Face Smart Height V2 store integration', () => {
     expect(useCamStore.getState().project.setups[0].operations[0].resolvedHeights).toEqual(preview)
   })
 
-  it('re-resolves the selected target plane after its geometry moves', () => {
+  it('re-resolves the selected target plane after its geometry moves', async () => {
     const op = faceOp('target_face')
     load(op, [{ ...target, position: { x: 0, y: 0, z: 3 } }])
 
-    const preview = useCamStore.getState().previewFaceSmartHeights('setup-1', op)
+    const preview = await vi.waitFor(() => useCamStore.getState().previewFaceSmartHeights('setup-1', op))
 
     expect(preview.wcs.bottom).toBe(9)
     expect(preview.machine.bottom).toBe(14)

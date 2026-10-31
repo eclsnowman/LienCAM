@@ -20,7 +20,7 @@ Object.defineProperty(globalThis, 'localStorage', { value: memoryStorage, config
 
 const { PostProcessModal } = await import('../../components/modals/PostProcessModal')
 const { useCamStore } = await import('../../store')
-const originalComputeOperationToolpath = useCamStore.getState().computeOperationToolpath
+const originalComputeAllToolpaths = useCamStore.getState().computeAllToolpaths
 
 let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>
 
@@ -58,7 +58,7 @@ function seedPostOperation(overrides: Partial<Operation> = {}): void {
       toolLibrary: [tool],
       consoleEvents: [],
       consoleReadThroughId: 0,
-      computeOperationToolpath: originalComputeOperationToolpath,
+      computeAllToolpaths: originalComputeAllToolpaths,
     } as never)
   })
 }
@@ -78,7 +78,7 @@ afterEach(() => {
   cleanup()
   Reflect.deleteProperty(navigator, 'clipboard')
   act(() => {
-    useCamStore.setState({ computeOperationToolpath: originalComputeOperationToolpath })
+    useCamStore.setState({ computeAllToolpaths: originalComputeAllToolpaths })
   })
 })
 
@@ -124,7 +124,7 @@ describe('PostProcessModal G-code context menu (UI-40)', () => {
     const recompute = vi.fn()
     seedPostOperation({ status: 'ready', toolpathMoves: [] })
     act(() => {
-      useCamStore.setState({ computeOperationToolpath: recompute })
+      useCamStore.setState({ computeAllToolpaths: recompute })
     })
 
     render(<PostProcessModal />)
@@ -139,6 +139,7 @@ describe('PostProcessModal G-code context menu (UI-40)', () => {
     expect(screen.queryByRole('menuitem', { name: 'Open full preview' })).toBeNull()
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Recompute all' }))
-    expect(recompute).toHaveBeenCalledWith('setup-1', 'op1', expect.any(String))
+    // WO-2661 (e8d1e5df2f): one ordered batch for the selected setup scope.
+    expect(recompute).toHaveBeenCalledExactlyOnceWith(['setup-1'])
   })
 })

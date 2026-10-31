@@ -105,7 +105,7 @@ describe('SolidsWorkbenchPage editEntryFor domain census (WO UI-18-R2, Item 1)',
     // recognized body, which this closed-domain InsertNodeCommand shape
     // can't seed -- this loop only checks that the resolver routes to
     // onEdit, not that the callback succeeds).
-    const dialogBacked = new Set(['extrude', 'revolve', 'boolean', 'pushPull', 'fillet', 'chamfer', 'shell', 'draft', 'hole', 'sweep', 'loft', 'defeature', 'resizeHole', 'form', 'relief'])
+    const dialogBacked = new Set(['extrude', 'revolve', 'boolean', 'pushPull', 'fillet', 'chamfer', 'shell', 'draft', 'hole', 'sweep', 'loft', 'defeature', 'resizeHole', 'form', 'relief', 'bodyTransform'])
     WORKBENCH_BODY_OP_TYPES.forEach((opType, i) => {
       const id = `F${i}`
       hooks().history.execute(new InsertNodeCommand({ id, kind: 'feature', payload: { opType, ownerId: 'F0' } }))

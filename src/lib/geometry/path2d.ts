@@ -24,6 +24,10 @@ export interface JoinReport {
   // literals written before these existed still type-check; absent means 0.
   overlapsMerged?: number
   branchPoints?: number
+  // WO-3276: line ends that met the middle of another line and were joined to
+  // it, and the closed faces traced from chains that stayed open after that.
+  tJunctionsSplit?: number
+  facesClosed?: number
 }
 
 function gk(p: Vec2): string {
@@ -316,6 +320,74 @@ function classifyClosedLoopsByContainment(loops: Loop2D[]): Loop2D[] {
   })
 }
 
+/**
+ * WO-3276: split segments at T-junctions. A drawing whose line ends against the
+ * middle of another line (an isometric or hidden-line drawing exported as one
+ * <path> per line) has no shared endpoint there, so joinSegments, which joins
+ * only end to end, leaves every such chain open. Where an endpoint of one
+ * segment lies within JOIN_TOL of the interior of another segment's edge, that
+ * edge gets a vertex at the foot of the endpoint, so the two now share an end.
+ * The new vertex is the meeting endpoint itself (at most JOIN_TOL off the edge),
+ * and an endpoint is only matched against an edge it is not already within
+ * JOIN_TOL of an end of (that gap is joinSegments's own tolerance). Each split
+ * cuts the polyline in two at that vertex. Returns the segments and the number
+ * of cuts.
+ */
+export function splitAtTJunctions(segs: Vec2[][]): { segs: Vec2[][]; splits: number } {
+  const ends: Vec2[] = []
+  for (const s of segs) {
+    if (s.length < 2) continue
+    ends.push(s[0], s[s.length - 1])
+  }
+  ends.sort((a, b) => a.x - b.x)
+  const xs = ends.map(e => e.x)
+  const lowerBound = (x: number) => {
+    let lo = 0, hi = xs.length
+    while (lo < hi) { const m = (lo + hi) >> 1; if (xs[m] < x) lo = m + 1; else hi = m }
+    return lo
+  }
+
+  let splits = 0
+  const out: Vec2[][] = []
+  for (const s of segs) {
+    if (s.length < 2) { out.push(s); continue }
+    let res: Vec2[] = [s[0]]
+    for (let k = 1; k < s.length; k++) {
+      const a = s[k - 1], b = s[k]
+      const vx = b.x - a.x, vy = b.y - a.y
+      const len2 = vx * vx + vy * vy
+      if (len2 > 0) {
+        const minY = Math.min(a.y, b.y) - JOIN_TOL, maxY = Math.max(a.y, b.y) + JOIN_TOL
+        const hits: { u: number; pt: Vec2 }[] = []
+        for (let e = lowerBound(Math.min(a.x, b.x) - JOIN_TOL); e < ends.length; e++) {
+          const q = ends[e]
+          if (q.x > Math.max(a.x, b.x) + JOIN_TOL) break
+          if (q.y < minY || q.y > maxY) continue
+          const u = ((q.x - a.x) * vx + (q.y - a.y) * vy) / len2
+          if (u <= 0 || u >= 1) continue
+          const fx = a.x + u * vx, fy = a.y + u * vy
+          if (dist2(q, { x: fx, y: fy }) >= JOIN_TOL2) continue
+          if (dist2(q, a) < JOIN_TOL2 || dist2(q, b) < JOIN_TOL2) continue
+          hits.push({ u, pt: q })
+        }
+        hits.sort((h1, h2) => h1.u - h2.u)
+        for (const h of hits) {
+          const last = res[res.length - 1]
+          if (dist2(h.pt, last) < JOIN_TOL2) continue
+          const foot = { x: h.pt.x, y: h.pt.y }
+          res.push(foot)
+          out.push(res)
+          res = [foot]
+          splits++
+        }
+      }
+      res.push(b)
+    }
+    out.push(res)
+  }
+  return { segs: out, splits }
+}
+
 // Join raw segment arrays into connected loops.
 // Uses a 3×3 grid neighbourhood so arc endpoints (computed via trig) reliably
 // connect to LINE endpoints even with small floating-point differences.
@@ -477,6 +549,245 @@ export function joinSegments(rawSegs: Vec2[][], layerId: string, report?: JoinRe
   // yields identical ids (docs/planning/STABLE-LOOP-ID-PLAN.md). The store namespaces
   // these by geoId at the attach boundary.
   return assignStableLoopIds(classifyClosedLoopsByContainment(loops))
+}
+
+/**
+ * WO-3276: the closed faces of a drawing whose chains joinSegments left open
+ * because lines branch (three or more lines meeting at a corner, as in an
+ * isometric letter drawing). Chaining end to end follows one way through a
+ * branch and so never comes back round; the faces of the drawn lines are what
+ * a person sees as closed shapes. Edges that bound no face (a line sticking
+ * out, or a bridge) are returned as `rest` and stay open. Nothing is invented:
+ * every face edge is an input edge, and a face boundary is only taken where the
+ * drawn lines enclose it, within JOIN_TOL.
+ */
+export function traceClosedFaces(chains: Vec2[][]): { faces: Vec2[][]; rest: Vec2[][] } {
+  const nodes: Vec2[] = []
+  const cells = new Map<string, number[]>()
+  const nodeAt = (p: Vec2): number => {
+    for (const key of neighbours(p)) {
+      for (const id of cells.get(key) ?? []) if (dist2(nodes[id], p) < JOIN_TOL2) return id
+    }
+    const id = nodes.length
+    nodes.push(p)
+    const k = gk(p)
+    const arr = cells.get(k); if (arr) arr.push(id); else cells.set(k, [id])
+    return id
+  }
+  const edgeKeys = new Set<string>()
+  const edges: Array<[number, number]> = []
+  for (const c of chains) {
+    for (let i = 1; i < c.length; i++) {
+      const a = nodeAt(c[i - 1]), b = nodeAt(c[i])
+      if (a === b) continue
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`
+      if (edgeKeys.has(key)) continue
+      edgeKeys.add(key)
+      edges.push([a, b])
+    }
+  }
+
+  const adj = new Map<number, Set<number>>()
+  const link = (a: number, b: number) => {
+    let s = adj.get(a); if (!s) adj.set(a, s = new Set())
+    s.add(b)
+  }
+  for (const [a, b] of edges) { link(a, b); link(b, a) }
+
+  // A line that dead-ends bounds no face: peel such ends off until none is left.
+  const rest: Vec2[][] = []
+  const queue = [...adj.keys()].filter(n => adj.get(n)!.size === 1)
+  while (queue.length > 0) {
+    const n = queue.pop()!
+    const nb = adj.get(n)
+    if (!nb || nb.size !== 1) continue
+    const m = [...nb][0]
+    rest.push([nodes[n], nodes[m]])
+    adj.delete(n)
+    const mb = adj.get(m)!
+    mb.delete(n)
+    if (mb.size === 1) queue.push(m)
+    else if (mb.size === 0) adj.delete(m)
+  }
+
+  // Neighbours of each node in counter-clockwise order.
+  const ring = new Map<number, number[]>()
+  for (const [n, nb] of adj) {
+    ring.set(n, [...nb].sort((a, b) =>
+      Math.atan2(nodes[a].y - nodes[n].y, nodes[a].x - nodes[n].x)
+      - Math.atan2(nodes[b].y - nodes[n].y, nodes[b].x - nodes[n].x)))
+  }
+
+  // Walk each directed edge, turning to the neighbour just clockwise of the way
+  // back: inner faces come out counter-clockwise (positive area), the outside
+  // of each component clockwise.
+  const walked = new Set<string>()
+  const faces: Vec2[][] = []
+  const inFace = new Set<string>()
+  for (const [u0, nb0] of ring) {
+    for (const v0 of nb0) {
+      if (walked.has(`${u0}>${v0}`)) continue
+      const path: number[] = []
+      let u = u0, v = v0
+      while (!walked.has(`${u}>${v}`)) {
+        walked.add(`${u}>${v}`)
+        path.push(u)
+        const r = ring.get(v)!
+        const back = r.indexOf(u)
+        const w = r[(back - 1 + r.length) % r.length]
+        u = v; v = w
+      }
+      const pts = path.map(id => nodes[id])
+      if (pts.length >= 3 && signedArea(pts) > JOIN_TOL2) {
+        faces.push([...pts, pts[0]])
+        for (let i = 0; i < path.length; i++) {
+          const a = path[i], b = path[(i + 1) % path.length]
+          inFace.add(a < b ? `${a}:${b}` : `${b}:${a}`)
+        }
+      }
+    }
+  }
+  for (const [a, b] of edges) {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`
+    if (adj.get(a)?.has(b) && !inFace.has(key)) rest.push([nodes[a], nodes[b]])
+  }
+  return { faces, rest }
+}
+
+// WO-3276: two segments belong to one connected group when a vertex of one
+// lies within this of an edge of the other. Twice JOIN_TOL, so the group always
+// holds everything joinSegments could join, merge or chain together: a loop
+// that joinSegments builds never spans two groups.
+const GROUP_TOL2 = 4 * JOIN_TOL2
+
+function distToEdge2(p: Vec2, a: Vec2, b: Vec2): number {
+  const vx = b.x - a.x, vy = b.y - a.y
+  const len2 = vx * vx + vy * vy
+  if (len2 === 0) return dist2(p, a)
+  const u = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2))
+  return dist2(p, { x: a.x + u * vx, y: a.y + u * vy })
+}
+
+// The connected groups of `segs` (indices, each group ascending, groups in
+// order of their first index). Edges are paired by padded box (a sweep, so
+// dense nested curves stay cheap), then an end of one edge within the
+// tolerance of the other edge joins their segments.
+function connectedGroups(segs: Vec2[][]): number[][] {
+  const parent = segs.map((_, i) => i)
+  const find = (i: number): number => {
+    while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] }
+    return i
+  }
+  const owner: number[] = []
+  const edges: Array<[Vec2, Vec2]> = []
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i]
+    for (let k = 1; k < s.length; k++) { owner.push(i); edges.push([s[k - 1], s[k]]) }
+  }
+  // boxOf pads each side by JOIN_TOL, so boxes meet whenever the edges come
+  // within 2 * JOIN_TOL (GROUP_TOL) of each other.
+  const boxes = edges.map(([a, b]) => boxOf(a, b))
+  for (const [p, q] of boxPairs(boxes, (i, j) => owner[i] !== owner[j])) {
+    const rp = find(owner[p]), rq = find(owner[q])
+    if (rp === rq) continue
+    const [a0, a1] = edges[p], [b0, b1] = edges[q]
+    if (distToEdge2(a0, b0, b1) <= GROUP_TOL2 || distToEdge2(a1, b0, b1) <= GROUP_TOL2
+      || distToEdge2(b0, a0, a1) <= GROUP_TOL2 || distToEdge2(b1, a0, a1) <= GROUP_TOL2) {
+      parent[Math.max(rp, rq)] = Math.min(rp, rq)
+    }
+  }
+  const byRoot = new Map<number, number[]>()
+  for (let i = 0; i < segs.length; i++) {
+    const r = find(i)
+    const g = byRoot.get(r); if (g) g.push(i); else byRoot.set(r, [i])
+  }
+  return [...byRoot.values()]
+}
+
+/**
+ * WO-3276: joinSegments for a drawing made of separate lines. Line ends that
+ * meet the middle of another line are joined to it, the segments are chained as
+ * joinSegments always did, and the closed faces the lines enclose are traced.
+ * That is decided per connected group of lines, never for the whole layer: a
+ * group that joinSegments already closes completely keeps exactly the loops
+ * joinSegments gives it (same points, direction and hole/contour role), however
+ * many open lines lie elsewhere in the layer. Only a group holding a chain that
+ * stays open is split and traced, and outlines that arrive closed are never
+ * re-traced. A layer where every group closes, or where no face is found,
+ * comes out exactly as joinSegments alone gives it. Hole or contour is decided
+ * over the whole layer. Known limit: a shape joined to another only by a single
+ * line (a bridge) is not traced as a separate face.
+ */
+export function joinSegmentsIntoFaces(rawSegs: Vec2[][], layerId: string, report?: JoinReport): Loop2D[] {
+  // Chain the lines exactly as before; a layer where everything closes is done.
+  const plain: JoinReport = { gapsClosed: 0, largestGapMM: 0, openChains: 0, overlapsMerged: 0, branchPoints: 0 }
+  const first = joinSegments(rawSegs, layerId, plain)
+  const mergePlain = (openChains: number) => {
+    if (!report) return
+    report.gapsClosed += plain.gapsClosed
+    report.largestGapMM = Math.max(report.largestGapMM, plain.largestGapMM)
+    report.openChains += openChains
+    report.overlapsMerged = (report.overlapsMerged ?? 0) + (plain.overlapsMerged ?? 0)
+    report.branchPoints = (report.branchPoints ?? 0) + (plain.branchPoints ?? 0)
+  }
+  if (plain.openChains === 0) { mergePlain(0); return first }
+
+  // Something stayed open. Each connected group is decided on its own.
+  const isClosedIn = (seg: Vec2[]) => seg.length >= 3 && dist2(seg[0], seg[seg.length - 1]) < JOIN_TOL2
+  const segs = rawSegs.map(s => dedup(s)).filter(s => s.length >= 2)
+  const keptKeys = new Map<string, number>()
+  const keptOwn: Loop2D[] = []
+  const traced: Loop2D[] = []
+  let splits = 0, faceLoops = 0
+  for (const group of connectedGroups(segs)) {
+    const groupSegs = group.map(i => segs[i])
+    const own: JoinReport = { gapsClosed: 0, largestGapMM: 0, openChains: 0 }
+    const ownLoops = joinSegments(groupSegs, layerId, own)
+    const keep = () => {
+      for (const l of ownLoops) {
+        const k = pointKey(l.points)
+        keptKeys.set(k, (keptKeys.get(k) ?? 0) + 1)
+        keptOwn.push(l)
+      }
+    }
+    if (own.openChains === 0) { keep(); continue }
+
+    // Outlines that arrive closed (one closed path) are authored shapes and
+    // pass through untouched; only the separate lines are joined to the lines
+    // they meet and traced for the faces they enclose.
+    const closedIn = groupSegs.filter(isClosedIn)
+    const split = splitAtTJunctions(groupSegs.filter(seg => !isClosedIn(seg)))
+    const chained = joinSegments(split.segs, layerId)
+    // A chain that closed by walking through a branch need not be a face (the
+    // outline of two boxes sharing a wall), so every edge goes to the tracer.
+    const { faces, rest } = traceClosedFaces(chained.map(l => (l.closed ? [...l.points, l.points[0]] : l.points)))
+    if (faces.length === 0) { keep(); continue }
+    const fromLines = joinSegments([...faces, ...rest], layerId)
+    traced.push(...joinSegments(closedIn, layerId), ...fromLines)
+    splits += split.splits
+    faceLoops += fromLines.filter(l => l.closed).length
+  }
+  if (traced.length === 0) { mergePlain(plain.openChains); return first }
+
+  // The loops of the groups that were kept, taken from `first` itself so they
+  // are exactly what joinSegments gave (a group never shares a loop with
+  // another, so they are the same loops), then the traced groups.
+  const loops: Loop2D[] = []
+  for (const l of first) {
+    const k = pointKey(l.points), n = keptKeys.get(k) ?? 0
+    if (n === 0) continue
+    keptKeys.set(k, n - 1)
+    loops.push(l)
+  }
+  if (loops.length !== keptOwn.length) { loops.length = 0; loops.push(...keptOwn) }
+  loops.push(...traced)
+  const out = assignStableLoopIds(classifyClosedLoopsByContainment(loops))
+  mergePlain(out.filter(l => !l.closed).length)
+  if (report) {
+    report.tJunctionsSplit = (report.tJunctionsSplit ?? 0) + splits
+    report.facesClosed = (report.facesClosed ?? 0) + faceLoops
+  }
+  return out
 }
 
 export function computeBBox2D(loops: Loop2D[]): {

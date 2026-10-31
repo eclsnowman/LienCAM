@@ -2,6 +2,7 @@ import type { Project, Setup, Vec3 } from '../../types'
 import { stockWorldBounds } from '../../store/stockAssignment'
 import {
   conflictingWorkOffsetClaim,
+  FIXTURE_OFFSETS,
   isFixtureOffset,
   setupOwnsFixtureOffset,
   wcsStockCornerBinding,
@@ -22,50 +23,43 @@ import {
 //   principal axis maps a box onto itself). What changes is which face of the
 //   PART is up, and therefore which part corner sits under the work zero.
 //
-//   The second side therefore zeroes on the SAME stock corner as the first -
-//   same physical spot on the fixture, same work offset. That is what a
-//   machinist does: the corner of the block in the vise is re-touched, and the
-//   part underneath it is the one that moved. Side 2 is not a new datum; it is
-//   the same datum seeing a different face.
-//
-// WHY BOTH SIDES SHARE ONE OFFSET, and what changed under it (WO-288 asked for
-// the opposite; the note is kept because the answer is not obvious). The block
-// does not move and the zero stays on the same corner of it, so the two sides
-// genuinely run on one controller frame - that is the machinist's answer, and
-// it is what this module implements. What WO-1291 changed is WHOSE offset that
-// is: a SETUP now owns its own frame, so the shared value is the first side's,
-// not the stock's. Only an unmarked legacy setup still reads through its stock.
-// resolvedOffsetFor below must stay in the same order as resolveSetupWorkOffset
-// in workOffsets.ts. An operator who wants the second side on a DIFFERENT offset
-// can now say so: edit that setup, and the console reports what it outdated.
+// WO-3108: The approved S2D-02 target supersedes the shared-datum default.
+// New second sides reflect the parent's XY about the stock centre and use
+// the next available offset. Owner decision 2026-10-25: probe Z0 on the flipped stock TOP,
+// not the reflected first-side datum on the bottom. Saved frames stay explicit. The
+// physical block and part geometry are never moved by this planner.
 
 /** Axis the part is turned over about. X and Y are different operations and the
  *  app must never guess which one was meant. */
 export type FlipAxis = 'x' | 'y'
 
 /** The stock frame both sides share. `stockSize` is the block's world extents;
- *  `originInStock` is the shared work zero measured from the block's minimum
+ *  `originInStock` is the first-side work zero measured from the block's minimum
  *  corner (so a top-face zero has originInStock.z === stockSize.z). The origin
  *  is required, not optional: where the zero sits inside the block is exactly
  *  what decides whether a flipped coordinate reads 45 or -5. */
 export interface SecondSideFrame {
   stockSize: Vec3
   originInStock: Vec3
+  /** Destination zero inside the same block. Omitted preserves legacy shared
+   *  datum callers; saved second sides must supply their actual zero. */
+  secondOriginInStock?: Vec3
 }
 
 /**
  * Where a point on the part ends up once the block is turned over.
  *
- * Input and output are both in setup coordinates (relative to the shared work
- * zero, axis-aligned with it). Turning about X keeps X and swings Y and Z
+ * Input is relative to the first-side zero; output is relative to the destination
+ * zero (both axis-aligned). Turning about X keeps world X and swings Y and Z
  * across the block; turning about Y keeps Y and swings X and Z.
  *
- * Worked example - 100 x 50 x 20 block, zero at the front-left TOP corner
+ * Legacy shared-zero example - 100 x 50 x 20 block, zero at the front-left TOP corner
  * (originInStock = {x:0, y:0, z:20}), turned about X:
  *   a point 5 mm behind the front face and 3 mm below the top (y=5, z=-3)
  *   reads y = 50 - 0 - 5 = 45 and z = 20 - 40 + 3 = -17.
  * It is 5 mm from what is now the BACK face and 3 mm above the new bottom.
- * Negating instead (y = -5) is the plausible wrong answer.
+ * With the flipped XY / top-zero destination (0,50,20), the point reads
+ * y = -5, z = -17. The physical point is identical; only its frame changes.
  */
 export function flipPointToSecondSide(
   point: Vec3,
@@ -74,11 +68,12 @@ export function flipPointToSecondSide(
 ): Vec3 {
   const size = frame.stockSize
   const zero = frame.originInStock
-  // Z always turns over, whichever axis the part rolls about.
-  const z = size.z - 2 * zero.z - point.z
+  const destination = frame.secondOriginInStock ?? zero
+  // First translate into the block, turn once, then subtract the child zero.
+  const z = size.z - zero.z - point.z - destination.z
   return axis === 'x'
-    ? { x: point.x, y: size.y - 2 * zero.y - point.y, z }
-    : { x: size.x - 2 * zero.x - point.x, y: point.y, z }
+    ? { x: zero.x + point.x - destination.x, y: size.y - zero.y - point.y - destination.y, z }
+    : { x: size.x - zero.x - point.x - destination.x, y: zero.y + point.y - destination.y, z }
 }
 
 export type SecondSideRefusalCode =
@@ -107,22 +102,26 @@ export interface SecondSidePlan {
   stockName: string
   /** World extents of that stock. */
   stockSize: Vec3
-  /** Shared work zero, measured from the stock's minimum corner. */
+  /** First-side work zero, measured from the stock minimum. */
   originInStock: Vec3
-  /** World origin of the second side: the first side's, because the block did
-   *  not move and the zero stays on the same corner of it. */
+  secondOriginInStock: Vec3
+  /** World origin of the destination frame. */
   origin: Vec3
   cornerRow: number
   cornerCol: number
   cornerFace: 'top' | 'bottom'
-  /** Offset both sides resolve to (the first side owns it; WO-1291). */
+  /** Offset owned by the destination setup. */
   fixtureOffset: FixtureOffset
+  /** New creation must ask before sharing the parent when every slot is used. */
+  requiresOffsetReuseConfirmation: boolean
 }
 
 export interface SecondSideRequest {
   /** Setup the new one is the second side of. */
   parentSetupId: string
   axis: FlipAxis
+  /** Resolve this actual saved child instead of allocating a creation default. */
+  existingSetup?: Setup
   /** Stock the caller currently has selected. Given and different from the
    *  first side's stock, the flip is refused: two sides of one part are one
    *  block of material. Omitted = adopt the first side's stock. */
@@ -198,7 +197,8 @@ export function planSecondSideSetup(
     }
   }
 
-  const rawOffset = resolvedOffsetFor(parent, stock.fixtureOffset)
+  const existing = request.existingSetup
+  const rawOffset = resolvedOffsetFor(existing ?? parent, stock.fixtureOffset)
   if (!isFixtureOffset(rawOffset)) {
     return {
       ok: false,
@@ -209,21 +209,29 @@ export function planSecondSideSetup(
     }
   }
 
-  // The two sides run on the first side's offset. Ask the existing collision
-  // reader whether an owner on some OTHER stock already holds it; a second side
-  // must never be created into an offset map that is already wrong.
-  const claim = conflictingWorkOffsetClaim(project, rawOffset, stock.id)
+  // Owner decision 2026-10-25: first unused G54-G59 across ALL setup/stock claims.
+  // Exhaustion proposes the parent's slot; creation must ask before saving it.
+  const unusedOffset = FIXTURE_OFFSETS.find(offset => !conflictingWorkOffsetClaim(project, offset))
+  const fixtureOffset = existing ? rawOffset : unusedOffset ?? rawOffset
+  const requiresOffsetReuseConfirmation = !existing && unusedOffset === undefined
+  // Saved explicit choices already passed the setup editor (WO-2983 allows
+  // separate programs to share a slot). Never reallocate them during probing.
+  const claim = existing ? undefined : conflictingWorkOffsetClaim(project, fixtureOffset, stock.id)
   if (claim) {
     return {
       ok: false,
       code: 'FLIP_WORK_OFFSET_CLAIMED',
-      message:
-        `G${rawOffset} is already held by ${claim.kind} "${claim.name}". Both sides of ` +
-        `one part run on the first side's offset, so free G${rawOffset} first.`,
+      message: `G${fixtureOffset} is already held by ${claim.kind} "${claim.name}".`,
     }
   }
 
   const bounds = stockWorldBounds(stock)
+  const origin = existing ? { ...existing.wcs.origin } : {
+    x: request.axis === 'y' ? bounds.min.x + bounds.max.x - parent.wcs.origin.x : parent.wcs.origin.x,
+    y: request.axis === 'x' ? bounds.min.y + bounds.max.y - parent.wcs.origin.y : parent.wcs.origin.y,
+    z: bounds.max.z,
+  }
+  const childBinding = existing ? wcsStockCornerBinding(existing.wcs) : undefined
   return {
     ok: true,
     parentSetupId: parent.id,
@@ -241,11 +249,20 @@ export function planSecondSideSetup(
       y: parent.wcs.origin.y - bounds.min.y,
       z: parent.wcs.origin.z - bounds.min.z,
     },
-    origin: { ...parent.wcs.origin },
-    cornerRow: binding.cornerRow,
-    cornerCol: binding.cornerCol,
-    cornerFace: binding.cornerFace,
-    fixtureOffset: rawOffset,
+    secondOriginInStock: {
+      x: origin.x - bounds.min.x,
+      y: origin.y - bounds.min.y,
+      z: origin.z - bounds.min.z,
+    },
+    origin,
+    cornerRow: childBinding?.cornerRow ?? (request.axis === 'x' ? 2 - binding.cornerRow : binding.cornerRow),
+    cornerCol: childBinding?.cornerCol ?? (request.axis === 'y' ? 2 - binding.cornerCol : binding.cornerCol),
+    // Match the stored origin so stock moves/reloads keep the probed top zero.
+    cornerFace: existing
+      ? childBinding?.cornerFace ?? (binding.cornerFace === 'top' ? 'bottom' : 'top')
+      : 'top',
+    fixtureOffset,
+    requiresOffsetReuseConfirmation,
   }
 }
 
@@ -257,4 +274,42 @@ export function farCornerInSetupCoords(plan: SecondSidePlan): Vec3 {
     y: plan.stockSize.y - plan.originInStock.y,
     z: plan.stockSize.z - plan.originInStock.z,
   }
+}
+
+/** WO-3196: how a second side holds the part - the block turned 180 degrees
+ *  about `axis` through its own centre, where it stays in the same world box.
+ *  `center` is the centre of that block in world coordinates. */
+export interface SecondSideTurn {
+  axis: FlipAxis
+  center: Vec3
+}
+
+/** The turn a setup machines under, or null for a first side (no flipOf).
+ *  `block` is the setup's proven stock box; a second side without one has no
+ *  block to turn and returns 'no-block' so the caller can say so. */
+export function secondSideTurn(
+  setup: Pick<Setup, 'flipOf'>,
+  block: { min: Vec3; max: Vec3 } | null | undefined,
+): SecondSideTurn | null | 'no-block' {
+  if (!setup.flipOf) return null
+  if (!block) return 'no-block'
+  return {
+    axis: setup.flipOf.axis,
+    center: {
+      x: (block.min.x + block.max.x) / 2,
+      y: (block.min.y + block.max.y) / 2,
+      z: (block.min.z + block.max.z) / 2,
+    },
+  }
+}
+
+/** Where a world point of the part sits once the block is turned. Turning
+ *  about X keeps X and swings Y and Z across the block; about Y keeps Y and
+ *  swings X and Z - the same turn flipPointToSecondSide expresses in setup
+ *  coordinates. A half turn, not a mirror: handedness is kept. */
+export function turnWorldPointForSecondSide(point: Vec3, turn: SecondSideTurn): Vec3 {
+  const { center } = turn
+  return turn.axis === 'x'
+    ? { x: point.x, y: 2 * center.y - point.y, z: 2 * center.z - point.z }
+    : { x: 2 * center.x - point.x, y: point.y, z: 2 * center.z - point.z }
 }

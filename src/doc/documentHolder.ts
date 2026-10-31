@@ -86,6 +86,7 @@ import {
 } from '../lib/drawing/document'
 import type { JsonValue } from './persist'
 import type { ModelSession } from './modelSession'
+import { FeatureResultMemo, type ModelBodyFeatureResult } from '../lib/geometry/partFeatureBinding'
 
 /** The one hardcoded key every pre-Stage-C1 caller implicitly owns. Not a
  *  real Model Item id (no such registry exists yet -- that is the v12
@@ -120,6 +121,72 @@ const heldDrawings = new Map<string, JsonValue>()
 function holdDrawings(modelItemId: string, drawings: JsonValue): void {
   if (drawingRecordsEmpty(readDrawingRecords(drawings))) heldDrawings.delete(modelItemId)
   else heldDrawings.set(modelItemId, drawings)
+}
+
+/**
+ * WO-3202 (WO-3170 Slice B): feature recognition results read off an item's
+ * ARCHIVED document by a headless replay (modelBodyHoleRecognition.ts), plus
+ * results carried over from the live session at unmount. Bound to the exact
+ * archived bytes: every route that sets, replaces or drops an item's
+ * pass-through archive moves its serial and drops its memo (noteArchiveChanged),
+ * so a result is never read against bytes it was not made from. Holds plain
+ * data only -- no kernel handle survives a replay.
+ */
+let nextArchiveSerial = 1
+const archiveSerials = new Map<string, number>()
+const archiveFeatureMemos = new Map<string, { serial: number; memo: FeatureResultMemo }>()
+
+function noteArchiveChanged(modelItemId: string): void {
+  archiveSerials.set(modelItemId, nextArchiveSerial++)
+  archiveFeatureMemos.delete(modelItemId)
+}
+
+function noteAllArchivesChanged(): void {
+  for (const modelItemId of [...archiveSerials.keys(), ...archiveFeatureMemos.keys()]) noteArchiveChanged(modelItemId)
+  archiveFeatureMemos.clear()
+}
+
+/** WO-3202: the memo for `modelItemId`'s archived document, with the serial
+ *  of the bytes it belongs to. Undefined while a workbench holds the live
+ *  document (its bytes are rebuilt on every collect, so there is nothing
+ *  fixed to bind to; the live session's own memo serves it) or when no
+ *  archive is held. */
+export function archiveFeatureResultScope(
+  modelItemId: string = LEGACY_MODEL_ITEM_ID,
+): { serial: number; memo: FeatureResultMemo } | undefined {
+  if (liveCollectors.has(modelItemId) || !passThroughArchives.has(modelItemId)) return undefined
+  let serial = archiveSerials.get(modelItemId)
+  if (serial === undefined) {
+    serial = nextArchiveSerial++
+    archiveSerials.set(modelItemId, serial)
+  }
+  let scope = archiveFeatureMemos.get(modelItemId)
+  if (scope === undefined || scope.serial !== serial) {
+    scope = { serial, memo: new FeatureResultMemo() }
+    archiveFeatureMemos.set(modelItemId, scope)
+  }
+  return scope
+}
+
+/** Rebinds live results to the archive now held for `modelItemId`. Called
+ *  only with results the session vouched for at the moment its document was
+ *  captured (ModelSession.committedFeatureResults). */
+function carryFeatureResults(modelItemId: string, results: readonly ModelBodyFeatureResult[]): void {
+  if (results.length === 0) return
+  const scope = archiveFeatureResultScope(modelItemId)
+  if (scope === undefined) return
+  for (const result of results) {
+    scope.memo.install({
+      ...result,
+      token: {
+        binderVersion: result.token.binderVersion,
+        route: 'archive',
+        modelItemId,
+        bodyId: result.token.bodyId,
+        revision: scope.serial,
+      },
+    })
+  }
 }
 
 /** The live collector's input with the item's held drawings folded in. A document the workbench calls empty (genesis only) is NOT empty while it holds a drawing: the drawing outlives its body (plan section 3, "Deleting the source body retains the drawing"). A collector that supplies its own `drawings` wins. */
@@ -377,6 +444,10 @@ export function registerLiveDocument(
     // legacy" -- see this function's own doc comment above.
     if (!embedded) return
     try {
+      // WO-3202: what the live session can vouch for, read at the same
+      // moment as the document it is about to become (no await between).
+      const session = liveSessions.get(modelItemId)
+      const carried = session !== undefined ? session.committedFeatureResults() : []
       const input = withHeldDrawings(collect(), modelItemId)
       if (input === null) {
         // No-op guard (INT-17C Stage C2: React StrictMode dev double-mount
@@ -409,6 +480,7 @@ export function registerLiveDocument(
             makePendingSeedLease(loadDocumentArchive(bytes)),
           )
         }
+        carryFeatureResults(modelItemId, carried)
       }
     } catch (err) {
       console.error(
@@ -485,6 +557,7 @@ export function stashLoadedDocument(
   const loaded = loadDocumentArchive(bytes)
   pendingSeeds.set(modelItemId, makePendingSeedLease(loaded))
   passThroughArchives.set(modelItemId, new Uint8Array(bytes))
+  noteArchiveChanged(modelItemId)
   holdDrawings(modelItemId, loaded.drawings)
   bumpGeneration(modelItemId)
   return loaded
@@ -499,6 +572,7 @@ export function stashLoadedDocument(
 export function clearLoadedDocument(modelItemId: string = LEGACY_MODEL_ITEM_ID): void {
   pendingSeeds.delete(modelItemId)
   passThroughArchives.delete(modelItemId)
+  noteArchiveChanged(modelItemId)
   heldDrawings.delete(modelItemId)
   bumpGeneration(modelItemId)
 }
@@ -530,6 +604,7 @@ export function replaceLoadedDocumentArchives(
   ])
   liveCollectors.clear()
   passThroughArchives.clear()
+  noteAllArchivesChanged()
   pendingSeeds.clear()
   heldDrawings.clear()
   for (const modelItemId of [...controllers.keys()]) {
@@ -541,6 +616,7 @@ export function replaceLoadedDocumentArchives(
       makePendingSeedLease(decoded.get(modelItemId)!),
     )
     passThroughArchives.set(modelItemId, new Uint8Array(bytes))
+    noteArchiveChanged(modelItemId)
     holdDrawings(modelItemId, decoded.get(modelItemId)!.drawings)
   }
   // Install the owning project after the holder maps exist but before any
@@ -643,6 +719,7 @@ export function setDrawingRecords(records: DrawingRecords, modelItemId: string =
   const passThrough = passThroughArchives.get(modelItemId)
   if (!liveCollectors.has(modelItemId) && passThrough !== undefined) {
     passThroughArchives.set(modelItemId, replaceArchiveDrawings(passThrough, heldDrawings.get(modelItemId)))
+    noteArchiveChanged(modelItemId)
   }
   markDocumentDirty(modelItemId)
 }
@@ -1180,6 +1257,7 @@ export function resetDocumentHolder(): void {
   liveCollectors.clear()
   liveSessions.clear()
   passThroughArchives.clear()
+  noteAllArchivesChanged()
   pendingSeeds.clear()
   heldDrawings.clear()
   documentStorage = null
@@ -1218,6 +1296,7 @@ export function disposeModelItem(modelItemId: string): void {
   liveCollectors.delete(modelItemId)
   liveSessions.delete(modelItemId)
   passThroughArchives.delete(modelItemId)
+  noteArchiveChanged(modelItemId)
   pendingSeeds.delete(modelItemId)
   heldDrawings.delete(modelItemId)
   disposeDocumentAutosave(modelItemId)

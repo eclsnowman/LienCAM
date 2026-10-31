@@ -1,6 +1,7 @@
 import type { ProfileRegion } from '../../../geom/geom-service'
 import type { RayLike } from '../../../viewport3d'
-import { regionProfileSelector, type ProfileSelector } from './regionSelector'
+import { expandOpenChainProfileSelection, regionProfileSelector, type ProfileSelector } from './regionSelector'
+import type { SweepPathNodeLookup } from '../../../geom/sweep-path'
 
 export interface ProfilePickResult {
   sketchId: string
@@ -14,6 +15,7 @@ export interface ProfilePickCandidate extends ProfilePickResult {
 }
 
 export function profilePickKey(sketchId: string, selector: ProfileSelector): string {
+  if (selector.kind === 'sketch-chain') return `${sketchId}:sketch-chain:${JSON.stringify([selector.sketchId, selector.steps.map(({ entityId, forward }) => [entityId, forward])])}`
   if (selector.kind === 'whole-sketch') return `${sketchId}:whole-sketch`
   if (selector.kind === 'regions') {
     return `${sketchId}:regions:${selector.regions.map(({ signature, ordinal }) =>
@@ -173,4 +175,13 @@ export function pickProfileRegion(
     }
   }
   return closest
+}
+
+/** Selection-only seam for Thin open walls (WO-3237 enables its UI). Open
+ * chains remain wires; they never enter the region/face hit-test candidates. */
+export function openChainProfilePick(sketchId: string, entityId: string, lookup: SweepPathNodeLookup) {
+  const expanded = expandOpenChainProfileSelection(sketchId, entityId, lookup)
+  return expanded.ok
+    ? { ok: true as const, pick: { sketchId, profileSelector: expanded.selector }, path: expanded.path }
+    : expanded
 }

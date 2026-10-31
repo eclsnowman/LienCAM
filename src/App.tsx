@@ -24,10 +24,12 @@ import { NestModal } from './components/modals/NestModal'
 import { BooleanMeshDialog } from './components/modals/BooleanMeshDialog'
 import { MeshViewerModal } from './components/machine/MeshViewerModal'
 import { ProjectStartupFlow } from './components/modals/DemoExamplePickerModal'
+import { GuidedSetupHost } from './components/modals/GuidedSetupHost'
 import { useCamStore } from './store'
 import type { Project } from './types'
 import { subscribeToProjectOpenTiming } from './lib/perf/projectOpenTiming'
 import { scheduleDesktopReleaseCheck } from './lib/update/releaseCheck'
+import { DesktopUpdateOffer } from './components/update/DesktopUpdateOffer'
 import { useEffect, useLayoutEffect, useRef, useState, lazy, Suspense } from 'react'
 import {
   MACHINE_PANEL_LEFT_DEFAULT,
@@ -42,6 +44,7 @@ import { installAgentBridge } from './lib/agent/rendererBridge'
 import { Sketch3dLabPage } from './components/sketch3dlab'
 import { MeshLabPage } from './components/meshlab'
 import { ThemedTooltip } from './components/ui/ThemedTooltip'
+import { NewUiGate } from './ui2/NewUiGate'
 import './theme/tokens.css'
 import './styles/app.css'
 import './app.css'
@@ -118,7 +121,7 @@ export function statusBarLabel(s: { project: Pick<Project, 'setups' | 'nests'> }
 // `partWorkspace` query param is now only an opt-OUT hatch (`?partWorkspace=0` disables it;
 // every other value stays enabled). Same "read the query param at render time, no new flags
 // module" mechanism as the two flags above — see INT-13-WORKBENCH-INTEGRATION-SPEC.md 2.2 (D2.1/D2.2).
-export default function App() {
+function LegacyApp() {
   useText('app-shell-settings-menus')
   const params = new URLSearchParams(window.location.search)
   if (params.get('sketch3dlab') === '1') return <Sketch3dLabPage />
@@ -398,6 +401,8 @@ function CamApp({ partWorkspaceEnabled }: { partWorkspaceEnabled: boolean }) {
           TopToolbar hosts the one shared strip; the Model-tab flag threads
           through it. */}
       <TopToolbar showPartTab={partWorkspaceEnabled} onAbout={() => setAboutOpen(true)} />
+      {/* WO-2883: the desktop app's one update offer (renders nothing in the browser). */}
+      <DesktopUpdateOffer emit={addConsoleEvent} />
       {/* CAM workspace host — always mounted; hidden (not unmounted) while the 3D modeling workspace is
           active so switching back is instant and no CAM state is lost (D1). display:contents
           keeps app-body/BottomConsole/the status footer as direct flex children of app-shell
@@ -539,6 +544,7 @@ function CamApp({ partWorkspaceEnabled }: { partWorkspaceEnabled: boolean }) {
       <PostProcessModal />
       <NestModal />
       <ProjectStartupFlow />
+      <GuidedSetupHost />
       <BooleanMeshDialog />
       <MeshViewerModal />
       {/* PROMOTE-SKETCH-FAIL round 2: the ONE themed confirm dialog (on-brand
@@ -574,4 +580,9 @@ function renderedStatusLabel(value: string, failedCount: number): string {
     case "Ready": return shellText('App.ready')
     default: return failedCount > 0 ? shellText('App.failedStatus', { count: failedCount }) : value
   }
+}
+
+// WO-3275: the New UI switch (off by default) chooses the shell; off renders LegacyApp unchanged.
+export default function App() {
+  return <NewUiGate legacy={<LegacyApp />} />
 }

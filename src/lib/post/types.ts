@@ -92,6 +92,8 @@ export interface PostInput {
 // --- Dialect capability declaration ---
 
 export interface PostCapabilities {
+  /** False when this post cannot emit G53; shipped dialects support it. */
+  machineCoordinates?: boolean
   arcs: boolean
   arcFullCircle: boolean
   arcCenterMode: 'ijk' | 'r'
@@ -158,8 +160,8 @@ export interface PostOptions {
   /** Opt-in G10 L2 work-offset write (default false). */
   writeWorkOffsets: boolean
   /** Max chordal deviation (mm) the arc-collapse stage may introduce when
-   *  fitting G2/G3 arcs over dense polylines. User-tunable; default 0.05. Only
-   *  consulted when capabilities.arcs === true. */
+   *  fitting G2/G3 arcs over dense polylines, or sampling native arcs as G1
+   *  when arc output is disabled. User-tunable; default 0.05. */
   arcTolerance?: number
   /** WO-2437: a macro word an operator stop calls just before its M0 (UCCNC's
    *  M2001, as Fusion's UCCNC post writes it). Absent = the stop is M0 alone. */

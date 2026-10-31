@@ -103,7 +103,7 @@ export type BridgeStopResult =
 interface BridgeProcessHost {
   machineBridgeStatus: () => Promise<BridgeProcessStatus>
   machineBridgeStart?: (settings?: MachineBridgeLaunchSettings) => Promise<Exclude<BridgeRestartResult, { reason: 'unhosted' }>>
-  machineBridgeRestart: (settings?: MachineBridgeLaunchSettings) => Promise<Exclude<BridgeRestartResult, { reason: 'unhosted' }>>
+  machineBridgeRestart: (settings?: MachineBridgeLaunchSettings, options?: BridgeStartOptions) => Promise<Exclude<BridgeRestartResult, { reason: 'unhosted' }>>
   machineBridgeStop?: () => Promise<BridgeStopResult>
   chooseMachinePath?: (kind: MachinePathKind) => Promise<string | null>
 }
@@ -112,6 +112,14 @@ type HostedBridgeProcess = Partial<BridgeProcessHost>
   & Pick<BridgeProcessHost, 'machineBridgeRestart'>
 
 let supervisorReachability: 'unknown' | 'reachable' | 'unreachable' = 'unknown'
+
+/** WO-3290: the desktop host hears the press too. A fresh Linux install starts
+ *  its bridge on the operator's first Connect, never on opening Control. */
+function hostedRestart(host: HostedBridgeProcess, settings: MachineBridgeLaunchSettings | undefined, options: BridgeStartOptions) {
+  return options.operatorPress === true
+    ? host.machineBridgeRestart(settings, { operatorPress: true })
+    : host.machineBridgeRestart(settings)
+}
 
 function hostedBridgeProcess(): HostedBridgeProcess | null {
   const host = (window as typeof window & { liencamHost?: Partial<BridgeProcessHost> }).liencamHost
@@ -216,7 +224,7 @@ export async function startBridge(
   if (host !== null) {
     return typeof host.machineBridgeStart === 'function'
       ? host.machineBridgeStart(settings)
-      : host.machineBridgeRestart(settings)
+      : hostedRestart(host, settings, options)
   }
   try {
     const result = await supervisorStartBridge(bridgePort, supervisorLaunchArguments(settings, options))
@@ -238,7 +246,7 @@ export async function restartBridge(
   options: BridgeStartOptions = {},
 ): Promise<BridgeRestartResult> {
   const host = hostedBridgeProcess()
-  if (host !== null) return host.machineBridgeRestart(settings)
+  if (host !== null) return hostedRestart(host, settings, options)
   try {
     const result = await supervisorRestartBridge(bridgePort, supervisorLaunchArguments(settings, options))
     supervisorAnswered(bridgePort)
@@ -361,7 +369,8 @@ export async function prepareHostedBridgeForConnect(
     }
   }
   if (status.running) return { kind: 'ready' }
-  const result = await host.machineBridgeRestart(settings)
+  // The Connect press itself.
+  const result = await hostedRestart(host, settings, { operatorPress: true })
   if (!result.ok) {
     if (result.reason === 'exited' && result.lastExit?.consoleLineId) {
       // The child this press started ended a firmware update: its outcome is

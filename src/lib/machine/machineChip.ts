@@ -20,6 +20,10 @@ export interface MachineChipFacts {
   /** WO-2774: the Probing screen holds a stopped probe run - its red
    *  "Stopped at step N" or "Did not start" line is up. */
   probeRunStopped?: boolean
+  /** WO-3098: the session's E-STOP latch as its caller passes it. The header
+   *  chip and the Control state chip both read the whole latch, connect-time
+   *  included (machineSession estopNeedsReset, WO-3190). */
+  estopTripped?: boolean
   /**
    * The live controller is the only datum authority. A connected chip without
    * one fails closed to "Not homed"; it never substitutes the render store's
@@ -35,6 +39,7 @@ const RUNNING: MachineChipView = { state: 'running', label: 'Running' }
 const HELD: MachineChipView = { state: 'held', label: 'Held' }
 const ALARM: MachineChipView = { state: 'alarm', label: 'Alarm' }
 const STOPPED: MachineChipView = { state: 'stopped', label: 'Stopped' }
+const ESTOP: MachineChipView = { state: 'alarm', label: 'E-STOP' }
 
 /**
  * Derive the header's one machine reading from live controller facts.
@@ -45,6 +50,10 @@ const STOPPED: MachineChipView = { state: 'stopped', label: 'Stopped' }
  */
 export function deriveMachineChip(facts: MachineChipFacts): MachineChipView {
   if (facts.connectionPhase !== 'connected') return OFFLINE
+  // WO-3098 (owner 10-23, CT-16): the latch is the session's, on every route.
+  // The bridge keeps reporting idle behind it, so waiting for `alarm` left
+  // this chip green "Ready" beside the Control chip's E-STOP.
+  if (facts.estopTripped) return ESTOP
   if (facts.machineState === 'alarm') return ALARM
   if (facts.programM0Held) return HELD
   if (facts.machineState === 'hold') return HELD

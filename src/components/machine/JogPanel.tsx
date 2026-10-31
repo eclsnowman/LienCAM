@@ -1,5 +1,6 @@
 import { textFor, useText } from '../../i18n'
 const controlText = textFor('control-screens-not-probing')
+const gamepadText = textFor('gamepad-jog.wo3259')
 
 // JogPanel - manual machine motion (MACHINE-CONTROL plan, stage 5).
 //
@@ -42,9 +43,9 @@ const controlText = textFor('control-screens-not-probing')
 //   pointer release sends the realtime jog-cancel byte (0x85)
 
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ArrowUpToLine, Home, Unlock } from 'lucide-react'
+import { ArrowUpToLine, Gamepad2, Home, Unlock } from 'lucide-react'
 import { controlMachine, useCamStore } from '../../store'
-import { bridgePresence, useMachineControl } from '../../store/machineControlStore'
+import { useMachineControl } from '../../store/machineControlStore'
 import { parkCarrierMachine, useMachineActions } from '../../store/machineActionsStore'
 import { machineSafeZValue } from '../../lib/machine/machineActions'
 import { startHeldJog, type HeldJog } from '../../lib/machine/heldJog'
@@ -63,12 +64,10 @@ import {
   type ControlAxis,
 } from '../../lib/machine/machineSession'
 import { enabledControlAxes, resolveHomingOrder } from '../../lib/machine/controller'
-import { authorize, type OperatorAuthorityFacts } from '../../lib/machine/operatorAuthority'
-import { machineHasNoHomeSwitches } from '../../types'
+import { authorize } from '../../lib/machine/operatorAuthority'
+import { jogAuthorityFacts } from '../../lib/machine/jogAuthorityFacts'
 import { useUiPrefs } from '../../store/uiPrefs'
 import { useDisplayUnits } from './useDisplayUnits'
-import { bridgeHostCapability } from '../../lib/machine/bridgeHost'
-import { controllerSurface } from '../../lib/machine/controllerSurface'
 import {
   ControlCollapsedReadout,
   ControlPanelCollapseToggle,
@@ -83,6 +82,7 @@ import {
   unitLabel,
 } from '../../lib/ui/unitFormat'
 import { NumCell } from './NumCell'
+import { gamepadJogStatusLine, readGamepadJogPrefs, useGamepadJogSession } from '../../lib/machine/gamepadJogInput'
 
 /** Step choices per display unit; stored pref stays mm (canonical). */
 const STEP_CHOICES: Record<'mm' | 'inch', number[]> = {
@@ -165,8 +165,16 @@ function JogPanelView({
   selectedConnectionKind?: 'serial' | 'simulator' | 'bridge' | 'gateway'
 } = {}) {
   useText('control-screens-not-probing')
+  useText('gamepad-jog.wo3259')
+  // WO-3259: the gamepad's session state, shown in the header only while its
+  // Enable is on. It says "Gamepad step" in Continuous too: the pad only steps.
+  const gamepadEnabled = useGamepadJogSession((s) => s.enabled)
+  const gamepadPhase = useGamepadJogSession((s) => s.phase)
+  const gamepadHold = useGamepadJogSession((s) => s.hold)
+  const setGamepadEnabled = useGamepadJogSession((s) => s.setEnabled)
+  const gamepadRead = readGamepadJogPrefs(useUiPrefs((s) => s.gamepadJog))
+  const gamepadUnusable = gamepadRead.status !== 'ok'
   const machineState = useMachineControl((s) => s.machineState)
-  const connected = useMachineControl((s) => s.connectionPhase) === 'connected'
   const connectionPhase = useMachineControl((s) => s.connectionPhase)
   const connectionKind = useMachineControl((s) => s.connectionKind)
   const connectionDetail = useMachineControl((s) => s.connectionDetail)
@@ -220,7 +228,7 @@ function JogPanelView({
    * What changes is that the tooltip stops sending the operator to home a
    * machine with nothing to home with.
    */
-  const noHomeSwitches = machineHasNoHomeSwitches(machine)
+  // WO-3259: jogAuthorityFacts derives it (machineHasNoHomeSwitches) from `machine`.
   const jogStep = useUiPrefs((s) => s.machineJogStepMm)
   const jogFeed = useUiPrefs((s) => s.machineJogFeedMmMin)
   const jogContinuous = useUiPrefs((s) => s.machineJogContinuous)
@@ -234,27 +242,6 @@ function JogPanelView({
   const homingInFlightRef = useRef(false)
   const [homeRequestPending, setHomeRequestPending] = useState(false)
 
-  const presence = bridgePresence({
-    connectionPhase,
-    connectionKind,
-    bridgeControllerPresence,
-    bridgeProcessPresence,
-  })
-  const selectedTransport = connectionKind ?? selectedConnectionKind
-  const hasBridgeSurface = controllerSurface(machine).bridgeSettings
-    && selectedTransport === 'bridge'
-  const canOwnBridge = bridgeHostCapability() !== 'unhosted'
-  const bridgeIncidentObserved = connectionDetail !== null
-    || bridgeProcessPresence !== 'unknown'
-  const bridgeJogRefusal = !hasBridgeSurface || !bridgeIncidentObserved
-    ? null
-    : presence.socket === 'closed'
-      ? canOwnBridge
-        ? controlText('JogPanel.text004')
-        : controlText('JogPanel.text005')
-      : canOwnBridge && (presence.process === 'stopped' || presence.process === 'gave-up')
-        ? controlText('JogPanel.text006')
-        : null
   // WO-914 SAFETY: HOME ALL PASSES THIS MACHINE'S OWN ORDER.
   //
   // The order the axes home in is a per-machine setting, not a preference:
@@ -298,20 +285,27 @@ function JogPanelView({
   // WO-1992: every gate on this panel - jog, home, safe Z, unlock - is a row
   // of the operator authority table. Operator ruling 2026-09-14: while the E-STOP blinks
   // every motion control is dead and says why, in the transport header's words.
-  const authorityFacts: OperatorAuthorityFacts = {
-    connected,
+  // WO-3259: assembled in jogAuthorityFacts.ts, the one derivation the
+  // gamepad's step jog asks with too; this panel still subscribes to each fact.
+  const authorityFacts = jogAuthorityFacts({
+    connectionPhase,
+    connectionKind,
+    connectionDetail,
+    bridgeControllerPresence,
+    bridgeProcessPresence,
+    selectedConnectionKind,
     machineState,
     jobPhase,
-    estopLatched,
     homed,
-    noHomeSwitches,
+    machine,
+    safeZ,
+    estopLatched,
     softLimitLatched,
     toolChangeHold,
     pauseTakesCommands,
     homingInFlight,
-    bridgeJogRefusal,
-    safeZSet: safeZ !== null,
-  }
+  })
+  const bridgeJogRefusal = authorityFacts.bridgeJogRefusal ?? null
   const jogGate = authorize('jog', authorityFacts)
   const jogAllowed = jogGate.allowed
   const homeGate = authorize('home', authorityFacts)
@@ -620,7 +614,34 @@ function JogPanelView({
   return (
     <section className="panel control-panel">
       <div className="panel-header">
-        <span className="panel-title">{controlText('JogPanel.text029')}</span>
+        <span className="panel-title jog-panel-title">{controlText('JogPanel.text029')}</span>
+        <button
+          type="button"
+          className="panel-action-btn jog-gamepad-toggle"
+          data-testid="control-jog-gamepad-toggle"
+          aria-pressed={gamepadEnabled}
+          disabled={gamepadUnusable}
+          data-tooltip={gamepadUnusable
+            ? gamepadJogStatusLine(gamepadPhase, gamepadRead.status === 'unreadable' ? 'unreadable' : 'unmapped')
+            : gamepadEnabled ? gamepadText('toggleOn') : gamepadText('toggleOff')}
+          aria-label={gamepadEnabled ? gamepadText('toggleOn') : gamepadText('toggleOff')}
+          onClick={() => setGamepadEnabled(!gamepadEnabled)}
+        >
+          <Gamepad2 size={20} strokeWidth={2.25} />
+        </button>
+        {gamepadEnabled && (
+          // One line, never a taller header (the rail's no-growth rule); the
+          // whole sentence rides the tooltip when it is cut.
+          <span
+            className="control-field-label"
+            data-testid="control-jog-gamepad-status"
+            data-gamepad-phase={gamepadPhase}
+            data-tooltip={gamepadJogStatusLine(gamepadPhase, gamepadHold)}
+            style={{ flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          >
+            {gamepadJogStatusLine(gamepadPhase, gamepadHold)}
+          </span>
+        )}
         {/* WO-184: folded, Jog used to show NOTHING - Operator's annotated shot
             left it expanded for exactly that reason ("Jog collapsed is total
             currently, so showing as open"). The D-pad is a CONTROL and stays

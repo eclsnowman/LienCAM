@@ -1,0 +1,20 @@
+/* WO-3308: Arrange mode. Colours and sizes come from the theme tokens only. */
+.arrange-column { display: flex; flex-direction: column; gap: var(--sp4); min-height: 0; }
+.arrange-frame { position: relative; outline: 1px dashed var(--tx2); outline-offset: 2px; border-radius: var(--r-md); }
+.arrange-frame[data-locked] { outline-style: solid; outline-color: var(--b1); }
+.arrange-grip { position: absolute; top: calc(var(--h-head) / 2 - 10px); right: var(--sp4); z-index: 1; width: 20px; height: 20px; cursor: grab; border-radius: var(--r-sm); background: var(--ctl); border: 1px solid var(--ctl-bd); }
+.arrange-grip::before { content: ''; position: absolute; inset: 5px 4px; background: repeating-linear-gradient(to bottom, var(--tx2) 0 1px, transparent 1px 3px); }
+.arrange-drop { position: relative; z-index: 2; height: 3px; border-radius: 2px; background: var(--acc); margin: calc(var(--sp4) / -2 - 1px) 0; }
+.arrange-win { display: flex; flex-direction: column; gap: var(--sp4); min-width: 0; }
+.arrange-row { display: flex; align-items: center; gap: var(--sp4); flex-wrap: wrap; }
+.arrange-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
+.arrange-item { display: flex; align-items: center; gap: var(--sp3); min-width: 0; }
+.arrange-name { flex: 1 1 6em; min-width: 6em; overflow-wrap: anywhere; }
+.arrange-note { margin: 0; color: var(--tx2); }
+.arrange-changed { color: var(--warn); }
+.arrange-menu { display: flex; align-items: center; gap: var(--sp4); }
+/* until the icon family draws these two glyphs, the slot is masked to a plain triangle */
+.arrange-item .kit-icon[data-icon='move-up'] { -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 11l5-6 5 6z'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 11l5-6 5 6z'/%3E%3C/svg%3E") center / contain no-repeat; }
+.arrange-item .kit-icon[data-icon='move-down'] { -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 5l5 6 5-6z'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 5l5 6 5-6z'/%3E%3C/svg%3E") center / contain no-repeat; }
+/* spec 5.1 rule 4: at a small interface scale the shell's --hit grows the field so it is still 20 px on screen */
+.arrange-win :where(.kit-segment, .kit-text input) { min-height: var(--hit, 20px); }

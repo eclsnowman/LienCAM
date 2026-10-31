@@ -40,6 +40,11 @@ import type { MachineState } from './types'
  *  identically everywhere it can appear. */
 export const ESTOP_BLOCKS_MOTION = 'The software stop is latched. Press CLEAR to reset it.'
 
+/** WO-3087: the top line while an E-STOP has actually tripped - the state
+ *  chip beside it says E-STOP, so the line names the same thing. The
+ *  connect-time latch keeps ESTOP_BLOCKS_MOTION: nothing was pressed then. */
+export const ESTOP_TRIPPED_LINE = 'E-STOP is on. Press CLEAR to reset it.'
+
 /** WO-1042: one offset write per machine may be in flight. */
 export const WORK_OFFSET_WRITE_BUSY =
   'work offset: waiting for the bridge to confirm the previous change'

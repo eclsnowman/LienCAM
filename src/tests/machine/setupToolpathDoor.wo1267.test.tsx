@@ -443,6 +443,12 @@ async function operatorLoadsTheSetup(): Promise<void> {
     fireEvent.click(screen.getByTestId('control-load-setup-item-setup1'))
     await Promise.resolve()
   })
+  // WO-3125/WO-3292: the G-code text route's Setup Load spans several real
+  // tasks (MessageChannel, not faked timers); wait for it to finish.
+  const load = await import('../../lib/machine/setupLoadPreparation')
+  for (let i = 0; i < 500 && (load.setupLoadInProgress() || load.setupLoadAdoptionInProgress()); i++) {
+    await act(async () => { await load.yieldSetupLoadTask() })
+  }
 }
 
 describe('WO-1267: a setup loads on a controller with no G-code interpreter', () => {

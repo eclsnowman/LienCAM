@@ -40,6 +40,7 @@ import type {
   StableId,
   SweepRequest,
   TessQuality,
+  TransformBodyRequest,
   Vec3,
 } from '../geom-service.ts'
 
@@ -63,6 +64,7 @@ const api = {
   makeLoft: (req: LoftRequest) => engine.makeLoft(req), // GEO-5
   makeHole: (req: HoleRequest) => engine.makeHole(req), // GEO-5
   applyBodyPattern: (req: PatternRequest) => engine.applyBodyPattern(req), // GEO-5
+  transformBody: (req: TransformBodyRequest) => engine.transformBody(req), // WO-3244
   makeSolidFromPlanarFaces: (req: PlanarFaceSet) => engine.makeSolidFromPlanarFaces(req), // MSH-3
   recognizeFeatures: (h: BodyHandle) => engine.recognizeFeatures(h), // GEO-6
   queryFeatures: (h: BodyHandle, query: FeatureQuery) => engine.queryFeatures(h, query), // GEO-6

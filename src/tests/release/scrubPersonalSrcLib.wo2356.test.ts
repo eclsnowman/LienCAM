@@ -34,26 +34,11 @@ describe('WO-2356 personal information in library source', () => {
     // The scanner treats the hyphenated product name as a standalone surname.
     // WO-2402 explicitly exempts these persisted IDs in the real manifest.
     const report = evidence('scan')
-    // WO-2537 removed two private debug PNGs; WO-2480 added nesting/proxy.ts: 482 -> 481.
-    // WO-2637 (ca58aa923) added post/toolNumbers.ts: 481 -> 482.
-    // WO-2668 added machine/outputPinWatch.ts: 482 -> 483.
-    // WO-2784 RE-PIN 483 -> 516: WO-2759 diagnostics/ (7), WO-2725 projectOpen/ (4 + 14 example
-    // thumbnails), WO-2677 machine/macros/macroOutputSelection.ts, WO-2616 sketch/patterns.ts +
-    // solver/dependentDimensionRouting.ts + solver/dependentFeatures.ts, WO-2322
-    // sketch/sketcher/overlays/SketchPatternEditor.tsx, WO-2748 sketch/tools/dimPreviewConnector.ts +
-    // dimensionGuideSizing.ts, WO-2720 update/releaseCheck.ts.
-    // WO-2829 RE-PIN 516 -> 518: WO-2787 added cam/adaptiveClearing2d/engine/
-    // repositionTime.ts (b850cece6b); WO-2809 added machine/probingSession.ts (1e7a259aea).
-    // WO-2875 RE-PIN 518 -> 523: WO-2854 sketch/sketchEditorPose.ts, WO-2857
-    // cam/headlessFeatureReplay.ts + cam/modelWorkbenchHelpers.ts, WO-2864
-    // tools/projectLibraryIdentity.ts, WO-2867 tools/toolImportIdentity.ts.
-    // WO-2875 RE-PIN 523 -> 525: WO-2858 operatorLabels.ts, WO-2877 format/lengthDisplay.ts.
-    // WO-2882 RE-PIN 525 -> 527: WO-2859 cam/meshChainInstances.ts (ac6e219161),
-    // WO-2878 machine/currentTool.ts (6cf08b5011).
-    // WO-3056 RE-PIN 527 -> 569: 42 library source files were added since WO-2882 (tree growth,
-    // not a scrub change); the hit and rule counts below are unchanged.
-    // WO-3059 RE-PIN 569 -> 570: WO-3021 added cam/chamferFromModel.ts (8860bbf478); hits unchanged.
-    expect(report.files).toBe(570)
+    // WO-3208: measure the tracked inventory instead of pinning historical tree
+    // growth. The scanner must still visit every library file and find zero hits.
+    const files = git('ls-files', '-z', '--', 'src/lib').split('\0').filter(Boolean)
+    expect(files.length).toBeGreaterThan(0)
+    expect(report.files).toBe(files.length)
     expect(report.hits).toEqual([])
     expect(Object.entries(report.counts).filter(([rule]) => rule !== 'personal:lien').every(([, count]) => count === 0)).toBe(true)
   }, 30_000)

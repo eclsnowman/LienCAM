@@ -236,6 +236,23 @@ declare module '../../types' {
 export type ModelReferenceRole =
   | 'machining-boundary' | 'stock' | 'origin' | 'avoid' | 'drill-targets' | 'bore-target' | 'edge-chain'
 
+/** One selected Bore feature. Wall ids remain the durable topology authority;
+ * geometric identity/fingerprint records what the operator detected. */
+export interface ModelBoreFeatureBinding {
+  /** Smart Height's last proven body leaf; wall identity remains stable across
+   * later leaf changes and undo. Absent on pre-refresh bindings. */
+  bodyId?: string
+  /** Imported STEP correspondence proved this complete cylindrical wall's rim
+   * from its analytic area and bounding-box midpoint, rather than stack entry. */
+  wallRim?: boolean
+  featureId: string
+  sourceKey: string
+  faceStableId: string
+  loopId: string
+  sourceVersion: number
+  sourceFingerprint: string
+}
+
 export interface ModelReference {
   /** Stable id of the B-rep body the referenced subshapes live on. */
   bodyId: string
@@ -248,6 +265,8 @@ export interface ModelReference {
   /** Role drives nothing in CAM-1's mapping today (a lost id degrades the op
    *  regardless of role); it is carried for CAM-2's role-specific handling. */
   role: ModelReferenceRole
+  /** WO-3169: explicit multi-feature spelling; absent preserves legacy one-wall semantics. */
+  boreFeatures?: ModelBoreFeatureBinding[]
 }
 
 /** WO-2287: how Pocket and closed Contour relieve the inside corners a round cutter
@@ -257,6 +276,9 @@ export interface ModelReference {
 export type CornerReliefStyle = 'none' | 'dogbone' | 't_bone' | 'longest_edge'
 
 // ── Contour 2D ───────────────────────────────────────────────────────────────
+
+/** One loop's holding-tab locations: center fractions, or 'none' (WO-3220). */
+export type ContourTabLocations = number[] | 'none'
 
 export interface ContourParams {
   /** Closed is the legacy/default contour planner. Open machines only open
@@ -291,8 +313,12 @@ export interface ContourParams {
    *  tabCount; an absent or empty entry keeps the evenly-spaced default
    *  (byte-identical legacy output). Optional + additive: absent on older
    *  projects, verbatim (de)serialization, no schema-version bump (same
-   *  precedent as tabShape/floorStockToLeave). */
-  tabLocations?: { [loopId: string]: number[] }
+   *  precedent as tabShape/floorStockToLeave).
+   *  WO-3220: the value 'none' means NO tabs on that loop. Only an applied
+   *  tab suggestion writes it, for a loop where the suggestion found no safe
+   *  place, so the cut matches the accepted partial plan instead of falling
+   *  back to even spacing. Absent and [] still mean even spacing. */
+  tabLocations?: { [loopId: string]: ContourTabLocations }
   /** Which plane the bottom of cut sits on. Resolved to bottomHeight (WCS)
    *  before dispatch (mirrors PocketParams). Absent (older projects) → the op
    *  falls back to bottomHeightMode/absolute resolution (no behavior change). */
@@ -330,6 +356,40 @@ export interface ContourParams {
   trochoidalWidth?: number
   /** Trochoidal centre advance per orbit (mm). Absent follows the tool: 0.1 x its diameter. */
   trochoidalAdvance?: number
+  /** WO-3221: present only on a tab removal contour made by Create tab removal
+   *  contour. It names the tabbed Contour whose tabs this one cuts away and the
+   *  tabs it targets. Absent on every other contour (older projects unchanged).
+   *  Its presence makes the operation depend on its predecessors; a malformed
+   *  value is refused at compute, never read as an ordinary contour. */
+  tabRemovalSource?: ContourTabRemovalSource
+}
+
+/** WO-3221: one holding tab a tab removal contour targets, resolved from the
+ *  source's own tab plan (buildContourTabPlan, re-seaming included). */
+export interface ContourTabRemovalTarget {
+  loopId: string
+  /** `${loopId}#${k}` (the WO-3004 tab index): display only, ordinal, never an identity. */
+  label: string
+  /** Tab center on the source's finish path, world XY mm. */
+  center: { x: number; y: number }
+  width: number
+  height: number
+  shape: 'box' | 'triangular'
+}
+
+/** WO-3221: the link from a tab removal contour to the tabbed Contour it cleans up. */
+export interface ContourTabRemovalSource {
+  version: 1
+  sourceSetupId: string
+  sourceOperationId: string
+  /** The source's authored cut inputs when the cleanup was created (outline,
+   *  side, direction, tabs and their locations, heights, tool size and hand).
+   *  A target is this identity + its loop + its center/profile, so a later
+   *  tab #1 never silently stands in for an earlier tab #1. */
+  sourceIdentity: string
+  /** The outlines that carry the targeted tabs; the cleanup cuts exactly these. */
+  loopIds: string[]
+  targets: ContourTabRemovalTarget[]
 }
 
 /** WO-2289: the Contour Roughing style choices. */
@@ -582,8 +642,12 @@ export interface ThreadMillParams {
   pitch: number                                  // mm per revolution; if tpi set, pitch = 25.4 / tpi
   tpi?: number                                   // optional alternate entry (threads per inch)
   handedness: 'right' | 'left'                   // RH default
-  cutDirection: 'climb' | 'conventional'         // default climb
-  roughingPasses: number                         // legacy explicit radial pass count (used only when radialStepover is unset)
+  cutDirection: 'climb' | 'conventional'         // default climb; drives the direction only while axialDirection is unset
+  /** WO-3193: the operator's axial direction. When set, the orbit sense follows
+   *  direction x hand x spindle and climb/conventional is what results; unset
+   *  (every op saved before WO-3193) derives it from cutDirection as before. */
+  axialDirection?: 'bottom-up' | 'top-down'
+  roughingPasses: number                        // legacy explicit radial pass count (used only when radialStepover is unset)
   radialStepover?: number                        // max radial bite per infeed pass (mm); drives the pass count when set
   springPasses: number                           // extra passes at final radius (>=0, default 0)
   leadInOut: 'arc' | 'none'                       // tangent lead default 'arc'

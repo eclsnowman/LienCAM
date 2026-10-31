@@ -1,12 +1,22 @@
+import { EngraveVcarveFieldHelp } from '../modals/EngraveVcarveFieldHelp'
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
+const txDir = textFor('thread-direction.wo3193')
+const txTabs = textFor('holding-tabs.wo3220')
+const txRemoval = textFor('tab-removal.wo3221')
 const shellText = textFor('app-shell-settings-menus')
 import { create } from 'zustand'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { Sliders, Info, Move3d, Wrench, CheckCircle2, Ungroup, RefreshCw, AlertTriangle, Copy, Trash2, Eye, EyeOff, PenTool, Settings2, Pencil, X, Box, Combine, MousePointer2, Anchor } from 'lucide-react'
+import type { ContourTabApplyOutcome, ContourTabSuggestion, ContourTabSuggestRefusal, ContourTabRemovalMaterial } from '../../store'
+import type { ContourTabRemovalRefusal } from '../../lib/cam/contourTabRemoval'
+import { readTabRemovalBinding } from '../../lib/cam/contourTabRemoval'
+import type { ContourTabRemovalTarget } from '../../lib/cam/types'
+import { holdingMethodLabel } from '../../lib/workholding/holdingMethods'
 import { machineActionsOf, outdatedReasonText, resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, smartHeightStockBounds, useCamStore } from '../../store'
 import { workholdingStopPark } from '../../lib/machine/macros/clampPauseMacro'
 import { useUiPrefs } from '../../store/uiPrefs'
+import { useCamShortcutHints } from '../settings/CamShortcutMap'
 import { DisclosureSection } from '../ui/DisclosureSection'
 import { GeometryColorSwatch } from './GeometryColorSwatch'
 import { isMeshBooleanSourceRow, isBooleanResultRow, hasModelBooleanBody } from '../../lib/cam/booleanMeshModel'
@@ -30,9 +40,11 @@ import {
   type BoreParams,
   type ChamferHeightReference,
   type ChamferParams,
+  type ThreadMillParams,
   type VCarveParams,
   type ContourCuttingStrategy,
   type ContourParams,
+  type ContourTabLocations,
   type ContourRoughingStyle,
   type EngraveParams,
   type EngraveStyle,
@@ -85,6 +97,8 @@ import { RoughingScopeSelector } from './RoughingScopeSelector'
 import { SetupHoldingEditor } from './SetupPanel'
 import { deriveFaceLoops, getBrepPayload, readStep, setBrepPayload, removeBrepPayload } from '../../lib/cam/geometry/occt/model/modelClient'
 import { toolTypeMeta } from '../../lib/tool/toolMeta'
+import { spindleSignForTool } from '../../lib/tool/cutHand'
+import { resolveThreadMotion, type ThreadAxialDirection } from '../../lib/cam/threadHelix'
 import { evenTabFractions } from '../../lib/viewport/tabPlacement'
 import { isModelOriginGeometry, resolveOwningModelItemId } from '../../lib/cam/modelOrigin'
 import { resolveModelReferenceFrame } from '../../lib/cam/modelReferenceFrame'
@@ -3011,7 +3025,7 @@ function QuickEditCard({ op }: { op: Operation }) {
         )
       )}
 
-      <div className="props-quickedit-feed">
+      <div className="props-quickedit-feed" data-engrave-vcarve-field="cutFeed">
         <span className="props-quickedit-flabel">{tx('PropertiesPanel.Feed')}</span>
         <NumericInput
           className="props-quickedit-input"
@@ -3025,7 +3039,7 @@ function QuickEditCard({ op }: { op: Operation }) {
         />
         <span className="props-quickedit-unit">{feedLabel(displayUnits)}</span>
       </div>
-      <div className="props-quickedit-feed">
+      <div className="props-quickedit-feed" data-engrave-vcarve-field="plunge">
         <span className="props-quickedit-flabel">{tx('PropertiesPanel.Plunge')}</span>
         <NumericInput
           className="props-quickedit-input"
@@ -3046,6 +3060,7 @@ function QuickEditCard({ op }: { op: Operation }) {
 // ---- Operation properties ----
 function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getState>['project']['setups'][0]['operations'][0] }) {
   useText('cam-operations-new-operation')
+  const camHints = useCamShortcutHints()
   const activeSetupId = useCamStore((s) => s.project.activeSetupId)
   const project = useCamStore((s) => s.project)
   const ownerSetup = project.setups.find((s) => s.id === activeSetupId)
@@ -3120,10 +3135,26 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
   const datumPickGenerationRef = useRef(0)
   // Contour tab placement (Tabs v2): whether the viewport edit mode is active.
   const [tabEditActive, setTabEditActive] = useState(false)
+  // WO-3220: the suggestion under review (nothing is written until Apply) and
+  // the one line the last Suggest/Apply produced.
+  const [tabSuggestion, setTabSuggestion] = useState<ContourTabSuggestion | null>(null)
+  const [tabSuggestNote, setTabSuggestNote] = useState<string | null>(null)
+  // WO-3221: Create tab removal contour - the review under way (every tab
+  // starts selected), the remaining-stock line and the last one-line outcome.
+  const [tabRemovalReview, setTabRemovalReview] = useState<{
+    targets: ContourTabRemovalTarget[]; loopIds: string[]; holdingMethod?: string; notes: string; selected: string[]
+  } | null>(null)
+  const [tabRemovalMaterial, setTabRemovalMaterial] = useState<ContourTabRemovalMaterial | 'reading' | null>(null)
+  const [tabRemovalNote, setTabRemovalNote] = useState<string | null>(null)
   // Switching ops / unmounting always leaves the viewport tab-edit mode (a
   // no-op when it was never entered).
   useEffect(() => {
     setTabEditActive(false)
+    setTabSuggestion(null)
+    setTabSuggestNote(null)
+    setTabRemovalReview(null)
+    setTabRemovalMaterial(null)
+    setTabRemovalNote(null)
     return () => { getVp()?.exitContourTabEditMode?.(false) }
   }, [op.id])
   const regenerate = () => { if (activeSetupId) computeOperationToolpath(activeSetupId, op.id) }
@@ -4167,6 +4198,16 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
   const commitPasses = (patch: Partial<PassParams>) => {
     if (activeSetupId) updateOperation(activeSetupId, op.id, { passes: { ...op.passes, ...patch }, ...STALE })
   }
+  // WO-3193: the thread mill's Bottom-up / Top-down choice (orbit sense then
+  // follows direction x hand x cutter; climb/conventional is shown as the result).
+  const commitThreadAxialDirection = (axialDirection: ThreadAxialDirection) => {
+    if (!activeSetupId || op.type !== 'thread_mill') return
+    pushHistory()
+    updateOperation(activeSetupId, op.id, {
+      params: { ...op.params, axialDirection } as Record<string, unknown>,
+      ...STALE,
+    })
+  }
   const adaptiveParams = op.params as unknown as ACParams
   const commitAdaptiveParams = (patch: Partial<ACParams>) => {
     if (!activeSetupId || op.type !== 'adaptive_clearing_2d') return
@@ -4430,9 +4471,11 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
     op.contourTabPreview !== undefined &&
     Array.isArray(op.contourTabPreview.loops) &&
     op.contourTabPreview.loops.length > 0
-  const contourTabLocations = (contourParams.tabLocations ?? {}) as { [loopId: string]: number[] }
+  const contourTabLocations = (contourParams.tabLocations ?? {}) as { [loopId: string]: ContourTabLocations }
   const customTabCount = Object.values(contourTabLocations)
-    .reduce((n, arr) => n + (arr?.length ?? 0), 0)
+    .reduce((n, at) => n + (Array.isArray(at) ? at.length : 0), 0)
+  // WO-3220: outlines an applied suggestion left without tabs ('none').
+  const noTabOutlineCount = Object.values(contourTabLocations).filter((at) => at === 'none').length
   const freshContourOp = () =>
     useCamStore.getState().project.setups.find((s) => s.id === activeSetupId)
       ?.operations.find((o) => o.id === op.id)
@@ -4441,13 +4484,14 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
     const cur = freshContourOp()
     if (!cur) return
     const params = cur.params as unknown as ContourParams
-    const next = updater([...(params.tabLocations?.[loopId] ?? [])])
+    const existing = params.tabLocations?.[loopId]
+    const next = updater(Array.isArray(existing) ? [...existing] : [])
       .filter((f) => Number.isFinite(f))
       // Wrap only out-of-range values: the mod dance perturbs in-range
       // fractions by one ulp, which would drift stored positions.
       .map((f) => (f >= 0 && f < 1 ? f : ((f % 1) + 1) % 1))
       .sort((a, b) => a - b)
-    const map: { [id: string]: number[] } = { ...(params.tabLocations ?? {}) }
+    const map: { [id: string]: ContourTabLocations } = { ...(params.tabLocations ?? {}) }
     if (next.length === 0) delete map[loopId]
     else map[loopId] = next
     useCamStore.getState().updateOperation(activeSetupId, op.id, {
@@ -4475,10 +4519,13 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
     // First entry with no custom locations SEEDS them from the evenly-spaced
     // centers currently shown, so hand editing starts from what the user sees.
     const count = Math.max(1, Math.round(params.tabCount ?? DEFAULT_CONTOUR_TABS.count))
-    const seeded: { [id: string]: number[] } = { ...(params.tabLocations ?? {}) }
+    // A loop set to 'none' by an applied suggestion stays without tabs; a
+    // click on it adds the first hand-placed one.
+    const seeded: { [id: string]: ContourTabLocations } = { ...(params.tabLocations ?? {}) }
     let seededAny = false
     for (const l of cur.contourTabPreview.loops) {
-      if (!seeded[l.loopId] || seeded[l.loopId].length === 0) {
+      const at = seeded[l.loopId]
+      if (at !== 'none' && (!at || at.length === 0)) {
         seeded[l.loopId] = evenTabFractions(count)
         seededAny = true
       }
@@ -4502,6 +4549,101 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
       onExit: () => setTabEditActive(false),
     })
     setTabEditActive(true)
+  }
+  // WO-3220: Suggest tab locations. The store reads the inputs the current
+  // preview was derived from; a contour it cannot suggest for gets one line.
+  const suggestRefusalText = (reason: ContourTabSuggestRefusal | 'changed' | 'nothing-found'): string => ({
+    'missing': txTabs('refuseMissing'), 'not-contour': txTabs('refuseNotContour'), 'open': txTabs('refuseOpen'),
+    'roughing': txTabs('refuseRoughing'), 'tabs-off': txTabs('refuseTabsOff'),
+    'generate-first': txTabs('refuseGenerateFirst'), 'stale': txTabs('refuseStale'),
+    'all-hand-placed': txTabs('refuseAllHandPlaced'), 'changed': txTabs('refuseChanged'),
+    'nothing-found': txTabs('refuseNothingFound'),
+  })[reason]
+  const suggestTabLocations = () => {
+    if (!activeSetupId) return
+    endTabEdit()
+    const outcome = useCamStore.getState().suggestContourTabLocations(activeSetupId, op.id)
+    setTabSuggestion(outcome.ok ? outcome.suggestion : null)
+    setTabSuggestNote(outcome.ok ? null : suggestRefusalText(outcome.reason))
+  }
+  const applyTabSuggestion = () => {
+    if (!activeSetupId || !tabSuggestion) return
+    const outcome: ContourTabApplyOutcome = useCamStore.getState().applyContourTabSuggestions(activeSetupId, op.id, tabSuggestion)
+    if (outcome.ok) {
+      setTabSuggestion(null)
+      setTabSuggestNote(outcome.noneLoopIds.length > 0
+        ? txTabs('appliedWithNone', { count: outcome.applied, none: outcome.noneLoopIds.length })
+        : txTabs('applied', { count: outcome.applied }))
+      return
+    }
+    setTabSuggestion(outcome.recomputed ?? null)
+    setTabSuggestNote(suggestRefusalText(outcome.reason))
+  }
+  const cancelTabSuggestion = () => {
+    setTabSuggestion(null)
+    setTabSuggestNote(null)
+  }
+  // WO-3221: Create tab removal contour. Review first (all tabs, the setup's
+  // holding method); Create makes a separate Contour and never edits this one.
+  const tabRemovalRefusalText = (reason: ContourTabRemovalRefusal | 'rejected'): string => ({
+    'missing': txRemoval('refuseMissing'), 'not-contour': txRemoval('refuseNotContour'),
+    'is-cleanup': txRemoval('refuseIsCleanup'), 'open': txRemoval('refuseOpen'), 'tabs-off': txRemoval('refuseTabsOff'),
+    'generate-first': txRemoval('refuseGenerateFirst'), 'stale': txRemoval('refuseStale'),
+    'no-tabs': txRemoval('refuseNoTabs'), 'selective': txRemoval('refuseSelective'),
+    'flipped': txRemoval('refuseFlipped'), 'rejected': txRemoval('refuseRejected'),
+  })[reason]
+  const beginTabRemoval = () => {
+    if (!activeSetupId) return
+    endTabEdit()
+    const outcome = useCamStore.getState().reviewContourTabRemoval(activeSetupId, op.id)
+    if (!outcome.ok) {
+      setTabRemovalReview(null)
+      setTabRemovalNote(tabRemovalRefusalText(outcome.reason))
+      return
+    }
+    setTabRemovalNote(null)
+    setTabRemovalReview({ targets: outcome.targets, loopIds: outcome.loopIds, holdingMethod: outcome.holdingMethod,
+      notes: outcome.notes, selected: outcome.targets.map((target) => target.label) })
+    setTabRemovalMaterial('reading')
+    const setupId = activeSetupId, opId = op.id
+    void useCamStore.getState().readContourTabRemovalMaterial(setupId, opId).then((material) => {
+      if (useCamStore.getState().project.activeSetupId === setupId) setTabRemovalMaterial(material)
+    })
+  }
+  const toggleTabRemovalTarget = (label: string, on: boolean) => {
+    setTabRemovalReview((review) => review && {
+      ...review, selected: on ? [...review.selected.filter((l) => l !== label), label] : review.selected.filter((l) => l !== label),
+    })
+    setTabRemovalNote(null)
+  }
+  const createTabRemoval = () => {
+    if (!activeSetupId || !tabRemovalReview) return
+    const outcome = useCamStore.getState().createContourTabRemoval(activeSetupId, op.id, tabRemovalReview.selected)
+    if (!outcome.ok) {
+      setTabRemovalNote(tabRemovalRefusalText(outcome.reason))
+      return
+    }
+    setTabRemovalReview(null)
+    setTabRemovalMaterial(null)
+    setTabRemovalNote(txRemoval('created', { name: outcome.name }))
+  }
+  const cancelTabRemoval = () => {
+    setTabRemovalReview(null)
+    setTabRemovalMaterial(null)
+    setTabRemovalNote(null)
+  }
+  const suggestionReasonText = (reasons: Record<string, number>): string => {
+    const labels = new Set<string>()
+    for (const reason of Object.keys(reasons)) {
+      labels.add(reason === 'sharp-corner-or-short-span' ? txTabs('reasonCorner')
+        : reason === 'entry-exit' ? txTabs('reasonEntry')
+        : reason === 'opposite-wall' ? txTabs('reasonOppositeWall')
+        : reason.startsWith('source-ring:') ? txTabs('reasonOtherOutline')
+        : reason.startsWith('fixture:') ? txTabs('reasonFixture')
+        : reason === 'material-connection-unresolved' || reason === 'no-local-material-span' ? txTabs('reasonMaterial')
+        : txTabs('reasonOther'))
+    }
+    return [...labels].join(', ')
   }
   const resetTabLocations = () => {
     endTabEdit()
@@ -5007,7 +5149,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
   const tool = toolLibrary.find((t) => t.id === op.toolId)
 
   return (
-    <>
+    <EngraveVcarveFieldHelp operation={op.type}>
       {/* Scrolling body — the props-section sits inside the panel-body scroll. */}
       {/* WO-1960: the section is the containing box for its rows. Without it the
           rows' offset parent is the page, so every row scrolled below the fold
@@ -5470,6 +5612,43 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
               )}
             </>
           )}
+          {op.type === 'thread_mill' && (() => {
+            // An op whose kind/hand/cut cannot resolve shows no choice here
+            // (its compute says why); the panel itself must still render.
+            let threadMotion: ReturnType<typeof resolveThreadMotion>
+            try {
+              threadMotion = resolveThreadMotion(
+                op.params as unknown as ThreadMillParams,
+                tool ? spindleSignForTool(tool) : 1,
+              )
+            } catch {
+              return null
+            }
+            return (
+              <div className="props-group" data-testid="props-thread-mill-direction">
+                <div className="props-label">{txDir('direction')}</div>
+                <div className="props-value" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 5, whiteSpace: 'normal' }}>
+                  <div className="op-toggle-row">
+                    <button
+                      type="button"
+                      className={`op-toggle-btn ${threadMotion.axialDirection === 'bottom-up' ? 'op-toggle-active' : ''}`}
+                      data-testid="props-thread-direction-bottom-up"
+                      onClick={() => commitThreadAxialDirection('bottom-up')}
+                    >{txDir('bottomUp')}</button>
+                    <button
+                      type="button"
+                      className={`op-toggle-btn ${threadMotion.axialDirection === 'top-down' ? 'op-toggle-active' : ''}`}
+                      data-testid="props-thread-direction-top-down"
+                      onClick={() => commitThreadAxialDirection('top-down')}
+                    >{txDir('topDown')}</button>
+                  </div>
+                  <span data-testid="props-thread-direction-result">
+                    {threadMotion.cut === 'climb' ? txDir('resultClimb') : txDir('resultConventional')}
+                  </span>
+                </div>
+              </div>
+            )
+          })()}
           {op.type === 'thread_mill' && (
             <>
               {threadMillSmartPanelState?.kind === 'smart_v2' ? (
@@ -5986,6 +6165,14 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
             </>
           )}
           {conventionalHeightRows.map(conventionalHeightRow)}
+          <div className="props-group" data-testid="props-minimize-z-travel">
+            <label className="props-label">
+              <input type="checkbox" checked={op.heights.minimizeZTravel !== false}
+                onChange={e => commitHeights({ minimizeZTravel: e.target.checked })} />
+              {tx('PropertiesPanel.Minimize_Z_travel')}
+            </label>
+            <div className="props-value">{tx('PropertiesPanel.Unchecked_hops_at_Retract')}</div>
+          </div>
           {showRefPlane && (
             <>
               <div className="props-group">
@@ -7233,6 +7420,17 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                       <span>{contourParams.tabs ? tx('PropertiesPanel.Enabled') : tx('PropertiesPanel.Disabled')}</span>
                     </label>
                   </div>
+                  {(() => {
+                    const read = readTabRemovalBinding(op)
+                    if (read.kind !== 'bound') return null
+                    const source = ownerSetup?.operations.find((candidate) => candidate.id === read.binding.sourceOperationId)
+                    return (
+                      <p className="op-hint" data-testid="props-contour-tab-removal-linked" style={{ margin: 0, whiteSpace: 'normal' }}>
+                        {txRemoval('linked', { name: source?.name ?? read.binding.sourceOperationId,
+                          count: read.binding.targets.length, outlines: read.binding.loopIds.length })}
+                      </p>
+                    )
+                  })()}
                   {contourParams.tabs && (
                     <>
                       {numRow(
@@ -7292,7 +7490,13 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                               style={{ whiteSpace: 'normal' }}
                             >{tx('PropertiesPanel.custom_tab_count_field_ignored', { p1: customTabCount, p2: customTabCount === 1 ? '' : tx('PropertiesPanel.s') })}</span>
                           )}
-                          {customTabCount > 0 && (
+                          {noTabOutlineCount > 0 && (
+                            <span
+                              data-testid="props-contour-tab-none-count"
+                              style={{ whiteSpace: 'normal' }}
+                            >{txTabs('outlinesWithoutTabs', { count: noTabOutlineCount })}</span>
+                          )}
+                          {(customTabCount > 0 || noTabOutlineCount > 0) && (
                             <button
                               type="button"
                               className="op-toggle-btn"
@@ -7300,6 +7504,100 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
                               onClick={resetTabLocations}
                               data-tooltip={tx('PropertiesPanel.Discard_the_hand_placed_tab_locations_and_return_to')}
                             >{tx('PropertiesPanel.Reset_to_even_spacing')}</button>
+                          )}
+                          <button
+                            type="button"
+                            className="op-toggle-btn"
+                            data-testid="props-contour-tab-suggest"
+                            onClick={suggestTabLocations}
+                            data-tooltip={txTabs('suggestTooltip')}
+                          >{txTabs('suggest')}</button>
+                          {tabSuggestNote && (
+                            <span data-testid="props-contour-tab-suggest-note" style={{ whiteSpace: 'normal' }}>{tabSuggestNote}</span>
+                          )}
+                          {tabSuggestion && (() => {
+                            const omitted = new Set<string>()
+                            const diagnostics = new Set<string>()
+                            for (const loop of tabSuggestion.loops) {
+                              for (const item of loop.omissions) omitted.add(item.startsWith('holder:') ? txTabs('omittedHolder') : txTabs('omittedFixtures'))
+                              for (const code of loop.diagnostics) diagnostics.add(code.startsWith('zero-central-web') ? txTabs('diagnosticThinWeb') : txTabs('diagnosticOther', { code }))
+                            }
+                            const partial = tabSuggestion.found < tabSuggestion.requested
+                            return (
+                              <div data-testid="props-contour-tab-suggestion" style={{ display: 'flex', flexDirection: 'column', gap: 3, whiteSpace: 'normal' }}>
+                                <span data-testid="props-contour-tab-suggest-found">{txTabs('foundOf', { found: tabSuggestion.found, requested: tabSuggestion.requested })}</span>
+                                {tabSuggestion.loops.map((loop, i) => (
+                                  <span key={loop.loopId} data-testid="props-contour-tab-suggest-loop" className="op-hint">
+                                    {loop.skipped ? txTabs('loopHandPlaced', { index: i + 1 })
+                                      : loop.found === 0 ? txTabs('loopNone', { index: i + 1 })
+                                      : txTabs('loopLine', { index: i + 1, found: loop.found, requested: loop.requested,
+                                          positions: loop.distances.map((d) => d.toFixed(1)).join(', ') })}
+                                    {!loop.skipped && Object.keys(loop.reasons).length > 0 && (
+                                      <> {txTabs('avoided', { reasons: suggestionReasonText(loop.reasons) })}</>
+                                    )}
+                                  </span>
+                                ))}
+                                {[...diagnostics].map((line) => <span key={line} className="op-hint">{line}</span>)}
+                                {omitted.size > 0 && (
+                                  <span className="op-hint" data-testid="props-contour-tab-suggest-omitted">{txTabs('notChecked', { items: [...omitted].join(', ') })}</span>
+                                )}
+                                <div style={{ display: 'flex', gap: 5 }}>
+                                  {tabSuggestion.found > 0 && (
+                                    <button type="button" className="op-toggle-btn" data-testid="props-contour-tab-suggest-apply" onClick={applyTabSuggestion}>
+                                      {partial ? txTabs('applyPartial', { count: tabSuggestion.found }) : txTabs('apply')}
+                                    </button>
+                                  )}
+                                  <button type="button" className="op-toggle-btn" data-testid="props-contour-tab-suggest-cancel" onClick={cancelTabSuggestion}>{txTabs('cancel')}</button>
+                                </div>
+                              </div>
+                            )
+                          })()}
+                          <button
+                            type="button"
+                            className="op-toggle-btn"
+                            data-testid="props-contour-tab-removal"
+                            onClick={beginTabRemoval}
+                            data-tooltip={txRemoval('actionTooltip')}
+                          >{txRemoval('action')}</button>
+                          {tabRemovalNote && (
+                            <span data-testid="props-contour-tab-removal-note" style={{ whiteSpace: 'normal' }}>{tabRemovalNote}</span>
+                          )}
+                          {tabRemovalReview && (
+                            <div data-testid="props-contour-tab-removal-review" style={{ display: 'flex', flexDirection: 'column', gap: 3, whiteSpace: 'normal' }}>
+                              <span data-testid="props-contour-tab-removal-all">{txRemoval('reviewAll', { count: tabRemovalReview.targets.length, outlines: tabRemovalReview.loopIds.length })}</span>
+                              {tabRemovalReview.targets.map((target) => (
+                                <label key={target.label} className="op-hint" data-testid="props-contour-tab-removal-tab" style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={tabRemovalReview.selected.includes(target.label)}
+                                    onChange={(e) => toggleTabRemovalTarget(target.label, e.target.checked)}
+                                  />
+                                  <span>{txRemoval('reviewTab', { label: target.label, x: target.center.x.toFixed(2), y: target.center.y.toFixed(2),
+                                    width: target.width.toFixed(2), height: target.height.toFixed(2),
+                                    shape: target.shape === 'triangular' ? txRemoval('shapeTriangular') : txRemoval('shapeBox') })}</span>
+                                </label>
+                              ))}
+                              <span data-testid="props-contour-tab-removal-holding">
+                                {tabRemovalReview.holdingMethod
+                                  ? txRemoval('reviewHolding', { method: holdingMethodLabel(tabRemovalReview.holdingMethod as Parameters<typeof holdingMethodLabel>[0]) ?? tabRemovalReview.holdingMethod })
+                                  : txRemoval('reviewHoldingNone')}
+                              </span>
+                              {tabRemovalReview.notes.split(/\r?\n/).filter((line) => line.trim() !== '').map((line, i) => (
+                                <span key={i} className="op-hint">{txRemoval('reviewNotes', { note: line.trim() })}</span>
+                              ))}
+                              <span className="op-hint" data-testid="props-contour-tab-removal-material">
+                                {tabRemovalMaterial === 'reading' ? txRemoval('materialReading')
+                                  : tabRemovalMaterial?.status === 'ready' ? txRemoval('materialRetained', { retained: tabRemovalMaterial.retained, count: tabRemovalMaterial.count })
+                                  : tabRemovalMaterial?.status === 'unavailable' ? txRemoval('materialUnavailable', { reason: tabRemovalMaterial.reason })
+                                  : null}
+                              </span>
+                              <span className="op-hint">{txRemoval('reviewRetention')}</span>
+                              <span className="op-hint">{txRemoval('reviewSameSetup')}</span>
+                              <div style={{ display: 'flex', gap: 5 }}>
+                                <button type="button" className="op-toggle-btn" data-testid="props-contour-tab-removal-create" onClick={createTabRemoval}>{txRemoval('create')}</button>
+                                <button type="button" className="op-toggle-btn" data-testid="props-contour-tab-removal-cancel" onClick={cancelTabRemoval}>{txRemoval('cancel')}</button>
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -7463,7 +7761,7 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
           disabled={computing || !op.enabled}
           data-tooltip={!op.enabled
             ? tx('PropertiesPanel.Unsuppress_this_operation_before_generating_its_toolpath')
-            : tx('PropertiesPanel.Compute_regenerate_this_operation_s_toolpath_G')}
+            : camHints.computeRegenerate}
         >
           {computing ? tx('PropertiesPanel.Computing_3') : op.status === 'ready' ? tx('PropertiesPanel.Regenerate') : tx('PropertiesPanel.Generate')}
         </button>
@@ -7502,6 +7800,6 @@ function OperationProperties({ op }: { op: ReturnType<typeof useCamStore.getStat
           >{tx('PropertiesPanel.Cancel')}</button>
         )}
       </div>
-    </>
+    </EngraveVcarveFieldHelp>
   )
 }

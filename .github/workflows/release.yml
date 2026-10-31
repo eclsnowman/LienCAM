@@ -32,6 +32,9 @@ jobs:
   native-bridge:
     uses: ./.github/workflows/native-linux-bridge.yml
 
+  native-macos-bridge:
+    uses: ./.github/workflows/native-macos-bridge.yml
+
   windows:
     # WO-3064: x64 and arm64 installers are both packaged on the x64 runner.
     # The arm64 build is untested; its machine-control bridge stays x64.
@@ -153,6 +156,7 @@ jobs:
           compression-level: 0
 
   macos:
+    needs: [native-macos-bridge]
     # macOS builds are untested and unsigned. Journey testing is a later order.
     # WO-3064: Apple Silicon and Intel are separate builds on their own runners.
     strategy:
@@ -178,8 +182,36 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${RELEASE_TAG#v}"
       - name: Build renderer
         run: npm run build
+      - name: Download Apple Silicon native bridge (alpha, untested on macOS)
+        if: matrix.arch == 'arm64'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: native-bridge-osx-arm64
+          path: native-bridge-artifact
+      - name: Stage Apple Silicon native bridge (alpha, untested on macOS)
+        if: matrix.arch == 'arm64'
+        run: |
+          root=pendant/uc100net/publish/osx-arm64
+          mkdir -p "$root"
+          tar -xzf native-bridge-artifact/liencam-bridge-osx-arm64.tar.gz -C "$root"
+          test -x "$root/liencam-bridge"
+          file "$root/liencam-bridge" | grep 'Mach-O 64-bit executable arm64'
+          for f in libcoreclr.dylib libhostfxr.dylib libhostpolicy.dylib liencam-bridge.dll liencam-bridge.deps.json liencam-bridge.runtimeconfig.json; do test -s "$root/$f"; done
+          test -n "$(find "$root/boards" -name '*.json' -print -quit)"
       - name: Package untested unsigned macOS dmg and zip
         run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
+      - name: Verify packaged bridge CPU and full runtime (alpha, untested on macOS)
+        run: |
+          root="release/mac${{ matrix.arch == 'arm64' && '-arm64' || '' }}/LienCAM.app/Contents/Resources/pendant/uccnc-bridge/native"
+          if [ "${{ matrix.arch }}" = arm64 ]; then
+            test -x "$root/osx-arm64/liencam-bridge"
+            file "$root/osx-arm64/liencam-bridge" | grep 'Mach-O 64-bit executable arm64'
+            for f in libcoreclr.dylib libhostfxr.dylib libhostpolicy.dylib liencam-bridge.dll liencam-bridge.deps.json liencam-bridge.runtimeconfig.json; do test -s "$root/osx-arm64/$f"; done
+            test -n "$(find "$root/osx-arm64/boards" -name '*.json' -print -quit)"
+          else
+            test ! -e "$root/osx-arm64"
+            test ! -e "$root/osx-x64"
+          fi
       - name: Save macOS installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -191,7 +223,7 @@ jobs:
           compression-level: 0
 
   release:
-    needs: [windows, linux, macos, native-bridge]
+    needs: [windows, linux, macos, native-bridge, native-macos-bridge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -210,7 +242,7 @@ jobs:
           pattern: installers-*
           path: release-assets
           merge-multiple: true
-      - name: Collect both standalone native bridge downloads
+      - name: Collect standalone native bridge downloads
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: native-bridge-*
@@ -231,6 +263,12 @@ jobs:
           test -s liencam-bridge-linux-arm64.tar.gz
           sha256sum liencam-bridge-linux-x64.tar.gz liencam-bridge-linux-arm64.tar.gz > native-bridge-SHA256SUMS.txt
           sha256sum --check --strict native-bridge-SHA256SUMS.txt
+      - name: Verify Mac native bridge download checksum (alpha, untested on macOS)
+        run: |
+          cd release-assets
+          test -s liencam-bridge-osx-arm64.tar.gz
+          sha256sum liencam-bridge-osx-arm64.tar.gz > native-macos-bridge-SHA256SUMS.txt
+          sha256sum --check --strict native-macos-bridge-SHA256SUMS.txt
       - name: Write release notes with one Downloads row per file
         run: |
           cat > release-notes.txt <<'NOTES'
@@ -240,6 +278,8 @@ jobs:
           Copy gateway.py to your LinuxCNC PC; it is a separate release download.
           SHA256SUMS.txt and releases.json describe installers and gateway.py.
           Native AXBB-E bridge archives for linux-x64 and linux-arm64 have their own native-bridge-SHA256SUMS.txt.
+          Apple Silicon AXBB-E bridge: alpha, untested on macOS. Intel Mac native control is unsupported.
+          Native osx-arm64 archive has its own native-macos-bridge-SHA256SUMS.txt.
           Route B needs the motors-disabled-first real-board T3 before this draft is published.
 
           ## Downloads

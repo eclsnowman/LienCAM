@@ -21,8 +21,19 @@ import { readableInternalIds } from '../../../lib/operatorLabels'
 // (shared with the page's executor). Edit mode exposes the same profile,
 // boolean mode, and target controls as create. Applying those topology edits
 // rewrites payload + consumes in the same EditFeaturePayloadCommand step.
-// draftAngleDeg / thin are accepted-and-ignored kernel trap fields and are
+// draftAngleDeg is an accepted-and-ignored kernel trap field and is
 // deliberately NOT exposed (see extrudeParams.ts header).
+//
+// WO-3234: Thin. A toggle with wall thickness and side (Inside / Outside /
+// Center) writes wallMode 'thin' + wallThickness + wallSide; with Thin off the
+// payload is the ordinary solid's and a left-over thickness is never checked.
+// WO-3235: Thin runs on every end condition. On Up to next / part one line
+// says each wall stops on its own section, the hollow centre not counting.
+// WO-3237: with Thin on, "Wall along" can name one open chain of the sketch
+// (the Sweep path list, the WO-3236 selector). Its side is Left / Right /
+// Center of the chain's persisted direction; Reverse flips that direction and
+// the viewport arrow shows it. An open chain is never built solid: with Thin
+// off it says so in one line and Apply stays off.
 //
 // WO-035 (UI-107 slice 2): the dialog's live-preview seam, following the
 // OffsetPlaneDialog shape. The intent is geometric only; the page owns the
@@ -32,10 +43,15 @@ import { readableInternalIds } from '../../../lib/operatorLabels'
 
 import { useText, textFor } from '../../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
+const thinText = textFor('thin-extrude.wo3234')
+const thinEndsText = textFor('thin-extrude-ends.wo3235')
+const thinOpenText = textFor('thin-open-extrude.wo3237')
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NumericInput } from '../../ui/NumericInput'
 import type { CommandHistory, FeatureDag } from '../../../doc'
-import type { ExtrudeEndTargetIdentity, ProfileRegion } from '../../../geom/geom-service'
+import type { ExtrudeEndTargetIdentity, ProfileRegion, ThinExtrudeSide, ThinOpenSide } from '../../../geom/geom-service'
+import { reverseSweepPathSelector } from '../../../geom/sweep-path'
+import { sweepPathKey } from '../workbench/sweepPathPicker'
 import { DialogShell } from './DialogShell'
 import { EditFeaturePayloadCommand } from './EditFeaturePayloadCommand'
 import { createFeatureCommand } from './createFeatureCommand'
@@ -45,15 +61,24 @@ import {
   DEFAULT_EXTRUDE_BOOL_MODE,
   DEFAULT_EXTRUDE_DIRECTION,
   DEFAULT_EXTRUDE_END_CONDITION,
+  DEFAULT_THIN_OPEN_WALL_SIDE,
+  DEFAULT_THIN_WALL_SIDE,
+  DEFAULT_THIN_WALL_THICKNESS,
   EXTRUDE_BOOL_MODES,
   EXTRUDE_BOOL_MODE_LABELS,
   EXTRUDE_DIRECTIONS,
   EXTRUDE_DIRECTION_LABELS,
   EXTRUDE_END_CONDITIONS,
   EXTRUDE_END_CONDITION_LABELS,
+  THIN_OPEN_WALL_SIDES,
+  THIN_OPEN_WALL_SIDE_LABELS,
+  THIN_WALL_SIDES,
+  THIN_WALL_SIDE_LABELS,
   isExtrudeBoolMode,
   isExtrudeDirection,
   isExtrudeEndCondition,
+  isThinOpenWallSide,
+  isThinWallSide,
   type ExtrudeBoolMode,
   type ExtrudeDirection,
   type ExtrudeEndCondition,
@@ -65,7 +90,7 @@ import {
   type ProfilePickStopper,
   type StartProfilePick,
 } from '../workbench/profileRegionPicker'
-import type { ProfileSelector, RegionSignature } from '../workbench/regionSelector'
+import { openChainCandidatesForSketch, type ProfileSelector, type RegionSignature } from '../workbench/regionSelector'
 
 export interface ExtrudeFeaturePayload {
   opType: 'extrude'
@@ -87,14 +112,37 @@ export interface ExtrudeFeaturePayload {
   targetFeatureId?: string
   /** Optional driving expression (e.g. "2*base+5") -- see featureDimension.ts. */
   expression?: string
+  /** WO-3234: absent = solid. 'thin' requires wallThickness and wallSide. */
+  wallMode?: 'solid' | 'thin'
+  wallThickness?: number
+  /** WO-3237: left / right / center of travel when profileSelector is a sketch-chain. */
+  wallSide?: ThinExtrudeSide | ThinOpenSide
   name: string
+}
+
+/** WO-3234: the Thin part of a preview intent / payload; present only for Thin. */
+export interface ExtrudeWallIntent {
+  wallMode?: 'thin'
+  wallThickness?: number
+  wallSide?: ThinExtrudeSide | ThinOpenSide
+}
+
+/** WO-3234: the wall keys an Apply (and the preview that must equal it) writes.
+ *  Thin writes all three. Solid writes nothing on a new extrude -- absent means
+ *  solid -- and keeps an explicit 'solid' on an edited one that already said so
+ *  (every reopened pre-Thin extrude does), dropping any stale thickness/side. */
+export function extrudeWallPayloadFields(wall: ExtrudeWallIntent, priorWallMode?: unknown): Record<string, unknown> {
+  if (wall.wallMode === 'thin') {
+    return { wallMode: 'thin', wallThickness: wall.wallThickness, wallSide: wall.wallSide }
+  }
+  return priorWallMode === undefined ? {} : { wallMode: 'solid' }
 }
 
 // WO-035 (UI-107 slice 2): one preview request. Geometric fields only (the
 // feature name never rides here, so renaming can't kill the ghost). This shape
 // is deliberately the PROFILE-CONSUMING template revolve/sweep/loft will
 // extend: a sketch profile reference + a newBody/add-or-cut target.
-export interface ExtrudePreviewIntent {
+export interface ExtrudePreviewIntent extends ExtrudeWallIntent {
   mode: 'create' | 'edit'
   /** edit mode only */
   featureId?: string
@@ -276,6 +324,15 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
   const [targetFeatureId, setTargetFeatureId] = useState<string>(
     typeof existing?.targetFeatureId === 'string' ? (existing.targetFeatureId as string) : bodies[0]?.id ?? '',
   )
+  const [thin, setThin] = useState<boolean>(existing?.wallMode === 'thin')
+  const [wallThickness, setWallThickness] = useState<number>(
+    typeof existing?.wallThickness === 'number' && Number.isFinite(existing.wallThickness) && existing.wallThickness > 0
+      ? existing.wallThickness
+      : DEFAULT_THIN_WALL_THICKNESS,
+  )
+  const [wallSide, setWallSide] = useState<ThinExtrudeSide | ThinOpenSide>(
+    isThinWallSide(existing?.wallSide) || isThinOpenWallSide(existing?.wallSide) ? existing.wallSide : DEFAULT_THIN_WALL_SIDE,
+  )
   const [expressionError, setExpressionError] = useState<string | undefined>(undefined)
   const [applyError, setApplyError] = useState<string | undefined>(undefined)
 
@@ -288,9 +345,21 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
     sketchNode?.payload.regions as ProfileRegion[] | undefined,
   )
   const explicitRegions = explicitRegionSignatures(profileSelector)
+  // WO-3237: an open chain chosen for a Thin wall, and the side read from its
+  // travel direction. A side kept from the other kind of selection (Inside on
+  // a chain, Left on a region) shows and builds as that kind's default.
+  const chainSelector = profileSelector?.kind === 'sketch-chain' ? profileSelector : undefined
+  const chainSelected = chainSelector !== undefined
+  const effectiveWallSide: ThinExtrudeSide | ThinOpenSide = chainSelected
+    ? (isThinOpenWallSide(wallSide) ? wallSide : DEFAULT_THIN_OPEN_WALL_SIDE)
+    : (isThinWallSide(wallSide) ? wallSide : DEFAULT_THIN_WALL_SIDE)
+  // Listed only while Thin is on: the chain chooser lives in the Thin rows.
+  const chainCandidates = thin ? openChainCandidatesForSketch(sketchId, (id) => dag.getNode(id)).candidates : []
+  const chainKey = chainSelector === undefined ? '' : sweepPathKey(chainSelector)
+  const chainNeedsThin = chainSelected && !thin
   const selectedRegionCount = isPickingProfile
     ? profilePickDraft.length
-    : explicitRegions?.length ?? profileCandidates.length
+    : chainSelected ? 0 : explicitRegions?.length ?? profileCandidates.length
   const profileRegionSummary = extrudeRegionSummary(selectedRegionCount, profileCandidates.length)
   const featureRegionSummary = profileSelector?.kind === 'regions' ? profileRegionSummary : undefined
   const explicitlySelectedKeys = new Set((explicitRegions ?? []).map((region) =>
@@ -316,7 +385,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
     // when it is a whole-sketch/legacy selector (the region case already
     // highlighted); create keeps its prior region-only behavior.
     onProfileSelectionChange?.(
-      profileSelector?.kind === 'region' || profileSelector?.kind === 'regions'
+      profileSelector?.kind === 'region' || profileSelector?.kind === 'regions' || profileSelector?.kind === 'sketch-chain'
         ? { sketchId, profileSelector }
         : editing && profileAvailable
           ? { sketchId, profileSelector: { kind: 'whole-sketch' } }
@@ -332,10 +401,12 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
   const noTargetAvailable = needsTarget && bodies.length === 0
   const missingTarget = needsTarget && (targetFeatureId === '' || !targetAvailable)
   const previewControlled = onPreviewIntent !== undefined
+  const thinWallValid = !thin || (Number.isFinite(wallThickness) && wallThickness > 0)
   // A pending preview does NOT disable Apply: the page's onApplyGuard awaits
   // the in-flight evaluation and commits only its accepted candidate. Only an
   // explicit refusal (bad geometry, drifted model) blocks the button.
   const applyDisabled = !profileAvailable || noTargetAvailable || missingTarget || (needsEndTarget && endTarget === undefined) ||
+    !thinWallValid || chainNeedsThin ||
     (previewControlled && previewState?.status === 'refused')
 
   // WO-035: the live preview request. Null (which cancels any session) when
@@ -350,6 +421,8 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
     if ((endCondition === 'blind' || endCondition === 'symmetric') && boundExpression !== '' && !validateFeatureExpression(boundExpression).ok) return null
     if (supportsTerminalOffset && !Number.isFinite(terminalOffset)) return null
     if (needsEndTarget && endTarget === undefined) return null
+    if (!thinWallValid) return null
+    if (chainNeedsThin) return null
     return {
       mode,
       ...(editing && featureId !== undefined ? { featureId } : {}),
@@ -363,9 +436,10 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
       boolMode,
       ...(needsTarget ? { targetFeatureId } : {}),
       ...((endCondition === 'blind' || endCondition === 'symmetric') && boundExpression !== '' ? { expression: boundExpression } : {}),
+      ...(thin ? { wallMode: 'thin' as const, wallThickness, wallSide: effectiveWallSide } : {}),
     }
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- advisory: no React Compiler runs in this build; the manual memo is intentional
-  }, [profileAvailable, noTargetAvailable, missingTarget, distance, boundExpression, mode, editing, featureId, sketchId, profileSelector, direction, endCondition, supportsTerminalOffset, terminalOffset, needsEndTarget, endTarget, boolMode, needsTarget, targetFeatureId])
+  }, [profileAvailable, noTargetAvailable, missingTarget, distance, boundExpression, mode, editing, featureId, sketchId, profileSelector, direction, endCondition, supportsTerminalOffset, terminalOffset, needsEndTarget, endTarget, boolMode, needsTarget, targetFeatureId, thin, thinWallValid, chainNeedsThin, wallThickness, effectiveWallSide])
 
   useEffect(() => {
     onPreviewIntent?.(previewIntent)
@@ -448,8 +522,10 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
           }]
         : [],
     )
+    // WO-3237: ticking a region while an open chain is chosen starts a region
+    // choice from that region alone; it never adds the chain to anything.
     const current = explicitRegions === null
-      ? available.map(({ region }) => region)
+      ? (chainSelected ? [] : available.map(({ region }) => region))
       : [...explicitRegions]
     const next = checked
       ? current.some((region) => profilePickKey(sketchId, { kind: 'region', ...region }) === candidateKey)
@@ -489,6 +565,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
       acceptance = refusal
     }
     const paramConsumes = featureExpressionParamConsumes(bound === '' ? undefined : bound)
+    const wallIntent: ExtrudeWallIntent = thin ? { wallMode: 'thin', wallThickness, wallSide: effectiveWallSide } : {}
 
     if (editing && featureId !== undefined) {
       const node = dag.getNode(featureId)
@@ -500,6 +577,9 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         terminalOffset: _priorTerminalOffset,
         endTarget: _priorEndTarget,
         resolvedEndTargets: _priorResolvedEndTargets,
+        wallMode: priorWallMode,
+        wallThickness: _priorWallThickness,
+        wallSide: _priorWallSide,
         ...restPayload
       } = node?.payload ?? {}
       const payload = {
@@ -519,6 +599,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         boolMode,
         ...(needsTarget ? { targetFeatureId } : {}),
         ...((endCondition === 'blind' || endCondition === 'symmetric') && bound !== '' ? { expression: bound } : {}),
+        ...extrudeWallPayloadFields(wallIntent, priorWallMode),
       }
       const targetConsumes = needsTarget ? [targetFeatureId] : []
       const endTargetConsumes = endTarget !== undefined && 'planeFeatureId' in endTarget ? [endTarget.planeFeatureId] : []
@@ -552,6 +633,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
         boolMode,
         ...(boolMode !== 'newBody' ? { targetFeatureId } : {}),
         ...((endCondition === 'blind' || endCondition === 'symmetric') && bound !== '' ? { expression: bound } : {}),
+        ...extrudeWallPayloadFields(wallIntent),
         name: extrudeNameWithRegionSummary(workbenchText('ExtrudeDialog.extrude2', { id: String(id) }), featureRegionSummary),
       }
       try {
@@ -597,10 +679,12 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
           <div data-testid="extrude-profile-pick-guidance" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
             {workbenchText('ExtrudeDialog.clickRegionsToToggleThemPressEnterOrDone')}</div>
         )}
-        {(profileSelector?.kind === 'region' || profileSelector?.kind === 'regions') && (
+        {(profileSelector?.kind === 'region' || profileSelector?.kind === 'regions' || chainSelected) && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span data-testid="extrude-selected-profile-region" style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
-              {workbenchText('ExtrudeDialog.chosen')}{profileRegionSummary}
+              {workbenchText('ExtrudeDialog.chosen')}{chainSelector !== undefined
+                ? thinOpenText('chainOption', { sketch: sketches.find((option) => option.id === sketchId)?.label ?? sketchId, curves: chainSelector.steps.map((step) => step.entityId).join(' \u2192 ') })
+                : profileRegionSummary}
             </span>
             <button
               type="button"
@@ -639,7 +723,7 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
           {profileCandidates.length > 0 && (
             <div data-testid="extrude-profile-region-fallback" style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8, paddingLeft: 78 }}>
               {profileCandidates.map((candidate, index) => {
-                const checked = explicitRegions === null || explicitlySelectedKeys.has(candidate.key)
+                const checked = (explicitRegions === null && !chainSelected) || explicitlySelectedKeys.has(candidate.key)
                 const onlyExplicitChoice = explicitRegions?.length === 1 && checked
                 return (
                   <label key={candidate.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -720,6 +804,120 @@ export function ExtrudeDialog({ dag, history, mode, featureId, sketchOptions, tr
                 style={{ flex: 1 }}
               />
             </label>
+          </>
+        )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 70, color: 'var(--text-muted)' }}>{thinText('wall')}</span>
+          <input
+            type="checkbox"
+            data-testid="extrude-thin-toggle"
+            checked={thin}
+            onChange={(e) => setThin(e.target.checked)}
+          />
+          <span>{thinText('thin')}</span>
+        </label>
+        {chainNeedsThin && (
+          <div data-testid="extrude-thin-open-needs-thin" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
+            {thinOpenText('needsThin')}
+          </div>
+        )}
+        {thin && (
+          <>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{thinOpenText('source')}</span>
+              <select
+                data-testid="extrude-thin-open-chain-select"
+                value={chainKey}
+                onChange={(e) => {
+                  const picked = chainCandidates.find((candidate) => candidate.key === e.target.value)
+                  setProfileSelector(picked === undefined ? { kind: 'whole-sketch' } : picked.selector)
+                  setTreeSelectionActive(false)
+                }}
+                style={{ flex: 1, minWidth: 0 }}
+              >
+                <option value="">{thinOpenText('sourceRegions')}</option>
+                {chainKey !== '' && !chainCandidates.some((candidate) => candidate.key === chainKey) && (
+                  <option value={chainKey}>{chainSelector!.sketchId}: {chainSelector!.steps.map((step) => step.entityId).join(' \u2192 ')}</option>
+                )}
+                {chainCandidates.map((candidate) => (
+                  <option key={candidate.key} value={candidate.key}>
+                    {thinOpenText('chainOption', {
+                      sketch: sketches.find((option) => option.id === sketchId)?.label ?? sketchId,
+                      curves: candidate.selector.steps.map((step) => step.entityId).join(' \u2192 '),
+                    })}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="modal-btn modal-btn-ghost"
+                data-testid="extrude-thin-open-reverse"
+                disabled={chainSelector === undefined}
+                onClick={() => { if (chainSelector !== undefined) setProfileSelector(reverseSweepPathSelector(chainSelector)) }}
+              >
+                {thinOpenText('reverse')}
+              </button>
+            </label>
+            {chainSelector !== undefined && (
+              <div data-testid="extrude-thin-open-direction" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
+                {thinOpenText('travels', { curve: chainSelector.steps[0].entityId, last: chainSelector.steps[chainSelector.steps.length - 1].entityId })}
+              </div>
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{thinText('thickness')}</span>
+              <span data-testid="extrude-thin-thickness" style={{ flex: 1 }}>
+                {/* No min: any finite positive wall is built exactly as typed. A
+                    floor would clamp 0.005 to itself; zero or negative is refused
+                    below with its reason instead. */}
+                <NumericInput value={wallThickness} onChange={setWallThickness} style={{ width: '100%' }} />
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{workbenchText('ExtrudeDialog.mm')}</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 70, color: 'var(--text-muted)' }}>{thinText('side')}</span>
+              <select
+                data-testid="extrude-thin-side"
+                value={effectiveWallSide}
+                onChange={(e) => setWallSide(e.target.value as ThinExtrudeSide | ThinOpenSide)}
+                style={{ flex: 1 }}
+              >
+                {chainSelected
+                  ? THIN_OPEN_WALL_SIDES.map((side) => (
+                      <option key={side} value={side} data-testid={`extrude-thin-side-option-${side}`}>
+                        {THIN_OPEN_WALL_SIDE_LABELS[side]}
+                      </option>
+                    ))
+                  : THIN_WALL_SIDES.map((side) => (
+                      <option key={side} value={side} data-testid={`extrude-thin-side-option-${side}`}>
+                        {THIN_WALL_SIDE_LABELS[side]}
+                      </option>
+                    ))}
+              </select>
+            </label>
+            {!thinWallValid ? (
+              <div data-testid="extrude-thin-thickness-invalid" style={{ color: 'var(--text-danger)', fontSize: 'var(--font-size-sm)' }}>
+                {thinText('thicknessMustBePositive', { thickness: String(wallThickness) })}
+              </div>
+            ) : (
+              <div data-testid="extrude-thin-summary" data-side={effectiveWallSide} style={{ color: 'var(--text-accent)', fontSize: 'var(--font-size-sm)' }}>
+                {chainSelected
+                  ? effectiveWallSide === 'left'
+                    ? thinOpenText('summaryLeft', { thickness: String(wallThickness) })
+                    : effectiveWallSide === 'right'
+                      ? thinOpenText('summaryRight', { thickness: String(wallThickness) })
+                      : thinOpenText('summaryCenter', { thickness: String(wallThickness), half: String(wallThickness / 2) })
+                  : effectiveWallSide === 'inside'
+                  ? thinText('summaryInside', { thickness: String(wallThickness) })
+                  : effectiveWallSide === 'outside'
+                    ? thinText('summaryOutside', { thickness: String(wallThickness) })
+                    : thinText('summaryCenter', { thickness: String(wallThickness), half: String(wallThickness / 2) })}
+              </div>
+            )}
+            {(endCondition === 'upToNext' || endCondition === 'toPart') && (
+              <div data-testid="extrude-thin-end-note" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
+                {thinEndsText('wallsStopOnTheirOwnSection')}
+              </div>
+            )}
           </>
         )}
         {supportsTerminalOffset && (

@@ -1,6 +1,10 @@
 // WO-2321: English UI text; numeric formatting remains at the call sites.
 const words = {
   "NewOperationModalBody": {
+    "Drill_larger_than_hole": "Drill {{drill}} {{unit}} is larger than this {{hole}} {{unit}} hole",
+    "Minimize_Z_travel": "Minimize Z travel",
+    "Unchecked_hops_at_Retract": "Unchecked: non-cutting hops use Retract.",
+    "part_on_other_stock": "Part \"{{part}}\" is on {{stock}}; this setup uses {{setupStock}}.",
     "From_the_model": "From the model",
     "Modeled_chamfers_reading": "Reading the chamfers this part has...",
     "Modeled_chamfers_read_failed": "Could not read this part's chamfers: {{p1}}",
@@ -665,6 +669,11 @@ const words = {
     "The_selected_source_has_no_to_machine": "The selected source has no {{p1}} to machine.",
     "Go_to_the_Tool_tab_and_select_a_tool": "Go to the Tool tab and select a tool first",
     "Choose_a_finished_face_in_Heights_Bottom_Height_Finished": "Choose a finished face in Heights > Bottom Height > Finished face.{{p1}}",
+    "Select_part_stock_in_Setup": "Select this part's stock in Setup.",
+    "No_closed_profiles_to_machine": "Select geometry with closed profiles to machine.",
+    "Review_height_authority": "Review the saved height settings on the Heights tab.",
+    "Height_preflight_running": "Calculating Smart Height...",
+    "Height_preflight_not_resolved": "Smart Height has not resolved for the current inputs.",
     "Wait_for_Face_Smart_Height_preflight_to_resolve": "Wait for Face Smart Height preflight to resolve",
     "Go_to_the_Geometry_tab_and_select_a_3D": "Go to the Geometry tab and select a 3D solid to finish",
     "Pencil_needs_a_ball_or_bull_nose_end_mill": "Pencil needs a ball or bull-nose end mill",
@@ -780,6 +789,17 @@ const words = {
     "Feedrate": "Feedrate"
   },
   "newOperationModalParts": {
+    "Heights_explained": "How these heights are used",
+    "Entry_explained": "Entry usually starts just above the material left (about 1 mm). Some operation families use different entry rules; see Help.",
+    "Travel_explained": "Retract is the normal hop between features. Stock-proven links may stay lower; a hop across a modeled clamp lifts higher, even above Clearance.",
+    "Clearance_explained": "Clearance is used for the first approach and final exit. These values are reference planes, not every travel height.",
+    "Reference_planes": "Reference planes (WCS Z)",
+    "Illustrative_route": "Illustrative local route - not to scale",
+    "Entry_start": "Entry start",
+    "Ordinary_hop": "Ordinary hop",
+    "Clamp_crossing": "Clamp crossing",
+    "Material_left": "Material left",
+
     "Set_manually": "Set manually",
     "Auto_from_3D_model": "Auto from 3D model",
     "Clearance": "Clearance",
@@ -869,6 +889,8 @@ const words = {
     "Census_placed": "{{p1}} placed"
   },
   "PropertiesPanel": {
+    "Minimize_Z_travel": "Minimize Z travel",
+    "Unchecked_hops_at_Retract": "Unchecked: non-cutting hops use Retract.",
     "Modeled_chamfer_source": "From the modeled chamfer: {{p1}} deep, top edge at Z {{p2}} on the part, {{p3}}°",
     "Modeled_chamfer_stretch": "Only the modeled stretch is cut: {{p1}} along {{p2}} loop(s). The loop's other edges are left as they are.",
     "Modeled_chamfer_angle_note": "This {{p1}}° bit is not the modeled {{p2}}° chamfer: at the modeled {{p3}} depth it cuts {{p4}} wide on top, not the modeled {{p5}}.",
@@ -1778,6 +1800,7 @@ const words = {
     "Finish": "Finish",
     "Lead_in": "Lead-in",
     "Lead_out": "Lead-out",
+    "Loop_back": "Loop-back",
     "line": "line",
     "rect": "rect",
     "circle": "circle",

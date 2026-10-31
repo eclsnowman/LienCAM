@@ -1,6 +1,11 @@
 // WO-2326: software-authored console lines and operator messages.
 // Controller payloads and persisted/protocol identifiers remain verbatim.
 const messages = {
+  "postToolNumberAssigned": "Assigned T{{number}} to \"{{name}}\" for this program.",
+  "g53BottomOfTravel": "\"{{name}}\", line {{line}}: {{code}} goes to machine Z {{z}}, the bottom of the Z travel on this machine. It runs as written.",
+  "g53BottomOfTravelMore": "\"{{name}}\": {{count}} more lines go to the bottom of the Z travel too, the next on line {{line}}.",
+  "interpreterHandover": "\"{{name}}\": line {{line}} ({{word}}) is read by the file interpreter the machine bridge uses, so the whole file is read there.",
+  "interpreterHandoverNoLine": "\"{{name}}\": this file is read by the file interpreter the machine bridge uses, so the whole file is read there.",
   "format1": "0s",
   "format2": "{{value1}}h {{value2}}m",
   "format3": "{{value1}}m {{value2}}s",
@@ -102,7 +107,7 @@ const messages = {
   "index37": "Pencil 3D",
   "index38": "Parallel 3D",
   "index39": "{{value1}} Smart Height authority is invalid: {{value2}}",
-  "index40": "{{value1}}: {{value2}} of {{value3}} link(s) stay below Clearance over material earlier operations removed (WO-1620).",
+  "index40": "{{value1}}: checked {{value3}} links; {{value2}} rapid moves stay below Clearance over material removed by earlier operations.",
   "index41": "{{value1}}: {{value2}} of {{value3}} cutting move(s) run at rapid - the material earlier operations removed leaves them nothing to cut (WO-1641).",
   "index42": "{{value1}}: links were left at Clearance; earlier operations' material could not be read.",
   "index43": "{{value1}}: earlier operations' material could not be read; the block as loaded is used.",

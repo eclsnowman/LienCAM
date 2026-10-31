@@ -65,7 +65,19 @@ describe('WO-1621: a raised Top lifts the Setup-owned safety planes', () => {
           3, 7)
         expect(violations, 'pocket rapids vs the material left').toEqual([])
       } else {
-        expect(reading.lowestRapidZ, 'no rapid below Feed').toBeGreaterThanOrEqual(7 - TOL)
+        // WO-3083: Face enters at material + 1, so each pass's entry rapid descends from
+        // Clearance to 1 mm above the surface it is about to cut and then plunges; every other
+        // rapid stays at or above the Feed plane and nothing enters the material.
+        const rapids = reading.moves.map((m, i) => [m, i] as const).filter(([m]) => isRapid(m))
+        const belowFeed = rapids.filter(([m]) => m.z < 7 - TOL)
+        expect(belowFeed.length, 'one entry rapid per pass').toBeGreaterThan(0)
+        for (const [m, i] of belowFeed) {
+          const next = reading.moves[i + 1]
+          expect(next?.type, 'the entry rapid is followed by its plunge').toBe('feed')
+          expect(next.z, 'the plunge starts at the entry rapid').toBeLessThanOrEqual(m.z + TOL)
+        }
+        expect(reading.lowestRapidZ, 'the entry rapid stops at material + 1').toBeGreaterThanOrEqual(1 - TOL)
+        expect(rapids.every(([m]) => m.z >= 1 - TOL), 'no rapid below material + 1').toBe(true)
       }
       // The row and the moves never disagree: the path's highest point is the row's Clearance.
       expect(Math.max(...reading.moves.map(m => m.z)), 'clearance = row')

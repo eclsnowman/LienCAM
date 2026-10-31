@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSketcherTool } from '../useSketcherTool'
 import { sketcherTools } from '../toolController'
 import { sketcherToolStore } from '../toolStore'
-import { drawValueScalar } from '../../tools/drawValue'
+import { drawValueScalar, resolveCreationSize, hasCreationSize } from '../../tools/drawValue'
 import { toDisplay, parseDimToMm, unitLabel } from '../../../ui/unitFormat'
 import { useTypeToSet } from '../../../../components/ui/useTypeToSet'
 import type { SketcherOverlaysPort } from './port'
@@ -48,6 +48,8 @@ export function SketchDrawValueInput({ port }: Props) {
   const sketchTool = useSketcherTool((s) => s.tool)
   const sketchToolChain = useSketcherTool((s) => s.chain)
   const units = port.useDisplayUnits()
+  const creationSessionActive = useSketcherTool((s) => s.creationSessionActive)
+  const creationDocumentId = useSketcherTool((s) => s.creationDocumentId)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -165,6 +167,11 @@ export function SketchDrawValueInput({ port }: Props) {
   // Tool/chain change (or unmount) ends any in-progress entry hint.
   useEffect(() => { if (!supported) setEditing(false) }, [supported])
 
+  if (isSketch && activeSketch && creationSessionActive && creationDocumentId === activeSketch.id &&
+      (sketchTool === 'rect-corner' || sketchTool === 'rect-center') &&
+      sketchToolChain?.kind === 'rect' && sketchToolChain.anchor && !sketchToolChain.rotated) {
+    return <RectangleSizeInput key={`${activeSketch.id}:${units}`} port={port} units={units} documentId={activeSketch.id} />
+  }
   if (!supported) return null
 
   return (
@@ -237,4 +244,87 @@ export function SketchDrawValueInput({ port }: Props) {
 // trailing-zero noise; mirrors the dimension label's brevity.
 function formatScalar(v: number): string {
   return String(+v.toFixed(3))
+}
+
+// A pair in the existing draw-value chrome; the document/controller, never
+// DOM text, owns the size overrides. Focus alone does not lock a live value.
+function RectangleSizeInput({ port, units, documentId }: Props & { units: 'mm' | 'inch'; documentId: string }) {
+  const text = useText('sketch-and-model-workbench')
+  const root = useRef<HTMLDivElement>(null)
+  const width = useRef<HTMLInputElement>(null)
+  const height = useRef<HTMLInputElement>(null)
+  const cursor = useRef({ x: 0, y: 0 })
+  useTypeToSet(width, { enabled: true })
+  useEffect(() => {
+    let raf = 0
+    const tick = () => {
+      raf = requestAnimationFrame(tick)
+      const surface = port.getSurface()
+      const s = sketcherToolStore.getState()
+      const ch = s.chain
+      if (!surface || ch?.kind !== 'rect' || !ch.anchor) return
+      cursor.current = surface.getLastSketchCursor() ?? ch.anchor
+      const size = resolveCreationSize(s, cursor.current, s.creationSize)
+      const screen = surface.worldToScreen(cursor.current.x, cursor.current.y, 0)
+      if (root.current) root.current.style.transform = `translate(${screen.x + 14}px, ${screen.y + 14}px)`
+      for (const [field, ref] of [['width', width], ['height', height]] as const) {
+        const input = ref.current
+        if (!input) continue
+        const held = s.creationSize?.[field] !== undefined
+        input.dataset.held = String(held)
+        input.style.fontWeight = held ? 'bold' : ''
+        input.setAttribute('aria-description', held ? text('SketchDrawValueInput.held') : text('SketchDrawValueInput.followsPointer'))
+        if (!held && size) input.value = formatScalar(toDisplay(size[field], units))
+      }
+    }
+    tick()
+    return () => {
+      cancelAnimationFrame(raf)
+      if (sketcherToolStore.getState().creationDocumentId === documentId) sketcherTools.clearCreationSize()
+    }
+  }, [port, units, text, documentId])
+  const apply = () => sketcherTools.commitCreationSizeAt(port.getSurface()?.getLastSketchCursor() ?? cursor.current)
+  return <div ref={root} className="sketch-dim-editor sketch-draw-value"
+    style={{ transform: 'translate(-1000px, -1000px)', pointerEvents: 'none' }}>
+    {(['width', 'height'] as const).map((field, index) => {
+      const ref = index === 0 ? width : height
+      return <label key={field} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span>{index === 0 ? 'W' : 'H'}</span>
+        <input ref={ref} className="sketch-dim-input" type="text" inputMode="decimal"
+          aria-label={text(index === 0 ? 'SketchDrawValueInput.width' : 'SketchDrawValueInput.height')}
+          style={{ pointerEvents: 'auto' }}
+          onPointerDown={e => e.stopPropagation()}
+          onInput={e => sketcherTools.setCreationSize(field, parseDimToMm(e.currentTarget.value, units))}
+          onBlur={e => {
+            if (e.relatedTarget instanceof Node && root.current?.contains(e.relatedTarget)) return
+            // Tool/mode/cancel buttons change the current operation. Browser
+            // blur precedes their click; discard locks before that transition.
+            if (e.relatedTarget instanceof Element && e.relatedTarget.closest(
+              '.sketch-tool-btn, .sketch-header-toggle, .sketch-prompt-btn:not(.sketch-prompt-btn-confirm)',
+            )) { sketcherTools.clearCreationSize(); return }
+            if (!sketcherTools.isCreationPlacementPending()) apply()
+          }}
+          onKeyDown={e => {
+            sketcherTools.trackCreationModifiers(e.shiftKey)
+            e.stopPropagation()
+            if (e.key === 'Escape') {
+              e.preventDefault(); sketcherTools.clearCreationSize(); e.currentTarget.blur()
+            } else if (e.key === 'Tab') {
+              e.preventDefault()
+              if (sketcherToolStore.getState().creationSize?.[field] === null) return
+              const next = index === 0 ? height.current : width.current
+              next?.focus(); next?.select()
+            } else if (e.key === 'Enter') {
+              e.preventDefault()
+              if (hasCreationSize(sketcherToolStore.getState().creationSize)) {
+                if (apply()) e.currentTarget.blur()
+              } else {
+                sketcherTools.end(); e.currentTarget.blur()
+              }
+            }
+          }} />
+        <span className="sketch-dim-unit">{unitLabel(units)}</span>
+      </label>
+    })}
+  </div>
 }

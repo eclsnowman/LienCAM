@@ -29,6 +29,7 @@ import { useMachineActions } from '../../store/machineActionsStore'
 import { useMachineControl } from '../../store/machineControlStore'
 import { useUiPrefs } from '../../store/uiPrefs'
 import type { ControllerType, MachineConfig } from '../../types'
+import { makeOp } from '../post/helpers'
 
 const CONTROLLERS: ControllerType[] = ['uccnc', 'grbl', 'linuxcnc', 'generic']
 
@@ -303,6 +304,11 @@ describe('WO-1024 machine action boundaries', () => {
 describe('WO-1024 post boundaries', () => {
   it('refuses Post Process through the existing diagnostics surface', () => {
     seedOneSetup()
+    // WO-3086 (4fd05db640): an empty scope reports No operations selected.
+    // Give the controller diagnostic an actual selected operation to evaluate.
+    useCamStore.setState(s => ({ project: { ...s.project, setups: s.project.setups.map(setup => ({
+      ...setup, operations: [makeOp()],
+    })) } }))
     render(createElement(PostProcessModal))
     act(() => useCamStore.getState().openModal('post-process'))
 

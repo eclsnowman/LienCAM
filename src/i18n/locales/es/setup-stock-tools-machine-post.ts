@@ -30,6 +30,7 @@ const words: Translation<'setup-stock-tools-machine-post'> = {
     new_holder: 'Nuevo portaherramientas', imported_library: 'Biblioteca importada', could_not_read_the_selected_file: 'No se pudo leer el archivo seleccionado.',
   },
   PostProcessModal: {
+    "no_operations_selected": "No hay operaciones seleccionadas. Seleccione las operaciones que desea exportar.",
     controller_not_declared: 'Controlador sin especificar', built_in_templates: 'Plantillas incluidas', saved_posts: 'Posprocesadores guardados',
     name_for_this_saved_post: 'Nombre para este posprocesador guardado:', saved: '{{value1}} guardado', delete: 'Eliminar', cancel: 'Cancelar',
     deleted: '{{value1}} eliminado', downloaded: '{{value1}} descargado', posted_lines: '{{value1}} posprocesado ({{value2}} líneas)',

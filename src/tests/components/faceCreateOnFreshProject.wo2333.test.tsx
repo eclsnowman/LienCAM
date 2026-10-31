@@ -87,7 +87,8 @@ describe('WO-2333 fresh-project Face preflight', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Stock$/ }))
     const create = screen.getByTestId('op-create') as HTMLButtonElement
     expect(create.disabled).toBe(true)
-    expect(create.getAttribute('data-tooltip')).toContain('Wait for Face Smart Height preflight')
+    // WO-3137 gives the actual idle/pending reason instead of the old generic instruction.
+    expect(create.getAttribute('data-tooltip')).toBe('Smart Height has not resolved for the current inputs.')
     await waitFor(() => expect(resolver).toHaveBeenCalled())
     expect(create.disabled).toBe(true)
     expect(screen.queryByTestId('face-height-mode')).toBeNull()
@@ -95,6 +96,7 @@ describe('WO-2333 fresh-project Face preflight', () => {
     await waitFor(() => expect(create.disabled).toBe(false))
     fireEvent.click(screen.getByText('Heights'))
     expect(screen.getByTestId('standard-height-bottom-resolved').textContent).toContain('-5.000')
+    await waitFor(() => expect(create.disabled).toBe(false))
     fireEvent.click(create)
     const created = useCamStore.getState().project.setups[0].operations[0]
     expect(created.type).toBe('face')
@@ -114,6 +116,7 @@ describe('WO-2333 fresh-project Face preflight', () => {
     fireEvent.change(input, { target: { value: '-1' } })
     fireEvent.blur(input)
     await waitFor(() => expect(screen.getByTestId('standard-height-bottom-resolved').textContent).toContain('-1.000'))
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByTestId('op-create'))
     const created = useCamStore.getState().project.setups[0].operations[0]
     const plan = await preview('setup-2333', created)

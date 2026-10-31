@@ -91,3 +91,13 @@
   transform: translateX(-50%);
   margin: 0;
 }
+
+/* JOG header: the title never shrinks; the gamepad step toggle is a
+   larger icon button that shows its on state (operator 2026-10-30). */
+.panel-header > .jog-panel-title { flex-shrink: 0; }
+.panel-header > .jog-gamepad-toggle { padding: 0 4px; line-height: 0; }
+.panel-header > .jog-gamepad-toggle[aria-pressed="true"] {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}

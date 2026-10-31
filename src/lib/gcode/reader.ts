@@ -187,6 +187,14 @@ export interface GcodeReaderOptions {
    * so the caller answers net of it. Asked again when the file changes frame.
    */
   toolLengthMm?: (h: number, wcs: GcodeWcs) => number
+  /**
+   * THE TOOL LENGTH THE CONTROLLER ALREADY HOLDS IN FORCE IN `wcs`, in mm
+   * (WO-3192) - the panel's Apply or a guided tool change's measure. `G49`
+   * cancels the length in force on UCCNC, LinuxCNC and GRBL, not only a G43
+   * the file itself made, so the moves below a G49 are folded by minus this.
+   * ABSENT, the reader knows of no such length and G49 folds nothing.
+   */
+  toolLengthInForceMm?: (wcs: GcodeWcs) => number
 }
 
 /** One word a caller's route cannot honour, with the caller's own reason. The
@@ -761,6 +769,12 @@ export function readGcodeProgram(text: string, options: GcodeReaderOptions): Gco
     const answered = options.toolLengthMm?.(h, wcs) ?? 0
     return Number.isFinite(answered) ? answered : 0
   }
+  /** WO-3192: the Z shift under G49 in frame `wcs` - minus the length the
+   *  controller holds in force there, so it is cancelled, never left on. */
+  const cancelledLengthShiftFor = (wcs: GcodeWcs): number => {
+    const inForce = options.toolLengthInForceMm?.(wcs) ?? 0
+    return Number.isFinite(inForce) && inForce !== 0 ? -inForce : 0
+  }
   const transitionCoordinateFrame = (next: CoordinateFrameState): void => {
     if (next.wcs !== coordinateFrame.wcs) {
       const previousOffset = options.workOffsets?.[coordinateFrame.wcs]
@@ -815,6 +829,11 @@ export function readGcodeProgram(text: string, options: GcodeReaderOptions): Gco
     if (next.wcs !== coordinateFrame.wcs && next.toolLengthOffset !== null
       && next.toolLengthShiftMm !== null && options.toolLengthMm !== undefined) {
       coordinateFrame = { ...next, toolLengthShiftMm: toolLengthShiftFor(next.toolLengthOffset, next.wcs) }
+    } else if (next.wcs !== coordinateFrame.wcs && next.toolLengthOffset === null
+      && next.toolLengthShiftMm !== null && options.toolLengthInForceMm !== undefined) {
+      // WO-3192: likewise after a G49 - the length it cancels is the one in
+      // force in the frame the file moves into.
+      coordinateFrame = { ...next, toolLengthShiftMm: cancelledLengthShiftFor(next.wcs) }
     } else {
       coordinateFrame = next
     }
@@ -958,10 +977,18 @@ export function readGcodeProgram(text: string, options: GcodeReaderOptions): Gco
       items.push({ kind: 'tool-length-offset', line: block.line, enabled: true, tool: h })
     }
     if (gs.includes(49)) {
+      // WO-3192: G49 CANCELS THE LENGTH IN FORCE, whoever applied it. A length
+      // the panel or a guided measure applied lives on the controller (its
+      // G43.1 register, or folded into the frame's Z on the native route), so
+      // a fold of zero would leave it on every move below; UCCNC and LinuxCNC
+      // take it off. Minus that length, folded here like G43's, takes it off
+      // for this program's moves and writes nothing to the controller.
       transitionCoordinateFrame({
         ...coordinateFrame,
         toolLengthOffset: null,
-        toolLengthShiftMm: coordinateFrame.toolLengthShiftMm === null ? null : 0,
+        toolLengthShiftMm: options.toolLengthInForceMm !== undefined
+          ? cancelledLengthShiftFor(coordinateFrame.wcs)
+          : coordinateFrame.toolLengthShiftMm === null ? null : 0,
       })
       items.push({ kind: 'tool-length-offset', line: block.line, enabled: false })
     }

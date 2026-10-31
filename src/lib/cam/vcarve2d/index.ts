@@ -27,7 +27,7 @@ import type { ToolpathMove, VCarveWorkerPayload, LoopData, PocketWorkerPayload, 
 import type { Tool } from '../../../types'
 import { resolveHeights } from '../heights'
 import { resolveFeedrates } from '../feedrates'
-import { rapidEntryAt, retractFrom } from '../moves'
+import { entryMaterialOf, entryStartOver, hopTo, retractFrom } from '../moves'
 import { assertToolFluteReach } from '../toolFluteReach'
 import { toolHalfAngleRad } from '../geometry'
 import { buildPocketToolpath } from '../pocket2d'
@@ -360,22 +360,6 @@ function nearBoundary(region: Region, p: Pt, eps: number): boolean {
   return false
 }
 
-/** Carry the tool to `p`, ready to plunge from Feed Height. The operation's
- *  first entry comes down through Clearance; every later link between its
- *  cuts rises only to Retract (the plane for moving between the cuts of one
- *  operation), crosses there and drops to Feed Height. The builder makes the
- *  final exit to Clearance. */
-function hopTo(moves: ToolpathMove[], p: Pt, feedZ: number, retractZ: number, clearanceZ: number): void {
-  const last = moves[moves.length - 1]
-  if (!last) {
-    rapidEntryAt(moves, p, feedZ, retractZ, clearanceZ)
-    return
-  }
-  if (last.z < retractZ) moves.push({ type: 'rapid', x: last.x, y: last.y, z: retractZ, role: 'rapid' })
-  moves.push({ type: 'rapid', x: p.x, y: p.y, z: Math.max(retractZ, last.z), role: 'rapid' })
-  moves.push({ type: 'rapid', x: p.x, y: p.y, z: feedZ, role: 'rapid' })
-}
-
 /** Carry the tool from where it stopped to `p` and plunge to `pz`.
  *
  *  Inside a letter the tool has already carved a groove around itself, so it
@@ -389,7 +373,7 @@ function hopTo(moves: ToolpathMove[], p: Pt, feedZ: number, retractZ: number, cl
  *  stock) the tool hops at Retract instead. */
 function linkTo(
   moves: ToolpathMove[], cuts: CutIndex, p: Pt, pz: number, topZ: number, geom: VBitGeometry,
-  feedZ: number, retractZ: number, clearanceZ: number, feedRate: number, plungeRate: number,
+  feedZ: number, retractZ: number, clearanceZ: number, feedRate: number, plungeRate: number, minimizeZTravel?: boolean,
 ): void {
   const last = moves[moves.length - 1]
   // A long link is quicker as a rapid hop than at feed, so only short ones ride.
@@ -398,7 +382,7 @@ function linkTo(
   const across = Math.max(lift, last ? last.z : -Infinity, pz)
   if (across < topZ && across < retractZ) {
     if (across > last.z) moves.push({ type: 'feed', x: last.x, y: last.y, z: across, feed: feedRate, role: 'stepover' })
-    moves.push({ type: 'feed', x: p.x, y: p.y, z: across, feed: feedRate, role: 'stepover' })
+    moves.push({ type: 'feed', x: p.x, y: p.y, z: across, feed: feedRate, role: minimizeZTravel === false ? 'loop_back' : 'stepover' })
   } else {
     hopTo(moves, p, feedZ, retractZ, clearanceZ)
   }
@@ -522,7 +506,7 @@ export function buildVCarveToolpath(
   onProgress?: (fraction: number, phase?: string) => void,
 ): ToolpathMove[] {
   const { params, heights, passes, tool, loops, wcsOrigin } = payload
-  const { clearanceZ, retractZ, feedZ, topZ, bottomZ } = resolveHeights(heights, wcsOrigin)
+  const { clearanceZ, retractZ, feedZ: feedPlaneZ, topZ, bottomZ } = resolveHeights(heights, wcsOrigin)
   const { feedRate, plungeRate } = resolveFeedrates(tool, payload.feedrateOverride)
   const tol = params.tolerance > 0 ? params.tolerance : 0.01
 
@@ -532,6 +516,10 @@ export function buildVCarveToolpath(
   if (selected.length === 0) {
     throw new Error('V-carve: no closed outline selected. Pick closed loops (letters, shapes); open curves cannot be V-carved.')
   }
+  // WO-3083: every plunge starts ENTRY_CLEARANCE_MM above the highest material the outlines and
+  // the bit sit over (was the Feed plane, Top + 5). The tool hops between cuts at Retract
+  // (moves hopTo, promoted from here).
+  const feedZ = entryStartOver(entryMaterialOf(payload, topZ, feedPlaneZ), selected.flatMap(l => l.points), tool.diameter / 2)
 
   const regions = buildRegions(selected.map(l => l.points), { allowanceMm: params.allowanceMm, arcTol: tol })
   if (regions.length === 0) {
@@ -566,7 +554,7 @@ export function buildVCarveToolpath(
   for (let ri = 0; pending.length; ri++) {
     const region = pending.splice(nearestRegion(pending, moves[moves.length - 1]), 1)[0]
     const cuts = cutIndex(moves.length, geom)
-    const link: Link = (p, pz) => linkTo(moves, cuts, p, pz, topZ, geom, feedZ, retractZ, clearanceZ, feedRate, plungeRate)
+    const link: Link = (p, pz) => linkTo(moves, cuts, p, pz, topZ, geom, feedZ, retractZ, clearanceZ, feedRate, plungeRate, heights.minimizeZTravel)
     const phase = total > 1 ? `V-carve region ${ri + 1}/${total}` : 'V-carve'
     onProgress?.(ri / total, phase)
 

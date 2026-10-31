@@ -1,6 +1,6 @@
 import type { ToolpathMove, Vec2 } from '../../../types'
-import { fitCircleEndpointLocked, maxRadialDeviation, sweepAngle } from './circleFit'
-import { douglasPeuckerIndexed } from './simplify'
+import { fitCircleEndpointLocked, sweepAngle } from './circleFit'
+import { douglasPeuckerIndexed, orderedSegmentDeviation } from './simplify'
 
 /**
  * Tuning parameters for {@link collapsePolyline} (R3 sections 3.4 / 3.5).
@@ -54,53 +54,45 @@ function windingSign(pts: Vec2[], cx: number, cy: number): number {
 }
 
 /**
- * Max arc-to-chord bulge (sagitta) over the straight segments of an original
- * point run, for a candidate arc on circle (cx, cy, r).
+ * Worst distance of the original PATH sub[0..n-1] from a candidate arc on circle
+ * (cx, cy, r), leaving sub[0] in `dir` and sweeping `sweep` radians (WO-3205).
  *
- * Acceptance via {@link maxRadialDeviation} only proves the original VERTICES
- * lie on the fitted circle -- but any 3 points define a perfect circle (zero
- * radial deviation), so two long straight edges meeting at a sharp corner would
- * pass that check and collapse into a wildly bulging arc. The arc must instead
- * approximate the original PATH: the straight chords between consecutive points.
- * For each consecutive pair the fitted arc bulges off their straight segment by
- * the minor-arc sagitta r - sqrt(r^2 - (chordLen/2)^2). The returned value is
- * the maximum such bulge; a caller rejects the arc when it exceeds the
- * tolerance. (Whole arc <=180deg => each sub-segment subtends <180deg, so the
- * minor-arc sagitta is the correct bulge.)
+ * Two parts, together the exact worst distance for a run that turns one way:
+ *  - each vertex against the ARC, walked in traversal order: its place on the
+ *    arc is its own angle clamped into the sweep and never behind the previous
+ *    vertex's place, so a vertex past either end, or one stepping back along
+ *    the circle, measures the move that would replace it;
+ *  - each straight segment between consecutive vertices bulges INWARD of the
+ *    circle most where it passes nearest the centre (r - that distance). Its
+ *    outward reach is largest at a vertex (distance from the centre is convex
+ *    along a line), which the first part already covers.
+ * The old measure took the minor-arc sagitta assuming the vertices lay ON the
+ * circle, so a vertex inside the circle stacked its own deviation on the
+ * sagitta and the posted arc left the path by more than arcTolerance.
  *
- * @returns the worst arc-to-chord bulge (>= 0); 0 for fewer than 2 points
+ * @returns the worst distance (>= 0); 0 for fewer than 2 points
  */
-function maxArcChordBulge(sub: Vec2[], _cx: number, _cy: number, r: number): number {
+function arcPathDeviation(sub: Vec2[], cx: number, cy: number, r: number, dir: 'cw' | 'ccw', sweep: number): number {
+  const a0 = Math.atan2(sub[0].y - cy, sub[0].x - cx)
+  const turn = dir === 'ccw' ? 1 : -1
+  let progress = 0
   let worst = 0
-  for (let k = 0; k + 1 < sub.length; k++) {
-    const dx = sub[k + 1].x - sub[k].x
-    const dy = sub[k + 1].y - sub[k].y
-    const half = Math.hypot(dx, dy) / 2
-    // Points passed the radial check (~on the circle) so chordLen <= 2r; clamp
-    // the sqrt arg at 0 for floating-point safety.
-    const sag = r - Math.sqrt(Math.max(0, r * r - half * half))
-    if (sag > worst) worst = sag
-  }
-  return worst
-}
-
-/** Max perpendicular distance of pts[i..j] from the chord pts[i]->pts[j]. */
-function maxChordDeviation(pts: Vec2[], i: number, j: number): number {
-  const a = pts[i]
-  const b = pts[j]
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const lenSq = dx * dx + dy * dy
-  let worst = 0
-  for (let k = i + 1; k < j; k++) {
-    const p = pts[k]
-    let d: number
-    if (lenSq === 0) {
-      d = Math.hypot(p.x - a.x, p.y - a.y)
-    } else {
-      d = Math.abs(dx * (p.y - a.y) - dy * (p.x - a.x)) / Math.sqrt(lenSq)
-    }
-    if (d > worst) worst = d
+  for (let k = 1; k < sub.length; k++) {
+    const p = sub[k]
+    let phi = sweepAngle(sub[0], p, cx, cy, dir)
+    // Outside the sweep: the nearer arc end (just past the end, or just behind the start).
+    if (phi > sweep) phi = phi - sweep < 2 * Math.PI - phi ? sweep : 0
+    progress = Math.max(progress, phi)
+    const th = a0 + turn * progress
+    const onArc = Math.hypot(p.x - (cx + r * Math.cos(th)), p.y - (cy + r * Math.sin(th)))
+    if (onArc > worst) worst = onArc
+    const q = sub[k - 1]
+    const ex = p.x - q.x
+    const ey = p.y - q.y
+    const lenSq = ex * ex + ey * ey
+    const u = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((cx - q.x) * ex + (cy - q.y) * ey) / lenSq))
+    const inward = r - Math.hypot(q.x + u * ex - cx, q.y + u * ey - cy)
+    if (inward > worst) worst = inward
   }
   return worst
 }
@@ -134,14 +126,16 @@ function maxChordDeviation(pts: Vec2[], i: number, j: number): number {
  *     of the emitted primitive. Whichever primitive reaches further wins; ties
  *     and any doubt favor the line (always safe).
  *
- * Invariants: no emitted primitive deviates more than arcTolerance from ANY
- * original point it replaces, AND (for arcs) no more than arcTolerance from the
- * straight PATH between any pair of consecutive original points it spans -- so a
- * sparse run of long segments meeting at a corner is never mis-fit as an arc
- * (vertices-on-circle alone is insufficient: any 3 points define a perfect
- * circle); no arc exceeds 180deg (a full circle naturally splits into multiple
- * <=180deg arcs); emitted endpoints are exact original points (the DP-kept
- * breakpoints).
+ * Invariants (WO-3205: measured to the fitted SEGMENT or ARC, in traversal
+ * order, never to an infinite line or a whole circle): no emitted primitive
+ * deviates more than arcTolerance from ANY original point it replaces, AND (for
+ * arcs) no more than arcTolerance from the straight PATH between any pair of
+ * consecutive original points it spans -- so a sparse run of long segments
+ * meeting at a corner is never mis-fit as an arc (vertices-on-circle alone is
+ * insufficient: any 3 points define a perfect circle); a reversal along a line
+ * or a circle larger than arcTolerance is kept; no arc exceeds 180deg (a full
+ * circle naturally splits into multiple <=180deg arcs); emitted endpoints are
+ * exact original points (the DP-kept breakpoints).
  *
  * @param moves the source toolpath (not mutated)
  * @param params collapse tolerances
@@ -247,7 +241,7 @@ export function collapsePolyline(moves: ToolpathMove[], params: CollapseParams):
       // Longest line from s: chord deviation over EVERY original point spanned.
       let jLine = s + 1
       for (let j = s + 2; j < sn; j++) {
-        if (maxChordDeviation(pts, keptIdx[s], keptIdx[j]) <= arcTolerance) {
+        if (orderedSegmentDeviation(pts, keptIdx[s], keptIdx[j]).dist <= arcTolerance) {
           jLine = j
         } else {
           break
@@ -272,17 +266,16 @@ export function collapsePolyline(moves: ToolpathMove[], params: CollapseParams):
         const fit = fitCircleEndpointLocked(sub)
         if (!fit) break
         if (fit.r < minArcRadius || fit.r > maxArcRadius) break
-        if (maxRadialDeviation(sub, fit.cx, fit.cy, fit.r) > arcTolerance) break
-        // Vertices lying on the circle is NOT enough: any 3 points define a
-        // perfect circle, so a sharp corner of long straight edges would pass
-        // the radial check and collapse into a hugely bulging arc. Also require
-        // the arc to track the straight PATH between consecutive points -- reject
-        // if its arc-to-chord bulge anywhere exceeds tolerance (same as radial).
-        if (maxArcChordBulge(sub, fit.cx, fit.cy, fit.r) > arcTolerance) break
         const sign = windingSign(sub, fit.cx, fit.cy)
         const dir: 'cw' | 'ccw' = sign >= 0 ? 'ccw' : 'cw'
         const sweep = sweepAngle(pts[keptIdx[s]], pts[keptIdx[j]], fit.cx, fit.cy, dir)
         if (sweep > Math.PI + 1e-9) break // full-circle guard: cap at 180deg
+        // Vertices lying on the circle is NOT enough: any 3 points define a
+        // perfect circle, so a sharp corner of long straight edges would pass
+        // a radial check and collapse into a hugely bulging arc. The arc must
+        // track the straight PATH between consecutive points, in order, and a
+        // vertex's own radial error counts on top of its chords' bulge (WO-3205).
+        if (arcPathDeviation(sub, fit.cx, fit.cy, fit.r, dir, sweep) > arcTolerance) break
         if (sweep < minSweepRad) {
           // Too small to be worth an arc yet; keep growing in case a larger
           // window crosses the threshold while staying valid.

@@ -3,7 +3,7 @@
 // the harness refuses a store inside the working tree.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { ZDexelField } from '../../cam3d/stock'
 import { bounds, control } from './alpha3CollectorControls'
@@ -20,7 +20,10 @@ import { hashFiles, NORMALISED, PARAMS, PROVENANCE, readReferenceStore, type Ref
 const FIXTURES = 'src/tests/fixtures/reference-cam'
 const fixture = (name: string) => readFileSync(join(FIXTURES, name), 'utf8')
 const atZero = { originMm: { x: 0, y: 0, z: 0 } }
-const scratch = mkdtempSync(join(tmpdir(), 'wo3009-store-'))
+// WO-3323: the store must lie outside the working tree (privacy.ts refuses one inside it). A host whose
+// TMPDIR is inside the checkout (the Spark public-CI run exports TMPDIR=<checkout>/tmp) would put the
+// scratch store inside it, so there it steps out to the checkout's parent folder.
+const scratch = mkdtempSync(join(isInside(tmpdir(), repositoryRoot()) ? dirname(repositoryRoot()) : tmpdir(), 'wo3009-store-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
 // The stepped-boss rough row (A.5): 6 mm flat, stock 0..40 x 0..40 x 0..15, program zero at the stock top front left.

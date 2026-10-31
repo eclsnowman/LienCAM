@@ -119,6 +119,9 @@ const PROBE_TOUCHED_FAILURE_PREFIX = 'the probe touched '
  *  that timed out or lost its link, where what the machine did is unknown. */
 class BridgeReplyError extends Error {}
 
+/** WO-3121: a cadence query rejected locally was never a bridge request. */
+class BridgeCallNotSentError extends Error {}
+
 function probeCallFailureReason(command: string, error: unknown): string {
   const reason = error instanceof Error ? error.message : String(error)
   return reason.startsWith(PROBE_TOUCHED_FAILURE_PREFIX)
@@ -356,6 +359,8 @@ function readOverrideSupport(capabilities: ControllerCapabilities): OverrideSupp
 export interface UccncTransport {
   start(events: BridgeTransportEvents): Promise<void>
   send(message: BridgeClientMessage): void
+  startKeepAlive?(intervalMs: number, onTick: () => void): boolean
+  stopKeepAlive?(): void
   close(): Promise<void>
 }
 
@@ -411,6 +416,8 @@ interface PendingCall {
   resolve: (value: unknown) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
+  /** WO-3121: local delivery outcomes, never synthetic bridge replies. */
+  delivery?: (state: 'pending' | 'sent' | 'discarded') => void
   /** WO-930: set only for a LONG call (homing). The ceiling fires whatever the
    *  bridge is saying; `timer` above is then the liveness window, re-armed by
    *  `noteBridgeLiveness()` on every inbound frame. */
@@ -779,6 +786,9 @@ export class UccncController implements MachineController {
     try {
       await transport.start({
         onMessage: (m) => this.handleMessage(m, transport, generation),
+        onCallDelivery: (seq, state) => {
+          if (this.transportIsCurrent(transport, generation)) this.pending.get(seq)?.delivery?.(state)
+        },
         onClose: (reason) => this.handleClose(reason, transport, generation),
       })
       // WO-1783: start() owns the one measured 6 s old-bridge retry. Starting
@@ -2280,15 +2290,30 @@ export class UccncController implements MachineController {
     if (!transport) return Promise.reject(new Error('Not connected to the machine bridge.'))
     const seq = this.nextSeq()
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const deadline = Date.now() + timeoutMs
+      const expire = () => {
         this.pending.delete(seq)
         reject(new Error(`The machine bridge did not answer "${method}" in time.`))
-      }, timeoutMs)
-      this.pending.set(seq, {
+      }
+      const entry: PendingCall = {
         resolve: (v) => resolve(v as T),
         reject,
-        timer,
-      })
+        timer: setTimeout(expire, timeoutMs),
+        delivery: state => {
+          if (this.pending.get(seq) !== entry) return
+          // An unsent query cannot time out waiting for a bridge reply. Await
+          // the local worker outcome, even beyond the reply budget. Actually
+          // sent calls retain their original deadline; no new grace is added.
+          clearTimeout(entry.timer)
+          if (state === 'discarded') {
+            this.pending.delete(seq)
+            reject(new BridgeCallNotSentError('The bridge request was not sent.'))
+          } else if (state === 'sent') {
+            entry.timer = setTimeout(expire, Math.max(0, deadline - Date.now()))
+          }
+        },
+      }
+      this.pending.set(seq, entry)
       transport.send({ t: 'call', seq, m: method, a: args })
     })
   }
@@ -2389,6 +2414,9 @@ export class UccncController implements MachineController {
     if (!transport) return
     const generation = this.transportGeneration
     void this.call(method, args).catch((err) => {
+      // Only a locally skipped cadence poll is silent. Sent timeouts, bridge
+      // refusals and connection failures retain their existing error route.
+      if (method === 'queryStatus' && err instanceof BridgeCallNotSentError) return
       if (this.transportIsCurrent(transport, generation)) this.reportCallFailure(method, err)
     })
   }
@@ -2860,13 +2888,16 @@ export class UccncController implements MachineController {
   /** Prove to the bridge that this client is alive - see BRIDGE_KEEPALIVE_MS. */
   private startKeepAlive(): void {
     this.stopKeepAlive()
-    this.keepAliveTimer.start(BRIDGE_KEEPALIVE_MS, () => {
+    const onTick = () => {
       if (this.phase !== 'connected' || !this.transport) {
         this.stopKeepAlive()
         return
       }
       this.queryStatus()
-    })
+    }
+    if (!this.transport?.startKeepAlive?.(BRIDGE_KEEPALIVE_MS, onTick)) {
+      this.keepAliveTimer.start(BRIDGE_KEEPALIVE_MS, onTick)
+    }
   }
 
   /**
@@ -2986,6 +3017,7 @@ export class UccncController implements MachineController {
 
   /** Idempotent: teardown runs on paths that may never have started a timer. */
   private stopKeepAlive(): void {
+    this.transport?.stopKeepAlive?.()
     this.keepAliveTimer.stop()
   }
 

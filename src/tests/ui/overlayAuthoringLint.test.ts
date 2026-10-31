@@ -339,6 +339,8 @@ describe('WO UI-70-R5 / 2. the current tree passes -- every route it uses is san
       'lib/sketch/printDrawing.ts:printSketchDocument > frame.contentWindow',
       'components/model3d/form/formInteraction.ts:dragBoxTo > document.body.appendChild(shape)',
       'components/machine/PendantPanel.tsx:PendantPanel > createPortal( <div id=\"pendant-pairing-popover\" ref={popoverRef} className=\"pendant-pop...',
+      // WO-3279 (WO-3324): kit Tooltip transient fixed portal.
+      'components/kit/surfaces/tooltip.tsx:useTooltip > createPortal( <span ref={tipRef} id={id} role="tooltip" className="kit-tooltip" data-ki...',
       'components/machine/MacroAskDialog.tsx:mountMacroAskDialog > document.body.appendChild(host)',
     ].sort())
   })
@@ -457,6 +459,8 @@ describe('WO UI-70-R5 / 3. the sanctioned list cannot go stale, understate, or l
       "lib/sketch/printDrawing.ts:printSketchDocument > document.createElement('iframe')",
       'components/model3d/form/formInteraction.ts:dragBoxTo > document.body.appendChild(shape)',
       'components/machine/PendantPanel.tsx:PendantPanel > createPortal( <div id=\"pendant-pairing-popover\" ref={popoverRef} className=\"pendant-pop...',
+      // WO-3279 (WO-3324): kit Tooltip transient fixed portal.
+      'components/kit/surfaces/tooltip.tsx:useTooltip > createPortal( <span ref={tipRef} id={id} role="tooltip" className="kit-tooltip" data-ki...',
       'components/machine/MacroAskDialog.tsx:mountMacroAskDialog > document.body.appendChild(host)',
       'cam3d/dev/devPage.ts:mountCam3dDevPage > root.appendChild(page)',
       'lib/sketch/sketcher/sketchInteraction.ts:updateMarquee > this.host.container.appendChild(this.marqueeDiv)',

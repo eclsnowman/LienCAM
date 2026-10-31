@@ -173,6 +173,34 @@ async function perform(page, sequence) {
   await delay(start + sequence.durationSeconds * 1000 - performance.now())
   return actions
 }
+// Shared compositor capture for proof and ordered walkthroughs. Ack precedes disk I/O.
+export async function startCompositorCapture(context, page, raw) {
+  mkdirSync(raw, { recursive: true })
+  for (const name of readdirSync(raw)) if (/^frame-\d+\.jpg$/.test(name) || name === 'frames.txt') rmSync(path.join(raw, name))
+  const session = await context.newCDPSession(page), frames = [], writes = [], diskErrors = []
+  session.on('Page.screencastFrame', event => {
+    // Acknowledge before I/O. Synchronous JPEG writes can stall Chromium's
+    // capture delivery while the app itself continues rendering normally.
+    session.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {})
+    const name = `frame-${String(frames.length).padStart(6, '0')}.jpg`
+    writes.push(writeFileAsync(path.join(raw, name), Buffer.from(event.data, 'base64')).catch(e => diskErrors.push(e.message)))
+    frames.push({ name, timestamp: event.metadata.timestamp })
+  })
+  await session.send('Page.startScreencast', { format: 'jpeg', quality: 95, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 })
+  return { frames, async stop() {
+    await session.send('Page.stopScreencast')
+    await Promise.all(writes)
+    await session.detach()
+    if (diskErrors.length) throw new Error('Capture disk writes failed: ' + diskErrors.join('; '))
+  } }
+}
+export function encodeCompositorCapture(raw, frames, durationSeconds, output) {
+  if (!frames.length) throw new Error('Compositor returned no frames')
+  const first = frames[0].timestamp
+  const concat = frames.map((f, i) => `file '${f.name}'\noption framerate 1000\nduration ${Math.max(0.001, (frames[i + 1]?.timestamp ?? first + durationSeconds) - f.timestamp).toFixed(6)}\n`).join('') + `file '${frames.at(-1).name}'\noption framerate 1000\n`
+  writeFileSync(path.join(raw, 'frames.txt'), concat)
+  ffmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', path.join(raw, 'frames.txt'), '-t', String(durationSeconds), '-vf', 'fps=30', '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output])
+}
 export async function runProof({ record = false } = {}) {
   mkdirSync(EVIDENCE, { recursive: true }); mkdirSync(OUTPUT, { recursive: true })
   rmSync(path.join(EVIDENCE, 'failed.png'), { force: true })
@@ -209,15 +237,7 @@ export async function runProof({ record = false } = {}) {
         const raw = path.join(EVIDENCE, 'raw'); mkdirSync(raw, { recursive: true })
         for (const name of readdirSync(raw)) if (/^frame-\d+\.jpg$/.test(name) || name === 'frames.txt') rmSync(path.join(raw, name))
         for (const name of ['proof.mp4', 'strip-1fps.jpg']) rmSync(path.join(OUTPUT, name), { force: true })
-        const session = await context.newCDPSession(page), frames = [], writes = [], diskErrors = []
-        session.on('Page.screencastFrame', event => {
-          // Acknowledge before I/O. Synchronous JPEG writes can stall Chromium's
-          // capture delivery while the app itself continues rendering normally.
-          session.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {})
-          const name = `frame-${String(frames.length).padStart(6, '0')}.jpg`
-          writes.push(writeFileAsync(path.join(raw, name), Buffer.from(event.data, 'base64')).catch(e => diskErrors.push(e.message)))
-          frames.push({ name, timestamp: event.metadata.timestamp })
-        })
+        const capture = await startCompositorCapture(context, page, raw), frames = capture.frames
         await page.evaluate(() => {
           window.__wo2551Samples = []
           const start = performance.now()
@@ -227,21 +247,13 @@ export async function runProof({ record = false } = {}) {
           }
           requestAnimationFrame(sample)
         })
-        await session.send('Page.startScreencast', { format: 'jpeg', quality: 95, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 })
         const actions = await perform(page, s)
-        await session.send('Page.stopScreencast')
-        await Promise.all(writes)
-        if (diskErrors.length) throw new Error('Capture disk writes failed: ' + diskErrors.join('; '))
+        await capture.stop()
         const telemetry = await page.evaluate(() => window.__wo2551Samples)
         json(path.join(EVIDENCE, 'telemetry.json'), telemetry)
         if (errors.length) throw new Error('Application page errors: ' + errors.join('; '))
         if (frames.length < 300) throw new Error('Capture too sparse: ' + frames.length)
-        const first = frames[0].timestamp
-        // image2's default 25-Hz timebase would quantize a 60-Hz capture back
-        // to 40 ms. Give each image a millisecond timebase before fps conversion.
-        const concat = frames.map((f, i) => `file '${f.name}'\noption framerate 1000\nduration ${Math.max(0.001, (frames[i + 1]?.timestamp ?? first + s.durationSeconds) - f.timestamp).toFixed(6)}\n`).join('') + `file '${frames.at(-1).name}'\noption framerate 1000\n`
-        writeFileSync(path.join(raw, 'frames.txt'), concat)
-        ffmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', path.join(raw, 'frames.txt'), '-t', String(s.durationSeconds), '-vf', 'fps=30', '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(OUTPUT, 'proof.mp4')])
+        encodeCompositorCapture(raw, frames, s.durationSeconds, path.join(OUTPUT, 'proof.mp4'))
         ffmpeg(['-y', '-i', path.join(OUTPUT, 'proof.mp4'), '-vf', 'fps=1,scale=480:270,tile=5x6', '-frames:v', '1', path.join(OUTPUT, 'strip-1fps.jpg')])
         json(path.join(EVIDENCE, 'capture.json'), { source, capturedAt: new Date().toISOString(), projectSha256: createHash('sha256').update(readFileSync(path.join(ROOT, s.project))).digest('hex'), prep, cpu, captureCpu, frames, actions, errors, bytes: statSync(path.join(OUTPUT, 'proof.mp4')).size, sha256: createHash('sha256').update(readFileSync(path.join(OUTPUT, 'proof.mp4'))).digest('hex') })
         // The analyzer cleans raw originals after measurements; --keep-raw preserves them.

@@ -2,13 +2,15 @@
 // contract).
 //
 // v1 SCOPE: INTERNAL + EXTERNAL threads, single-point cutter model (one tool
-// revolution per pitch), top-to-bottom OR bottom-to-top helix (derived), radial
+// revolution per pitch), top-to-bottom OR bottom-to-top helix (the operator's
+// axialDirection, WO-3193; derived when unset), radial
 // roughing + spring passes, tangent (or none) lead-in/out, computer
 // compensation only. internal/external is a MECHANICAL MIRROR: it changes the
-// orbit RADIUS only (internal subtracts the tool radius, external adds it). The
-// orbit SENSE is set by climb/conventional x kind x spindle (threadOrbitSense),
-// and the hand then couples that sense to the axial travel direction
-// (threadTravelUp) -- see ADR-0031 sec 5.
+// orbit RADIUS only (internal subtracts the tool radius, external adds it). With
+// a chosen axialDirection the orbit SENSE is direction x hand; unset, it is set by
+// climb/conventional x kind x spindle (threadOrbitSense) and the hand couples it
+// to the axial travel direction (threadTravelUp) -- see resolveThreadMotion and
+// ADR-0031 sec 5.
 //
 // INTERNAL -- PRE-DRILLED HOLE ASSUMPTION: the hole has already been
 // bored/drilled below bottomZ and is LARGER than the tool, by a SEPARATE drill
@@ -30,9 +32,12 @@
 import type { ThreadMillWorkerPayload } from './types'
 import type { ToolpathMove } from '../../types'
 import { resolveHeights } from './heights'
+import { entryMaterialOf, entryStartZ, hopTo, liftTo } from './moves'
 import { resolveFeedrates } from './feedrates'
 import { fitCircle } from './geometry'
-import { generateThreadHelix, generateLeadArc, threadOrbitSense, threadTravelUp } from './threadHelix'
+// WO-3168: constant-radius cutting passes share Bore's native helical arcs.
+// Lead geometry, pass scheduling and dense/adaptive entry generators stay independent.
+import { generateHelixArcs, generateLeadArc, resolveThreadMotion, threadEdgeFeed } from './threadHelix'
 import { spindleSignForTool } from '../tool/cutHand'
 
 export function buildThreadMillToolpath(
@@ -41,7 +46,7 @@ export function buildThreadMillToolpath(
 ): ToolpathMove[] {
   const { params, heights, tool, loops, wcsOrigin, feedrateOverride } = payload
 
-  const { clearanceZ, feedZ, topZ, bottomZ } = resolveHeights(heights, wcsOrigin)
+  const { clearanceZ, retractZ, feedZ, topZ, bottomZ } = resolveHeights(heights, wcsOrigin)
   const { feedRate, plungeRate, leadInRate, leadOutRate } = resolveFeedrates(tool, feedrateOverride)
 
   // Pitch resolution: tpi (when > 0) wins, else the explicit pitch.
@@ -214,15 +219,24 @@ export function buildThreadMillToolpath(
   })
 
   // ── Orbit sense + axial travel + lead mode ────────────────────────────────
-  // Orbit sense (climb/conventional x kind x spindle) is set like 2D contouring;
-  // hand then couples it to the axial travel direction along the fixed groove.
+  // WO-3193: the operator's axialDirection, when set, is followed by every pass
+  // and the orbit sense follows direction x hand x spindle (climb/conventional is
+  // what results). Unset (ops saved before WO-3193) derives it as before: orbit
+  // sense from climb/conventional x kind x spindle like 2D contouring, then hand
+  // couples it to the axial travel direction along the fixed groove.
   const spindleSign = spindleSignForTool(tool)
-  const dir = threadOrbitSense(params.threadKind, params.cutDirection, spindleSign)  // +1 CCW
-  const travelUp = threadTravelUp(dir, params.handedness)
+  const { orbitSense: dir, travelUp } = resolveThreadMotion(params, spindleSign)  // dir +1 CCW
   const useArc = params.leadInOut === 'arc'
   const phi0 = 0  // helix + leads all reference orbit angle 0 at the start.
 
   const moves: ToolpathMove[] = []
+  // WO-3083: every pass comes down to ENTRY_CLEARANCE_MM above the material under the tool (was
+  // the Feed plane, Top + 5) - the first through Clearance, the rest hopping at Retract - and
+  // leaves straight up to Retract; the operation's final exit is to Clearance.
+  const material = entryMaterialOf(payload, topZ, feedZ)
+  const enter = (x: number, y: number, floorZ: number) => {
+    hopTo(moves, { x, y }, entryStartZ(material, { x, y }, toolR, floorZ), retractZ, clearanceZ)
+  }
   const totalPasses = holeSchedules.reduce((sum, s) => sum + s.length, 0)
   let passesDone = 0
 
@@ -231,14 +245,18 @@ export function buildThreadMillToolpath(
     const passRadii = holeSchedules[hi]
     for (let pi = 0; pi < passRadii.length; pi++) {
       const R = passRadii[pi]
+      // WO-3194: the cutting helix is fed so the EDGE (not the centre) runs at the
+      // set feed; leads, plunge and exit keep their own rates. The helix's first move
+      // (to the start point, constant Z) completes the arc lead-in, which stops just
+      // short of it, so it keeps the uncompensated feed it always had (entryFeed).
+      const helixFeed = threadEdgeFeed(feedRate, R, toolR, params.threadKind)
 
       if (params.threadKind === 'internal') {
         if (travelUp) {
-        // ── INTERNAL: plunge straight down the open hole, thread up, then
-        // thread-mill back OUT of the hole before retract. (Byte-identical to v1.)
+        // ── INTERNAL: plunge straight down the open hole, thread up to the
+        // thread top, lead out to the centre and retract up the open hole.
         // Per-pass ENTRY down the open, pre-cleared hole.
-        moves.push({ type: 'rapid', x: h.x, y: h.y, z: clearanceZ, role: 'rapid' })
-        moves.push({ type: 'rapid', x: h.x, y: h.y, z: feedZ, role: 'rapid' })
+        enter(h.x, h.y, bottomZ)
         moves.push({ type: 'feed', x: h.x, y: h.y, z: bottomZ, feed: plungeRate, role: 'plunge' })
 
         // LEAD-IN at bottomZ.
@@ -253,31 +271,19 @@ export function buildThreadMillToolpath(
         }
 
         // HELIX (the thread): climb bottom-to-top, exactly one pitch per rev.
-        moves.push(...generateThreadHelix({
+        moves.push(...generateHelixArcs({
           cx: h.x, cy: h.y, radius: R, pitch, bottomZ, topZ, dir,
-          feed: feedRate, startAngle: phi0, role: 'helix',
+          feed: helixFeed, entryFeed: feedRate, startAngle: phi0, role: 'helix',
         }))
 
-        // EXIT CLIMB: keep orbiting at the thread radius from the thread top up to
-        // the feed plane (above the stock) so the cutter is FULLY OUT of the hole
-        // before the radial lead-out and the rapid retract - we thread-mill back
-        // OUT of the hole rather than retracting from inside it. The orbit phase
-        // continues seamlessly from where the thread helix ended; the exit climb's
-        // duplicate first point (== the thread helix's last) is dropped so Z stays
-        // strictly increasing. Above the stock top this just cuts air.
-        let exitZ = topZ
-        let endAng = phi0 + dir * ((topZ - bottomZ) / pitch) * 2 * Math.PI
-        if (feedZ > topZ + 1e-9) {
-          const exitHelix = generateThreadHelix({
-            cx: h.x, cy: h.y, radius: R, pitch, bottomZ: topZ, topZ: feedZ, dir,
-            feed: feedRate, startAngle: endAng, role: 'helix',
-          })
-          moves.push(...exitHelix.slice(1))
-          exitZ = feedZ
-          endAng = endAng + dir * ((feedZ - topZ) / pitch) * 2 * Math.PI
-        }
+        // The helix ENDS at the thread top (WO-3080, ADR-0031 Amendment 10: the
+        // A2.1 exit climb to the feed plane cut ~5 air turns per hole). Lead out
+        // at topZ back to the open hole centre, then rapid straight up it - the
+        // same exit as the internal descending branch below.
+        const exitZ = topZ
+        const endAng = phi0 + dir * ((topZ - bottomZ) / pitch) * 2 * Math.PI
 
-        // LEAD-OUT at the exit plane (feedZ when the exit climb ran, else topZ).
+        // LEAD-OUT at the thread top.
         if (useArc) {
           // FLIP dir for the internal lead-out (real hole-center arc): the smooth
           // return to center is the OTHER half-circle from the lead-in one.
@@ -290,66 +296,37 @@ export function buildThreadMillToolpath(
             z: exitZ, feed: leadOutRate, kindRole: 'lead_out',
           }))
         } else {
-          // Straight feed from E (helix end) to center at the exit plane. Single
+          // Straight feed from E (helix end) to center at the thread top. Single
           // move; E is already at the cutter from the helix, so we only emit the
           // destination.
           moves.push({ type: 'feed', x: h.x, y: h.y, z: exitZ, feed: leadOutRate, role: 'lead_out' })
         }
 
-        // Per-pass EXIT.
-        moves.push({ type: 'rapid', x: h.x, y: h.y, z: clearanceZ, role: 'rapid' })
+        // Per-pass EXIT: retract straight up the open hole centre.
+        liftTo(moves, retractZ)
         } else {
           // ── INTERNAL DESCENDING (travelUp false): the tool enters from the
           // TOP through the open hole, threads DOWN to the bottom, then exits
           // straight up the open center. Mirror of internal ascending.
-          moves.push({ type: 'rapid', x: h.x, y: h.y, z: clearanceZ, role: 'rapid' })
-          moves.push({ type: 'rapid', x: h.x, y: h.y, z: feedZ, role: 'rapid' })
-
-          let mainStartAngle = phi0
-          if (feedZ > topZ + 1e-9) {
-            // LEAD-IN at the feed plane (in air above the stock).
-            if (useArc) {
-              moves.push(...generateLeadArc({
-                cx: h.x, cy: h.y, radius: R, angle: phi0, dir,
-                z: feedZ, feed: leadInRate, kindRole: 'lead_in',
-              }))
-            } else {
-              moves.push({ type: 'feed', x: h.x + R, y: h.y, z: feedZ, feed: leadInRate, role: 'lead_in' })
-            }
-            // ENTRY CLIMB: orbit DOWN in air from the feed plane to the thread
-            // top so the cutter arrives at topZ already on the thread radius.
-            const entryHelix = generateThreadHelix({
-              cx: h.x, cy: h.y, radius: R, pitch, bottomZ: topZ, topZ: feedZ, dir,
-              descend: true, feed: feedRate, startAngle: phi0, role: 'helix',
-            })
-            moves.push(...entryHelix)
-            const revsEntry = (feedZ - topZ) / pitch
-            mainStartAngle = phi0 + dir * revsEntry * 2 * Math.PI
-            // MAIN helix topZ -> bottomZ descending; drop the duplicate first
-            // point (== the entry climb's last) so it connects seamlessly.
-            moves.push(...generateThreadHelix({
-              cx: h.x, cy: h.y, radius: R, pitch, bottomZ, topZ, dir,
-              descend: true, feed: feedRate, startAngle: mainStartAngle, role: 'helix',
-            }).slice(1))
-          } else {
-            // DEGENERATE (feedZ <= topZ): plunge straight down to the thread top.
-            moves.push({ type: 'feed', x: h.x, y: h.y, z: topZ, feed: plungeRate, role: 'plunge' })
-            // LEAD-IN at the thread top.
-            if (useArc) {
-              moves.push(...generateLeadArc({
-                cx: h.x, cy: h.y, radius: R, angle: phi0, dir,
-                z: topZ, feed: leadInRate, kindRole: 'lead_in',
-              }))
-            } else {
-              moves.push({ type: 'feed', x: h.x + R, y: h.y, z: topZ, feed: leadInRate, role: 'lead_in' })
-            }
-            mainStartAngle = phi0
-            // MAIN helix topZ -> bottomZ descending.
-            moves.push(...generateThreadHelix({
-              cx: h.x, cy: h.y, radius: R, pitch, bottomZ, topZ, dir,
-              descend: true, feed: feedRate, startAngle: mainStartAngle, role: 'helix',
+          // WO-3083: down to just above the material, plunge to the thread top and start the
+          // thread there (the air "entry climb" orbit from the Feed plane is gone).
+          enter(h.x, h.y, topZ)
+          moves.push({ type: 'feed', x: h.x, y: h.y, z: topZ, feed: plungeRate, role: 'plunge' })
+          // LEAD-IN at the thread top.
+          if (useArc) {
+            moves.push(...generateLeadArc({
+              cx: h.x, cy: h.y, radius: R, angle: phi0, dir,
+              z: topZ, feed: leadInRate, kindRole: 'lead_in',
             }))
+          } else {
+            moves.push({ type: 'feed', x: h.x + R, y: h.y, z: topZ, feed: leadInRate, role: 'lead_in' })
           }
+          const mainStartAngle = phi0
+          // MAIN helix topZ -> bottomZ descending.
+          moves.push(...generateHelixArcs({
+            cx: h.x, cy: h.y, radius: R, pitch, bottomZ, topZ, dir,
+            descend: true, feed: helixFeed, entryFeed: feedRate, startAngle: mainStartAngle, role: 'helix',
+          }))
 
           // LEAD-OUT at bottomZ.
           const endAng = mainStartAngle + dir * ((topZ - bottomZ) / pitch) * 2 * Math.PI
@@ -367,7 +344,7 @@ export function buildThreadMillToolpath(
           }
 
           // Per-pass EXIT: retract straight up the open hole.
-          moves.push({ type: 'rapid', x: h.x, y: h.y, z: clearanceZ, role: 'rapid' })
+          liftTo(moves, retractZ)
         }
       } else {
         if (travelUp) {
@@ -391,8 +368,7 @@ export function buildThreadMillToolpath(
           // at radius [R, 2R] from the boss center -- it never dips toward center.
           const ovx = h.x + 2 * R * cosP, ovy = h.y + 2 * R * sinP
           // ENTRY: plunge in AIR at the arc start O_v (outside the boss).
-          moves.push({ type: 'rapid', x: ovx, y: ovy, z: clearanceZ, role: 'rapid' })
-          moves.push({ type: 'rapid', x: ovx, y: ovy, z: feedZ, role: 'rapid' })
+          enter(ovx, ovy, bottomZ)
           moves.push({ type: 'feed', x: ovx, y: ovy, z: bottomZ, feed: plungeRate, role: 'plunge' })
           moves.push(...generateLeadArc({
             cx: ovx, cy: ovy, radius: R, angle: phi0 + Math.PI, dir: (dir === 1 ? -1 : 1),
@@ -407,21 +383,19 @@ export function buildThreadMillToolpath(
           // the helix. (The arc branch is already safe -- it plunges at O_v.)
           const rSafe = params.majorDiameter / 2 + toolR
           const psx = h.x + rSafe * cosP, psy = h.y + rSafe * sinP
-          moves.push({ type: 'rapid', x: psx, y: psy, z: clearanceZ, role: 'rapid' })
-          moves.push({ type: 'rapid', x: psx, y: psy, z: feedZ, role: 'rapid' })
+          enter(psx, psy, bottomZ)
           moves.push({ type: 'feed', x: psx, y: psy, z: bottomZ, feed: plungeRate, role: 'plunge' })
           moves.push({ type: 'feed', x: qx, y: qy, z: bottomZ, feed: leadInRate, role: 'lead_in' })
         }
 
         // HELIX (the thread): climb bottom-to-top, exactly one pitch per rev.
-        moves.push(...generateThreadHelix({
+        moves.push(...generateHelixArcs({
           cx: h.x, cy: h.y, radius: R, pitch, bottomZ, topZ, dir,
-          feed: feedRate, startAngle: phi0, role: 'helix',
+          feed: helixFeed, entryFeed: feedRate, startAngle: phi0, role: 'helix',
         }))
 
         // NO EXIT CLIMB for external: the tool is already radially clear of the
         // boss, so the lead-out happens at the thread top (topZ).
-        let exitX: number, exitY: number
         if (useArc) {
           // Tangent lead-out arc that curves OUTWARD/away from the boss (same
           // virtual-outside-center trick, mirrored about E). Ends at O_v_end,
@@ -436,17 +410,15 @@ export function buildThreadMillToolpath(
             cx: ovex, cy: ovey, radius: R, angle: endAng + Math.PI, dir: dir,
             z: topZ, feed: leadOutRate, kindRole: 'lead_out',
           }))
-          exitX = ovex; exitY = ovey
         } else {
           // Straight short radial feed OUTWARD from E to radius R + toolR (away
           // from the boss, NEVER toward center). E is already at the cutter.
           const rOut = R + toolR
-          exitX = h.x + rOut * cosE; exitY = h.y + rOut * sinE
-          moves.push({ type: 'feed', x: exitX, y: exitY, z: topZ, feed: leadOutRate, role: 'lead_out' })
+          moves.push({ type: 'feed', x: h.x + rOut * cosE, y: h.y + rOut * sinE, z: topZ, feed: leadOutRate, role: 'lead_out' })
         }
 
         // Per-pass EXIT: retract straight up from the (outside) lead-out end.
-        moves.push({ type: 'rapid', x: exitX, y: exitY, z: clearanceZ, role: 'rapid' })
+        liftTo(moves, retractZ)
         } else {
           // ── EXTERNAL DESCENDING (travelUp false): plunge in AIR beside the
           // boss down to the TOP, thread DOWN, then lead out at the base. Mirror
@@ -465,8 +437,7 @@ export function buildThreadMillToolpath(
             // Tangent lead-in arc on the OUTSIDE of the boss (virtual-outside
             // center trick, same as ascending), but at the thread TOP.
             const ovx = h.x + 2 * R * cosP, ovy = h.y + 2 * R * sinP
-            moves.push({ type: 'rapid', x: ovx, y: ovy, z: clearanceZ, role: 'rapid' })
-            moves.push({ type: 'rapid', x: ovx, y: ovy, z: feedZ, role: 'rapid' })
+            enter(ovx, ovy, topZ)
             moves.push({ type: 'feed', x: ovx, y: ovy, z: topZ, feed: plungeRate, role: 'plunge' })
             moves.push(...generateLeadArc({
               cx: ovx, cy: ovy, radius: R, angle: phi0 + Math.PI, dir: (dir === 1 ? -1 : 1),
@@ -480,20 +451,18 @@ export function buildThreadMillToolpath(
             // gouge. (The arc branch is already safe -- it plunges at O_v.)
             const rSafe = params.majorDiameter / 2 + toolR
             const psx = h.x + rSafe * cosP, psy = h.y + rSafe * sinP
-            moves.push({ type: 'rapid', x: psx, y: psy, z: clearanceZ, role: 'rapid' })
-            moves.push({ type: 'rapid', x: psx, y: psy, z: feedZ, role: 'rapid' })
+            enter(psx, psy, topZ)
             moves.push({ type: 'feed', x: psx, y: psy, z: topZ, feed: plungeRate, role: 'plunge' })
             moves.push({ type: 'feed', x: qx, y: qy, z: topZ, feed: leadInRate, role: 'lead_in' })
           }
 
           // MAIN helix topZ -> bottomZ descending, exactly one pitch per rev.
-          moves.push(...generateThreadHelix({
+          moves.push(...generateHelixArcs({
             cx: h.x, cy: h.y, radius: R, pitch, bottomZ, topZ, dir,
-            descend: true, feed: feedRate, startAngle: phi0, role: 'helix',
+            descend: true, feed: helixFeed, entryFeed: feedRate, startAngle: phi0, role: 'helix',
           }))
 
           // LEAD-OUT at bottomZ (away from the boss, never toward center).
-          let exitX: number, exitY: number
           if (useArc) {
             const ovex = h.x + 2 * R * cosE, ovey = h.y + 2 * R * sinE
             // REAL dir here (NOT flipped) -- same reasoning as the 961b202 fix:
@@ -503,16 +472,14 @@ export function buildThreadMillToolpath(
               cx: ovex, cy: ovey, radius: R, angle: endAng + Math.PI, dir: dir,
               z: bottomZ, feed: leadOutRate, kindRole: 'lead_out',
             }))
-            exitX = ovex; exitY = ovey
           } else {
             // Straight short radial feed OUTWARD from E to radius R + toolR.
             const rOut = R + toolR
-            exitX = h.x + rOut * cosE; exitY = h.y + rOut * sinE
-            moves.push({ type: 'feed', x: exitX, y: exitY, z: bottomZ, feed: leadOutRate, role: 'lead_out' })
+            moves.push({ type: 'feed', x: h.x + rOut * cosE, y: h.y + rOut * sinE, z: bottomZ, feed: leadOutRate, role: 'lead_out' })
           }
 
           // Per-pass EXIT: retract straight up from the (outside) lead-out end.
-          moves.push({ type: 'rapid', x: exitX, y: exitY, z: clearanceZ, role: 'rapid' })
+          liftTo(moves, retractZ)
         }
       }
 
@@ -523,6 +490,7 @@ export function buildThreadMillToolpath(
     }
     passesDone += passRadii.length
   }
+  liftTo(moves, clearanceZ)
 
   return moves
 }

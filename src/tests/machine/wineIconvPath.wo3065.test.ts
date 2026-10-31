@@ -82,7 +82,9 @@ function harness(options: { mingw?: boolean; platform?: string; arch?: string; p
   let signalCleanup!: () => void
   const cleanupRequested = new Promise<void>((resolve) => { signalCleanup = resolve })
   const processValue = { ...process, platform: options.platform ?? 'linux', arch: options.arch ?? 'x64', argv: [], resourcesPath: resources,
-    env: { ...process.env, LIENCAM_BRIDGE_EXECUTABLE: '', LIENCAM_BRIDGE_ARGS_JSON: '', LIENCAM_USER_DATA_DIR: '', LIENCAM_UCCNC_SEARCH_ROOT: '', WINEPREFIX: prefix, ...options.env } }
+    // WO-3072 (e4ccf21a81) made Linux prepare the native bridge and parked Wine
+    // behind this explicit opt-in; the Wine route is what these tests measure.
+    env: { ...process.env, LIENCAM_BRIDGE_EXECUTABLE: '', LIENCAM_BRIDGE_ARGS_JSON: '', LIENCAM_USER_DATA_DIR: '', LIENCAM_UCCNC_SEARCH_ROOT: '', LIENCAM_BRIDGE_WINE: '1', WINEPREFIX: prefix, ...options.env } }
   const events = new Map<string, (event: { preventDefault: () => void }) => unknown>()
   const app = { isPackaged: options.packaged ?? true, getPath: () => userData, on: (event: string, fn: (event: { preventDefault: () => void }) => unknown) => events.set(event, fn), quit: vi.fn(), whenReady: () => ({ then: () => Promise.resolve() }) }
   const module = { exports: {} as Api }

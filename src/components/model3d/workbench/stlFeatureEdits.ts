@@ -373,7 +373,8 @@ export function planStlShapeEdit(
   // WO-2089: a hole or a chamfer is plain data already (`stlHoleShape`,
   // `stlChamferShape`); copied, so the record shares no array with the caller.
   // WO-2090: so is a shell or a draft (`stlShellShape`, `stlDraftShape`).
-  const parameters: Record<string, unknown> = shape.shape === 'hole' || shape.shape === 'chamfer' ||
+  // WO-3092: and a fillet (`stlFilletShape`).
+  const parameters: Record<string, unknown> = shape.shape === 'hole' || shape.shape === 'chamfer' || shape.shape === 'fillet' ||
     shape.shape === 'shell' || shape.shape === 'draft'
     ? JSON.parse(JSON.stringify(shape)) as Record<string, unknown>
     : shape.shape === 'box'
@@ -667,6 +668,219 @@ export function stlChamferShape(edges: readonly StlSharpEdge[], distanceMm: numb
   }
 }
 
+// ------------------------------------------------------------ Fillet (WO-3092)
+
+/** A run of sharp edge turns at most this much at each corner and still
+ *  reads as one edge to Fillet - a hole's rim, polygon though the STL makes
+ *  it, is picked whole; a box's corner (90 deg) ends the edge there. */
+export const STL_TANGENT_CHAIN_DEG = 30
+
+/** A sharp edge of an STL as Fillet picks it: the whole tangent-continuous
+ *  run of it along one flat face - a straight edge, or a hole's rim all the
+ *  way round. */
+export interface StlEdgeChain {
+  id: string
+  /** corners, part coordinates (a closed run does not repeat its first) */
+  points: Vec3Tuple[]
+  closed: boolean
+  lengthMm: number
+  /** per point: unit directions into the flat face the run lies in, and into
+   *  the other face, square to the run there */
+  faceDirections: Array<[Vec3Tuple, Vec3Tuple]>
+  /** 'subtract' for an outside edge (rounded off), 'add' for an inside corner (filled) */
+  operation: 'add' | 'subtract'
+}
+
+/**
+ * Which recognised curved surface each facet of the part lies on - one band
+ * (cylinder or cone) of a round feature, or a rounded blend. Fillet rounds an
+ * edge that runs along a flat face; a fold with a curved surface on both sides
+ * (a coarse cone's seam, a bore meeting its chamfer cone) is not one it picks.
+ * Undefined for a facet on none.
+ */
+export function stlCurvedSurfaceOf(part: { features: readonly StlModelFeature[]; sourceFacetIds: Uint32Array }): (facet: number) => string | undefined {
+  const bySource = new Map<number, string>()
+  part.features.forEach((feature, i) => {
+    const target = feature.target
+    if (target.family === 'round') {
+      target.feature.bands.forEach((band, b) => { for (const id of band.sourceFacetIds) bySource.set(id, `${i}:${b}`) })
+    } else if (target.family === 'blend' && target.blend.kind === 'fillet') {
+      for (const id of feature.sourceFacetIds) bySource.set(id, `${i}`)
+    }
+  })
+  return (facet) => bySource.get(part.sourceFacetIds[facet])
+}
+
+/**
+ * The sharp edge of `mesh` nearest `point` (part coordinates) within
+ * `toleranceMm` that runs along a flat face, grown both ways for as long as it
+ * keeps that face (the same plane) and turns no more than
+ * `STL_TANGENT_CHAIN_DEG` at a corner - the edge a click picks for Fillet. A
+ * facet `surfaceOf` (from `stlCurvedSurfaceOf`) places on a curved surface is
+ * not a flat face, so a fold with curved surfaces on both sides is not picked.
+ * Null when no such edge is that close. Pure.
+ */
+export function findStlEdgeChain(mesh: MeshBuffers, point: XYZ, toleranceMm: number, surfaceOf?: (facet: number) => string | undefined): StlEdgeChain | null {
+  const { welded, sharp: folds, atVertex: foldsAt } = sharpEdgeIndex(mesh)
+  const flat = (f: number): boolean => surfaceOf?.(f) === undefined
+  const alongFlat = (index: number): boolean => welded.edges[index].facets.some(flat)
+  const sharp = folds.filter(alongFlat)
+  const atVertex = { get: (v: number) => foldsAt.get(v)?.filter(alongFlat) }
+  const at = (v: number): Vec3Tuple => [welded.positions[v * 3], welded.positions[v * 3 + 1], welded.positions[v * 3 + 2]]
+  const normal = (f: number): Vec3Tuple => [welded.normals[f * 3], welded.normals[f * 3 + 1], welded.normals[f * 3 + 2]]
+  const p: Vec3Tuple = [point.x, point.y, point.z]
+  let best = -1
+  let bestDistance = toleranceMm
+  for (const index of sharp) {
+    const a = at(welded.edges[index].a)
+    const ab = v3sub(at(welded.edges[index].b), a)
+    const t = Math.max(0, Math.min(1, v3dot(v3sub(p, a), ab) / (v3dot(ab, ab) || 1)))
+    const distance = Math.hypot(p[0] - a[0] - ab[0] * t, p[1] - a[1] - ab[1] * t, p[2] - a[2] - ab[2] * t)
+    if (distance <= bestDistance) {
+      bestDistance = distance
+      best = index
+    }
+  }
+  if (best < 0) return null
+
+  // A face is a plane: its normal and its offset along it.
+  type Face = { n: Vec3Tuple; offset: number }
+  const faceOf = (f: number): Face => {
+    const n = normal(f)
+    return { n, offset: v3dot(n, at(welded.facets[f * 3])) }
+  }
+  const onPlane = (f: number, q: Face) => {
+    const own = faceOf(f)
+    return v3dot(own.n, q.n) > 0.9999 && Math.abs(own.offset - q.offset) <= 1e-3
+  }
+  const seed = welded.edges[best]
+  // The run keeps a flat face of its first edge.
+  const candidates = seed.facets.filter(flat).map(faceOf)
+  let shared: Face | null = null
+  const limit = Math.cos((STL_TANGENT_CHAIN_DEG * Math.PI) / 180)
+
+  // Walk on from `vertex` (arrived along `direction` by `edge`); the vertices
+  // and edges reached, in order. Stops at a corner sharper than the limit,
+  // where the face changes, or back at `stopAt` (a closed rim).
+  const used = new Set<number>([best])
+  const walk = (from: number, edge: number, direction: Vec3Tuple, stopAt: number) => {
+    const vertices: number[] = []
+    const edges: number[] = []
+    let vertex = from
+    let dir = direction
+    let previous = edge
+    for (;;) {
+      let next = -1
+      let nextDir: Vec3Tuple = dir
+      let nextTurn = -2
+      for (const index of atVertex.get(vertex) ?? []) {
+        if (index === previous || used.has(index)) continue
+        const e = welded.edges[index]
+        const other = e.a === vertex ? e.b : e.a
+        const along = v3unit(v3sub(at(other), at(vertex)))
+        const turn = v3dot(along, dir)
+        if (turn < limit) continue
+        const faces = shared === null ? candidates : [shared]
+        if (!faces.some((q) => e.facets.some((f) => onPlane(f, q)))) continue
+        if (turn > nextTurn) {
+          next = index
+          nextDir = along
+          nextTurn = turn
+        }
+      }
+      if (next < 0) return { vertices, edges, closed: false }
+      const e = welded.edges[next]
+      if (shared === null && nextTurn < 1 - 1e-9) {
+        // The first corner names the face the run keeps.
+        shared = candidates.find((q) => e.facets.some((f) => onPlane(f, q))) ?? null
+      }
+      used.add(next)
+      edges.push(next)
+      vertex = e.a === vertex ? e.b : e.a
+      dir = nextDir
+      previous = next
+      if (vertex === stopAt) return { vertices, edges, closed: true }
+      vertices.push(vertex)
+    }
+  }
+  const seedDir = v3unit(v3sub(at(seed.b), at(seed.a)))
+  const ahead = walk(seed.b, best, seedDir, seed.a)
+  const back = ahead.closed ? { vertices: [], edges: [] } : walk(seed.a, best, [-seedDir[0], -seedDir[1], -seedDir[2]], seed.b)
+  const vertexRun = [...[...back.vertices].reverse(), seed.a, seed.b, ...ahead.vertices]
+  const edgeRun = [...[...back.edges].reverse(), best, ...ahead.edges]
+  const closed = ahead.closed
+  // The flat face the run lies in: the one its corners kept, else the seed's first.
+  const face = shared ?? candidates[0]
+
+  // Into each face of one edge, square to it: the facet's corner off the edge.
+  const into = (edgeIndex: number) => {
+    const e = welded.edges[edgeIndex]
+    const axis = v3unit(v3sub(at(e.b), at(e.a)))
+    const towards = (f: number): Vec3Tuple => {
+      const corners = [0, 1, 2].map((k) => welded.facets[f * 3 + k])
+      const off = corners.find((v) => v !== e.a && v !== e.b) ?? corners[0]
+      const d = v3sub(at(off), at(e.a))
+      const s = v3dot(d, axis)
+      return v3unit([d[0] - axis[0] * s, d[1] - axis[1] * s, d[2] - axis[2] * s])
+    }
+    const [f1, f2] = e.facets
+    const firstIsFace = onPlane(f1, face) || (!onPlane(f2, face) && f1 === seed.facets[0])
+    const [inFace, other] = firstIsFace ? [f1, f2] : [f2, f1]
+    return { t1: towards(inFace), t2: towards(other), otherNormal: normal(other) }
+  }
+  const perEdge = edgeRun.map(into)
+  const pointCount = closed ? edgeRun.length : edgeRun.length + 1
+  const points = Array.from({ length: pointCount }, (_, k) => at(vertexRun[k]))
+  const faceDirections = points.map((_, k): [Vec3Tuple, Vec3Tuple] => {
+    const before = closed ? perEdge[(k - 1 + perEdge.length) % perEdge.length] : perEdge[k - 1]
+    const after = perEdge[k]
+    const mix = (pick: (x: { t1: Vec3Tuple; t2: Vec3Tuple }) => Vec3Tuple): Vec3Tuple => {
+      const list = [before, after].filter((x): x is NonNullable<typeof x> => x !== undefined).map(pick)
+      return v3unit([0, 1, 2].map((a) => list.reduce((sum, v) => sum + v[a], 0)) as Vec3Tuple)
+    }
+    return [mix((x) => x.t1), mix((x) => x.t2)]
+  })
+  const round = (v: Vec3Tuple): Vec3Tuple => [0, 1, 2].map((k) => Math.round(v[k] * 1e6) / 1e6) as Vec3Tuple
+  const seedInto = perEdge[back.edges.length]
+  let lengthMm = 0
+  for (let k = 0; k < (closed ? points.length : points.length - 1); k++) {
+    const a = points[k]
+    const b = points[(k + 1) % points.length]
+    lengthMm += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])
+  }
+  const key = (v: Vec3Tuple) => v.map((n) => n.toFixed(3)).join(',')
+  const ends = closed ? [...points.map(key)].sort().slice(0, 2) : [key(points[0]), key(points[points.length - 1])].sort()
+  return {
+    id: `stl-edge${closed ? '-loop' : ''}:${ends.join(':')}:${points.length}`,
+    points: points.map(round),
+    closed,
+    lengthMm,
+    faceDirections: faceDirections.map(([a, b]) => [round(a), round(b)]),
+    // An outside edge: each face lies behind the other's plane.
+    operation: v3dot(seedInto.t1, seedInto.otherNormal) < 0 ? 'subtract' : 'add',
+  }
+}
+
+/** The Model screen's Fillet on an STL's sharp edges, as the one journal
+ *  entry it writes: a 'fillet' shape of the boolean-body edit, every picked
+ *  run rounded to `radiusMm`. Pure. */
+export function stlFilletShape(chains: readonly StlEdgeChain[], radiusMm: number): BooleanBodyParameters {
+  const first = chains[0]?.points[0]
+  const cuts = chains.some((c) => c.operation === 'subtract')
+  return {
+    operation: cuts ? 'subtract' : 'add',
+    shape: 'fillet',
+    center: first === undefined ? [0, 0, 0] : [...first] as Vec3Tuple,
+    chains: chains.map((c) => ({
+      points: c.points.map((p) => [...p] as Vec3Tuple),
+      closed: c.closed,
+      faceDirections: c.faceDirections.map(([a, b]) => [[...a] as Vec3Tuple, [...b] as Vec3Tuple]),
+      operation: c.operation,
+    })),
+    radiusMm,
+  }
+}
+
 // ---------------------------------------------------- Shell and Draft (WO-2090)
 
 /** The part as the Model screen holds it: the resolved mesh and, per facet of
@@ -768,7 +982,11 @@ function toolForFeature(feature: StlModelFeature): string {
  *  tool that edits what was clicked, then what was clicked. */
 export function stlFilletPickLine(features: readonly StlModelFeature[], picked: StlModelFeature | null, partName: string): string {
   const fillets = features.filter((feature) => stlToolAccepts('fillet', feature)).length
-  const answer = fillets === 0
+  // WO-3092: Fillet rounds a sharp edge along a flat face too, so a click on a
+  // face (not near an edge) is told to click an edge - never only about the face.
+  const answer = picked === null || picked.target.family === 'flat'
+    ? workbenchText('stlFeatureEdits.filletRoundsAnEdgeClickOne', { partName: String(partName) })
+    : fillets === 0
     ? workbenchText('stlFeatureEdits.hasNoRoundedEdgeForFilletToChange', { partName: String(partName) })
     : workbenchText('stlFeatureEdits.thatIsNotARoundedEdgeHasClickOne', { partName: String(partName), fillets: String(fillets) })
   return picked === null

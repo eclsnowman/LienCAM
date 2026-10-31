@@ -262,15 +262,24 @@ async function holeWallFaceId(): Promise<string> {
   throw new Error('the 6 mm hole has no cylindrical wall face')
 }
 
-/** The thread helix moves (leads and plunges excluded): their XY centre from
- *  the extreme points, each move's radius about it, and their Z. */
+/** The thread helix moves (leads and plunges excluded): their XY centre,
+ *  each move's radius about it, and their Z.
+ *  WO-3168 emits the helix as native arcs of at most half a turn, so the
+ *  endpoints need not reach the circle's extreme points (and a half-turn
+ *  chord fixes no centre on its own). The centre is the arcs' shared centre,
+ *  held to the geometry: every arc starts and ends the same distance from it. */
 function orbit(path: ToolpathMove[]): { cx: number; cy: number; radii: number[]; zs: number[] } {
   const helix = path.filter(m => m.role === 'helix')
   expect(helix.length).toBeGreaterThan(0)
-  const xs = helix.map(m => m.x)
-  const ys = helix.map(m => m.y)
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2
-  const cy = (Math.min(...ys) + Math.max(...ys)) / 2
+  const arc = helix.find(m => m.cx !== undefined && m.cy !== undefined)
+  expect(arc, 'the helix carries arc centres').toBeDefined()
+  const cx = arc!.cx!
+  const cy = arc!.cy!
+  for (let i = 1; i < helix.length; i++) {
+    const a = helix[i - 1], b = helix[i]
+    if (b.cx === undefined || b.cy === undefined) continue
+    expect(Math.hypot(a.x - cx, a.y - cy)).toBeCloseTo(Math.hypot(b.x - cx, b.y - cy), 3)
+  }
   for (const m of helix) {
     if (m.cx !== undefined) expect(m.cx).toBeCloseTo(cx, 2)
     if (m.cy !== undefined) expect(m.cy).toBeCloseTo(cy, 2)
@@ -300,7 +309,13 @@ beforeEach(() => {
   ;(globalThis as { Worker?: unknown }).Worker = class {
     onmessage: ((event: MessageEvent) => void) | null = null
     onerror: ((event: ErrorEvent) => void) | null = null
-    postMessage(data: Request): void {
+    postMessage(data: Request | { request: unknown }): void {
+      // The off-page post-process worker (store/toolpathPostprocess.ts): report
+      // "cannot start a module worker" so it runs its own in-page fallback.
+      if ('request' in data) {
+        queueMicrotask(() => this.onerror?.({ preventDefault() {} } as unknown as ErrorEvent))
+        return
+      }
       requests.push(data)
       const built = data.type === 'COMPUTE_THREAD_MILL'
         ? buildThreadMillToolpath(data.payload as never)

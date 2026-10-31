@@ -26,7 +26,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       },
       {
         kind: 'paragraph',
-        text: 'About in the header opens About LienCAM, with the version, build information, credits and licenses, plus GitHub project and Releases links. The desktop app checks for a newer published release shortly after launch and posts a notice with its link in the Console if one is available. Download and install the update yourself; the check does not install it. Offline or unavailable checks stay silent.',
+        text: 'About in the header opens About LienCAM, with the version, build information, credits and licenses, plus GitHub project and Releases links. The desktop app checks for a newer published release when it starts and, if one exists, offers to download it; nothing installs until you click Install and restart (see "Updating LienCAM"). If GitHub cannot be reached, LienCAM says nothing and keeps working.',
       },
       { kind: 'image', slot: 'settings-window' },
     ],
@@ -41,7 +41,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     ],
     keywords: 'settings preferences options application global window sections about version build schema project file format splash startup grbl controller settings where done ai assistant mcp',
     contextKeys: ['modal:settings'],
-    relatedTopicIds: ['settings-display', 'settings-performance', 'settings-defaults', 'settings-user-data', 'units'],
+    relatedTopicIds: ['settings-display', 'settings-performance', 'settings-defaults', 'settings-user-data', 'updating-liencam', 'units'],
     sinceVersion: '0.36.0',
   },
   {
@@ -174,7 +174,7 @@ export const topics: HelpTopic[] = localizeHelpTopics([
       { kind: 'image', slot: 'restore-review' },
       {
         kind: 'paragraph',
-        text: 'On Windows, updating means closing LienCAM and running the newer installer over the existing installation, then opening it from its shortcut. Your setup stays in place; you do not need to restore a backup for a normal upgrade. Download a backup before updating. For a new or rebuilt PC, follow "Moving LienCAM to a new or rebuilt PC" for the controller software and profile steps as well as restoring your data.',
+        text: 'To update, use the offer LienCAM shows at start when a newer release exists (see "Updating LienCAM"); on Windows, closing LienCAM and running the newer installer over the existing installation also works. Either way your setup stays in place; you do not need to restore a backup for a normal update. Download a backup before updating. For a new or rebuilt PC, follow "Moving LienCAM to a new or rebuilt PC" for the controller software and profile steps as well as restoring your data.',
       },
       {
         kind: 'paragraph',
@@ -199,8 +199,61 @@ export const topics: HelpTopic[] = localizeHelpTopics([
     ],
     keywords: 'user data backup restore sync folder download bundle recover previous generation shop data machines tools libraries preferences storage safe keep lost',
     contextKeys: ['modal:settings'],
-    relatedTopicIds: ['settings-tour', 'projects-save-open', 'moving-to-a-new-pc'],
+    relatedTopicIds: ['settings-tour', 'projects-save-open', 'moving-to-a-new-pc', 'updating-liencam'],
     sinceVersion: '0.35.0',
+  },
+  {
+    // WO-2883: the desktop app updates itself from the published GitHub releases.
+    id: 'updating-liencam',
+    title: 'Updating LienCAM',
+    category: 'settings',
+    summary: 'The desktop app looks for a newer release when it starts, downloads and checks it when you click Download, and installs it only when you click Install and restart.',
+    sections: [
+      {
+        kind: 'paragraph',
+        text: 'Each time the desktop app starts, it checks the LienCAM releases on GitHub. When a newer published release exists, one small offer appears: "LienCAM X is available", with Download and Not now. Not now, or Later once the file is downloaded, hides that version until the next start. While LienCAM stays open it checks again every 6 hours, silently, and offers only a release newer than the one you put off. LienCAM asks nothing else about updates.',
+      },
+      {
+        kind: 'steps',
+        steps: [
+          'Click Download. LienCAM fetches the file made for this computer and checks it against the SHA-256 sums published with the release. It keeps the file only if it matches. A file that does not match is deleted and nothing is installed.',
+          'When the download is checked, click Install and restart. Nothing is installed until you click it; Later hides the offer and changes nothing.',
+          'Installing closes LienCAM and the machine bridge, so it is refused while a program is running. Finish or stop the program first, then click Install and restart again.',
+        ],
+      },
+      {
+        kind: 'table',
+        columns: ['Your copy of LienCAM', 'What happens when you install'],
+        rows: [
+          { cells: ['Windows, installed (setup.exe)', 'The installer runs quietly and LienCAM restarts on the new version.'] },
+          { cells: ['Linux AppImage', 'The AppImage file is replaced and LienCAM restarts.'] },
+          { cells: ['Windows portable (portable.exe)', 'A portable copy cannot replace itself. Click Show the file: LienCAM opens the folder with the checked file. Close LienCAM and start the new one.'] },
+          { cells: ['Linux tar.gz', 'This copy cannot replace itself. Click Show the file: LienCAM opens the folder with the checked file. Close LienCAM, unpack the new one and start it.'] },
+          { cells: ['macOS', 'This copy cannot replace itself. LienCAM opens the checked disk image; drag LienCAM to Applications, then quit this copy and start the new one.'] },
+        ],
+      },
+      {
+        kind: 'paragraph',
+        text: 'Your settings, machine, tools, probing setup, saved posts and recent projects are kept across an update. You do not need to restore a backup afterwards. Downloading a backup first (Settings, User Data, Download backup) is still a good habit.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'If GitHub cannot be reached, LienCAM says nothing and keeps working on the version you have.',
+      },
+      {
+        kind: 'tip',
+        text: 'LienCAM run from source (a development checkout) does not update from releases. Update it with git pull instead.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'LienCAM builds are not code-signed yet. Windows may show the blue "Windows protected your PC" window the first time the new version runs; click More info, then Run anyway.',
+      },
+    ],
+    images: [],
+    keywords: 'update updating upgrade new version newer release github download install restart not now later checksum sha-256 sha256 verify portable appimage tar.gz macos dmg installer smartscreen offline git pull source keep settings',
+    contextKeys: ['modal:settings'],
+    relatedTopicIds: ['settings-tour', 'settings-user-data', 'moving-to-a-new-pc'],
+    sinceVersion: '0.36.0',
   },
   {
     id: 'machine-library',

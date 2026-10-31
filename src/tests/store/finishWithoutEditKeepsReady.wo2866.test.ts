@@ -295,7 +295,13 @@ beforeEach(() => {
   ;(globalThis as { Worker?: unknown }).Worker = class {
     onmessage: ((event: MessageEvent) => void) | null = null
     onerror: ((event: ErrorEvent) => void) | null = null
-    postMessage(data: { type: string; payload: { opId: string } }): void {
+    postMessage(data: { type: string; payload: { opId: string } } | { request: unknown }): void {
+      // The off-page post-process worker (store/toolpathPostprocess.ts): report
+      // "cannot start a module worker" so it runs its own in-page fallback.
+      if ('request' in data) {
+        queueMicrotask(() => this.onerror?.({ preventDefault() {} } as unknown as ErrorEvent))
+        return
+      }
       queueMicrotask(() => this.onmessage?.({
         data: { type: 'TOOLPATH_COMPLETE', opId: data.payload.opId, moves: MOVES, computeTimeMs: 1 },
       } as MessageEvent))

@@ -39,7 +39,8 @@ export const HUANYANG_GT: VfdDefinition = {
   },
   link: {
     transport: 'rtu',
-    port: 'COM3',
+    // Only seeds fresh definitions; persisted definitions retain their own port.
+    port: typeof navigator !== 'undefined' && /linux/i.test(navigator.platform) ? '/dev/ttyUSB0' : 'COM3',
     baud: 19200,
     dataBits: 8,
     parity: 'none',
@@ -131,7 +132,7 @@ export const HUANYANG_GT: VfdDefinition = {
     },
   ],
   notes:
-    'Two-wire RS485 on RS485+ / RS485-. COM3 is exclusive: UCCNC must not be running, and neither may any other program that opens the port.',
+    'Two-wire RS485 on RS485+ / RS485-. The serial port is exclusive: UCCNC must not be running, and neither may any other program that opens the port.',
 }
 
 /** Everything that ships. One entry, on purpose. */

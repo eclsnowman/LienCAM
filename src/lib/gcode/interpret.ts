@@ -90,6 +90,9 @@ export interface GcodeInterpretOptions {
   /** The length the machine's tool table holds for tool n (WO-1677), folded
    *  into every absolute Z a `G43 H<n>` governs. See reader.ts. */
   toolLengthMm?: GcodeReaderOptions['toolLengthMm']
+  /** WO-3192: the length the controller holds in force, which `G49` cancels.
+   *  See reader.ts. */
+  toolLengthInForceMm?: GcodeReaderOptions['toolLengthInForceMm']
 }
 
 /** Why a stage ended - which is what the operator is told at its boundary. */
@@ -328,6 +331,8 @@ export function interpretGcodeProgram(
     // session passes the lookup, the reader folds tool n's length into the Z
     // it stages, and the load line states what it resolved. See reader.ts.
     toolLengthMm: options.toolLengthMm,
+    // WO-3192: and `G49` cancels the length the controller holds in force.
+    toolLengthInForceMm: options.toolLengthInForceMm,
     // A user macro is a line this app cannot run. It is REPORTED so the program
     // can hold at it and name it, rather than refused at the door (which turns
     // away a whole Fusion file for one park-position call) or dropped silently

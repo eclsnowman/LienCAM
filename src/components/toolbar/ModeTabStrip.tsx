@@ -2,8 +2,7 @@ import { textFor, useText } from '../../i18n'
 import { Box, Download, Gauge, Layers, MonitorPlay, PenTool, Wrench } from 'lucide-react'
 import { Fragment } from 'react'
 import { useCamStore } from '../../store'
-import { useModelSelectionBridge } from '../../store/modelSelectionBridge'
-import { findModelBodyGeometryRow } from '../../lib/cam/modelBodyAdapter'
+import { carryModelBodySelectionToCam } from '../../store/modelSelectionHandoff'
 
 const shellText = textFor('app-shell-settings-menus')
 
@@ -145,16 +144,7 @@ export function ModeTabStrip({ showPartTab = false }: Props) {
                 // parameter/import), or that body has no CAM row yet
                 // (unsynced/never-regenerated): never a dead end, per the
                 // WO's own "omitted, not disabled" rule.
-                const bridge = useModelSelectionBridge.getState()
-                if (bridge.selectedBodyId !== null) {
-                  const st = useCamStore.getState()
-                  const row = findModelBodyGeometryRow(
-                    st.project.geometry,
-                    bridge.selectedBodyId,
-                    bridge.selectedBodyModelItemId,
-                  )
-                  if (row !== undefined) st.setSelectedGeometry(row.id)
-                }
+                carryModelBodySelectionToCam()
               }
               // NAV-SKETCH-TAB-SELECTION (GEO-UNIFY Stage 5, NAV-PARITY-AUDIT
               // Gap 1): the Sketch tab is selection-aware. A single store action owns

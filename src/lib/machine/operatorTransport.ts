@@ -71,6 +71,9 @@ export interface OperatorTransportInput {
   /** WO-2519: the paused program's readouts while it stands in a kept stop
    *  (machineSession.pausedProgramReadout). Absent = asked of the session. */
   pausedProgram?: ReturnType<typeof pausedProgramReadout>
+  /** WO-3087: CYCLE START's own arm-from-line-1 is in progress (`armFromLine1ThenStart`).
+   *  Absent = asked of this module. */
+  armingFromLine1?: boolean
 }
 
 /** The re-arm-from-the-top offer (WO-082). It is a SEPARATE authority from
@@ -597,6 +600,18 @@ function deriveCycleVerdict(
       cycleStartDetail: 'CYCLE START is blocked while the door is open.',
     }
   }
+  // WO-3087 (O58, desk kit 10-22): while CYCLE START's own press arms the
+  // program from line 1, the staging it does passes through states that read
+  // "Cycle complete. ... load the toolpath again" or "Program is not ready:
+  // Load a program." for a few hundred ms - dead ends the operator has just
+  // pressed his way out of. The line says what is happening instead. ONLY the
+  // line: the action, CYCLE START's enablement and its tooltip are the verdict
+  // main gives in that instant (audit 10-23), and every executor acts on the
+  // verdict without this line (verdictToAct).
+  if (input.armingFromLine1 ?? (armingFromLine1 > 0)) {
+    const verdict = deriveCycleVerdict({ ...input, armingFromLine1: false }, reArm)
+    return { ...verdict, nextAction: 'Arming the program from line 1.' }
+  }
   if (fitTrace?.step === 'confirm') {
     const enabled = machineState === 'idle'
     return {
@@ -880,21 +895,37 @@ async function armFromLine1ThenStart(): Promise<boolean> {
     say('tx', `Cycle Start: refused - ${ESTOP_BLOCKS_MOTION}`, 'error')
     return false
   }
-  const armed = await armLoadedProgramFromLine1()
-  if (!armed.ok) {
-    say('tx', `Cycle Start: refused - ${armed.reason}`, 'error')
-    return false
+  armingFromLine1 += 1
+  try {
+    const armed = await armLoadedProgramFromLine1()
+    if (!armed.ok) {
+      say('tx', `Cycle Start: refused - ${armed.reason}`, 'error')
+      return false
+    }
+    say('tx', 'Armed from line 1.', 'info')
+    const fresh = verdictToAct()
+    if (!fresh.cycleStartEnabled || fresh.action === 'arm-start') {
+      say('tx', `Cycle Start: ${fresh.nextAction}`, 'error')
+      return false
+    }
+    return await executeOperatorCycleStart()
+  } finally {
+    armingFromLine1 -= 1
   }
-  say('tx', 'Armed from line 1.', 'info')
-  const fresh = currentOperatorTransport()
-  if (!fresh.cycleStartEnabled || fresh.action === 'arm-start') {
-    say('tx', `Cycle Start: ${fresh.nextAction}`, 'error')
-    return false
-  }
-  return executeOperatorCycleStart()
 }
 
-function currentOperatorTransportInput(): OperatorTransportInput {
+/** WO-3087: how many CYCLE START arm-from-line-1 presses are between their
+ *  press and their start request. Above zero, the top line says it is arming
+ *  (and the line beside Load reads it); no press reads it - presses are taken
+ *  exactly as before. */
+let armingFromLine1 = 0
+
+/** WO-3087: CYCLE START is arming the loaded program from line 1 right now. Words only. */
+export function cycleStartArmingFromLine1(): boolean {
+  return armingFromLine1 > 0
+}
+
+export function currentOperatorTransportInput(): OperatorTransportInput {
   const s = useMachineControl.getState()
   return {
     ...s,
@@ -907,6 +938,12 @@ function currentOperatorTransportInput(): OperatorTransportInput {
 
 export function currentOperatorTransport(): OperatorTransportState {
   return deriveOperatorTransport(currentOperatorTransportInput())
+}
+
+/** WO-3087: the verdict an executor acts on - never the arming line its own
+ *  press put on the screen. */
+function verdictToAct(): OperatorTransportState {
+  return deriveOperatorTransport({ ...currentOperatorTransportInput(), armingFromLine1: false })
 }
 
 /**
@@ -945,7 +982,7 @@ export async function executeOperatorCycleStart(): Promise<boolean> {
   // resume authority may interleave with it, even if a stale render briefly
   // presents an otherwise-valid verdict.
   if (stepBackInProgress()) return false
-  const state = currentOperatorTransport()
+  const state = verdictToAct()
   if (!state.cycleStartEnabled) return false
   const ctrl = getMachineController()
   switch (state.action) {

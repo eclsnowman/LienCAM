@@ -1,10 +1,13 @@
 import type { Vec2, Layer2D, Loop2D, BoundingBox } from '../../types'
-import { joinSegments, computeBBox2D, centerLoops } from '../geometry/path2d'
+import type { JoinReport } from '../geometry/path2d'
+import { joinSegmentsIntoFaces, computeBBox2D, centerLoops } from '../geometry/path2d'
 
 export interface Import2DResult {
   loops: Loop2D[]
   layers: Layer2D[]
   boundingBox: BoundingBox
+  // WO-3276: what joining the separate lines did, for the import console event.
+  report?: JoinReport
 }
 
 // Default layer palette for files without explicit layers
@@ -659,9 +662,10 @@ export function importSVG(svgText: string): Import2DResult {
     layerSegMap.set(seg.layerId, arr)
   }
 
+  const joinReport: JoinReport = { gapsClosed: 0, largestGapMM: 0, openChains: 0 }
   let allLoops: Loop2D[] = []
   for (const [layerId, segs] of layerSegMap) {
-    allLoops = allLoops.concat(joinSegments(segs, layerId))
+    allLoops = allLoops.concat(joinSegmentsIntoFaces(segs, layerId, joinReport))
   }
 
   allLoops = centerLoops(allLoops)
@@ -680,7 +684,7 @@ export function importSVG(svgText: string): Import2DResult {
     center: { x: bb2.center.x, y: bb2.center.y, z: 0 },
   }
 
-  return { loops: allLoops, layers: layersWithGeometry, boundingBox: bbox }
+  return { loops: allLoops, layers: layersWithGeometry, boundingBox: bbox, report: joinReport }
 }
 
 function emptyBBox(): BoundingBox {

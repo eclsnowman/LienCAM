@@ -103,6 +103,8 @@ function post(exportUnits: Units, displayUnits: Units): string {
 // a real run -- do NOT hand-edit it.
 const FROZEN_MM_BASELINE = [
   'G90 G94 G17 G21 G64',
+  // WO-3123: absent authored safe Z retains clearance fallback and names it.
+  '( Machine safe Z is missing or rounds to zero; using work clearance for start/restart )',
   'G54',
   '( Units matrix )',
   'T1',

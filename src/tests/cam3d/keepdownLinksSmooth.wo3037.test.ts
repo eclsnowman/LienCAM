@@ -56,7 +56,26 @@ vi.mock('../../kernel/ops/adaptive/policy', async (importOriginal) => {
   })
 })
 
-type Row = { stepId: string; status: string; metrics: Record<string, unknown> }
+// WO-3323: the H-pocket negative control's seam. Since WO-3204 the 2D emitter lifts every link the
+// stock does not prove clear (emit.ts liftLinksOverUnclearedStock), so the production OFF program no
+// longer rides the island and the control read 0 hits. The control is rebuilt the WO-2835 round-2
+// way: one seam suppressed on a canned run. With `lifter.suppressed`, only that lifter's stock query
+// answers "clear" (every other caller, and this file's own replay, reads the real field), so the
+// router's own rides stay in the program and the replay must see them.
+type StockModule = typeof import('../../cam3d/stock')
+const lifter = vi.hoisted(() => ({ suppressed: false }))
+vi.mock('../../cam3d/stock', async (importOriginal) => {
+  const real = await importOriginal<StockModule>()
+  return typedMock<StockModule>({
+    ...real,
+    maxTraverseIntrusion: (...args: Parameters<StockModule['maxTraverseIntrusion']>) =>
+      lifter.suppressed && (new Error().stack ?? '').includes('liftLinksOverUnclearedStock')
+        ? { intrusionMm: Number.NEGATIVE_INFINITY, x: NaN, y: NaN, materialTopZ: NaN, contactTipZ: NaN, tipZ: NaN, columnsTested: 0 }
+        : real.maxTraverseIntrusion(...args),
+  })
+})
+
+type Row ={ stepId: string; status: string; metrics: Record<string, unknown> }
 const metric = (row: Row, key: string): number => {
   const m = row.metrics[key] as { value?: number } | number
   return typeof m === 'number' ? m : m.value as number
@@ -68,11 +87,12 @@ const firstStep = (id: string): BenchmarkChain => {
   return { ...chain, steps: chain.steps.slice(0, 1) }
 }
 
-const run = async (chain: BenchmarkChain, smooth: boolean, steering = false) => {
+const run = async (chain: BenchmarkChain, smooth: boolean, steering = false, withoutLifter = false) => {
   switches.smooth = smooth
   switches.steering = steering
   try {
-    const planned = await planChain(chain)
+    lifter.suppressed = withoutLifter
+    const planned = await planChain(chain).finally(() => { lifter.suppressed = false })
     const step = planned.steps[0]
     expect(step.status).toBe('ready')
     const row = ((await scoreChain(chain, planned)).rows as Row[]).find(r => r.stepId === step.stepId)!
@@ -250,11 +270,17 @@ describe('WO-3037 2D H-pocket: no keep-down link rides through standing stock (p
     it(`ON, WO-3042 steering ${steering ? 'ON' : 'OFF'}: no link meets a column taller than the level above, no rapid meets stock, M-SAFE-2 no worse`, async () => {
       const off = await run(chain, false, steering)
       const on = await run(chain, true, steering)
-      const hitsOff = await standingStockHits(chain, off.moves)
       const hitsOn = await standingStockHits(chain, on.moves)
       expect(on.moves.length).toBeGreaterThan(1000)
-      // premise: the replay sees today's router ride through the island's standing stock
-      expect(hitsOff.links.length, 'OFF standing-stock link hits').toBeGreaterThan(0)
+      // premise (WO-3323 control, see `lifter`): with the WO-3204 lifter suppressed, the replay sees
+      // the OFF router ride through the island's standing stock ...
+      const hitsOffBare = await standingStockHits(chain, (await run(chain, false, steering, true)).moves)
+      expect(hitsOffBare.links.length, 'OFF standing-stock link hits without the WO-3204 lifter').toBeGreaterThan(0)
+      // ... and ON keeps its links out of it by itself, not because the lifter lifted them.
+      const hitsOnBare = await standingStockHits(chain, (await run(chain, true, steering, true)).moves)
+      expect(hitsOnBare.links, JSON.stringify(hitsOnBare.links.slice(0, 5))).toEqual([])
+      expect(hitsOnBare.rapids, JSON.stringify(hitsOnBare.rapids.slice(0, 5))).toEqual([])
+      // The production program (lifter in place) holds the same.
       expect(hitsOn.links, JSON.stringify(hitsOn.links.slice(0, 5))).toEqual([])
       expect(hitsOn.rapids, JSON.stringify(hitsOn.rapids.slice(0, 5))).toEqual([])
       expect(metric(on.row, 'M-SAFE-2')).toBeLessThanOrEqual(metric(off.row, 'M-SAFE-2'))

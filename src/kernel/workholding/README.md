@@ -43,9 +43,11 @@ const bands = setup.depthBands({ depths, topZ: topZ + fluteLength, allowanceMm }
    settings once (stock bottom from the caller's planning stock record, never the
    viewport) and plans every loop's intervals with stable ids `loopId#k`. The words
    when it cannot are the engine's words.
-6. **Routes**: `tabRoutes()`. Flag off (parity): single-region Offset and Trochoidal
-   roughing and the finish keep tabs; the multi-region branch (rough offset split,
-   finish one) has none (BL-312/313); a split finish and open chains refuse.
+6. **Routes**: `tabRoutes()`. Flag off (parity): Offset and Trochoidal roughing and
+   the finish keep tabs, a rough offset split into regions (finish one) included -
+   WO-3195 made the Offset rough lift over the finish's tab plan on every region
+   (before it, Offset roughing and the split route cut through the tabs); a split
+   finish and open chains refuse.
 7. **Policy flags**: `keepout_in_planning` and `tabs_all_routes`, both OFF in
    `PARITY_POLICY`. Turning either on is a later order with a V13 before/after card.
 

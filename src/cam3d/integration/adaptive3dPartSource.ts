@@ -3,6 +3,7 @@ import type { PartMesh } from '../kernel/types'
 import { sanitizeTriangleMesh } from '../input/sanitize'
 import { isModelOriginGeometry, resolveOwningModelItemId } from '../../lib/cam/modelOrigin'
 import { resolveModelReferenceFrame } from '../../lib/cam/modelReferenceFrame'
+import { turnWorldPointForSecondSide, type SecondSideTurn } from '../../lib/cam/flipSetup'
 
 export class Adaptive3dPartSourceError extends Error {
   constructor(message: string) {
@@ -152,4 +153,49 @@ export function resolveAdaptive3dPartSource(
   throw new Adaptive3dPartSourceError(
     `${operationLabel} needs an STL, STEP, or LienCAM modeled solid, but "${geo.name}" is ${geo.format}.`,
   )
+}
+
+/**
+ * WO-3196: the part as a second side holds it. Every 3D strategy machines the
+ * mesh it is handed from the top down, so a flipped setup must hand it the part
+ * turned over, or it re-cuts the first side's top. The pose is kept (moves are
+ * still world-placed by `position` + rotation about Z); only the display-local
+ * vertices change, so that the placed mesh lands where the turned part sits in
+ * the same block. A half turn keeps triangle winding and face ids as they are.
+ * No turn (a first side) returns the source untouched.
+ */
+export function partSourceAsSetupHoldsIt(
+  source: ResolvedAdaptive3dPartSource,
+  turn: SecondSideTurn | null,
+): ResolvedAdaptive3dPartSource {
+  if (!turn) return source
+  const { partMesh, position } = source
+  const rad = (source.rotation.z * Math.PI) / 180
+  const c = Math.cos(rad)
+  const s = Math.sin(rad)
+  const from = partMesh.positions
+  const positions = new Float32Array(from.length)
+  const min: [number, number, number] = [Infinity, Infinity, Infinity]
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  for (let i = 0; i < from.length; i += 3) {
+    const world = turnWorldPointForSecondSide({
+      x: from[i] * c - from[i + 1] * s + position.x,
+      y: from[i] * s + from[i + 1] * c + position.y,
+      z: from[i + 2] + position.z,
+    }, turn)
+    const dx = world.x - position.x
+    const dy = world.y - position.y
+    positions[i] = dx * c + dy * s
+    positions[i + 1] = -dx * s + dy * c
+    positions[i + 2] = world.z - position.z
+    for (let axis = 0; axis < 3; axis++) {
+      const value = positions[i + axis]
+      if (value < min[axis]) min[axis] = value
+      if (value > max[axis]) max[axis] = value
+    }
+  }
+  return {
+    ...source,
+    partMesh: { ...partMesh, positions, indices: partMesh.indices.slice(), bounds: { min, max } },
+  }
 }

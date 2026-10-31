@@ -1,0 +1,460 @@
+/* WO-3280: looks of the kit action parts. Colours, sizes, radii and type come only from the token
+   custom properties (src/theme/tokens.ts); every rule is scoped under [data-ui2] so the old UI
+   cannot change. Design: docs/design/LIENCAM-DESIGN-SPEC.md sections 6.2, 6.6, 7, 7.1 and 9. */
+
+/* ---------------------------------------------------------------- Button */
+[data-ui2] .kit-buttonwrap {
+  position: relative;
+  display: inline-flex;
+}
+[data-ui2] .kit-button {
+  --kit-bg: var(--ctl);
+  --kit-bd: var(--ctl-bd);
+  --kit-fg: var(--tx);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp3);
+  height: calc(var(--h-ctl) + var(--sp1));
+  min-width: var(--min-hit);
+  padding: 0 var(--sp5);
+  border: 1px solid var(--kit-bd);
+  border-radius: var(--r-md);
+  background: var(--kit-bg);
+  color: var(--kit-fg);
+  font: 500 var(--f-body) / 1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+[data-ui2] .kit-button:hover { --kit-bg: var(--ctl-hover); }
+[data-ui2] .kit-button:focus-visible {
+  outline: none;
+  --kit-bd: var(--acc);
+  box-shadow: 0 0 0 2px var(--acc-soft);
+}
+
+/* emphasis (spec 6.6) */
+[data-ui2] .kit-button[data-emphasis="primary"] { --kit-bg: var(--acc); --kit-bd: var(--acc); --kit-fg: var(--on-acc); font-weight: 700; }
+[data-ui2] .kit-button[data-emphasis="primary"]:hover { --kit-bg: var(--acc); filter: brightness(1.08); }
+[data-ui2] .kit-button[data-emphasis="ghost"] { --kit-bg: transparent; --kit-bd: transparent; --kit-fg: var(--tx2); }
+[data-ui2] .kit-button[data-emphasis="ghost"]:hover { --kit-bg: var(--ctl-hover); }
+[data-ui2] .kit-button[data-emphasis="danger"] { --kit-fg: var(--err); }
+
+/* forms (spec 6.2, 6.6) */
+[data-ui2] .kit-button[data-form="icon"] { width: var(--h-ctl); height: var(--h-ctl); padding: 0; }
+[data-ui2] .kit-button[data-form="small"] {
+  justify-content: flex-start;
+  height: var(--h-small);
+  padding: 0 var(--sp3);
+  --kit-bd: transparent;
+  --kit-bg: transparent;
+  font-size: var(--f-cap);
+}
+[data-ui2] .kit-button[data-form="small"]:hover { --kit-bg: var(--ctl-hover); }
+[data-ui2] .kit-button[data-form="big"] {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: var(--sp2);
+  height: var(--h-big);
+  min-width: var(--w-big-min);
+  max-width: var(--w-big-max);
+  padding: var(--sp2) var(--sp2) 0;
+  --kit-bd: transparent;
+  --kit-bg: transparent;
+  font-size: var(--f-cap);
+  line-height: 1.1;
+  white-space: normal;
+  text-align: center;
+}
+[data-ui2] .kit-button[data-form="big"]:hover { --kit-bg: var(--ctl-hover); }
+[data-ui2] .kit-button[data-form="big"] .kit-button-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+[data-ui2] .kit-icon {
+  flex: none;
+  width: var(--ic-size-small);
+  height: var(--ic-size-small);
+  background: currentColor;
+  opacity: 0.35;
+  border-radius: var(--r-sm);
+}
+/* The glyph fills the same box; unknown ids retain the placeholder above. */
+[data-ui2] .kit-icon[data-glyph] { background: transparent; opacity: 1; }
+[data-ui2] .kit-icon[data-glyph] > svg { display: block; }
+[data-ui2] .kit-button[data-form="big"] .kit-icon { width: var(--ic-size-ribbon); height: var(--ic-size-ribbon); }
+[data-ui2] .kit-button[data-form="icon"] .kit-icon { width: var(--ic-size-header); height: var(--ic-size-header); }
+
+/* on (latched, choice, transport active, and the active tool): one look everywhere */
+[data-ui2] .kit-button[data-on="true"] {
+  --kit-bg: var(--acc-soft);
+  --kit-bd: var(--acc);
+  --kit-fg: var(--acc-ink);
+  font-weight: 600;
+}
+[data-ui2] .kit-button[data-kind="choice"][data-on="false"] { --kit-bd: var(--b1); }
+
+/* the lamp every latched button carries: hollow off, lit on */
+[data-ui2] .kit-lamp {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--sp4);
+  height: var(--sp4);
+  border: 1px solid var(--tx2);
+  border-radius: 50%;
+}
+[data-ui2] .kit-lamp[data-lit="true"] {
+  border-color: var(--acc);
+  background: var(--acc);
+  box-shadow: 0 0 0 2px var(--acc-soft);
+}
+
+/* held: solid accent and sunk 1px, only while the press lasts (spec 7.1) */
+[data-ui2] .kit-button[data-held="true"],
+[data-ui2] [data-held-example] .kit-button {
+  --kit-bg: var(--acc);
+  --kit-bd: var(--acc);
+  --kit-fg: var(--on-acc);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px color-mix(in srgb, var(--app) 70%, transparent);
+}
+
+/* transport keeps its status colours (spec 7.1); stop uses the fixed stop token as fill and edge only */
+[data-ui2] .kit-button[data-kind="transport"] { font-weight: 600; }
+[data-ui2] .kit-button[data-transport="start"] { --kit-bd: var(--ok); --kit-bg: color-mix(in srgb, var(--ok) 16%, transparent); }
+[data-ui2] .kit-button[data-transport="hold"] { --kit-bd: var(--warn); --kit-bg: color-mix(in srgb, var(--warn) 16%, transparent); }
+[data-ui2] .kit-button[data-transport="stop"] { --kit-bd: var(--stop); --kit-bg: color-mix(in srgb, var(--stop) 16%, transparent); }
+[data-ui2] .kit-button[data-transport="start"][data-on="true"],
+[data-ui2] .kit-button[data-transport="start"][data-held="true"] { --kit-bg: var(--ok); --kit-fg: var(--on-err); }
+[data-ui2] .kit-button[data-transport="hold"][data-on="true"],
+[data-ui2] .kit-button[data-transport="hold"][data-held="true"] { --kit-bg: var(--warn); --kit-fg: var(--on-err); }
+[data-ui2] .kit-button[data-transport="stop"][data-on="true"],
+[data-ui2] .kit-button[data-transport="stop"][data-held="true"] { --kit-bg: var(--stop); --kit-fg: var(--on-stop); }
+
+/* unavailable: no fill, dashed edge, hint-coloured text, lock glyph when an interlock holds it */
+[data-ui2] .kit-buttonwrap > .kit-button[data-unavailable="true"][data-kind] {
+  --kit-bg: transparent;
+  --kit-bd: var(--b1);
+  --kit-fg: var(--tx3);
+  border-style: dashed;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+  font-weight: 500;
+}
+[data-ui2] .kit-buttonwrap > .kit-button[data-unavailable="true"][data-kind]:focus-visible { --kit-bd: var(--acc); box-shadow: 0 0 0 2px var(--acc-soft); }
+[data-ui2] .kit-lock { flex: none; width: var(--sp5); height: var(--sp5); }
+
+/* the reason, after 500 ms of hover or on keyboard focus */
+[data-ui2] .kit-tip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  max-width: 260px;
+  margin-top: var(--sp2);
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--tx);
+  font: 400 var(--f-cap) / 1.35 var(--sans);
+  white-space: normal;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0s 0s, visibility 0s 0s;
+}
+[data-ui2] .kit-buttonwrap:hover .kit-tip {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0s 500ms, visibility 0s 500ms;
+}
+[data-ui2] .kit-buttonwrap:focus-within .kit-tip,
+[data-ui2] .kit-buttonwrap:active .kit-tip { visibility: visible; opacity: 1; }
+
+/* ---------------------------------------------------------------- RibbonGroup */
+[data-ui2] .kit-ribbongroup {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: var(--h-band);
+  padding: 0 var(--sp3);
+  border-right: 1px solid var(--b3);
+  color: var(--tx);
+}
+[data-ui2] .kit-ribbongroup-tools {
+  flex: 1;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, var(--h-small));
+  grid-auto-columns: max-content;
+  align-content: center;
+  column-gap: var(--sp2);
+  min-height: 0;
+}
+/* a big button spans the three rows of its column */
+[data-ui2] .kit-ribbongroup-tools > .kit-buttonwrap[data-form="big"] { grid-row: 1 / span 3; align-self: center; }
+[data-ui2] .kit-ribbongroup-tools > .kit-buttonwrap[data-form="big"] .kit-button { height: var(--h-big); }
+[data-ui2] .kit-ribbongroup-tools > .kit-buttonwrap:not([data-form="big"]) { display: flex; }
+[data-ui2] .kit-ribbongroup-tools > .kit-buttonwrap:not([data-form="big"]) .kit-button { flex: 1; }
+[data-ui2] .kit-ribbongroup-caption {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp2);
+  height: var(--h-cap);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx2);
+  font: 400 var(--f-cap) / 1 var(--sans);
+}
+[data-ui2] button.kit-ribbongroup-caption { cursor: pointer; border-radius: var(--r-sm); }
+[data-ui2] button.kit-ribbongroup-caption:hover { background: var(--ctl-hover); color: var(--tx); }
+[data-ui2] button.kit-ribbongroup-caption:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--acc-soft), inset 0 0 0 1px var(--acc); }
+[data-ui2] .kit-caret {
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+}
+[data-ui2] .kit-caret[data-up] { border-top: 0; border-bottom: 4px solid currentColor; }
+@media (max-height: 759px) {
+  [data-ui2] .kit-ribbongroup { height: var(--h-band-short); }
+  [data-ui2] .kit-ribbongroup-tools > .kit-buttonwrap[data-form="big"] .kit-button { height: calc(var(--h-band-short) - var(--h-cap) - var(--sp2)); }
+  [data-ui2] .kit-ribbongroup-tools > .kit-buttonwrap[data-form="big"] .kit-icon { width: var(--ic-size-header); height: var(--ic-size-header); }
+}
+
+/* ---------------------------------------------------------------- PromptBar */
+[data-ui2] .kit-promptbar {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp3);
+  min-height: var(--h-strip);
+  padding: var(--sp2) var(--sp3) var(--sp2) var(--sp5);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--tx);
+  font: 400 var(--f-body) / 1.3 var(--sans);
+}
+[data-ui2] .kit-promptbar-step { color: var(--tx2); font: 500 var(--f-cap) / 1 var(--mono); }
+[data-ui2] .kit-promptbar-text { font-weight: 500; white-space: nowrap; }
+[data-ui2] .kit-keycap {
+  box-sizing: border-box;
+  padding: var(--sp1) var(--sp3);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-sm);
+  background: var(--ctl);
+  color: var(--tx2);
+  font: 500 var(--f-micro) / 1 var(--mono);
+}
+
+/* ---------------------------------------------------------------- AnchoredValue */
+[data-ui2] .kit-anchoredvalue {
+  position: absolute;
+  left: var(--kit-x, 0);
+  top: var(--kit-y, 0);
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--tx);
+}
+[data-ui2] .kit-anchoredvalue-input {
+  box-sizing: border-box;
+  width: 72px;
+  height: var(--h-ctl);
+  padding: 0 var(--sp3);
+  border: 1px solid var(--ctl-bd);
+  border-radius: var(--r-md);
+  background: var(--ctl);
+  color: var(--tx);
+  font: 500 var(--f-val) / 1 var(--mono);
+  text-align: right;
+}
+[data-ui2] .kit-anchoredvalue-input:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 2px var(--acc-soft); }
+[data-ui2] .kit-anchoredvalue-input[aria-invalid="true"] { border-color: var(--err); }
+[data-ui2] .kit-anchoredvalue-unit { color: var(--tx2); font: 400 var(--f-cap) / 1 var(--mono); }
+[data-ui2] .kit-anchoredvalue-error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: var(--sp2);
+  max-width: 220px;
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--err);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--tx);
+  font: 400 var(--f-cap) / 1.35 var(--sans);
+}
+
+/* ---------------------------------------------------------------- ShowCard */
+[data-ui2] .kit-showcard {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 168px;
+  border: 1px solid var(--b1);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--tx);
+  font: 400 var(--f-body) / 1 var(--sans);
+}
+[data-ui2] .kit-showcard-header {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--h-head);
+  padding: 0 var(--sp5);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: var(--tx);
+  font: 600 var(--f-body) / 1 var(--sans);
+  cursor: pointer;
+}
+[data-ui2] .kit-showcard-header:hover { background: var(--ctl-hover); }
+[data-ui2] .kit-showcard-header:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--acc), 0 0 0 2px var(--acc-soft); }
+[data-ui2] .kit-showcard[data-open="true"] .kit-showcard-header { border-top: 1px solid var(--b2); border-top-left-radius: 0; border-top-right-radius: 0; }
+[data-ui2] .kit-showcard-list { order: -1; margin: 0; padding: var(--sp2) 0; list-style: none; }
+[data-ui2] .kit-showcard-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  height: var(--h-row);
+  padding: 0 var(--sp5);
+  cursor: pointer;
+}
+[data-ui2] .kit-showcard-row:hover { background: var(--ctl-hover); }
+[data-ui2] .kit-showcard-check { accent-color: var(--acc); margin: 0; }
+[data-ui2] .kit-showcard-check:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+[data-ui2] .kit-swatch {
+  flex: none;
+  width: var(--sp5);
+  height: var(--sp2);
+  border-radius: var(--r-sm);
+  background: var(--kit-swatch);
+}
+[data-ui2] .kit-showcard-label { flex: 1; font-size: var(--f-body); }
+
+/* ---------------------------------------------------------------- ViewCube */
+[data-ui2] .kit-viewcube {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: var(--sp3);
+  padding: var(--sp3);
+  color: var(--tx);
+  font: 500 var(--f-micro) / 1 var(--sans);
+}
+[data-ui2] .kit-viewcube-cube {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  /* the part edge colour outlines the cube so it reads on a light ground too */
+  filter: drop-shadow(1px 0 0 var(--m-edge)) drop-shadow(-1px 0 0 var(--m-edge)) drop-shadow(0 1px 0 var(--m-edge)) drop-shadow(0 -1px 0 var(--m-edge));
+}
+[data-ui2] .kit-viewcube-face {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: var(--kit-face, var(--m-top));
+}
+/* the oblique drafting cube: top, front and right faces cut out of one square */
+[data-ui2] .kit-viewcube-face[data-view="top"] { --kit-face: var(--m-top); clip-path: polygon(50% 2%, 98% 25%, 50% 48%, 2% 25%); }
+[data-ui2] .kit-viewcube-face[data-view="front"] { --kit-face: var(--m-front); clip-path: polygon(2% 29%, 48% 52%, 48% 98%, 2% 75%); }
+[data-ui2] .kit-viewcube-face[data-view="right"] { --kit-face: var(--m-side); clip-path: polygon(52% 52%, 98% 29%, 98% 75%, 52% 98%); }
+[data-ui2] .kit-viewcube-face:hover { background: var(--acc-soft); }
+[data-ui2] .kit-viewcube-face:focus-visible { outline: none; background: var(--acc); }
+[data-ui2] .kit-viewcube-keys { display: grid; grid-template-columns: repeat(2, auto); gap: var(--sp2); }
+[data-ui2] .kit-viewcube-key,
+[data-ui2] .kit-viewcube-style {
+  box-sizing: border-box;
+  min-height: var(--min-hit);
+  min-width: 0;
+  padding: 0 var(--sp2);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-sm);
+  background: var(--ctl);
+  color: var(--tx2);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+[data-ui2] .kit-viewcube-style { grid-column: 1 / -1; padding: 0 var(--sp3); font-size: var(--f-cap); }
+[data-ui2] .kit-viewcube-key:hover,
+[data-ui2] .kit-viewcube-style:hover { background: var(--ctl-hover); color: var(--tx); }
+[data-ui2] .kit-viewcube-key:focus-visible,
+[data-ui2] .kit-viewcube-style:focus-visible,
+[data-ui2] .kit-viewcube-item:focus-visible { outline: none; border-color: var(--acc); box-shadow: 0 0 0 2px var(--acc-soft); }
+[data-ui2] .kit-viewcube-menu {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  z-index: 20;
+  min-width: 160px;
+  margin: 0 0 var(--sp2);
+  padding: var(--sp2) 0;
+  list-style: none;
+  border: 1px solid var(--b1);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+[data-ui2] .kit-viewcube-item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  width: 100%;
+  height: var(--h-row);
+  padding: 0 var(--sp5);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--tx);
+  font: 400 var(--f-body) / 1 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+[data-ui2] .kit-viewcube-item::before {
+  content: "";
+  flex: none;
+  width: var(--sp3);
+  height: var(--sp3);
+  box-sizing: border-box;
+  border: 1px solid var(--tx2);
+  border-radius: 50%;
+}
+[data-ui2] .kit-viewcube-item[aria-checked="true"]::before { border-color: var(--acc); background: var(--acc); }
+[data-ui2] .kit-viewcube-item[aria-checked="true"] { color: var(--acc-ink); font-weight: 600; }
+[data-ui2] .kit-viewcube-item:hover { background: var(--ctl-hover); }
+
+/* ---------------------------------------------------------------- gallery */
+[data-ui2] .kit-gallery-anchor { position: relative; width: 160px; height: 56px; }

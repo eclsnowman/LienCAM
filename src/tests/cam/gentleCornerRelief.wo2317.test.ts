@@ -196,6 +196,11 @@ const NOTCH_CORNERS = [
   { c: { x: 60, y: 10 }, b: { x: s, y: s } },
   { c: { x: 68, y: 10 }, b: { x: -s, y: s } },
 ]
+/** Where the contour relief starts on this fixture: the (68, 10) notch corner approached
+ *  at (65, 13), 3 mm out in -x and 3 mm along +y for the 6 mm mill. With relief enabled the
+ *  main path's exit move travels here instead of lifting in place, at Retract (WO-3083
+ *  rule 2). */
+const RELIEF_APPROACH: Vec2 = { x: 65, y: 13 }
 const NOTCH_POLY: Vec2[] = [
   { x: 0, y: 0 }, { x: 80, y: 0 }, { x: 80, y: 50 }, { x: 68, y: 50 }, { x: 68, y: 10 },
   { x: 60, y: 10 }, { x: 60, y: 50 }, { x: 0, y: 50 },
@@ -412,7 +417,16 @@ describe('WO-2317: Gentle corner through the production compute', () => {
     for (const style of ['dogbone', 't_bone', 'longest_edge'] as const) {
       it(`${style} gentle: corners cut to the corner point, nothing else changes, engagement <= the cap`, async () => {
         const moves = await compute(notchGeo, op({ style, gentle: true }))
-        expect(moves.slice(0, plain.length)).toEqual(plain)
+        // Main path untouched but for its EXIT move, which is pinned move for move: instead
+        // of lifting in place to Clearance (25) the tool travels to the relief's approach
+        // point at Retract (17), because WO-3083 rule 2 crosses into a corner relief of the
+        // same operation at Retract. Type, role and every other field still compare equal.
+        expect(plain[plain.length - 1]).toMatchObject({ type: 'rapid', z: heights.clearanceHeight })
+        expect(moves.slice(0, plain.length - 1)).toEqual(plain.slice(0, -1))
+        expect(moves[plain.length - 1]).toEqual({
+          ...plain[plain.length - 1],
+          x: RELIEF_APPROACH.x, y: RELIEF_APPROACH.y, z: heights.retractHeight,
+        })
         const extra = moves.slice(plain.length)
         expect(cutLevels(extra)).toEqual(levels)
         const bottom = levels[levels.length - 1]
@@ -439,7 +453,14 @@ describe('WO-2317: Gentle corner through the production compute', () => {
       for (const direction of ['climb', 'conventional'] as const) {
         const base = await compute(notchGeo, op({ direction }))
         const moves = await compute(notchGeo, op({ style: 'dogbone', gentle: true, engagement: 0.6, direction }))
-        expect(moves.slice(0, base.length)).toEqual(base)
+        // As above: the main path but for its exit move, pinned to the relief's approach
+        // point at Retract while every other field of that move stays equal.
+        expect(base[base.length - 1]).toMatchObject({ type: 'rapid', z: heights.clearanceHeight })
+        expect(moves.slice(0, base.length - 1)).toEqual(base.slice(0, -1))
+        expect(moves[base.length - 1]).toEqual({
+          ...base[base.length - 1],
+          x: RELIEF_APPROACH.x, y: RELIEF_APPROACH.y, z: heights.retractHeight,
+        })
         const e = engagementAt(moves, base.length, levels[levels.length - 1], NOTCH_CORNERS[1].c)
         expect(peak(e), direction).toBeLessThanOrEqual(0.6)
         expect(peak(e), direction).toBeGreaterThan(0.3)

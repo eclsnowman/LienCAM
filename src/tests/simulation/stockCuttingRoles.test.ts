@@ -11,12 +11,12 @@ import type { MoveRole } from '../../types'
 // compile-time exhaustiveness guard; this is the runtime companion).
 const ALL_ROLES: MoveRole[] = [
   'rapid', 'cut', 'helix', 'ramp', 'plunge', 'stepover', 'fast_traverse',
-  'lead_in', 'lead_out', 'loop_back', 'wall_follow', 'finish',
+  'lead_in', 'lead_out', 'loop_back', 'wall_follow', 'finish', 'retract',
 ]
 
 // Ported from the Codex-branch policy: stepover and finish DO remove stock.
 const CUTTING: MoveRole[] = ['cut', 'helix', 'ramp', 'plunge', 'stepover', 'wall_follow', 'lead_in', 'lead_out', 'finish']
-const NON_CUTTING: MoveRole[] = ['rapid', 'fast_traverse', 'loop_back']
+const NON_CUTTING: MoveRole[] = ['rapid', 'fast_traverse', 'loop_back', 'retract']
 
 describe('isStockCuttingRole — the one shared carve authority', () => {
   it('exports the exact exhaustive stock-cutting policy', () => {
@@ -33,6 +33,7 @@ describe('isStockCuttingRole — the one shared carve authority', () => {
       rapid: false,
       fast_traverse: false,
       loop_back: false,
+      retract: false,
     })
   })
 

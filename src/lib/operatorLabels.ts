@@ -1,7 +1,9 @@
 import { textFor } from '../i18n'
 import { resolveOwningModelItemId, type ModelItemOwnedCandidate } from './cam/modelOrigin'
+import type { BodyTransformRefusal, MirrorReferenceNotCarriedError } from '../doc/features/bodyTransform'
 
 const words = textFor('sketch-and-model-workbench')
+const mirrorWords = textFor('body-mirror.wo3244')
 
 /** Display only: keep stable keys in documents, picks and diagnostic records. */
 export function readableInternalIds(text: string): string {
@@ -45,4 +47,32 @@ export function geometryDisplayName(
  * Describe the picked face and its actual owning body without inventing one. */
 export function pickedFaceDisplayName(bodyName?: string): string {
   return bodyName ? words('operatorLabels.pickedFaceOn', { name: bodyName }) : words('operatorLabels.pickedFace')
+}
+
+/** WO-3244: one wording for a Mirror replay refusal, used by the Model screen
+ *  and the background replay alike. Ids shown are display names. */
+export function bodyTransformRefusalText(refusal: BodyTransformRefusal): string {
+  const nodeId = readableInternalIds(refusal.nodeId)
+  switch (refusal.kind) {
+    case 'malformed':
+      return mirrorWords('refusedMalformed', { nodeId })
+    case 'sourceNotLive':
+      return mirrorWords('refusedSourceNotLive', { nodeId, sourceBodyId: readableInternalIds(refusal.sourceBodyId) })
+    case 'planeUnresolved':
+      return mirrorWords('refusedPlaneUnresolved', { nodeId, planeNodeId: readableInternalIds(refusal.planeNodeId) })
+    case 'noTransform':
+      return mirrorWords('refusedNoTransform', { nodeId })
+  }
+}
+
+/** WO-3244: one wording for a later feature whose reference cannot be
+ *  resolved through a Mirror at replay, on the Model screen and in the
+ *  background replay alike. */
+export function mirrorCarryReplayText(error: MirrorReferenceNotCarriedError, featureName?: string): string {
+  const values = {
+    feature: featureName !== undefined && featureName.length > 0 ? featureName : readableInternalIds(error.featureId),
+    reference: readableInternalIds(error.reference),
+    mirror: readableInternalIds(error.mirrorId),
+  }
+  return mirrorWords(error.kind === 'noPlane' ? 'replayNoPlane' : 'replayNotCarried', values)
 }

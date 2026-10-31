@@ -1,19 +1,24 @@
+import { EngraveVcarveFieldHelp } from './EngraveVcarveFieldHelp'
 import type { CamCommand } from '../../kernel/camCommands'
 import { operationAuthoringDecision, type OperationAuthoringFacts } from '../../kernel/authoring'
 import { geometryDisplayName, pickedFaceDisplayName, readableInternalIds } from '../../lib/operatorLabels'
 import { textFor, useText } from '../../i18n'
 const tx = textFor('cam-operations-new-operation')
+const txSlot = textFor('slot-centerline.wo3250')
+const txDir = textFor('thread-direction.wo3193')
 import {
   ArrowDown, CheckCircle2, ChevronDown, ChevronRight, Circle, Gauge, Hand, Layers, Loader2, MousePointer2, PenTool, Scissors,
   Spline, Square, Tornado, TriangleRight, Waves, Waypoints, Wrench, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { areaLabel, feedLabel, fmtArea, fmtDim, fmtFeed, fmtMachineLength, parseDimToMm, unitLabel } from '../../lib/ui/unitFormat'
-import { deriveModelThreadMillTarget, geometryForOperation, meshFeatureTargetAdmission, operationAcceptsMeshEdgeChains, resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, smartHeightStockBounds, useCamStore } from '../../store'
+import { deriveModelThreadMillTarget, geometryForOperation, meshFeatureTargetAdmission, operationAcceptsMeshEdgeChains, resolveOpGeometrySources, setupProvenStockId, smartHeightModelTop, smartHeightStockBounds, useCamStore, modelItemHistoricalLineageLookup } from '../../store'
 import { DisclosureSection } from '../ui/DisclosureSection'
 import { NumericInput, OptionalNumericInput } from '../ui/NumericInput'
 import { heightOffsetBoxValue } from './useHeightOffsetDisplay'
 import { toolHalfAngleRad } from '../../lib/cam/geometry'
+import { resolveThreadMotion } from '../../lib/cam/threadHelix'
+import { spindleSignForTool } from '../../lib/tool/cutHand'
 import { drillBoreEndAllowancesMm } from '../../lib/cam/smartHeights/drillBore'
 import { CLEARANCE_TRIM_OP_TYPES, clearanceAllowanceMmOf } from '../../lib/cam/holderClearanceGate'
 import { contourLoopIdsForSave } from '../../lib/cam/contour2d'
@@ -28,6 +33,7 @@ import {
   resolveOwningModelItemId,
 } from '../../lib/cam/modelOrigin'
 import { consumeCylinder } from '../../lib/cam/operationGeometry'
+import { drillSizeNoticeHoleDiameter } from '../../lib/cam/drillSizeNotice'
 import { stlRecessFloorLocalZ } from '../../lib/cam/stlRecessFloor'
 import { getPocketEntryPolicy, isPocketEntryAllowed, normalizePocketEntryForFillStrategy, } from '../../lib/cam/pocketEntryPolicy'
 import {
@@ -45,7 +51,7 @@ import type {
   EngraveStyle,
   ModelReference, ModelReferenceRole, PocketParams, ThreadMillParams,
 } from '../../lib/cam/types'
-import { holeBottomWorldZ, isTiltedOffZ, ModelOriginComputeError, OwningStockError, ReferencePlaneError, resolveGeometryZToFrames, resolveGeometryZToFramesModelAwareSafe, resolveModelBottomZ, resolveTopZ, transformLoopPoints } from '../../store/dispatchGeo'
+import { holeBottomWorldZ, isTiltedOffZ, ModelOriginComputeError, OwningStockError, ReferencePlaneError, resolveGeometryZToFrames, resolveGeometryZToFramesModelAwareSafe, resolveModelBottomZ, resolveTopZ, sourcesAreHeightlessOutlines, geometryLoopPlane, transformLoopPoints } from '../../store/dispatchGeo'
 import {
   chamferAngleNote, chamferParamsFromPass, chamferPassesFromModel, chamferStretchOf, modeledChamferRecordOf, modeledChamfersOnPart,
   modeledPassDatum as modeledPassDatumIn, type ChamferFrames, type ChamferFromModelPass, type ChamferSourceGeometry,
@@ -97,13 +103,13 @@ import {
   type ResolvedHeightPlanV2,
   type StableFeatureReference,
 } from '../../lib/cam/smartHeights'
-import { deriveModelBodyBoreTarget, deriveModelBodyDrillTargets, deriveModelBodyFace, modelBodyWorldZRange } from '../../lib/cam/modelBodyDerive'
+import { deriveModelBodyBoreCandidates, deriveModelBodyBoreTarget, deriveModelBodyDrillTargets, deriveModelBodyFace, modelBodyWorldZRange } from '../../lib/cam/modelBodyDerive'
 import {
   deriveModelBodyEdges, modelBodyEdgeChainBindingSupported, modelBodyEdgePickOffered,
   modelEdgeChainAllowsOpenPaths, modelEdgeChainBodyMismatch, modelEdgeChainDeriveOptions,
-  modelEdgeChainMismatchMessage, modelEdgeChainSourceGeometry, modelReferenceMatchesSource,
+  modelEdgeChainMismatchMessage, modelEdgeChainSourceGeometry, modelReferenceMatchesSource, modelReferenceSourceIdentity,
 } from '../../store/modelEdgeChainBinding'
-import { readModelBodyFaceFacts, recognizeModelBodyHoles } from '../../lib/cam/modelBodyHoleRecognition'
+import { readModelBodyBoreFeatureResult, readModelBodyFaceFacts, recognizeModelBodyHoles } from '../../lib/cam/modelBodyHoleRecognition'
 import {
   defaultACParams, defaultBoreParams, defaultChamferParams, defaultContourParams,
   defaultDrillParams, defaultEngraveParams, defaultFaceParams, defaultFeedrateOverride,
@@ -114,7 +120,7 @@ import {
   FACE_PASS_ANGLE_BOUNDS, FACE_PASS_EXTENSION_BOUNDS, FACE_STOCK_OFFSET_BOUNDS,
   FACE_STEPOVER_BOUNDS, FACE_STEPDOWN_BOUNDS, FACE_RADIAL_STOCK_BOUNDS, faceToolDiameterCap,
 } from './faceFieldBounds'
-import { AutoFromModelBadge, HeightDiagram, NumberField } from './newOperationModalParts'
+import { AutoFromModelBadge, HeightDiagram, HeightlessOutlineNote, HeightsExplainedNotice, NumberField } from './newOperationModalParts'
 import { useDrillBreakThroughDefault } from './useDrillBreakThroughDefault'
 import type { useNewOperationModalState } from './useNewOperationModalState'
 import type { VCarveParams } from '../../lib/cam/types'
@@ -163,6 +169,23 @@ type LiveSmartHeightPreview =
   | { state: 'loading' }
   | { state: 'resolved'; plan: ResolvedHeightPlanV2 }
   | { state: 'error'; message: string }
+
+// WO-3137: a result belongs to the draft that requested it, including the
+// debounce interval. Effect cleanup rejects late jobs; this also hides an old
+// success synchronously when the next draft renders, before its effect runs.
+function useDraftHeightPreview(inputs: readonly unknown[]): readonly [LiveSmartHeightPreview, (preview: LiveSmartHeightPreview) => void] {
+  const [result, setResult] = useState<{ inputs: readonly unknown[]; preview: LiveSmartHeightPreview }>(
+    () => ({ inputs, preview: { state: 'idle' } }),
+  )
+  const matches = (previous: readonly unknown[]) => previous.length === inputs.length &&
+    previous.every((value, index) => Object.is(value, inputs[index]))
+  if (!matches(result.inputs)) {
+    setResult({ inputs, preview: { state: 'idle' } })
+  }
+  const publish = (preview: LiveSmartHeightPreview) => setResult(current =>
+    matches(current.inputs) ? { inputs: current.inputs, preview } : current)
+  return [matches(result.inputs) ? result.preview : { state: 'idle' }, publish] as const
+}
 
 const STANDARD_HEIGHT_ROWS: ReadonlyArray<{
   plane: HeightPlaneName
@@ -636,10 +659,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   setupId: string | null
 }) {
   useText('cam-operations-new-operation')
+  useText('slot-centerline.wo3250')
   const [runMacroId, setRunMacroId] = useState('')
   const {
     closeModal, project, toolLibrary, toolLibraries, editingOpPayload, computeToolpath,
     deriveBrepLayer, displayUnits, savedReviewCameraRef, tab, setTab, opType, setOpType,
+    slotShortcut, setSlotShortcut,
     machineActionKind, setMachineActionKind,
     opName, setOpName, toolId, setToolId, heights, setHeights, customEndCondition, setCustomEndCondition,
     passes, setPasses, linking, setLinking, contour, setContour,
@@ -647,6 +672,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     pocket, setPocket,
     drill, setDrill, bore, setBore, drillBoreHeightDraft, setDrillBoreHeightDraft,
     drillBoreHeightAuthority, setDrillBoreHeightAuthority, threadMill, setThreadMill, chamfer, setChamfer,
+    chamferDatumChosen, setChamferDatumChosen,
     face, setFace, engrave, setEngrave, engraveExplicitDepthMm, setEngraveExplicitDepthMm,
     engraveDepthConfirmed: engraveDepthEntered, setEngraveDepthConfirmed: setEngraveDepthEntered,
     vcarve, setVCarve, vcarveClearingToolId, setVCarveClearingToolId,
@@ -711,6 +737,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
 
   // ── Derived values ────────────────────────────────────────────────────────
   const selectedTool  = toolLibrary.find(t => t.id === toolId)
+  // WO-3193: the thread mill's direction and the climb/conventional it gives
+  // (the builder resolves the same way; no tool yet = a right-hand cutter).
+  const threadMotion = resolveThreadMotion(threadMill, selectedTool ? spindleSignForTool(selectedTool) : 1)
   const isPocket      = opType === 'pocket_2d'
   const isDrill       = opType === 'drill'
   const isBore        = opType === 'bore'
@@ -1161,8 +1190,13 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     }
     throw new Error(SMART_HEIGHT_V2_REPAIR_MESSAGE)
   }
-  const [planarRoughHeightPreview, setPlanarRoughHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [planarRoughHeightPreview, setPlanarRoughHeightPreview] = useDraftHeightPreview([
+    adaptive, editingOperation, feedrateOverride, heights, isPocket, linking, opName,
+    passes, planarGeometrySmartActive, planarRoughOperationType, planarRoughOwningStockId,
+    planarRoughParams, planarStockSmartActive, buildPlanarGeometrySmartHeightAuthority,
+    buildPlanarStockSmartHeightAuthority, pocket, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks, heightRepairRequired,
+  ])
   useEffect(() => {
     const planarSmartActive = planarStockSmartActive || planarGeometrySmartActive
     if (!planarSmartActive) {
@@ -1227,14 +1261,19 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     passes, planarGeometrySmartActive, planarRoughOperationType, planarRoughOwningStockId,
     planarRoughParams, planarStockSmartActive, buildPlanarGeometrySmartHeightAuthority,
     buildPlanarStockSmartHeightAuthority, pocket, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks, heightRepairRequired,
   ])
   const adaptive3dBandValid = adaptive3dHeightDraft.mode !== 'bounded_band' || (
     Number.isFinite(adaptive3dHeightDraft.topWcsMm) &&
     Number.isFinite(adaptive3dHeightDraft.bottomWcsMm) &&
     adaptive3dHeightDraft.topWcsMm >= adaptive3dHeightDraft.bottomWcsMm
   )
-  const [adaptive3dHeightPreview, setAdaptive3dHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [adaptive3dHeightPreview, setAdaptive3dHeightPreview] = useDraftHeightPreview([
+    adaptive3d, adaptive3dBandValid, adaptive3dHeightAuthority, adaptive3dHeightDraft,
+    adaptive3dPartIdEff, editingOperation, feedrateOverride, heights, isAdaptive3d,
+    heightRepairRequired, linking, opName, passes, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
+  ])
   useEffect(() => {
     if (!isAdaptive3d || !adaptive3dPartIdEff || !toolId ||
         heightRepairRequired || !adaptive3dBandValid) {
@@ -1301,10 +1340,16 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     adaptive3d, adaptive3dBandValid, adaptive3dHeightAuthority, adaptive3dHeightDraft,
     adaptive3dPartIdEff, editingOperation, feedrateOverride, heights, isAdaptive3d,
     heightRepairRequired, linking, opName, passes, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
   ])
 
-  const [parallel3dHeightPreview, setParallel3dHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [parallel3dHeightPreview, setParallel3dHeightPreview] = useDraftHeightPreview([
+    editingOperation, feedrateOverride, heights,
+    heightRepairRequired, isParallel3d, isSteepShallow3d, isScallop3d, isPencil3d, linking, opName, parallel3d, parallel3dHeightAuthority,
+    parallelHeightPartIdEff, parallelHeightFinishDepth, steepShallow3d, scallop3d, pencil3d,
+    passes, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
+  ])
   useEffect(() => {
     if ((!isParallel3d && !isSteepShallow3d && !isScallop3d && !isPencil3d) || !parallelHeightPartIdEff || heightRepairRequired) {
       const idleHandle = window.setTimeout(() => setParallel3dHeightPreview({ state: 'idle' }), 0)
@@ -1365,12 +1410,17 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     heightRepairRequired, isParallel3d, isSteepShallow3d, isScallop3d, isPencil3d, linking, opName, parallel3d, parallel3dHeightAuthority,
     parallelHeightPartIdEff, parallelHeightFinishDepth, steepShallow3d, scallop3d, pencil3d,
     passes, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
   ])
 
   // waterline_3d live Smart Height preview (WO-1176): the same debounce and
   // draft shape as the parallel effect above, under the waterline policy.
-  const [waterline3dHeightPreview, setWaterline3dHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [waterline3dHeightPreview, setWaterline3dHeightPreview] = useDraftHeightPreview([
+    editingOperation, feedrateOverride, heights,
+    heightRepairRequired, isWaterline3d, linking, opName, waterline3d,
+    waterline3dPartIdEff, passes, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
+  ])
   useEffect(() => {
     if (!isWaterline3d || !waterline3dPartIdEff || heightRepairRequired) {
       const idleHandle = window.setTimeout(() => setWaterline3dHeightPreview({ state: 'idle' }), 0)
@@ -1428,6 +1478,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     editingOperation, feedrateOverride, heights,
     heightRepairRequired, isWaterline3d, linking, opName, waterline3d,
     waterline3dPartIdEff, passes, previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
   ])
   // A fresh waterline starts at 10% of the chosen tool's diameter (floored at
   // 0.2 mm) until the operator types a stepdown of their own.
@@ -1459,8 +1510,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         : undefined,
     }),
   })
-  const [faceHeightPreview, setFaceHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [faceHeightPreview, setFaceHeightPreview] = useDraftHeightPreview([
+    editingOperation, face, faceHeightChosen, faceHeightDraft, faceHeightAuthority,
+    feedrateOverride, heightRepairRequired, heights, isFace, linking, opName, passes,
+    previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
+  ])
   useEffect(() => {
     if (!isFace || heightRepairRequired || !faceHeightChosen || !toolId) {
       const idleHandle = window.setTimeout(() => setFaceHeightPreview({ state: 'idle' }), 0)
@@ -1508,6 +1563,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     editingOperation, face, faceHeightChosen, faceHeightDraft, faceHeightAuthority,
     feedrateOverride, heightRepairRequired, heights, isFace, linking, opName, passes,
     previewOperationSmartHeightPlan, setup, toolId,
+    project.geometry, project.stocks,
   ])
   // Every source-part viewport button routes through this single predicate.
   // WO-329: a loopless STL is now viewport-eligible for any chain-consuming
@@ -1929,12 +1985,6 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     : l.closed
   // WO-2859: under All Parts each row is one loop ON one part - two copies of
   // one STL list the same chain id once per copy, and a tick names the copy.
-  const closedLoopRows = isAllGeo
-    ? allGeoSources.flatMap(g => (g.loops ?? []).filter(loopIsPickable).map(loop => ({ loop, source: g })))
-    : selectedGeo
-      ? (geometryForOperation(selectedGeo, opType).loops ?? []).filter(loopIsPickable).map(loop => ({ loop, source: selectedGeo }))
-      : []
-  const closedLoops = closedLoopRows.map(row => row.loop)
   const selectedLoopIds = isFace ? face.loopIds : isDrill ? drill.loopIds : isBore ? bore.loopIds : isThreadMill ? threadMill.loopIds : isPocket ? pocket.loopIds : isChamfer ? chamfer.loopIds : isEngrave ? engrave.loopIds : isVCarve ? vcarve.loopIds : isAdaptive ? adaptive.loopIds : contour.loopIds
   // WO-2859: an STL's hole detection resolves later; it may only fill in the
   // source, family and still-empty pick it started from, never one the
@@ -1942,38 +1992,56 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   const holeDetectTargetRef = useRef({ geoId, opType, picked: selectedLoopIds.length })
   holeDetectTargetRef.current = { geoId, opType, picked: selectedLoopIds.length }
 
+  const boreDetectionSerial = useRef(0)
+  useEffect(() => {
+    ++boreDetectionSerial.current
+    setBrepDeriving(null)
+    setBrepDeriveError(null)
+    return () => { ++boreDetectionSerial.current }
+  }, [geoId, opType, project.id])
+
   // WO-1942: Thread Mill authors its band from the same picked-cylinder stand-in.
   // A pick belongs to the family that made it (a Thread Mill pick lands on an
   // mthread: loop), so switching Bore <-> Thread Mill never carries it across.
-  const modelBoreBindingForOp = modelBoreBinding && (!modelBoreBinding.derived ||
-      modelBoreBinding.derived.loop.id.startsWith('mthread:') === isThreadMill)
+  const modelBoreBindingForOp = modelBoreBinding && (modelBoreBinding.boreFeatures ? isBore :
+      !modelBoreBinding.derived || modelBoreBinding.derived.loop.id.startsWith('mthread:') === isThreadMill)
     ? modelBoreBinding
     : null
-  const modelBoreAuthoringGeometry = (isBore || isThreadMill) && selectedGeo && modelBoreBindingForOp?.derived &&
-      modelReferenceMatchesSource(modelBoreBindingForOp, {
-        modelItemId: resolveOwningModelItemId(selectedGeo),
-        bodyId: selectedGeo.modelBody?.ref.bodyId,
-      })
+  const modelBoreTargets = modelBoreBindingForOp?.targets ??
+    (modelBoreBindingForOp?.derived ? [modelBoreBindingForOp.derived] : [])
+  // Partial STEP conversion keeps unresolved selected discovery rows visible.
+  // The operator can untick one without losing the valid wall bindings; merely
+  // opening Edit must never silently remove a selected target.
+  const unresolvedBoreLoops = isBore && modelBoreBindingForOp?.boreFeatures
+    ? (selectedGeo?.loops ?? []).filter(loop =>
+        (selectedLoopIds.includes(loop.id) || (editingOperation?.params as { loopIds?: string[] } | undefined)?.loopIds?.includes(loop.id)) &&
+        !modelBoreTargets.some(target => target.loop.id === loop.id) &&
+        selectedGeo?.layers2d?.some(layer => layer.id === loop.layerId && layer.id.startsWith('bore_detect:')))
+    : []
+  const unresolvedBoreIds = new Set(unresolvedBoreLoops.map(loop => loop.id))
+  const modelBoreAuthoringGeometry = (isBore || isThreadMill) && selectedGeo && modelBoreTargets.length > 0 &&
+      modelReferenceMatchesSource(modelBoreBindingForOp!, isBore
+        ? modelReferenceSourceIdentity(selectedGeo ?? undefined, resolveOwningModelItemId(selectedGeo), project.geometry,
+          modelItemHistoricalLineageLookup(resolveOwningModelItemId(selectedGeo)))
+        : { modelItemId: resolveOwningModelItemId(selectedGeo), bodyId: selectedGeo.modelBody?.ref.bodyId })
     ? {
         ...selectedGeo,
-        loops: [
-          ...(selectedGeo.loops ?? []).filter(loop => loop.id !== modelBoreBindingForOp.derived!.loop.id),
-          modelBoreBindingForOp.derived.loop,
-        ],
-        layers2d: [
-          ...(selectedGeo.layers2d ?? []).filter(layer => layer.id !== modelBoreBindingForOp.derived!.loop.layerId),
-          {
-            id: modelBoreBindingForOp.derived.loop.layerId,
-            name: isThreadMill ? tx('NewOperationModalBody.Census_Selected_model_cylinder') : tx('NewOperationModalBody.Census_Selected_model_bore'),
-            color: '#4ea1ff',
-            visible: true,
-            derived: true,
-            frame: 'geometry_local' as const,
-            cylinders: [modelBoreBindingForOp.derived.cylinder],
-          },
-        ],
+        loops: [...modelBoreTargets.map(target => target.loop), ...unresolvedBoreLoops],
+        layers2d: [{
+          id: modelBoreTargets[0].loop.layerId,
+          name: isThreadMill ? tx('NewOperationModalBody.Census_Selected_model_cylinder') : tx('NewOperationModalBody.Census_Selected_model_bore'),
+          color: '#4ea1ff', visible: true, derived: true,
+          cylinders: modelBoreTargets.map(target => target.cylinder),
+        }, ...(selectedGeo.layers2d ?? []).filter(layer => unresolvedBoreLoops.some(loop => loop.layerId === layer.id))
+          .map(layer => ({ ...layer, cylinders: layer.cylinders?.filter(c => unresolvedBoreIds.has(c.loopId ?? '')) }))],
       }
     : undefined
+  const closedLoopRows = isAllGeo
+    ? allGeoSources.flatMap(g => (g.loops ?? []).filter(loopIsPickable).map(loop => ({ loop, source: g })))
+    : selectedGeo
+      ? (geometryForOperation(modelBoreAuthoringGeometry ?? selectedGeo, opType).loops ?? []).filter(loopIsPickable).map(loop => ({ loop, source: selectedGeo }))
+      : []
+  const closedLoops = closedLoopRows.map(row => row.loop)
   const drillBoreSourceGeometries = (isDrill || isBore)
     ? (modelBoreAuthoringGeometry
         ? [modelBoreAuthoringGeometry]
@@ -1984,6 +2052,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   const effectiveDrillBoreLoopIds = (isDrill || isBore)
     ? (selectedLoopIds.length > 0 ? [...selectedLoopIds] : closedLoops.map(loop => loop.id))
     : []
+  const drillSizeNoticeDiameter = isDrill && !(userClearedLoops && selectedLoopIds.length === 0)
+    ? drillSizeNoticeHoleDiameter(selectedTool?.diameter, closedLoopRows, selectedLoopIds)
+    : undefined
   const drillBoreSelectionAvailable = effectiveDrillBoreLoopIds.every(loopId =>
     drillBoreSourceGeometries.some(geometry => (geometry.loops ?? []).some(loop => loop.id === loopId)),
   )
@@ -2072,9 +2143,13 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     if (!heightRepairRequired) return contourHeightAuthorityForDraft()
     throw new Error(SMART_HEIGHT_V2_REPAIR_MESSAGE)
   }
-  const [contourHeightPreview, setContourHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
   const contourHasSetupStock = Boolean(setupProvenStockId(setup, project))
+  const [contourHeightPreview, setContourHeightPreview] = useDraftHeightPreview([
+    contour, contourHeightAuthority, contourHeightDraft, editingOperation, feedrateOverride,
+    heights, isContour, linking, modelEdgeChain, opName, passes, previewOperationSmartHeightPlan,
+    contourHasSetupStock, project.geometry, selectedGeo, setup, toolId,
+    project.stocks, heightRepairRequired,
+  ])
   useEffect(() => {
     // A modeled-body source IS the machining target: it has no top-level loops
     // to pick (the store derives its profile, or the bound edge chain, at
@@ -2141,6 +2216,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     contour, contourHeightAuthority, contourHeightDraft, editingOperation, feedrateOverride,
     heights, isContour, linking, modelEdgeChain, opName, passes, previewOperationSmartHeightPlan,
     contourHasSetupStock, project.geometry, selectedGeo, setup, toolId,
+    project.stocks, heightRepairRequired,
   ])
 
   // A flat imported curve cannot supply the default detected feature floor.
@@ -2152,8 +2228,13 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     }
   }, [isContour, contourHeightPreview.state])
 
-  const [drillBoreHeightPreview, setDrillBoreHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [drillBoreHeightPreview, setDrillBoreHeightPreview] = useDraftHeightPreview([
+    bore, drill, drillBoreHeightAuthority, drillBoreHeightDraft, editingOperation,
+    feedrateOverride, heights, isBore, isDrill, linking, opName, passes,
+    previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    preservesUnmaterializedModelFeature,
+    project.stocks, heightRepairRequired, modelBoreBinding,
+  ])
   useEffect(() => {
     if (preservesUnmaterializedModelFeature && editingOperation?.resolvedHeightPlan) {
       const resolvedHandle = window.setTimeout(() => setDrillBoreHeightPreview({
@@ -2213,7 +2294,32 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     feedrateOverride, heights, isBore, isDrill, linking, opName, passes,
     previewOperationSmartHeightPlan, project.geometry, setup, toolId,
     preservesUnmaterializedModelFeature,
+    project.stocks, heightRepairRequired, modelBoreBinding,
   ])
+
+  // WO-3169: editing re-materializes the saved walls from one current result.
+  useEffect(() => {
+    if (!isBore || !modelBoreBinding?.boreFeatures || modelBoreBinding.targets) return
+    if (!selectedGeo || !modelReferenceMatchesSource(modelBoreBinding,
+      modelReferenceSourceIdentity(selectedGeo ?? undefined, resolveOwningModelItemId(selectedGeo), project.geometry,
+          modelItemHistoricalLineageLookup(resolveOwningModelItemId(selectedGeo))))) return
+    let current = true
+    const binding = modelBoreBinding
+    const modelItemId = binding.modelItemId ?? LEGACY_MODEL_ITEM_ID
+    void ensureDocumentArchiveHydrated(project.id, modelItemId, project.modelItems?.find(m => m.id === modelItemId))
+      .then(() => readModelBodyBoreFeatureResult(selectedGeo.modelBody!.ref.bodyId, modelItemId))
+      .then(result => {
+        const targets = binding.boreFeatures!.map(feature => {
+          const snapshot = result.snapshots[feature.faceStableId]
+          if (!snapshot) throw new Error(`Bore: selected wall "${feature.faceStableId}" is unavailable.`)
+          const target = deriveModelBodyBoreTarget(selectedGeo, project.modelItemPlacements ?? [], feature.faceStableId, snapshot, result.verdicts, feature.wallRim, result.snapshots)
+          return { ...target, loop: { ...target.loop, id: feature.loopId }, cylinder: { ...target.cylinder, loopId: feature.loopId } }
+        })
+        if (current) setModelBoreBinding(prev => prev === binding ? { ...prev, targets } : prev)
+      }).catch((err: unknown) => { if (current) setBrepDeriveError(err instanceof Error ? err.message : String(err)) })
+    return () => { current = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBore, modelBoreBinding, selectedGeo])
 
   const threadMillSourceGeometries = isThreadMill
     ? (modelBoreAuthoringGeometry
@@ -2323,8 +2429,11 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     threadMillHeightAuthority === 'smart_v2'
       ? { ...threadMill, loopIds: [...effectiveThreadMillLoopIds] }
       : threadMill
-  const [threadMillHeightPreview, setThreadMillHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [threadMillHeightPreview, setThreadMillHeightPreview] = useDraftHeightPreview([
+    editingOperation, feedrateOverride, heights, isThreadMill, linking, opName, passes,
+    previewOperationSmartHeightPlan, project.geometry, setup, threadMill, toolId,
+    project.stocks, heightRepairRequired, threadMillHeightAuthority, modelBoreBinding,
+  ])
   useEffect(() => {
     if (!isThreadMill || threadMillHeightAuthority === 'repair_required' ||
         effectiveThreadMillLoopIds.length === 0 || !toolId) {
@@ -2379,6 +2488,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   }, [
     editingOperation, feedrateOverride, heights, isThreadMill, linking, opName, passes,
     previewOperationSmartHeightPlan, project.geometry, setup, threadMill, toolId,
+    project.stocks, heightRepairRequired, threadMillHeightAuthority, modelBoreBinding,
   ])
 
   // WO-1941: an edge chain picked on the modeled body is the loop this Chamfer
@@ -2444,6 +2554,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
           'top',
         ) as Exclude<HeightReference, HeightPlaneName>,
         datumOffsetMm: params.planeOffset ?? 0,
+        // WO-3188: only this dialog's own unchosen datum is policy-owned; a
+        // modeled sibling pass carries the model's datum.
+        datumOwner: params === chamfer && !chamferDatumChosen ? 'policy' : 'user',
         chamferWidthMm: params.chamferWidth,
         tipOffsetMm: params.tipOffset,
         features: derived.bindings.map(binding => ({
@@ -2454,6 +2567,18 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       }),
     }
   }
+  // WO-3188: a chamfer on a plain DXF/SVG outline with no datum chosen starts
+  // at the material top (store resolveChamferSmartRuntime); say so.
+  const chamferOnHeightlessOutline = isChamfer && !chamferDatumChosen &&
+    (chamfer.heightReference ?? 'geometry_face') === 'geometry_face' &&
+    sourcesAreHeightlessOutlines(chamferSourceGeometries, effectiveChamferLoopIds)
+  // WO-3188: a pocket bottom on the Geometry plane of a plain 2D outline sits
+  // wherever the outline was imported; say where, and where to change it.
+  const pocketHeightlessPlaneWcsZ = isPocket && selectedGeo &&
+    (pocket.heightReference ?? 'geometry_face') === 'geometry_face' &&
+    sourcesAreHeightlessOutlines([selectedGeo], pocket.loopIds ?? [])
+    ? geometryLoopPlane(selectedGeo, pocket.loopIds ?? []).worldZ - setup.wcs.origin.z
+    : null
   const chamferSmartHeightForSave = (): Operation['smartHeight'] =>
     chamferHeightAuthority === 'smart_v2'
       ? chamferHeightAuthorityForDraft()
@@ -2554,6 +2679,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     if (modelEdgeChain) setModelEdgeChain(null)
     const filled = chamferParamsFromPass(chamfer, first.record.geometryId, first, modeledPassDatum(first))
     setChamfer(filled)
+    setChamferDatumChosen(true)
     setModeledChamferExtraPasses({ geoId: first.record.geometryId, passes: rest })
     setUserClearedLoops(false)
     pushPickedLoopsToViewport(filled.loopIds)
@@ -2671,8 +2797,11 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     setModeledChamferExtraPasses({ geoId: '', passes: [] })
     return true
   }
-  const [chamferHeightPreview, setChamferHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [chamferHeightPreview, setChamferHeightPreview] = useDraftHeightPreview([
+    chamfer, chamferModelChainGeometry, editingOperation, feedrateOverride, heights, isChamfer, linking,
+    opName, passes, previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    project.stocks, heightRepairRequired, chamferHeightAuthority, chamferDatumChosen,
+  ])
   useEffect(() => {
     if (!isChamfer || chamferHeightAuthority === 'repair_required' ||
         effectiveChamferLoopIds.length === 0 || !toolId) {
@@ -2724,6 +2853,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   }, [
     chamfer, chamferModelChainGeometry, editingOperation, feedrateOverride, heights, isChamfer, linking,
     opName, passes, previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    project.stocks, heightRepairRequired, chamferHeightAuthority, chamferDatumChosen,
   ])
 
   // WO-1939: an edge chain picked on the modeled body IS this Engrave's path
@@ -2811,8 +2941,12 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     engraveHeightAuthority === 'smart_v2'
       ? engraveHeightAuthorityForDraft()
       : (() => { throw new Error(SMART_HEIGHT_V2_REPAIR_MESSAGE) })()
-  const [engraveHeightPreview, setEngraveHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [engraveHeightPreview, setEngraveHeightPreview] = useDraftHeightPreview([
+    editingOperation, engrave, engraveDepthEntered, engraveExplicitDepthMm, engraveFollowSurface,
+    feedrateOverride, heights, isEngrave, linking, opName, passes,
+    previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    project.stocks, heightRepairRequired, engraveHeightAuthority,
+  ])
   useEffect(() => {
     const explicitDepthReady = engrave.useWidthForDepth || engraveDepthEntered
     if (!isEngrave || engraveHeightAuthority === 'repair_required' ||
@@ -2865,6 +2999,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     editingOperation, engrave, engraveDepthEntered, engraveExplicitDepthMm, engraveFollowSurface,
     feedrateOverride, heights, isEngrave, linking, opName, passes,
     previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    project.stocks, heightRepairRequired, engraveHeightAuthority,
   ])
 
   // ── V-carve Smart Height authoring (WO-1174) ──────────────────────────────
@@ -3002,8 +3137,11 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     if (!selectedTool) return undefined
     try { return vcarveToolLimitDepthMm(selectedTool) } catch { return undefined }
   }
-  const [vcarveHeightPreview, setVCarveHeightPreview] =
-    useState<LiveSmartHeightPreview>({ state: 'idle' })
+  const [vcarveHeightPreview, setVCarveHeightPreview] = useDraftHeightPreview([
+    editingOperation, vcarve, vcarveClearingToolId, feedrateOverride, heights, isVCarve, linking, opName, passes,
+    previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    project.stocks, heightRepairRequired, vcarveHeightAuthority, vcarveModelChainGeometry,
+  ])
   useEffect(() => {
     if (!isVCarve || vcarveHeightAuthority === 'repair_required' ||
         effectiveVCarveLoopIds.length === 0 || !toolId) {
@@ -3054,6 +3192,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   }, [
     editingOperation, vcarve, vcarveClearingToolId, feedrateOverride, heights, isVCarve, linking, opName, passes,
     previewOperationSmartHeightPlan, project.geometry, setup, toolId,
+    project.stocks, heightRepairRequired, vcarveHeightAuthority, vcarveModelChainGeometry,
   ])
 
   const activeHeightPreview: LiveSmartHeightPreview | undefined =
@@ -3164,7 +3303,17 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     if (reference === 'wcs_plane') return 0
     if (reference === 'clearance' || reference === 'retract' || reference === 'feed' ||
         reference === 'top' || reference === 'bottom') {
-      return resolving.has(reference) ? undefined : standardResolvedWcs(reference, resolving)
+      if (resolving.has(reference)) return undefined
+      // A draft edit drops the height preview until the plan re-resolves; in
+      // that window Top and Bottom still name the plane the last plan measured,
+      // never the legacy scalar the loading readout falls back to.
+      const last = lastResolvedHeightPlanRef.current
+      if (!activeResolvedHeightPlan && (reference === 'top' || reference === 'bottom') &&
+          last?.opType === opType && !rowPlaneOverrides[reference] &&
+          !(isOperationPlane(reference) && explicitModeWcs(reference) !== undefined)) {
+        return reference === 'top' ? last.plan.machining.materialStart.wcsMm : resolvedPlanTargetEndWcs(last.plan)
+      }
+      return standardResolvedWcs(reference, resolving)
     }
     if (reference === 'stock_top' || reference === 'stock_bottom') {
       // The setup's proven stock is the evidence the plan itself reads; it
@@ -3198,7 +3347,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
         // The row's words state this override; its number is the same formula
         // resolved, never a legacy scalar the override does not govern.
         if (override) {
-          const base = standardReferenceWcs(override.reference, heights)
+          const base = rowReferenceWcs(override.reference, new Set([...resolving, plane]))
           return base === undefined ? undefined : base + override.offsetMm
         }
       }
@@ -3410,6 +3559,10 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     if (override?.reference === 'wcs_plane') return override.offsetMm
     const explicit = explicitModeWcs(plane)
     if (!override && explicit !== undefined) return explicit
+    // A row reference set since the last plan resolved is the height in effect,
+    // which the dropped preview's last plan no longer states.
+    const overridden = override ? standardResolvedWcs(plane) : undefined
+    if (overridden !== undefined) return overridden
     const last = lastResolvedHeightPlanRef.current
     if (last?.opType === opType) {
       return plane === 'top'
@@ -3652,6 +3805,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     else if (isChamfer) {
       const { heights: hUpd } = deriveHeightRefUpdate('chamfer', heights, chamfer, ref)
       setChamfer(c => ({ ...c, heightReference: ref }))
+      setChamferDatumChosen(true)
       setHeights(h => ({ ...h, ...hUpd }))
     }
     else                 setOpHeightReference(ref)
@@ -3909,13 +4063,21 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       )]
     : undefined
   const boreTargetModelReferences = modelBoreBindingForOp
-      && modelReferenceMatchesSource(modelBoreBindingForOp, selectedModelReferenceSource)
+      && modelReferenceMatchesSource(modelBoreBindingForOp, isBore
+        ? modelReferenceSourceIdentity(selectedGeo ?? undefined, resolveOwningModelItemId(selectedGeo), project.geometry,
+          modelItemHistoricalLineageLookup(resolveOwningModelItemId(selectedGeo)))
+        : selectedModelReferenceSource)
     ? [authorModelReference(
         modelBoreBindingForOp.modelItemId ?? LEGACY_MODEL_ITEM_ID,
         modelBoreBindingForOp.bodyId,
-        [modelBoreBindingForOp.faceStableId],
+        modelBoreBindingForOp.boreFeatures
+          ? modelBoreBindingForOp.boreFeatures.filter(binding => bore.loopIds.includes(binding.loopId)).map(binding => binding.faceStableId)
+          : [modelBoreBindingForOp.faceStableId],
         'bore-target',
-      )]
+      )].map(ref => modelBoreBindingForOp.boreFeatures ? {
+        ...ref,
+        boreFeatures: modelBoreBindingForOp.boreFeatures.filter(binding => bore.loopIds.includes(binding.loopId)),
+      } : ref)
     : undefined
 
   // A modeled-body edge chain belongs only to the compound Model Item/body
@@ -4113,6 +4275,8 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     engraveHeightAuthority,
     vcarveHeightAuthority,
     vcarveClearingMode: vcarve.flatClearing.mode,
+    threadMillHasMachiningGeometry: effectiveThreadMillLoopIds.length > 0,
+    vcarveHasMachiningGeometry: effectiveVCarveLoopIds.length > 0,
     faceHeightPreview,
     planarRoughHeightPreview,
     contourHeightPreview,
@@ -4134,10 +4298,55 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     ? (machineActionKind !== 'run_macro' || selectedRunMacro !== undefined)
     : authoring.canCreate
 
+  // The shared decision explains the actual failed prerequisite, including
+  // stock evidence errors. A stock hint must not replace an unrelated error.
+  const createReason = authoring.message
+
+  // WO-3250: leaving the Slot (centerline) card puts back the Engrave fields
+  // its preset replaced, and the name only while it still reads as the preset's.
+  const leaveSlotShortcut = () => {
+    if (!slotShortcut) return
+    const { priorEngrave, presetName } = slotShortcut
+    setEngrave(current => {
+      const restored = { ...current, mode: priorEngrave.mode, side: priorEngrave.side, useWidthForDepth: priorEngrave.useWidthForDepth }
+      if (priorEngrave.engraveStyle === undefined) delete restored.engraveStyle
+      else restored.engraveStyle = priorEngrave.engraveStyle
+      return restored
+    })
+    if (presetName !== null && opName === presetName) setOpName('')
+    setSlotShortcut(null)
+  }
+
   const selectOperationType = (nextType: typeof opType) => {
+    leaveSlotShortcut()
     if (nextType !== opType) setUserClearedLoops(true)
     setOpType(nextType)
     setMachineActionKind(null)
+  }
+
+  // WO-3250: Slot (centerline) is the existing Engrave, preset to Trace on the
+  // line with an explicit depth and the Plain style (the style left unset, which
+  // is Plain). It sets no depth and adds no operation type: Create saves the
+  // same Engrave the operator could author by hand.
+  const selectSlotShortcut = () => {
+    setMachineActionKind(null)
+    if (slotShortcut) return
+    if (opType !== 'engrave') setUserClearedLoops(true)
+    setEngrave(current => {
+      const preset = { ...current, mode: 'trace' as const, side: 'center' as const, useWidthForDepth: false }
+      delete preset.engraveStyle
+      return preset
+    })
+    const presetName = opName.trim() === '' ? txSlot('defaultName') : null
+    if (presetName !== null) setOpName(presetName)
+    setSlotShortcut({
+      priorEngrave: {
+        mode: engrave.mode, side: engrave.side, useWidthForDepth: engrave.useWidthForDepth,
+        engraveStyle: engrave.engraveStyle,
+      },
+      presetName,
+    })
+    setOpType('engrave')
   }
 
   const startFaceTargetPlanePick = () => {
@@ -4187,7 +4396,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
   const resetState = () => {
     activeLoopPickSessions.delete(setIsPickingLoops)
     loopPickAcceptedRef.current = null
-    setTab('type'); setOpType('contour_2d'); setMachineActionKind(null)
+    setTab('type'); setOpType('contour_2d'); setMachineActionKind(null); setSlotShortcut(null)
     setOpName(''); setToolId('')
     setHeights(defaultHeights); setCustomEndCondition(false); setPasses(defaultPasses)
     setUserSafetyOverridePlanes(new Set())
@@ -4205,6 +4414,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     setThreadMill(defaultThreadMillParams)
     setThreadMillRepairConfirmed(false)
     setChamfer(defaultChamferParams)
+    setChamferDatumChosen(false)
     setChamferRepairConfirmed(false)
     setFace(defaultFaceParams)
     setEngrave(defaultEngraveParams)
@@ -5610,6 +5820,61 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
     args?: { edgeIndices?: number[]; z?: number },
   ) => {
     if (!geoId || isAllGeo) return
+    if (kind === 'holes' && isBore && selectedGeo) {
+      const serial = ++boreDetectionSerial.current
+      const source = selectedGeo
+      const projectId = project.id
+      const activeModal = useCamStore.getState().activeModal
+      const isCurrent = () => {
+        const live = useCamStore.getState()
+        return serial === boreDetectionSerial.current && live.project.id === projectId &&
+          live.activeModal === activeModal && live.project.modelItemPlacements === project.modelItemPlacements &&
+          holeDetectTargetRef.current.geoId === source.id &&
+          holeDetectTargetRef.current.opType === 'bore' &&
+          live.project.geometry.find(g => g.id === source.id) === source
+      }
+      setBrepDeriving('holes')
+      setBrepDeriveError(null)
+      try {
+        if (isModelSectionGeo && source.modelBody) {
+          const bodyId = source.modelBody.ref.bodyId
+          const modelItemId = resolveOwningModelItemId(source) ?? LEGACY_MODEL_ITEM_ID
+          await ensureDocumentArchiveHydrated(projectId, modelItemId, project.modelItems?.find(m => m.id === modelItemId))
+          const result = await readModelBodyBoreFeatureResult(bodyId, modelItemId)
+          const unsupported: string[] = []
+          const candidates = deriveModelBodyBoreCandidates(source, project.modelItemPlacements ?? [], result, unsupported)
+          if (!isCurrent()) return
+          if (unsupported.length) setBrepDeriveError(unsupported.join(' '))
+          setModelBoreBinding({ modelItemId, bodyId, faceStableId: candidates[0].binding.faceStableId,
+            boreFeatures: candidates.map(candidate => candidate.binding), targets: candidates.map(candidate => candidate.derived) })
+          const ids = candidates.map(candidate => candidate.derived.loop.id)
+          setBore(prev => ({ ...prev, loopIds: ids, geometrySource: 'cylinder', perBoreDepth: true }))
+          setUserClearedLoops(false)
+          pushPickedLoopsToViewport(ids)
+        } else {
+          // Store guards publication too, so a canceled request cannot land geometry.
+          await deriveBrepLayer(geoId, 'bore-holes', { isCurrent })
+          if (serial !== boreDetectionSerial.current || holeDetectTargetRef.current.geoId !== source.id ||
+              holeDetectTargetRef.current.opType !== 'bore' || useCamStore.getState().activeModal !== activeModal) return
+          const landed = useCamStore.getState().project.geometry.find(g => g.id === source.id)
+          // A refused/canceled scan did not publish; keep the current draft pick.
+          if (!landed || landed === source) return
+          // WO-3169: repeat scans update the row-owned layer in place.
+          const layers = (landed?.layers2d ?? []).filter(layer => layer.id.startsWith('bore_detect:'))
+          const ids = layers.flatMap(layer => layer.cylinders?.map(c => c.loopId!).filter(Boolean) ?? [])
+          if (ids.length === 0) return
+          setModelBoreBinding(null)
+          setBore(prev => ({ ...prev, loopIds: ids, geometrySource: 'cylinder', perBoreDepth: true }))
+          setUserClearedLoops(false)
+          pushPickedLoopsToViewport(ids)
+        }
+      } catch (err) {
+        if (isCurrent()) setBrepDeriveError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (serial === boreDetectionSerial.current) setBrepDeriving(null)
+      }
+      return
+    }
     setBrepDeriving(kind)
     setBrepDeriveError(null)
     setBrepFaceDepthHint(null)
@@ -6251,6 +6516,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
       onCreate={handleCreate}
       onClose={handleClose}
     />
+    <EngraveVcarveFieldHelp operation={opType}>
     {/* CVU-2: REGIME 2 ownership marker (see DisclosureSection.tsx) -- the
         ordinary create/edit render's own MODAL-GOVERNED scrim (the second
         authoring site; the editLoadError early return above is the first). */}
@@ -6283,7 +6549,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
           {/* parallel_3d does its own path linking (lead-ins/retracts) and reads
               no op.linking, so the Linking tab does nothing for it — drop it.
               thread_mill likewise derives its entry motion from handedness /
-              cut-direction and params.leadInOut and never reads op.linking. */}
+              direction (WO-3193) and params.leadInOut and never reads op.linking. */}
           {TABS.filter(t => !((isParallel3d || isWaterline3d || isSteepShallow3d || isScallop3d || isPencil3d || isAdaptive3d || isVCarve || isThreadMill) && t.id === 'linking'))
             .filter(t => machineActionKind === null || t.id === 'type').map(t => (
             <button
@@ -6347,12 +6613,23 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                   <span className="op-type-name">{tx('NewOperationModalBody.2D_Face')}</span>
                 </div>
                 <div
-                  className={`op-type-card ${machineActionKind === null && opType === 'engrave' ? 'op-type-card-active' : ''}`}
+                  className={`op-type-card ${machineActionKind === null && opType === 'engrave' && !slotShortcut ? 'op-type-card-active' : ''}`}
                   onClick={() => selectOperationType('engrave')}
                 >
                   <PenTool size={24} />
                   <span className="op-type-name">{tx('NewOperationModalBody.Engrave_Trace')}</span>
                 </div>
+                {!isEditMode && (
+                  <div
+                    className={`op-type-card ${machineActionKind === null && slotShortcut ? 'op-type-card-active' : ''}`}
+                    onClick={selectSlotShortcut}
+                    data-testid="op-type-slot"
+                    data-tooltip={txSlot('cardTooltip')}
+                  >
+                    <PenTool size={24} />
+                    <span className="op-type-name">{txSlot('card')}</span>
+                  </div>
+                )}
                 <div
                   className={`op-type-card ${machineActionKind === null && opType === 'vcarve' ? 'op-type-card-active' : ''}`}
                   onClick={() => selectOperationType('vcarve')}
@@ -6432,7 +6709,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                         key={kind}
                         className={`op-type-card ${machineActionKind === kind ? 'op-type-card-active' : ''}`}
                         data-testid={`op-type-action-${kind}`}
-                        onClick={() => { setMachineActionKind(kind); setTab('type') }}
+                        onClick={() => { leaveSlotShortcut(); setMachineActionKind(kind); setTab('type') }}
                       >
                         <Hand size={24} />
                         <span className="op-type-name">{label}</span>
@@ -7061,7 +7338,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                           disabled={brepDeriving !== null} onClick={startBrepEdgePick}>
                           <MousePointer2 size={14} />{tx('NewOperationModalBody.Pick_edges_2')}</button>
                       )}
-                      {isDrill && (isBrepGeo || isModelSectionGeo) && (
+                      {(isDrill || isBore) && (isBrepGeo || isModelSectionGeo) && (
                         <button className="op-pick-btn" data-testid="brep-detect-holes"
                           disabled={brepDeriving !== null} onClick={() => void runBrepDerive('holes')}>
                           <Circle size={14} />{tx('NewOperationModalBody.Detect_holes')}</button>
@@ -8139,6 +8416,21 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       </select>
                     </div>
                   )}
+                  {/* WO-3250: the Slot shortcut says the width each Style really cuts */}
+                  {slotShortcut && engrave.mode === 'trace' && engrave.side === 'center' && (() => {
+                    const width = (mm: number) => String(Number(fmtDim(mm, displayUnits)))
+                    const unit = unitLabel(displayUnits)
+                    const note = engrave.engraveStyle !== 'trochoidal'
+                      ? (selectedTool ? txSlot('plainWidth', { width: width(selectedTool.diameter), unit }) : txSlot('plainWidthNoTool'))
+                      : selectedTool
+                        ? txSlot('trochoidalRange', {
+                          min: width(trochoidalFieldLimits(selectedTool.diameter).width.min),
+                          max: width(trochoidalFieldLimits(selectedTool.diameter).width.max),
+                          unit,
+                        })
+                        : null
+                    return note && <div className="op-hint" data-testid="slot-width-note" style={{ marginTop: 6 }}>{note}</div>
+                  })()}
                   {engrave.mode === 'trace' && engrave.side === 'center'
                     && engrave.engraveStyle === 'trochoidal' && selectedTool && (() => {
                     const troch = resolveTrochoidalGeometry(
@@ -8750,7 +9042,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       Placement only - no behavior or default changes. */}
                   <DisclosureSection
                     title={tx('NewOperationModalBody.Advanced')}
-                    summary={tx('NewOperationModalBody.Advanced_thread_summary', { p1: threadMill.handedness === 'left' ? tx('NewOperationModalBody.Summary_left_hand') : tx('NewOperationModalBody.Summary_right_hand'), p2: tx(`NewOperationModalBody.Summary_direction_${threadMill.cutDirection}`), p3: threadMill.leadInOut === 'arc' ? tx('NewOperationModalBody.Summary_tangent_arc') : tx('NewOperationModalBody.Summary_no_lead') })}
+                    summary={txDir('summary', { hand: threadMill.handedness === 'left' ? tx('NewOperationModalBody.Summary_left_hand') : tx('NewOperationModalBody.Summary_right_hand'), direction: threadMotion.axialDirection === 'top-down' ? txDir('summaryTopDown') : txDir('summaryBottomUp'), cut: tx(`NewOperationModalBody.Summary_direction_${threadMotion.cut}`), lead: threadMill.leadInOut === 'arc' ? tx('NewOperationModalBody.Summary_tangent_arc') : tx('NewOperationModalBody.Summary_no_lead') })}
                     testId="disclosure-passes-advanced"
                   >
                   <p className="op-section-label" style={{ marginTop: 14 }}>{tx('NewOperationModalBody.Handedness')}</p>
@@ -8761,13 +9053,22 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       onClick={() => setThreadMill(t => ({ ...t, handedness: 'left' }))}>{tx('NewOperationModalBody.Left_hand')}</button>
                   </div>
 
-                  <p className="op-section-label" style={{ marginTop: 14 }}>{tx('NewOperationModalBody.Cut_direction')}</p>
-                  <div className="op-toggle-row">
-                    <button className={`op-toggle-btn ${threadMill.cutDirection === 'climb' ? 'op-toggle-active' : ''}`}
-                      onClick={() => setThreadMill(t => ({ ...t, cutDirection: 'climb' }))}>{tx('NewOperationModalBody.Climb')}</button>
-                    <button className={`op-toggle-btn ${threadMill.cutDirection === 'conventional' ? 'op-toggle-active' : ''}`}
-                      onClick={() => setThreadMill(t => ({ ...t, cutDirection: 'conventional' }))}>{tx('NewOperationModalBody.Conventional')}</button>
+                  {/* WO-3193: the operator chooses the axial direction; climb or
+                      conventional is what that gives on this kind, hand and
+                      cutter - shown, not a second input. Unset (no choice made)
+                      shows the direction the op derives today. */}
+                  <p className="op-section-label" style={{ marginTop: 14 }}>{txDir('direction')}</p>
+                  <div className="op-toggle-row" data-testid="thread-axial-direction">
+                    <button className={`op-toggle-btn ${threadMotion.axialDirection === 'bottom-up' ? 'op-toggle-active' : ''}`}
+                      data-testid="thread-direction-bottom-up"
+                      onClick={() => setThreadMill(t => ({ ...t, axialDirection: 'bottom-up' }))}>{txDir('bottomUp')}</button>
+                    <button className={`op-toggle-btn ${threadMotion.axialDirection === 'top-down' ? 'op-toggle-active' : ''}`}
+                      data-testid="thread-direction-top-down"
+                      onClick={() => setThreadMill(t => ({ ...t, axialDirection: 'top-down' }))}>{txDir('topDown')}</button>
                   </div>
+                  <p className="op-hint" data-testid="thread-direction-result" style={{ marginTop: 6 }}>
+                    {threadMotion.cut === 'climb' ? txDir('resultClimb') : txDir('resultConventional')}
+                  </p>
 
                   <p className="op-section-label" style={{ marginTop: 14 }}>{tx('NewOperationModalBody.Lead_in_out_2')}</p>
                   <div className="op-toggle-row">
@@ -9207,7 +9508,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
 
           {/* ── Heights ──────────────────────────────────────────────────── */}
           {tab === 'heights' && (
-            <div className="op-tab-content op-heights-tab" style={{ display: 'grid', gap: 4 }}>
+            <div className="op-tab-content op-heights-tab">
+              <HeightsExplainedNotice />
+              <div style={{ display: 'grid', gap: 4 }}>
               <div data-testid="standard-height-controls" style={{ display: 'contents' }}>
                 {STANDARD_HEIGHT_ROWS.map(row => {
                   const formula = standardHeightFormula(row.plane)
@@ -9933,10 +10236,14 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                     <RefPlaneSelect
                       value={chamfer.heightReference ?? 'absolute'}
                       onChange={setOpHeightReferenceAny}
+                      testId="chamfer-ref-plane"
                     />
                   </div>
 
                   {(chamfer.heightReference ?? 'absolute') === 'picked_plane' && renderPickedDatumBlock()}
+                  {chamferOnHeightlessOutline && (
+                    <HeightlessOutlineNote kind="chamfer" units={displayUnits} />
+                  )}
 
                   <NumberField
                     label={(chamfer.heightReference ?? 'absolute') === 'absolute' ? 'Z (WCS)' : tx('NewOperationModalBody.Z_offset_from_plane')}
@@ -9950,6 +10257,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                         'chamfer', heights, chamfer, chamfer.heightReference ?? 'absolute', v,
                       )
                       setChamfer(c => ({ ...c, planeOffset: v }))
+                      setChamferDatumChosen(true)
                       setHeights(h => ({ ...h, ...hUpd }))
                     }}
                   />
@@ -10023,6 +10331,9 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                     />
                   </div>
                   {(pocket.heightReference ?? 'geometry_face') === 'picked_plane' && renderPickedDatumBlock()}
+                  {pocketHeightlessPlaneWcsZ !== null && (
+                    <HeightlessOutlineNote kind="geometry" planeWcsZ={pocketHeightlessPlaneWcsZ} units={displayUnits} />
+                  )}
                   <NumberField
                     label={(pocket.heightReference ?? 'geometry_face') === 'absolute' ? 'Z (WCS)' : tx('NewOperationModalBody.Z_offset_from_plane')}
                     unit="mm" units={displayUnits}
@@ -10275,16 +10586,31 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                                 engraveDepthDraftEdited.current = false
                               }}
                             >
-                              <NumberField
-                                label={tx('NewOperationModalBody.Engraving_depth')} unit="mm" units={displayUnits}
-                                value={engraveExplicitDepthMm} min={0.001} step={0.1}
-                                onChange={value => {
-                                  setEngraveExplicitDepthMm(value)
-                                  // WO-2636: entering the depth supplies intent; no second tick box.
-                                  // Keep the state hook's explicit-end contract for starting policy.
-                                  setEngraveDepthEntered(true)
-                                }}
-                              />
+                              <div className="op-field-row">
+                                <span className="op-field-label">{tx('NewOperationModalBody.Engraving_depth')}</span>
+                                <div className="op-field-right">
+                                  <div className="op-field-input-row">
+                                    <OptionalNumericInput
+                                      className="op-field-input"
+                                      value={engraveDepthEntered ? engraveExplicitDepthMm : undefined}
+                                      min={0.001}
+                                      step={0.1}
+                                      units={displayUnits}
+                                      onChange={value => {
+                                        if (value === undefined) {
+                                          setEngraveDepthEntered(false)
+                                          return
+                                        }
+                                        setEngraveExplicitDepthMm(value)
+                                        // WO-2636: entering the depth supplies intent; no second tick box.
+                                        // Keep the state hook's explicit-end contract for starting policy.
+                                        setEngraveDepthEntered(true)
+                                      }}
+                                    />
+                                    <span className="op-field-unit">{unitLabel(displayUnits)}</span>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           )}
                           <LiveSmartHeightPlan
@@ -10336,11 +10662,19 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                 </>
               ))}
               </div>
+              <div data-testid="minimize-z-travel" style={{ gridRow: 7 }}>
+                <label className="op-check-label">
+                  <input type="checkbox" checked={heights.minimizeZTravel !== false}
+                    onChange={e => setHeights(h => ({ ...h, minimizeZTravel: e.target.checked }))} />
+                  {tx('NewOperationModalBody.Minimize_Z_travel')}
+                </label>
+                <div>{tx('NewOperationModalBody.Unchecked_hops_at_Retract')}</div>
+              </div>
               {/* WO-1974: the diagram lives OUTSIDE the policy-controls div above, which is
                   `hidden` until Top/Bottom is expanded - inside it the diagram never showed.
                   Drawn for every op with heights (Adaptive 3D and an unresolved Face too: it
                   falls back to the rows' own values until the plan resolves). */}
-              <div data-testid="operation-height-diagram" style={{ gridRow: 7 }}>
+              <div data-testid="operation-height-diagram" style={{ gridRow: 8 }}>
                 <HeightDiagram
                   heights={diagramHeights}
                   units={displayUnits}
@@ -10390,6 +10724,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
                       : standardResolvedWcs('bottom')
                   }
                 />
+              </div>
               </div>
             </div>
           )}
@@ -10822,16 +11157,33 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
 
         </div>
 
-        {/* Footer */}
+        {drillSizeNoticeDiameter !== undefined && selectedTool && (
+          <div className="op-hint" role="status" data-testid="drill-size-notice" style={{ margin: '0 20px 12px' }}>
+            {tx('NewOperationModalBody.Drill_larger_than_hole', {
+              // WO-3185: his approved line reads "Drill 8 mm ... 6 mm hole".
+              drill: String(Number(fmtDim(selectedTool.diameter, displayUnits))),
+              hole: String(Number(fmtDim(drillSizeNoticeDiameter, displayUnits))),
+              unit: unitLabel(displayUnits),
+            })}
+          </div>
+        )}
+        {/* WO-3086: a disabled action explains itself without requiring a hover.
+            The same authoring decision already owns the button and keyboard path. */}
         <div className="modal-footer">
+          {!canCreate && createReason && (
+            <span className="op-hint" role="status" id="op-create-reason" data-testid="op-create-reason" style={{ marginRight: 'auto', minWidth: 0 }}>
+              {createReason}
+            </span>
+          )}
           <button className="modal-btn modal-btn-ghost" onClick={handleClose}>{tx('NewOperationModalBody.Cancel_2')}</button>
           <button
             className="modal-btn modal-btn-primary"
             data-testid="op-create"
             onClick={handleCreate}
             disabled={!canCreate}
+            aria-describedby={!canCreate && createReason ? 'op-create-reason' : undefined}
             data-tooltip={
-              authoring.message
+              createReason
             }
           >
             {isEditMode ? tx('NewOperationModalBody.Save_Recompute') : tx('NewOperationModalBody.Create_Operation')}
@@ -10840,6 +11192,7 @@ export function NewOperationModalBody({ state, setup, isEditMode, setupId: _setu
 
       </div>
     </div>
+    </EngraveVcarveFieldHelp>
     {loopPickBanner}
     </>
   )

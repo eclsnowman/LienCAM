@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { buildThreadMillToolpath } from '../../lib/cam/threadmill2d'
-import { HELIX_FI_STEP } from '../../lib/cam/threadHelix'
 import { estimateRuntimeMs } from '../../lib/cam/runtime'
 import type { ThreadMillParams, ThreadMillWorkerPayload, LoopData } from '../../lib/cam/types'
 import type { Tool, HeightParams, PassParams, LinkingParams, ToolpathMove } from '../../types'
@@ -75,6 +74,28 @@ function makePayload(
 
 const R_FINAL = 10 / 2 - 6 / 2  // 2.0 mm
 
+// Independent circular geometry: a G2/G3 endpoint chord is not its tangent.
+// Keep the historical direction/cusp assertions meaningful for both dense feeds
+// and native helices, including the ambiguous endpoint chord of a half turn.
+function signedArcSweep(a: ToolpathMove, b: ToolpathMove): number {
+  const ax = a.x - b.cx!, ay = a.y - b.cy!
+  const bx = b.x - b.cx!, by = b.y - b.cy!
+  let sweep = Math.atan2(ax * by - ay * bx, ax * bx + ay * by)
+  if (b.type === 'arc_ccw' && sweep <= 0) sweep += 2 * Math.PI
+  if (b.type === 'arc_cw' && sweep >= 0) sweep -= 2 * Math.PI
+  return sweep
+}
+
+function segmentTangent(a: ToolpathMove, b: ToolpathMove, atEnd = false) {
+  if (b.type !== 'arc_cw' && b.type !== 'arc_ccw') {
+    return { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z }
+  }
+  expect(Number.isFinite(b.cx) && Number.isFinite(b.cy)).toBe(true)
+  const p = atEnd ? b : a, sense = b.type === 'arc_ccw' ? 1 : -1
+  return { x: -sense * (p.y - b.cy!), y: sense * (p.x - b.cx!),
+    z: (b.z - a.z) / Math.abs(signedArcSweep(a, b)) }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('buildThreadMillToolpath — emission', () => {
@@ -87,37 +108,49 @@ describe('buildThreadMillToolpath — emission', () => {
     }
   })
 
-  it('helix: rev count, endpoints (thread top reached, exit climb to feed), and orbit radius', () => {
+  it('helix: rev count, endpoints (bottom -> thread top, no exit climb), and orbit radius', () => {
     const moves = buildThreadMillToolpath(makePayload(makeParams()))
     const helix = moves.filter(m => m.role === 'helix')
     expect(helix.length).toBeGreaterThan(0)
 
-    // The helix climbs bottomZ(-9) -> topZ(0) [the thread] -> feedZ(+1) [the exit
-    // climb that lifts the cutter fully out of the hole before lead-out/retract].
-    // revs over the FULL climb = (feedZ - bottomZ)/pitch = 10/1.5 = 6.667.
-    const revs = (1 - (-9)) / 1.5
-    const expected = revs * (2 * Math.PI / HELIX_FI_STEP)
-    expect(Math.abs(helix.length - expected)).toBeLessThan(6)
+    // WO-3080: the helix climbs bottomZ(-9) -> topZ(0) only (the A2.1 exit climb
+    // to the feed plane is retired). revs = (topZ - bottomZ)/pitch = 9/1.5 = 6.
+    const revs = (0 - (-9)) / 1.5
+    // Count angular travel, not pi/16 chord samples (WO-3168 native output).
+    let sweep = 0
+    for (let i = 1; i < helix.length; i++) {
+      const a = helix[i - 1], b = helix[i]
+      expect(b.type).toBe('arc_ccw')
+      const angle = signedArcSweep(a, b)
+      expect(angle).toBeGreaterThan(0)
+      expect(angle).toBeLessThanOrEqual(Math.PI + 1e-9)
+      expect((b.z - a.z) / angle * 2 * Math.PI).toBeCloseTo(1.5, 9)
+      sweep += angle
+    }
+    expect(sweep / (2 * Math.PI)).toBeCloseTo(revs, 9)
 
-    // First point at bottomZ; the thread top (topZ = 0) is reached; the last
-    // point lands on the feed plane (exit climb fully out of the hole).
+    // First point at bottomZ; the last point is the thread top (topZ = 0).
     expect(helix[0].z).toBe(-9)
-    expect(helix.some(m => Math.abs(m.z - 0) < 1e-9)).toBe(true)
-    expect(helix[helix.length - 1].z).toBeCloseTo(1, 9)
+    expect(helix[helix.length - 1].z).toBeCloseTo(0, 9)
+    expect(Math.max(...helix.map(m => m.z))).toBeCloseTo(0, 9)
 
-    // Every helix point (thread + exit climb) at R_final from the hole center.
+    // Every helix point at R_final from the hole center.
     for (const m of helix) {
       const r = Math.hypot(m.x - 0, m.y - 0)
       expect(Math.abs(r - R_FINAL)).toBeLessThan(1e-6)
     }
   })
 
-  it('exit climb: the lead-out happens at the feed plane (tool clear of the hole), not at the thread top', () => {
+  it('the lead-out happens at the thread top, then the tool retracts up the open hole centre', () => {
     const moves = buildThreadMillToolpath(makePayload(makeParams()))
     const leadOut = moves.filter(m => m.role === 'lead_out')
     expect(leadOut.length).toBeGreaterThan(0)
-    // Every lead-out move is at the feed plane (+1), above the thread top (0).
-    for (const m of leadOut) expect(m.z).toBeCloseTo(1, 9)
+    // WO-3080: every lead-out move is at the thread top (0), not the feed plane (+1).
+    for (const m of leadOut) expect(m.z).toBeCloseTo(0, 9)
+    const last = moves[moves.length - 1]
+    expect(last).toMatchObject({ type: 'rapid', z: 10 })
+    expect(last.x).toBeCloseTo(0, 9)
+    expect(last.y).toBeCloseTo(0, 9)
   })
 
   it('helix Z is strictly increasing', () => {
@@ -209,12 +242,8 @@ describe('buildThreadMillToolpath — external (mechanical mirror)', () => {
 
   function helixSense(moves: ToolpathMove[], cx = 0, cy = 0): number {
     const helix = moves.filter(m => m.role === 'helix')
-    const a0 = Math.atan2((helix[0].y ?? 0) - cy, (helix[0].x ?? 0) - cx)
-    const a1 = Math.atan2((helix[1].y ?? 0) - cy, (helix[1].x ?? 0) - cx)
-    let d = a1 - a0
-    while (d > Math.PI) d -= 2 * Math.PI
-    while (d < -Math.PI) d += 2 * Math.PI
-    return Math.sign(d)
+    const tangent = segmentTangent(helix[0], helix[1])
+    return Math.sign((helix[0].x - cx) * tangent.y - (helix[0].y - cy) * tangent.x)
   }
 
   it('external orbit radius == majorDiameter/2 + toolR - 0.6*pitch (the thread root)', () => {
@@ -261,8 +290,8 @@ describe('buildThreadMillToolpath — external (mechanical mirror)', () => {
   })
 
   it('external emits NO exit climb above the thread top (helix stays at/below topZ; lead-out never returns to center)', () => {
-    // Internal climbs above topZ to feedZ (+1); external must NOT (it is already
-    // radially clear of the boss).
+    // External never climbs above topZ (it is already radially clear of the boss;
+    // since WO-3080 internal ascending stops at topZ too).
     const ext = buildThreadMillToolpath(makePayload(makeParams({ threadKind: 'external' })))
     const helix = ext.filter(m => m.role === 'helix')
     const maxZ = Math.max(...helix.map(m => m.z ?? -Infinity))
@@ -277,12 +306,11 @@ describe('buildThreadMillToolpath — external (mechanical mirror)', () => {
   })
 
   it('external ARC lead-out is tangent-continuous at the helix top (no cusp), both hands', () => {
-    // Direction of travel from the last two points of a same-role segment.
-    const dirOf = (a: ToolpathMove, b: ToolpathMove): [number, number] => {
-      const dx = (b.x ?? 0) - (a.x ?? 0)
-      const dy = (b.y ?? 0) - (a.y ?? 0)
-      const n = Math.hypot(dx, dy) || 1
-      return [dx / n, dy / n]
+    // Evaluate circular endpoint tangents rather than the arc's long chord.
+    const dirOf = (a: ToolpathMove, b: ToolpathMove, atEnd = false): [number, number] => {
+      const t = segmentTangent(a, b, atEnd)
+      const n = Math.hypot(t.x, t.y) || 1
+      return [t.x / n, t.y / n]
     }
     const dot = (u: [number, number], v: [number, number]) => u[0] * v[0] + u[1] * v[1]
 
@@ -300,7 +328,7 @@ describe('buildThreadMillToolpath — external (mechanical mirror)', () => {
       // LEAD-OUT continuity: helix-end direction A vs lead-out-start direction B.
       // Before the fix (double-reversed dir) this dot was ~ -0.92 (a ~169deg cusp);
       // after the fix it must be strongly positive (same general heading).
-      const A = dirOf(helix[helix.length - 2], helix[helix.length - 1])
+      const A = dirOf(helix[helix.length - 2], helix[helix.length - 1], true)
       const B = dirOf(leadOut[0], leadOut[1])
       expect(dot(A, B)).toBeGreaterThan(0.9)
 
@@ -387,7 +415,7 @@ describe('buildThreadMillToolpath — external radial depth + entry safety', () 
   it('climb/conventional agree with cross(heading, materialNormal) rule (both kinds)', () => {
     // ARCHITECTURE.md universal rule: cross(heading, materialNormal) < 0 = climb.
     // materialNormal is OUTWARD (P0 - center) for internal, INWARD (center - P0)
-    // for external. heading = P1 - P0 from the first two helix points.
+    // for external. Heading is the first segment's tangent at its start.
     const firstCross = (
       kind: ThreadMillParams['threadKind'],
       cut: ThreadMillParams['cutDirection'],
@@ -400,8 +428,7 @@ describe('buildThreadMillToolpath — external radial depth + entry safety', () 
       const helix = moves.filter(m => m.role === 'helix')
       expect(helix.length).toBeGreaterThan(1)
       const p0 = helix[0], p1 = helix[1]
-      const hx = (p1.x ?? 0) - (p0.x ?? 0)
-      const hy = (p1.y ?? 0) - (p0.y ?? 0)
+      const { x: hx, y: hy } = segmentTangent(p0, p1)
       let mx = (p0.x ?? 0) - 0, my = (p0.y ?? 0) - 0     // outward (internal)
       if (kind === 'external') { mx = -mx; my = -my }     // inward (external)
       const mn = Math.hypot(mx, my) || 1
@@ -433,12 +460,12 @@ describe('buildThreadMillToolpath — climb/conventional direction model', () =>
     for (let i = 1; i < helix.length; i++) {
       expect(helix[i].z).toBeGreaterThan(helix[i - 1].z)
     }
-    // Plunge to bottomZ; lead_out at the feed plane (+1, exit climb out of hole).
+    // Plunge to bottomZ; lead_out at the thread top (0; WO-3080 retired the exit climb).
     const plunges = moves.filter(m => m.role === 'plunge')
     expect(plunges.length).toBe(1)
     expect(plunges[0].z).toBe(-9)
     const leadOut = moves.filter(m => m.role === 'lead_out')
-    for (const m of leadOut) expect(m.z).toBeCloseTo(1, 9)
+    for (const m of leadOut) expect(m.z).toBeCloseTo(0, 9)
   })
 
   it('internal + right + conventional: DESCENDS, enters at top, retracts from bottom', () => {
@@ -504,10 +531,8 @@ describe('buildThreadMillToolpath — internal lead-out tangency (no cusp)', () 
     let lastHelix = -1
     for (let i = 0; i < moves.length; i++) if (moves[i].role === 'helix') lastHelix = i
     const firstLeadOut = moves.findIndex((m, i) => i > lastHelix && m.role === 'lead_out')
-    const p = (m: ToolpathMove) => ({ x: m.x ?? 0, y: m.y ?? 0, z: m.z ?? 0 })
-    const sub = (a: {x:number;y:number;z:number}, b: typeof a) => ({ x: a.x-b.x, y: a.y-b.y, z: a.z-b.z })
-    const inV = sub(p(moves[lastHelix]), p(moves[lastHelix - 1]))
-    const outV = sub(p(moves[firstLeadOut]), p(moves[lastHelix]))
+    const inV = segmentTangent(moves[lastHelix - 1], moves[lastHelix], true)
+    const outV = segmentTangent(moves[lastHelix], moves[firstLeadOut])
     const du = Math.hypot(inV.x, inV.y, inV.z), dw = Math.hypot(outV.x, outV.y, outV.z)
     let c = (inV.x*outV.x + inV.y*outV.y + inV.z*outV.z) / (du*dw)
     c = Math.max(-1, Math.min(1, c))

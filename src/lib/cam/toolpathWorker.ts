@@ -1,3 +1,4 @@
+import { enforceOperationTravel } from './minimumTravelZ'
 // Web Worker — toolpath computation.
 // Runs on a separate thread so the UI never freezes during computation.
 // Vite builds this as a module worker via:
@@ -230,7 +231,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequestMsg & { facePilot?: Fac
       const notices: string[] = []
       const notify = (message: string) => { notices.push(message) }
       const started = performance.now()
-      let moves = await build(payload, onProgress, notify)
+      let moves = enforceOperationTravel(await build(payload, onProgress, notify), payload.heights, payload.wcsOrigin.z, 0, undefined, msg.type === 'COMPUTE_DRILL' ? 'drill' : undefined)
 
       // WO-276 holder/shank crash guard. ONE call, on the single path every
       // strategy's response leaves through, so a strategy added tomorrow is
@@ -283,6 +284,8 @@ self.onmessage = async (event: MessageEvent<WorkerRequestMsg & { facePilot?: Fac
         if (clearance.status === 'not-checked') console.warn(`[toolpathWorker] ${clearance.message}`)
       }
 
+      // Reach trimming may introduce replacement traverses; retain the authored floor.
+      moves = enforceOperationTravel(moves, payload.heights, payload.wcsOrigin.z, 0, undefined, msg.type === 'COMPUTE_DRILL' ? 'drill' : undefined)
       const response: ToolpathCompleteWithNotices = {
         type: 'TOOLPATH_COMPLETE',
         opId: payload.opId,

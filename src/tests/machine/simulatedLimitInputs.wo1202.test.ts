@@ -10,6 +10,7 @@ import {
   getMachineController,
 } from '../../lib/machine/machineSession'
 import { axisSoftLimitStatementKey } from '../../lib/machine/resolvedMachineMotion'
+import { SimulatedController } from '../../lib/machine/simulatedController'
 import { useCamStore } from '../../store'
 import { useMachineControl } from '../../store/machineControlStore'
 import {
@@ -229,14 +230,20 @@ describe('WO-1202 simulated limit inputs through machineSession', () => {
     const controller = await connectSelectedMachine(false)
     // This case isolates limit behavior, not the fresh-connect E-STOP latch.
     __resetEstopInterlockForTest()
+    // The session's jog now shortens a step that would end past a stated soft
+    // limit (jogSoftLimitClamp.test.ts), so the simulator's own pre-flight and
+    // in-flight limit handling is driven through its unwrapped jog; its status
+    // still reaches the session as before.
+    const rawJog = (axis: 'X', deltaMm: number, feed: number) =>
+      SimulatedController.prototype.jog.call(controller as InstanceType<typeof SimulatedController>, axis, deltaMm, feed)
 
-    expect(controller.jog('X', 95.02, 60_000)).toBe(false)
+    expect(rawJog('X', 95.02, 60_000)).toBe(false)
     expect(controller.machineState()).toBe('idle')
     expect(controller.status().inputs?.softLimit).toBe(false)
 
     // The shared 0.01 mm fit tolerance admits this endpoint at pre-flight.
     // Motion integration then observes the actual out-of-envelope endpoint.
-    expect(controller.jog('X', 95.005, 60_000)).toBe(true)
+    expect(rawJog('X', 95.005, 60_000)).toBe(true)
     await vi.advanceTimersByTimeAsync(100)
 
     expect(controller.machineState()).toBe('alarm')

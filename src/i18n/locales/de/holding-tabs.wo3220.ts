@@ -1,0 +1,42 @@
+// WO-3220: German, machine-translated and checked against docs/i18n/GLOSSARY.md.
+import type { Translation } from '../../index'
+
+const holdingTabs: Translation<'holding-tabs.wo3220'> = {
+  suggest: 'Haltestegpositionen vorschlagen',
+  suggestTooltip: 'Schlägt Stegmitten abseits von Ecken, kurzen Abschnitten, nahen Bohrungen und Spannmitteln vor. Nichts ändert sich, bis Sie Übernehmen wählen. Konturen mit von Hand gesetzten Stegen bleiben unverändert.',
+  foundOf: '{{found}} von {{requested}} Vorschlägen gefunden',
+  loopLine: 'Kontur {{index}}: {{found}} von {{requested}} bei {{positions}} mm entlang des Schnitts',
+  loopNone: 'Kontur {{index}}: keine Position passt, daher bleibt sie beim Übernehmen ohne Stege',
+  loopHandPlaced: 'Kontur {{index}}: von Hand gesetzte Stege bleiben unverändert',
+  avoided: 'Gemieden: {{reasons}}',
+  notChecked: 'Nicht geprüft: {{items}}',
+  apply: 'Übernehmen',
+  applyPartial: '{{count}} übernehmen',
+  cancel: 'Abbrechen',
+  applied: '{{count}} Stegpositionen übernommen. Berechnen Sie neu, um sie zu schneiden.',
+  appliedWithNone: '{{count}} Stegpositionen übernommen; Konturen ohne Stege: {{none}}. Berechnen Sie neu, um sie zu schneiden.',
+  outlinesWithoutTabs: 'Konturen ohne Stege: {{count}}',
+  reasonCorner: 'Ecken und kurze Abschnitte',
+  reasonEntry: 'Ein- und Ausfahrt',
+  reasonOppositeWall: 'die gegenüberliegende Wand',
+  reasonOtherOutline: 'andere Konturen und Bohrungen',
+  reasonFixture: 'Spannmittel',
+  reasonMaterial: 'Stellen ohne umgebendes Material',
+  reasonOther: 'andere Grenzen',
+  omittedHolder: 'Freigang des Werkzeughalters',
+  omittedFixtures: 'Spannmittel ohne lesbare Form',
+  diagnosticThinWeb: 'Der Steg ist nicht breiter als das Werkzeug und lässt kaum Material stehen.',
+  diagnosticOther: 'Für eine Kontur ist kein Vorschlag möglich ({{code}}).',
+  refuseMissing: 'Diese Operation existiert nicht mehr.',
+  refuseNotContour: 'Haltestegpositionen vorschlagen gilt nur für Konturoperationen.',
+  refuseOpen: 'Haltestegpositionen vorschlagen gilt für geschlossene Konturen; diese ist offen.',
+  refuseRoughing: 'Haltestegpositionen vorschlagen gilt für reine Schlichtkonturen; diese schruppt zuerst und wird daher nicht angeboten.',
+  refuseTabsOff: 'Schalten Sie zuerst die Haltestege ein.',
+  refuseGenerateFirst: 'Berechnen Sie diese Operation zuerst: Vorschläge liegen auf ihrer Schlichtbahn.',
+  refuseStale: 'Die Operation hat sich seit der Berechnung geändert. Berechnen Sie neu, um Vorschläge zu erhalten.',
+  refuseAllHandPlaced: 'Jede Kontur hat bereits von Hand gesetzte Stege. Setzen Sie zuerst auf gleichmäßige Abstände zurück.',
+  refuseChanged: 'Etwas hat sich geändert, daher wurden die Vorschläge neu ermittelt. Prüfen Sie sie und übernehmen Sie erneut.',
+  refuseNothingFound: 'Keine Position passt, es gibt nichts zu übernehmen.',
+}
+
+export default holdingTabs

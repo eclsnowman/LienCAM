@@ -10,6 +10,9 @@ const dist = join(root, 'dist')
 const json = (path: string) => JSON.parse(readFileSync(path, 'utf8'))
 const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
   .flatMap(entry => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)])
+const embeddedOclWasm = (path: string): Buffer[] => [...readFileSync(path, 'utf8')
+  .matchAll(/'data:application\/octet-stream;base64,([A-Za-z0-9+/=]+)'/g)]
+  .map(match => Buffer.from(match[1], 'base64'))
 let sourceHandler: ((event: MessageEvent<WorkerRequestMsg>) => Promise<void> | void) | undefined
 
 describe('WO-2485 replaceable LGPL production modules (run npm run build first)', () => {
@@ -25,9 +28,15 @@ describe('WO-2485 replaceable LGPL production modules (run npm run build first)'
     expect(statSync(join(dist, manifest.adaptiveEngine)).size).toBeGreaterThan(10000)
     const wasm = readFileSync(join(dist, manifest.openCamLibWasm))
     expect([...wasm.subarray(0, 8)]).toEqual([0, 97, 115, 109, 1, 0, 0, 0])
-    const upstream = readFileSync(join(root, 'node_modules/@opencamlib/opencamlib/browser.js'), 'utf8')
-    const base64 = upstream.match(/'data:application\/octet-stream;base64,([A-Za-z0-9+/=]+)'/)![1]
-    expect(wasm.equals(Buffer.from(base64, 'base64'))).toBe(true)
+    // Waterline owns raw Embind handles, so its browser branch loads build/ocl.js;
+    // other package consumers use browser.js. Both factories embed the same shipped
+    // WASM and must resolve to this one replaceable release asset.
+    const browserPayloads = embeddedOclWasm(join(root, 'node_modules/@opencamlib/opencamlib/browser.js'))
+    const ownedFactoryPayloads = embeddedOclWasm(join(root, 'node_modules/@opencamlib/opencamlib/build/ocl.js'))
+    expect(browserPayloads).toHaveLength(1)
+    expect(ownedFactoryPayloads).toHaveLength(1)
+    expect(ownedFactoryPayloads[0].equals(browserPayloads[0])).toBe(true)
+    expect(wasm.equals(browserPayloads[0])).toBe(true)
   })
 
   it('owns every engine source module exclusively in the shared file, including worker routes', () => {
@@ -42,15 +51,17 @@ describe('WO-2485 replaceable LGPL production modules (run npm run build first)'
     expect(Object.keys(chunks).some(name => name.includes('toolpathWorker'))).toBe(true)
     expect(Object.keys(chunks).some(name => name.includes('cam3dWorker'))).toBe(true)
     expect(Object.keys(chunks).some(name => name.includes('plannerWorker'))).toBe(true)
+    const inlineOclWasmChunks: string[] = []
     for (const file of files(dist).filter(file => file.endsWith('.js'))) {
       const code = readFileSync(file, 'utf8')
       // WASM magic's base64 prefix catches the old multi-megabyte inline binary.
-      expect(code, file).not.toContain('AGFzbQEAAAAB0QVa')
+      if (code.includes('AGFzbQEAAAAB0QVa')) inlineOclWasmChunks.push(file)
       if (file !== join(dist, manifest.adaptiveEngine)) {
         expect(code, file).not.toContain('function processFeature(')
         expect(code, file).not.toContain('function buildAdaptiveClearingToolpath(')
       }
     }
+    expect(inlineOclWasmChunks).toEqual([])
     const importers = files(dist).filter(file => file.endsWith('.js') && file !== join(dist, manifest.adaptiveEngine))
       .filter(file => readFileSync(file, 'utf8').includes('adaptive2d-engine.js'))
     expect(importers.some(file => file.includes('toolpathWorker'))).toBe(true)

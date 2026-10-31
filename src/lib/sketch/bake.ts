@@ -268,7 +268,10 @@ export interface EntityChain {
 }
 
 interface ExtractedChains {
-  chains: { steps: Step[]; closed: boolean }[]
+  // `branched`: some node the walk passed through joins more than two curve
+  // ends, so the greedy walk below chose one branch (read only by
+  // chainComponentContaining; bake and chainContaining ignore it).
+  chains: { steps: Step[]; closed: boolean; branched: boolean }[]
   circles: { center: Vec2; radius: number }[]
   // Full ellipses bake as a polygonal approximation (no ellipse LoopSegment
   // exists): a closed line-segment loop; they never chain with line/arc edges.
@@ -541,9 +544,11 @@ function extractChains(
     return null
   }
 
-  const walk = (seed: Terminal): { steps: Step[]; closed: boolean } => {
+  const isJunction = (root: string) => (adjacency.get(root) ?? []).length > 2
+  const walk = (seed: Terminal): { steps: Step[]; closed: boolean; branched: boolean } => {
     const steps: Step[] = []
     const startNode = nodeOf(seed.edgeIdx, seed.site)
+    let branched = isJunction(startNode)
     let t: Terminal | null = seed
     let atNode = startNode
     while (t) {
@@ -551,13 +556,14 @@ function extractChains(
       const forward = t.site === 'start'
       steps.push({ edge: edges[t.edgeIdx], forward })
       atNode = nodeOf(t.edgeIdx, forward ? 'end' : 'start')
-      if (atNode === startNode) return { steps, closed: true }
+      if (isJunction(atNode)) branched = true
+      if (atNode === startNode) return { steps, closed: true, branched }
       t = takeNext(atNode)
     }
-    return { steps, closed: false }
+    return { steps, closed: false, branched }
   }
 
-  const chains: { steps: Step[]; closed: boolean }[] = []
+  const chains: { steps: Step[]; closed: boolean; branched: boolean }[] = []
   // Open-chain seeds: terminals whose node has remaining degree 1.
   for (let i = 0; i < edges.length; i++) {
     if (used[i]) continue
@@ -592,12 +598,33 @@ export function chainContaining(
   entityId: string,
   epsilon: number = DEFAULT_EPSILON,
 ): EntityChain | null {
+  const ch = chainComponentContaining(entities, constraints, entityId, epsilon)
+  return ch === null ? null : { steps: ch.steps, closed: ch.closed }
+}
+
+/** chainContaining's chain plus whether it is the UNIQUE ordered path through
+ *  its connected component. */
+export interface ChainComponent extends EntityChain {
+  /** true when a node on this chain joins more than two curve ends: the walk
+   *  picked one branch, so the chain is one possible path, not the only one. */
+  branched: boolean
+}
+
+/** Same extraction and the same chain as chainContaining, with the branch
+ *  flag a caller needs before it may treat the chain as unambiguous. */
+export function chainComponentContaining(
+  entities: readonly SketchEntity[],
+  constraints: readonly SketchConstraint[],
+  entityId: string,
+  epsilon: number = DEFAULT_EPSILON,
+): ChainComponent | null {
   const { chains } = extractChains(entities, constraints, epsilon)
   for (const ch of chains) {
     if (ch.steps.some((s) => s.edge.entity.id === entityId)) {
       return {
         steps: ch.steps.map((s) => ({ entity: s.edge.entity, forward: s.forward })),
         closed: ch.closed,
+        branched: ch.branched,
       }
     }
   }

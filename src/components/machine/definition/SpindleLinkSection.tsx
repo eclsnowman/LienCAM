@@ -145,6 +145,9 @@ export function VfdReadout({ label, value, testId, path, edit, ariaLabel, width 
           aria-disabled={edit.disabled}
           onChange={(event) => edit.onType(path, event.target.value)}
           onBlur={(event) => edit.onCommit(path, event.target.value)}
+          // WO-3088: Enter saves too - leaving the box is the one commit, so
+          // a value is never stored twice.
+          onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
           style={{ width, fontVariantNumeric: 'tabular-nums' }}
         />
       ) : (

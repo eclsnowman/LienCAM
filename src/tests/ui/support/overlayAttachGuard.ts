@@ -350,12 +350,17 @@ function shadowRootOf(el: Element): ShadowRoot | null {
 
 /** Every element in the composed subtree rooted at `node` (inclusive of element
  *  nodes directly under it), descending into open OR recorded shadow roots. */
-function composedElements(node: ParentNode): Element[] {
+function composedElements(node: ParentNode, visited = new Set<ParentNode>()): Element[] {
+  // WO-2929: roots overlap (rootDoc is also observed; shadow roots are both
+  // composed descendants and independently observed). Share this set only
+  // within ONE scan, never across mutations: every changed cascade is re-read.
+  if (visited.has(node)) return []
+  visited.add(node)
   const out: Element[] = []
   for (const el of Array.from(node.querySelectorAll('*'))) {
     out.push(el)
     const shadow = shadowRootOf(el)
-    if (shadow !== null) out.push(...composedElements(shadow))
+    if (shadow !== null) out.push(...composedElements(shadow, visited))
   }
   return out
 }
@@ -579,8 +584,9 @@ function processRecords(records: MutationRecord[], defaultChannel: string): void
 function reclassifyAll(channel: string): void {
   if (state === null) return
   const roots: Array<Document | ShadowRoot> = [state.rootDoc, ...state.observedRoots]
+  const visited = new Set<ParentNode>()
   for (const root of roots) {
-    for (const el of composedElements(root)) examine(el, channel)
+    for (const el of composedElements(root, visited)) examine(el, channel)
   }
 }
 

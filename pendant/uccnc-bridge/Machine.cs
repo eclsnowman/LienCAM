@@ -404,6 +404,22 @@ namespace LienCAM
 
         /** No record or the same DLL: Open. A changed DLL opens only on the
          *  Connect press after the line that named this very DLL. */
+        /** WO-3088: the board type this computer last connected, or -1. Read
+         *  quietly - it only names which cable a GIVING UP line points at. */
+        public static int LastConnectedDeviceType()
+        {
+            int type = -1;
+            string at = null;
+            foreach (DllPinEntry e in Load(PathBesideBridge(), delegate(string line) { }))
+            {
+                if (e.DeviceType == null) continue;
+                if (at != null && string.CompareOrdinal(e.ConnectedAt ?? "", at) <= 0) continue;
+                type = e.DeviceType.Value;
+                at = e.ConnectedAt ?? "";
+            }
+            return type;
+        }
+
         public static Verdict Decide(DllPinEntry pinned, string dllSha256, bool connectPressed)
         {
             if (pinned == null || pinned.DllSha256 == null || dllSha256 == null) return Verdict.Open;
@@ -617,6 +633,42 @@ namespace LienCAM
             return BoardPinTables.ForDeviceType(type) != null;
         }
 
+        /** WO-3088: the board this computer expects - the one it last opened,
+         *  or the one it last connected (DllPin) - so a board that does not
+         *  answer is pointed at its real cable. -1 when nothing says. */
+        public static int ExpectedDeviceType = -1;
+
+        /** "Ethernet", "USB" or null when the link is not known. The native
+         *  transport (Uc100Net) reaches a controller over the network only. */
+        public static string LinkOf(int deviceType)
+        {
+#if UC100NET
+            return "Ethernet";
+#else
+            switch (deviceType)
+            {
+                case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 15:
+                    return "USB";
+                case 8: case 9: case 10: case 11: case 12: case 13: case 14:
+                case 16: case 17: case 18: case 19:
+                    return "Ethernet";
+                default:
+                    return null;
+            }
+#endif
+        }
+
+        /** What to check when the controller never answered, for its link. */
+        public static string CheckAdvice(int deviceType)
+        {
+            string link = LinkOf(deviceType);
+            if (link == "Ethernet")
+                return "Check its power, its Ethernet cable and that this computer is on the controller's network, then try Reconnect again.";
+            if (link == "USB")
+                return "Check its power and USB connection, then try Reconnect again.";
+            return "Check its power and its USB or Ethernet cable, then try Reconnect again.";
+        }
+
         /** Waits for a physical controller to enumerate. A present device is
          *  deliberately not classified here: Machine.CheckBoardType remains
          *  the fail-closed authority and immediately refuses unknown types. */
@@ -644,11 +696,24 @@ namespace LienCAM
             log("[bridge] GIVING UP: controller " + controller
                 + " did not become enumerable within " + TimeoutSeconds + " s; "
                 + "the last ListDevices call returned rc=" + last.Rc + " and "
-                + last.Count + " device(s). Check its power and USB connection, then try Reconnect again.");
+                + last.Count + " device(s). " + CheckAdvice(ExpectedDeviceType));
             return false;
         }
     }
     // END WO-1306 CONTROLLER STARTUP WAIT
+
+    // BEGIN WO-3088 CONSOLE NUMBER
+    /** WO-3088: a zero printed as 0. .NET (the native Linux bridge) prints a
+     *  negative zero as "-0"; the .NET Framework bridge printed "0". The board
+     *  holds the same value either way - only the console text differs. */
+    public static class ConsoleNumber
+    {
+        public static double Plain(double value)
+        {
+            return value == 0 ? 0.0 : value;
+        }
+    }
+    // END WO-3088 CONSOLE NUMBER
 
     // BEGIN WO-2847 FIRMWARE UPDATE WAIT
     /** WO-2847 (ADR-0058 V6). UC100.dll starts a firmware update BY ITSELF,
@@ -969,6 +1034,7 @@ namespace LienCAM
 
             boardType = type;
             boardSerial = serial;   // WO-2845
+            ControllerStartupWait.ExpectedDeviceType = type;   // WO-3088: a reopen names this board's cable
             Console.WriteLine("[bridge] board " + board + " reports DeviceInfo type=" + type
                               + " serial=0x" + serial.ToString("X"));
 
@@ -1595,6 +1661,7 @@ namespace LienCAM
         // ---- staged program ------------------------------------------------
         readonly List<Move> staged = new List<Move>();
         readonly object jobLock = new object();
+        long stagingGeneration; // WO-3124: identity of the last accepted load, under jobLock.
         volatile bool jobRunning;
         volatile bool jobAbort;
         /** WO-423: set by StreamStaged when the CONTROLLER refused a move, and
@@ -2007,7 +2074,7 @@ namespace LienCAM
                                       // WO-1004: the back-off SIGN is the field that broke a
                                       // switch bracket. Print what the board actually holds, so
                                       // it can be checked rather than assumed.
-                                      + " homeBackOff=" + chk.HomeBackOff
+                                      + " homeBackOff=" + ConsoleNumber.Plain(chk.HomeBackOff)
                                       // WO-1557: the four fields WO-1360 carries through every
                                       // whole-struct write were never printed, so "read back
                                       // unchanged" could not be proved for them.
@@ -3160,8 +3227,8 @@ namespace LienCAM
         public bool ConfiguredThisSession { get { return configuredThisSession; } }
         public string ConfiguredHow { get { return configuredHow; } }
 
-        /** The sentence a refused move gets. Says what is wrong and both ways
-         *  to fix it - never a bare refusal. */
+        /** The sentence a refused move gets. Name the app action that sends
+         *  the definition; retain the board's specific refusal when known. */
         string RequireConfigured()
         {
             if (configuredThisSession) return null;
@@ -3180,11 +3247,7 @@ namespace LienCAM
                      + "bridge so the profile can actually reach the board, and do that BEFORE homing.";
 
             return "refusing to move: this bridge has not configured the controller in this session. "
-                 + "Controller settings do NOT survive a close/open - a freshly opened board was measured "
-                 + "holding step pin 0 and 100 steps/unit on a machine that is 400 - so a move would be "
-                 + "accepted, counted, and wrong by a constant with nothing to show for it. Start the "
-                 + "bridge with --profile <file>.pro, or apply the machine definition from LienCAM, then "
-                 + "try again.";
+                 + "Use Apply to Machine in LienCAM, then try again.";
         }
 
         // ---- (WO-926) A HAZARD THE OWNER THREAD INTRODUCES, CLOSED HERE ----
@@ -4376,7 +4439,7 @@ namespace LienCAM
                 if (!ap.Enabled)
                 {
                     Add(res, "[bridge] axis " + ap.Name + " applied and read back: enabled=" + got.Enable
-                        + " homeBackOff=" + got.HomeBackOff
+                        + " homeBackOff=" + ConsoleNumber.Plain(got.HomeBackOff)
                         // WO-1557: a disabled axis still receives the whole struct, so its
                         // carried fields are printed here for the same reason as below.
                         + " currentHiLowPin=" + got.CurrentHiLowPin
@@ -4401,7 +4464,7 @@ namespace LienCAM
                     // wrong was the one field the readback did not say out loud.
                     + " acceleration=" + got.MaxAccel
                     + " softLimits=" + got.SoftLimitN + ".." + got.SoftLimitP
-                    + " homeBackOff=" + got.HomeBackOff
+                    + " homeBackOff=" + ConsoleNumber.Plain(got.HomeBackOff)
                     // WO-1557: WO-1360 carries these four through every whole-struct
                     // write; printing them is what lets an apply prove it did not drop
                     // them. Same order as the startup readback above.
@@ -5127,7 +5190,7 @@ namespace LienCAM
                     + " stepsPerUnit=" + d.StepPer + " maxVel=" + d.MaxVel
                     + " acceleration=" + d.MaxAccel + " compAccel=" + d.CompAccel
                     + " softLimits=" + d.SoftLimitN + ".." + d.SoftLimitP
-                    + " slave=" + d.SlaveAxis + " homeBackOff=" + d.HomeBackOff
+                    + " slave=" + d.SlaveAxis + " homeBackOff=" + ConsoleNumber.Plain(d.HomeBackOff)
                     + " step=" + d.StepPin + " dir=" + d.DirPin + " home=" + d.HomePin, "info");
             }
             for (int w = 0; w < 6; w++)
@@ -5738,7 +5801,7 @@ namespace LienCAM
                 case 1: what = "the controller is not open"; break;
                 case 2: what = "no controller was found"; break;
                 case 3: what = "the controller reported a firmware error"; break;
-                case 4: what = "the link to the controller failed"; break;   // USB or Ethernet (AXBB-E): WO-2847
+                case 4: what = "the link to the controller failed; an Ethernet controller may still be answering the previous computer - power-cycle the controller, or use a different address on this computer"; break;   // WO-3071: wording only; USB or Ethernet (AXBB-E)
                 case 5: what = "a movement is already in progress"; break;
                 case 6: what = "a homing cycle is already in progress"; break;
                 case 7: what = "the machine is in e-stop"; break;
@@ -6117,6 +6180,7 @@ namespace LienCAM
             // WO-3060: and a run the board's own E-STOP ended did not finish
             // either - the physical button never passes through EmergencyStop().
             if (estopByRc || (live && st.Estop)) EndDrainingRunOnEstopInput();
+            NoteRunMotion(posOk, x, y, z);   // alpha.3.2: a run that never moved is not complete
             CheckExecutionComplete(state, posOk, x, y, z);
             // WO-1326 (audit): and the other half of it - a run that ended badly
             // holds the machine, and re-issues a refused stop, until the board
@@ -6266,7 +6330,7 @@ namespace LienCAM
 
             // WO-932: the latch clears on EVIDENCE, and this is the only place
             // that sees position over time.
-            ObserveRecovery(posOk, x, y, z);
+            ObserveRecovery(posOk, x, y, z, state == "home");
             CheckMoveWatch(posOk, x, y, z, state, state != "hold" && state != "home", live && st.SoftLimit,
                            ProbeInputLevel(probePin, probeNegate, probeInputRc, probeInputBits) as bool?);
             // WO-1352: and a latched machine that moves anyway is said, loudly.
@@ -6694,9 +6758,16 @@ namespace LienCAM
          *  the evidence for it has expired, not because it is convenient. */
         void AfterProvedReopen(int attempt)
         {
-            bool hadFault = faultLatched;
+            // alpha.3.2: a reopen this bridge made ON PURPOSE to clear a soft-limit
+            // trip (ReopenToClearSoftLimit). The board was not power-cycled, so the
+            // drive-fault latch is NOT cleared by it - that latch keeps its own
+            // way out (Stop/Reset with every fault input CLEAR) - and the operator
+            // reads why the position was dropped, not a power-loss sentence.
+            bool forSoftLimit = softLimitReopenPending;
+            softLimitReopenPending = false;
+            bool hadFault = faultLatched && !forSoftLimit;
             bool hadSoftLimit = softLimitLatched;
-            faultLatched = false;
+            if (!forSoftLimit) faultLatched = false;
             softLimitLatched = false;
             softLimitRecoveryAttempted = false;
 
@@ -6729,12 +6800,23 @@ namespace LienCAM
                      + "again on the next status read, and if it is not, this machine is clean. "
                      + "That is the answer a power cycle at the machine was always supposed to get.",
                        "info");
-            if (hadSoftLimit)
+            if (hadSoftLimit && !forSoftLimit)
                 Report("[bridge] the soft-limit latch is CLEARED for the same reason - the buffered "
                      + "motion it was protecting belonged to the connection that died.", "info");
 
             for (int i = 0; i < 6; i++) homedThisSession[i] = false;
             MarkPositionUnknown(true);
+
+            // The same datum rule as a power cycle: a fresh Open restarts the
+            // board's view of position, so every axis is unhomed and the
+            // operator re-homes. Said plainly, in place of the power-loss line.
+            if (forSoftLimit)
+            {
+                Report("[bridge] " + SoftLimitReopenedText + " Every axis is UNHOMED: the position "
+                     + "this bridge held belonged to the connection it just closed. Nothing here homes "
+                     + "it for you.", "warn");
+                return;
+            }
 
             // HOMING IS LOST AND MUST BE SAID. A power-cycled board has no
             // position counter: after one restart the board reported machinePos
@@ -6818,8 +6900,9 @@ namespace LienCAM
          *  operator learns two recoveries for one condition. */
         internal const string SoftLimitTripText =
             "[bridge] SOFT LIMIT TRIPPED - buffered motion is latched off. "
-          + "Press Unlock (or Stop/Reset) and then jog off the limit; the latch clears once "
-          + "the machine is seen to move. Homing and stops work meanwhile.";
+          + "Press Stop/Reset (or Unlock): this bridge then closes and reopens its connection to "
+          + "the controller, which is what brings buffered motion back, and every axis needs "
+          + "Home All afterwards. Homing and stops work meanwhile.";
 
         /** Sets the latch and says so, in the one sentence. `detail` is how this
          *  trip was SEEN - appended, never substituted, so the instruction the
@@ -7183,8 +7266,9 @@ namespace LienCAM
         internal const string SoftLimitLatchText =
             "this machine tripped a soft limit and BUFFERED MOTION IS STILL LATCHED OFF. "
           + "Homing and stops still work - that is why the machine looks healthy and only "
-          + "jogs and programs are dead. Press Unlock (or Stop/Reset), then jog off the limit; "
-          + "the latch clears only after this bridge sees the machine move. A move accepted now would be silently "
+          + "jogs and programs are dead. Press Stop/Reset (or Unlock): this bridge reopens its "
+          + "connection to the controller to clear it, and every axis then needs Home All. "
+          + "A move accepted now would be silently "
           + "discarded, so this bridge refuses it instead of pretending it ran.";
 
         /** A recovery has been ATTEMPTED and has not yet been proven to work.
@@ -7197,43 +7281,107 @@ namespace LienCAM
          *  watcher can tell "it moved" from "it was accepted". */
         double recoveryMarkX, recoveryMarkY, recoveryMarkZ;
 
-        /** WO-932 REQUIREMENT 2, AND THE SECOND VERSION OF IT.
+        /** alpha.3.2 (operator ruling 2026-10-30: "It needs to be self-healing").
+         *  The one sentence the operator reads when a soft-limit trip has been
+         *  cleared by reopening the board. */
+        internal const string SoftLimitReopenedText =
+            "Soft limit cleared by reopening the controller connection. Home All before jogging or running a program.";
+
+        /** Set by ReopenToClearSoftLimit, consumed by the next PROVED reopen, so
+         *  AfterProvedReopen says why the connection was reopened - also when
+         *  the first attempt fails and the WO-1130 retry loop finishes the job. */
+        volatile bool softLimitReopenPending;
+
+        /** THE ONLY MEASURED CURE, so the one recovery Stop/Reset and Unlock run.
          *
-         *  My first fix cleared the latch here, on the recovery COMMAND. That
-         *  was the same lie in a new costume: measured on a demo board
-         *  2026-08-25, `unlock` and `resetToIdle` both returned ok, the latch
-         *  went false - and the very next program still moved ZERO, with the
-         *  bridge back to answering v=true for a jog that did nothing.
+         *  Measured on the real board 2026-10-30: a 1 mm Z+ jog truncated at the
+         *  Z soft max latched buffered motion off, and from then on every jog and
+         *  program move was accepted and not made. Reset() (JogOff, Stop,
+         *  ClearSoftlimitState, SetFeedHold off), Unlock's two-pass Stop/GetStatus
+         *  reset cycle (both readbacks idle, softLimit=False), a full Apply to
+         *  Machine and an app Disconnect+Connect all left it dead. Only a fresh
+         *  UC100 Open brought it back. The cycle that used to run here, and the
+         *  "try one short jog" advice that followed it, are gone for that reason.
          *
-         *  A RECOVERY CONTROL THAT REPORTS SUCCESS WITHOUT VERIFYING THE MACHINE
-         *  ACTUALLY RECOVERED IS PART OF THIS DEFECT, NOT A FIX FOR IT. Four
-         *  controls already did that. This one refuses to be the fifth.
+         *  So this stops motion and then takes the WO-1130 reopen path unchanged -
+         *  ReopenLostBoard: Close the handle, ListDevices, Open the same board
+         *  with the same profile, every check Open makes (board type and
+         *  identity, compatibility, DLL pin, definition re-applied and read back)
+         *  - and the latch is cleared by AfterProvedReopen only when that Open
+         *  succeeded. Its datum rule stands too: every axis unhomed.
          *
-         *  So the sequence runs, the gate stands down so the operator can try,
-         *  and the latch is cleared ONLY by ObserveRecovery() below - when the
-         *  machine is seen to actually move. */
-        void AttemptSoftLimitRecovery(string how)
+         *  NEVER under a running program, a long operation, or an e-stop. If the
+         *  reopen fails after the Close, the board is left marked lost, so the
+         *  status loop keeps retrying it exactly as for a lost controller. */
+        bool ReopenToClearSoftLimit(string how, out string err)
         {
-            if (!softLimitLatched) return;
-            softLimitRecoveryAttempted = true;
-            double x = 0, y = 0, z = 0, a = 0, b = 0, c = 0;
-            int rc; lock (io.Api) rc = UC100.GetAxisPosition(ref x, ref y, ref z, ref a, ref b, ref c);
-            if (rc == 0) { recoveryMarkX = x; recoveryMarkY = y; recoveryMarkZ = z; }
-            Report("[bridge] " + how + " ran the recovery sequence. Motion is permitted again, but the "
-                 + "latch STAYS SET until this bridge sees the machine actually move - a recovery that "
-                 + "reports success without proving it is how this defect survived for days. "
-                 + "TRY ONE SHORT JOG. If the machine still does not move, no software recovery on this "
-                 + "controller has worked and the bridge must be restarted - measured on a demo board "
-                 + "2026-08-25, where Stop/Reset, Unlock, cycleResume and a full re-home all reported success "
-                 + "and none restored buffered motion.", "warn");
+            err = null;
+            if (!softLimitLatched) return true;
+            if (!opened)
+            {
+                err = how + " could not clear the soft limit: the controller is not open.";
+                return false;
+            }
+            bool programBusy;
+            lock (jobLock) programBusy = jobRunning || awaitingExecution || faultStopping;
+            string longOp = longOpRunning ? longOpName : null;
+            if (programBusy || longOp != null)
+            {
+                err = how + " did not reopen the controller to clear the soft limit, because "
+                    + (programBusy ? "a program is still running or finishing" : longOp + " is still running")
+                    + ". Press Stop/Reset again once the machine has stopped.";
+                return false;
+            }
+
+            lock (io.Api) { UC100.JogOff(6); UC100.Stop(); }
+
+            UC100.Stat st = new UC100.Stat();
+            int rc;
+            lock (io.Api) rc = UC100.GetStatus(ref st);
+            if (rc == (int)UC100.ReturnVal.UC100_ESTOP || st.Estop)
+            {
+                err = how + " did not reopen the controller to clear the soft limit: the machine is in "
+                    + "e-stop. Release the E-STOP, then press Stop/Reset again.";
+                return false;
+            }
+
+            Report("[bridge] " + how + ": a soft-limit trip leaves buffered motion dead on this "
+                 + "controller until its connection is opened afresh, so this bridge is closing and "
+                 + "reopening it now.", "warn");
+            softLimitReopenPending = true;
+            boardLost = true;
+            notOpenStreak = 0;
+            staleHandleClosed = false;
+            reopenAttempts = 0;
+            if (ReopenLostBoard()) return true;
+            if (!staleHandleClosed)
+            {
+                // Refused before anything was closed (no board on record, or a
+                // firmware update ended in error): the link is as it was.
+                boardLost = false;
+                softLimitReopenPending = false;
+                err = how + " could not reopen the controller to clear the soft limit; the "
+                    + "connection was left as it was.";
+                return false;
+            }
+            err = how + " closed the controller connection to clear the soft limit and it has not "
+                + "reopened yet - the lines above say which call refused. This bridge keeps trying "
+                + "every " + (ReopenIntervalMs / 1000) + " s; nothing reaches the machine until it reopens.";
+            return false;
         }
 
         /** Clears the latch on EVIDENCE: the machine moved after a recovery was
          *  attempted. Called from the status poll, which is the only place that
          *  sees position over time. */
-        void ObserveRecovery(bool posOk, double x, double y, double z)
+        void ObserveRecovery(bool posOk, double x, double y, double z, bool homing)
         {
             if (!softLimitLatched || !softLimitRecoveryAttempted || !posOk) return;
+            // Homing moves the axes by the board's own cycle, which works even
+            // while buffered motion is dead (measured on the real board
+            // 2026-10-30: a re-home "cleared" the latch and every jog after it
+            // still did nothing). Its motion is not evidence: re-mark the
+            // position so only a later buffered move can clear the latch.
+            if (homing) { recoveryMarkX = x; recoveryMarkY = y; recoveryMarkZ = z; return; }
             double moved = Math.Abs(x - recoveryMarkX) + Math.Abs(y - recoveryMarkY) + Math.Abs(z - recoveryMarkZ);
             if (moved < 0.002) return;
             softLimitLatched = false;
@@ -7241,102 +7389,6 @@ namespace LienCAM
             Report("[bridge] soft-limit latch CLEARED - the machine moved "
                  + moved.ToString("0.000") + " mm after the recovery, so buffered motion is genuinely "
                  + "back. This is measured, not assumed.", "info");
-        }
-
-        /** Reproduce UCCNC's reset-clear cycle instead of treating one accepted
-         *  Stop() call as recovery. Packet capture of UCCNC's RESET control
-         *  shows two Stop/GetStatus cycles; the board's startup e-stop likewise
-         *  needs two calls before Stop returns clean. The 2026-09-10 hardware
-         *  trace proved that our former one-Stop sequence can return success
-         *  while buffered motion remains dead.
-         *
-         *  A soft-limit recovery is not blanket authority to clear another
-         *  safety condition. E-stop is always refused. LimitOverRide is issued
-         *  only when this readback proves a physical limit input is active,
-         *  preserving the operator's existing route to jog off that switch; it
-         *  is never used merely because the software travel latch is set. */
-        bool RunSoftLimitResetCycle(out string err)
-        {
-            err = null;
-            UC100.Stat before = new UC100.Stat();
-            int beforeRc;
-            lock (io.Api) beforeRc = UC100.GetStatus(ref before);
-            if (beforeRc == (int)UC100.ReturnVal.UC100_ESTOP || before.Estop)
-            {
-                err = "soft-limit recovery refused: the machine is in e-stop. Release the genuine "
-                    + "safety condition before clearing a soft-limit latch.";
-                return false;
-            }
-            bool hardLimitOverrideActive = before.HardLimit
-                || beforeRc == (int)UC100.ReturnVal.UC100_LIMIT;
-            if (beforeRc != 0 && !hardLimitOverrideActive)
-            {
-                err = "soft-limit recovery could not read the controller before reset: " + Explain(beforeRc);
-                return false;
-            }
-
-            if (hardLimitOverrideActive)
-            {
-                int overrideRc;
-                lock (io.Api) overrideRc = UC100.LimitOverRide();
-                if (overrideRc != 0)
-                {
-                    err = "soft-limit recovery could not arm the active hard-limit override: "
-                        + Explain(overrideRc);
-                    return false;
-                }
-                Report("[bridge] Unlock armed the physical hard-limit override because the controller "
-                     + "reports an active limit input. Jog only away from the switch; the soft-limit "
-                     + "latch remains visible until motion is observed.", "warn");
-            }
-
-            lock (io.Api) UC100.JogOff(6);
-            for (int pass = 1; pass <= 2; pass++)
-            {
-                int stopRc;
-                lock (io.Api) stopRc = UC100.Stop();
-                if (pass == 1)
-                {
-                    lock (io.Api) UC100.ClearSoftlimitState();
-                }
-                // The owner must serve a stop during the controller settle, then
-                // unwind before this recovery issues another board call.
-                BoardOwner.Pump(250);
-                if (BoardOwner.AbortRequested)
-                {
-                    err = "soft-limit recovery was interrupted by a stop.";
-                    return false;
-                }
-
-                UC100.Stat readback = new UC100.Stat();
-                int statusRc;
-                lock (io.Api) statusRc = UC100.GetStatus(ref readback);
-                Report("[bridge] soft-limit RESET readback " + pass + "/2: Stop "
-                     + Explain(stopRc) + ", GetStatus " + Explain(statusRc)
-                     + ", idle=" + readback.Idle + " estop=" + readback.Estop
-                     + " hardLimit=" + readback.HardLimit
-                     + " softLimit=" + readback.SoftLimit, statusRc == 0 ? "info" : "warn");
-
-                if (statusRc == (int)UC100.ReturnVal.UC100_ESTOP || readback.Estop)
-                {
-                    err = "soft-limit recovery stopped: the reset readback reports e-stop. "
-                        + "Unlock did not clear that genuine safety condition.";
-                    return false;
-                }
-                if (readback.HardLimit && !hardLimitOverrideActive)
-                {
-                    err = "soft-limit recovery stopped: a hard limit became active during reset. "
-                        + "Unlock did not override a safety condition that was not present at its pre-check.";
-                    return false;
-                }
-                if (statusRc != 0)
-                {
-                    err = "soft-limit recovery reset readback " + pass + "/2 failed: "
-                        + Explain(statusRc);
-                    return false;
-                }
-            }
-            return true;
         }
 
         // ---- WO-933: acceptance is not execution ------------------------------
@@ -7749,6 +7801,7 @@ namespace LienCAM
             if (!opened) return;
             NoteMoveStopped("Stop/Reset ended it.");   // WO-2533
             jobAbort = true;
+            RetireStoppedStaging();   // WO-3124: Reset is also the idle-load remedy.
             lock (io.Api)
             {
                 UC100.JogOff(6);
@@ -7757,8 +7810,25 @@ namespace LienCAM
                 UC100.SetFeedHold(false);
             }
             EndRunAsStopped("Stop/Reset");   // WO-3060
-            AttemptSoftLimitRecovery("Stop/Reset");
+            // alpha.3.2: a soft-limit latch is NOT cleared here. On the real board
+            // (2026-10-30) this Stop left buffered motion dead; the bridge posts
+            // HealSoftLimitAfterReset right after this call to reopen the board.
             AttemptDriveFaultRecovery("Stop/Reset");
+        }
+
+        /** True while a soft-limit trip has left buffered motion latched off. */
+        public bool SoftLimitLatched { get { return softLimitLatched; } }
+
+        /** Stop/Reset is a StopNow call and must stay short, so the bridge posts
+         *  this as its own Long call right after it. It reopens the controller
+         *  connection (ReopenToClearSoftLimit): on the real board (2026-10-30)
+         *  nothing short of a fresh Open brought buffered motion back. */
+        public void HealSoftLimitAfterReset()
+        {
+            if (!softLimitLatched) return;
+            string err;
+            if (!ReopenToClearSoftLimit("Stop/Reset", out err) && err != null)
+                Report("[bridge] " + err, "warn");
         }
 
         public void EmergencyStop()
@@ -7811,9 +7881,23 @@ namespace LienCAM
          *  safety rule 1). Runs even in read-only builds. */
         public void PanicStop()
         {
+            PanicStop(CaptureStagingGeneration());
+        }
+
+        public long CaptureStagingGeneration()
+        {
+            lock (jobLock) return stagingGeneration;
+        }
+
+        public void PanicStop(long departingStaging)
+        {
             if (!opened) return;
             NoteMoveStopped("The connection-loss stop ended it.");   // WO-2533
             jobAbort = true;
+            // A timed-out BoardOwner.Run remains queued after a new socket is
+            // accepted. Retire only its departing load; ALWAYS stop the board.
+            lock (jobLock)
+                if (stagingGeneration == departingStaging) RetireStoppedStaging();
             // Stopping the machine must never queue behind another call, so the
             // API lock is asked for politely and then ignored.
             //
@@ -7874,10 +7958,11 @@ namespace LienCAM
             return true;
         }
 
-        public void StopJob()
+        // WO-3124: Reset and socket loss must retire the same managed staging
+        // as Stop. Do not call StopJob: its physical StopWithDeccel is a different
+        // stop sequence. The running streamer still owns its list until finally.
+        void RetireStoppedStaging()
         {
-            NoteMoveStopped("Stop ended it.");   // WO-2533
-            jobAbort = true;
             lock (jobLock)
             {
                 // WO-1326: a stop ENDS the run - it does not rewind it. Whatever
@@ -7900,6 +7985,13 @@ namespace LienCAM
                 // jobAbort above unwinds it and its finally does the clearing.
                 if (!jobRunning) staged.Clear();
             }
+        }
+
+        public void StopJob()
+        {
+            NoteMoveStopped("Stop ended it.");   // WO-2533
+            jobAbort = true;
+            RetireStoppedStaging();
             // WO-1054: A STOP DURING EXECUTION MUST NOT BECOME A COMPLETION.
             //
             // Once the push has finished, the run is waiting for the BOARD to
@@ -7957,17 +8049,17 @@ namespace LienCAM
          *
          *  IT STILL DOES NOT CLEAR AN E-STOP. Recovering from a soft-limit latch
          *  is not the same as clearing a genuine safety condition, and `Refuse()`
-         *  above still governs that. `homed` is untouched - the measured reset
-         *  preserved the datum and losing it would force a re-home for nothing. */
+         *  above still governs that.
+         *
+         *  alpha.3.2 (the real board, 2026-10-30): WITH THE SOFT-LIMIT LATCH SET,
+         *  UNLOCK REOPENS THE CONTROLLER. The two-pass reset cycle it ran before
+         *  read back idle and softLimit=False and left buffered motion dead; only
+         *  a fresh Open cured it. ReopenToClearSoftLimit refuses in e-stop and
+         *  under a running program, and the reopen unhomes every axis. */
         public bool Unlock(out string err)
         {
             err = Refuse(); if (err != null) return false;
-            if (softLimitLatched)
-            {
-                if (!RunSoftLimitResetCycle(out err)) return false;
-                AttemptSoftLimitRecovery("Unlock");
-                return true;
-            }
+            if (softLimitLatched) return ReopenToClearSoftLimit("Unlock", out err);
             lock (io.Api)
             {
                 UC100.JogOff(6);
@@ -7975,7 +8067,6 @@ namespace LienCAM
                 UC100.ClearSoftlimitState();
                 UC100.LimitOverRide();
             }
-            AttemptSoftLimitRecovery("Unlock");
             return true;
         }
 
@@ -9357,7 +9448,7 @@ namespace LienCAM
                     + " stepsPerUnit=" + dump.StepPer + " maxVel=" + dump.MaxVel
                     + " acceleration=" + dump.MaxAccel + " compAccel=" + dump.CompAccel
                     + " softLimits=" + dump.SoftLimitN + ".." + dump.SoftLimitP
-                    + " slave=" + dump.SlaveAxis + " homeBackOff=" + dump.HomeBackOff
+                    + " slave=" + dump.SlaveAxis + " homeBackOff=" + ConsoleNumber.Plain(dump.HomeBackOff)
                     + " step=" + dump.StepPin + " dir=" + dump.DirPin + " home=" + dump.HomePin,
                     ax == master && bad.Count > 0 ? "warn" : "info");
             }
@@ -10939,7 +11030,13 @@ namespace LienCAM
                     if (ax >= 3 && travelNeg[ax] == 0 && travelPos[ax] == 0) continue;
                     if (v < travelNeg[ax] || v > travelPos[ax])
                     {
-                        err = "step " + (i + 1) + " of " + moves.Count + " (move id " + m.Id + ") puts "
+                        // WO-3127: this is the SAME bounds refusal, not a new
+                        // configuration gate. Without confirmed settings, 0..0
+                        // is not an operator-stated travel envelope.
+                        err = !configuredThisSession
+                            ? "The controller has no confirmed machine definition for this session. "
+                              + "Use Apply to Machine in LienCAM, then load the program again. Nothing was staged."
+                            : "step " + (i + 1) + " of " + moves.Count + " (move id " + m.Id + ") puts "
                             + axisNames[ax] + " at " + v.ToString("0.####") + ", outside its soft limits "
                             + travelNeg[ax].ToString("0.####") + ".." + travelPos[ax].ToString("0.####")
                             + (work ? " once the work offset is applied" : "")
@@ -10971,6 +11068,7 @@ namespace LienCAM
                 err = RefuseWhileStopping(); if (err != null) return false;
                 staged.Clear();
                 staged.AddRange(moves);
+                stagingGeneration++;
                 stagedRotatedStart = assumedStart;       // WO-2186
                 jobSent = 0;
                 streamRetired = 0;
@@ -11320,6 +11418,7 @@ namespace LienCAM
                 // larger program gets recycled ids and the credit window.
                 pacedStreaming = PacedJob;
             }
+            if (startAt == 0) NoteRunStart();   // alpha.3.2: where a fresh run starts
 
             /** WO-1326: THE STREAM CLAIMS THE MACHINE, and it has to now.
              *
@@ -11927,6 +12026,69 @@ namespace LienCAM
         double lastCompletionX, lastCompletionY, lastCompletionZ;
         bool hadStablePoll;
 
+        /** alpha.3.2 (the real board, 2026-10-30): A RUN THAT NEVER MOVED DID
+         *  NOT COMPLETE. With buffered motion dead, a G53 G0 X737 at X 738 was
+         *  accepted, the board went idle and still, and this bridge said "program
+         *  COMPLETE ... all 1 move(s) have been executed" while X stayed 738.
+         *  Idle and still is exactly what a dead board is. So a fresh run records
+         *  where it started and whether its moves need motion, the status poll
+         *  records whether the machine was ever seen away from that start, and
+         *  completion is refused for a run that needed motion, saw none, and came
+         *  to rest where it started. Guarded by jobLock with the flags above. */
+        bool runStartKnown, runNeedsMotion, runMotionSeen;
+        double runStartX, runStartY, runStartZ;
+
+        /** An excursion this long cannot be flown out and back between two
+         *  status polls (40 Hz) unseen; shorter ones count only when the program
+         *  ENDS away from where it started, which no poll timing can hide. */
+        const double RunExcursionSeenMm = 1.0;
+
+        internal const string RunNeverMovedText =
+            "the machine never moved: the board accepted the program and came to rest where the run "
+          + "started, so nothing was executed - buffered motion may be latched off on the controller";
+
+        /** Called by StreamStaged for a FRESH run (not a single-block resume),
+         *  on the board owner, before the first move is pushed. Only X/Y/Z are
+         *  judged - the position watch reads no other axis - so a program that
+         *  moves only a rotary axis is never failed by this. */
+        void NoteRunStart()
+        {
+            MoveMark mark;
+            lock (io.Api) mark = ReadMoveMark();
+            lock (jobLock)
+            {
+                runStartKnown = mark.Ok;
+                runNeedsMotion = false;
+                runMotionSeen = false;
+                if (!mark.Ok) return;
+                runStartX = mark.X; runStartY = mark.Y; runStartZ = mark.Z;
+                double vx = mark.X, vy = mark.Y, vz = mark.Z, excursion = 0;
+                foreach (Move mv in staged)
+                {
+                    if (mv.Kind != "line" && mv.Kind != "arc") continue;
+                    vx = mv.X ?? vx; vy = mv.Y ?? vy; vz = mv.Z ?? vz;
+                    double d = Math.Max(Math.Abs(vx - mark.X), Math.Max(Math.Abs(vy - mark.Y), Math.Abs(vz - mark.Z)));
+                    if (d > excursion) excursion = d;
+                }
+                double endsAway = Math.Max(Math.Abs(vx - mark.X), Math.Max(Math.Abs(vy - mark.Y), Math.Abs(vz - mark.Z)));
+                runNeedsMotion = endsAway >= MoveSeenMm || excursion >= RunExcursionSeenMm;
+            }
+        }
+
+        /** Status-poll side: has the machine been seen away from the run's start? */
+        void NoteRunMotion(bool posOk, double x, double y, double z)
+        {
+            if (!posOk) return;
+            lock (jobLock)
+            {
+                if (!runStartKnown || runMotionSeen) return;
+                if (!jobRunning && !awaitingExecution && !jobPaused) return;
+                if (Math.Abs(x - runStartX) >= MoveSeenMm || Math.Abs(y - runStartY) >= MoveSeenMm
+                    || Math.Abs(z - runStartZ) >= MoveSeenMm)
+                    runMotionSeen = true;
+            }
+        }
+
         /** WO-1326 (audit): THE RUN ENDED BADLY AND THE MACHINE IS NOT YET KNOWN
          *  TO HAVE STOPPED.
          *
@@ -12027,6 +12189,7 @@ namespace LienCAM
         void CheckExecutionComplete(string state, bool posOk, double x, double y, double z)
         {
             int sent, total;
+            bool neverMoved;
             lock (jobLock)
             {
                 if (!awaitingExecution) return;
@@ -12035,6 +12198,20 @@ namespace LienCAM
                                      ref hadStablePoll)) return;
                 awaitingExecution = false;
                 sent = jobSent; total = jobTotal;
+                neverMoved = runStartKnown && runNeedsMotion && !runMotionSeen
+                    && Math.Abs(x - runStartX) < MoveSeenMm && Math.Abs(y - runStartY) < MoveSeenMm
+                    && Math.Abs(z - runStartZ) < MoveSeenMm;
+                runStartKnown = false;
+            }
+            if (neverMoved)
+            {
+                Report("[bridge] program FAILED, NOT COMPLETE: the board accepted all " + total
+                       + " move(s) and is idle, but the machine never moved - it is still at X " + Mm(x)
+                       + " Y " + Mm(y) + " Z " + Mm(z) + ", where the run started, and the program "
+                       + "needed it to move. Nothing was executed. The controller may have buffered "
+                       + "motion latched off (a soft-limit trip does this).", "error");
+                RaiseTerminal("failed", RunNeverMovedText, 0);
+                return;
             }
             Report("[bridge] program COMPLETE: the board is idle and the position has not moved for "
                    + "two polls, so all " + total + " move(s) have been executed - not merely sent.",

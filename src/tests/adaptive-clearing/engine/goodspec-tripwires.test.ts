@@ -24,9 +24,10 @@
 //
 // Run: npx vitest run src/tests/adaptive-clearing/engine/goodspec-tripwires.test.ts
 
-import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { ensureEngineClipperReady } from '../../../lib/cam/adaptiveClearing2d/engine/clipperEngine'
 import { FIXTURE_META, measureGoodspecFixture, ALLOWANCE, K, type GoodspecMeasurement } from './_goodspec-helpers'
+import { installHostIndependentMath, hostIndependentMathFallbacks } from '../../helpers/WO-3266/hostIndependentMath'
 
 // ---- PINNED current measured numbers (2026-08-20, this WO). Re-pin deliberately (with a
 // dated comment on the diff) when a reviewed engine change moves a fixture's numbers. Never
@@ -265,14 +266,39 @@ import { FIXTURE_META, measureGoodspecFixture, ALLOWANCE, K, type GoodspecMeasur
 //   clearance { 0:0, 1:1, 2:1, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0 }
 //   micro     { 0:1, 1:32, 2:1, 3:1, 4:0, 5:1, 6:1, 7:25, 8:1 }
 //   cuts      { 0:174, 1:246, 2:245, 3:139, 4:89, 5:249, 6:146, 7:200, 8:197 }
+//
+// ---- WO-3067 (2026-10-27) re-pin: steering smoothing ships ON ----
+// owner 2026-10-22 "Turn it on (recommended)". Counts only; attribution, budget and T3 hold.
+// Directions against the OFF stream measured on the same host (main 0d2d82f458; fixtures 1, 2,
+// 3, 6 and 7 were already red there against the older pins):
+//   clearance: 2 SquareIsland 0 -> 1 (WORSE, one lift); 5 BootL 2 -> 0 (better).
+//   micro:     1 Kidney 32 -> 28 (better); 5 BootL 1 -> 0 (better); 7 Barbell 22 -> 26 (WORSE).
+//   cuts:      0 168->166, 1 242->236, 2 238->221, 3 135->136, 4 87->89, 5 245->247,
+//              6 141->144, 7 199->190, 8 192->194.
+// Pre-WO-3067 pins, for the record:
+//   clearance { 0:0, 1:1, 2:4, 3:0, 4:0, 5:2, 6:0, 7:0, 8:0 }
+//   micro     { 0:1, 1:35, 2:0, 3:0, 4:0, 5:1, 6:1, 7:21, 8:0 }
+//   cuts      { 0:168, 1:247, 2:238, 3:137, 4:87, 5:245, 6:144, 7:191, 8:192 }
+//
+// ---- WO-3266 (2026-10-28) re-pin: one table on every host ----
+// No engine change. The engine now runs on host-independent Math (see beforeAll), so the pins
+// are the counts every runtime computes. The old pins were the arm64 Node 22 counts, whose
+// host Math differs by an ulp from x64 (fused multiply-adds) and from V8 14 (atan2).
+// Measured identical on arm64 Node 22.14.0 / 24.21.0 / 25.2.1; it is also the table the x64
+// Windows Node 25.2.1 run printed in WO-3067's re-pin round.
+//   micro: 7 Barbell 26 -> 25.   cuts: 0 CommaSpiral 166 -> 167, 3 Tee 136 -> 134,
+//   7 Barbell 190 -> 193. Clearance, unattributed and T3 unchanged (all hosts).
+// Pre-WO-3266 pins, for the record:
+//   micro     { 0:1, 1:28, 2:0, 3:0, 4:0, 5:0, 6:0, 7:26, 8:0 }
+//   cuts      { 0:166, 1:236, 2:221, 3:136, 4:89, 5:247, 6:144, 7:190, 8:194 }
 const PINNED_CLEARANCE_LIFTS: Record<number, number> = {
-  0: 0, 1: 1, 2: 4, 3: 0, 4: 0, 5: 2, 6: 0, 7: 0, 8: 0,
+  0: 0, 1: 0, 2: 1, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0,
 }
 const PINNED_MICRO_LIFTS: Record<number, number> = {
-  0: 1, 1: 35, 2: 0, 3: 0, 4: 0, 5: 1, 6: 1, 7: 21, 8: 0,
+  0: 1, 1: 28, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 25, 8: 0,
 }
 const PINNED_CUTS: Record<number, number> = {
-  0: 168, 1: 247, 2: 238, 3: 137, 4: 87, 5: 245, 6: 144, 7: 191, 8: 192,
+  0: 167, 1: 236, 2: 221, 3: 134, 4: 89, 5: 247, 6: 144, 7: 193, 8: 194,
 }
 // Every fixture must have zero unattributed lifts. This is NOT pinned -- it is the hard
 // invariant T1's "an unattributed lift is a red" requires. If this table ever needs a
@@ -282,7 +308,14 @@ const PINNED_UNATTRIBUTED: Record<number, number> = {
 }
 
 describe('GOOD-SPEC tripwires T1/T2/T3 (section 6)', () => {
-  beforeAll(async () => { await ensureEngineClipperReady() })
+  // WO-3266: the engine runs on host-independent sin/cos/tan/acos/atan2/hypot (pure-JS fdlibm,
+  // bit-identical on every host). The host's own are not: V8 builds its Math in C++ per platform
+  // (arm64 fuses multiply-adds, x64 does not) and V8 14 changed atan2, and the engine's stepper
+  // turns one ulp into whole passes, so the same source pinned three different tables on three
+  // runtimes. Evidence: src/tests/evidence/WO-3266/divergence.json.
+  let restoreHostMath = () => {}
+  beforeAll(async () => { await ensureEngineClipperReady(); restoreHostMath = installHostIndependentMath() })
+  afterAll(() => restoreHostMath())
   // TRIAGE 10-09: every fixture runs synchronously and the runner only awaits
   // microtasks between tests, so the worker never reads Vitest's RPC replies
   // until the file ends (~70 s here); the 60 s birpc timer then fires first and
@@ -337,6 +370,10 @@ describe('GOOD-SPEC tripwires T1/T2/T3 (section 6)', () => {
       )
     }
     console.log(`[goodspec-tripwires] ALLOWANCE=${ALLOWANCE} K=${K}`)
+    console.log(`[goodspec-tripwires] host ${JSON.stringify({ version: process.version, v8: process.versions.v8, arch: process.arch, platform: process.platform })}`)
     expect(rows.length).toBeGreaterThan(0)
+    // An argument past the shim's reduction range falls back to the host's Math and would make
+    // the counts host-dependent again; none occurs on the corpus.
+    expect(hostIndependentMathFallbacks()).toBe(0)
   })
 })

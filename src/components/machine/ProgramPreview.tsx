@@ -1,6 +1,8 @@
+import { preparedSourceProgram, preparedSetupLoadComparison, setupLoadAdoptionInProgress, yieldSetupLoadTask } from '../../lib/machine/setupLoadPreparation'
 import { catalogChildren, liveCatalog } from './definition/catalogText'
 import { textFor, useText } from '../../i18n'
 const controlText = textFor('control-screens-not-probing')
+const g53PreviewText = () => textFor('g53-preview.wo3263')
 
 // ProgramPreview - LIVE 3D view of the loaded program (MACHINE-CONTROL Tier 1).
 //
@@ -40,6 +42,7 @@ import {
   programIntentIdentity,
   setupAtSourceLine,
   transferCheckJobFromProgram,
+  transferCheckJobFromPreview,
   type ProgramContextComparison,
   type ProgramContextSetupSnapshot,
   type ProgramContextV1,
@@ -49,7 +52,8 @@ import { fmtMachineLength, unitLabel } from '../../lib/ui/unitFormat'
 import { useDisplayUnits } from './useDisplayUnits'
 import {
   buildProgramPath,
-  segmentPointsForLine,
+  loadedProgramMoveRole,
+  placeMachineFrameFromReported,
   type ProgramPath,
 } from '../../lib/machine/programPath'
 import {
@@ -65,6 +69,7 @@ import {
   workXYPointsForFit,
 } from '../../lib/machine/machineEnvelope'
 import { buildPreviewModel } from '../../lib/machine/previewGeometry'
+import { sampleArcMovesForLinearConsumers } from '../../lib/cam/toolpathArcSampling'
 import {
   resolvedMotionCoversAddressedAxes,
   resolveMachineMotion,
@@ -73,6 +78,8 @@ import {
   armEpoch,
   pausedProgramReadout,
   programLoadEpoch,
+  refusedFileView,
+  programAwaitingOffsetsText,
   stagedGeometryProgramPath,
   stagedProgramContext,
   standaloneMdiJob,
@@ -209,25 +216,37 @@ export function currentMoveTrailPoints(
   trailMm = CURRENT_TRAIL_MM,
   fromTool: ToolFollowPoint | null = null,
 ): Array<{ x: number; y: number; z: number }> | null {
-  if (fromTool && line > 0 && path.moveLines[0] === line) {
-    const points = [{ x: fromTool.x, y: fromTool.y, z: fromTool.z }]
-    for (let i = 0; i < path.moves.length && path.moveLines[i] === line; i++) {
-      const { x, y, z } = path.moves[i]
-      points.push({ x, y, z })
-    }
-    return points
+  if (line <= 0) return null
+  const first = path.moveLines.indexOf(line)
+  if (first < 0) return null
+  let last = first
+  while (last + 1 < path.moveLines.length && path.moveLines[last + 1] === line) last++
+  const point = ({ x, y, z }: ToolFollowPoint): ToolFollowPoint => ({ x, y, z })
+  if (fromTool && first === 0) {
+    return sampleArcMovesForLinearConsumers([
+      { type: 'feed', ...fromTool },
+      ...path.moves.slice(0, last + 1),
+    ]).map(point)
   }
-  const current = segmentPointsForLine(path, line)
-  if (!current) return null
-  // segmentPointsForLine starts one point before the line's first move.
-  let from = path.moveLines.indexOf(line) - 1
+  const start = Math.max(0, first - 1)
+  if (last <= start) return null
+  // WO-3122: geometry-door arcs are compact, unlike already sampled text.
+  // Match the static viewport's tessellation, only for this cursor's moves.
+  // Keep the original path/ids intact for the listing and done boundary.
+  const current = sampleArcMovesForLinearConsumers(path.moves.slice(start, last + 1)).map(point)
+  let from = start
   let travelled = 0
-  const before: Array<{ x: number; y: number; z: number }> = []
+  const before: ToolFollowPoint[] = []
   while (from > 0 && travelled < trailMm && before.length < CURRENT_TRAIL_MAX_POINTS) {
-    const a = path.moves[from - 1]
-    const b = path.moves[from]
-    travelled += Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
-    before.push({ x: a.x, y: a.y, z: a.z })
+    const samples = sampleArcMovesForLinearConsumers([path.moves[from - 1], path.moves[from]])
+    // Walk backwards along the arc, stopping within it when the trail is full.
+    // One sampler call is bounded by its existing per-arc segment ceiling.
+    for (let i = samples.length - 2; i >= 0 && travelled < trailMm && before.length < CURRENT_TRAIL_MAX_POINTS; i--) {
+      const a = samples[i]
+      const b = samples[i + 1]
+      travelled += Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
+      before.push(point(a))
+    }
     from--
   }
   return before.reverse().concat(current)
@@ -294,11 +313,12 @@ export function stagedListingProgramPath(view: StagedProgramView, armed: Program
       const x = step.to.x ?? modal.x
       const y = step.to.y ?? modal.y
       const z = step.to.z ?? modal.z
+      const from = modal
       modal = { x, y, z }
       if (x === undefined || y === undefined || z === undefined) continue
       moves.push({
         type: step.rapid ? 'rapid' : 'feed',
-        role: step.rapid ? 'rapid' : 'cut',
+        role: loadedProgramMoveRole(step.rapid ? 'rapid' : 'feed', from, { x, y, z }),
         x,
         y,
         z,
@@ -391,8 +411,43 @@ export function intendedStockWorkBox(
   return { min, max }
 }
 
+/**
+ * WO-3265: the points "Fit program extents" frames - every feed and arc move
+ * with its start point. A rapid (the opening run from where the machine sits,
+ * a lift between cuts) and a G53 move are drawn but are not the part, so they
+ * do not widen the frame. Empty when the path has no such move. The text route
+ * knows its G53 lines by source line; the other routes carry no machine-frame
+ * moves in their path.
+ */
+export function cuttingMovePoints(
+  path: ProgramPath,
+  programText: string | null,
+): Array<{ x: number; y: number; z: number }> {
+  const sourceLines = programText === null ? null : programText.split(/\r?\n/)
+  const points: Array<{ x: number; y: number; z: number }> = []
+  for (let i = 1; i < path.moves.length; i++) {
+    const move = path.moves[i]
+    if (move.type === 'rapid') continue
+    if (sourceLines !== null && /G\s*0*53(?![\d.])/i.test(sourceLines[path.moveLines[i] - 1] ?? '')) continue
+    for (const point of sampleArcMovesForLinearConsumers([path.moves[i - 1], move])) {
+      points.push({ x: point.x, y: point.y, z: point.z })
+    }
+  }
+  return points
+}
+
+/** WO-3265: the automatic fit at Load frames the cutting part the way the
+ *  Fit program extents button does, on the same ISO direction as before; a
+ *  program with no cutting move is framed whole, as it always was. */
+function frameLoadedProgram(vp: CNCViewport, path: ProgramPath, programText: string | null): void {
+  const cuts = cuttingMovePoints(path, programText)
+  if (cuts.length > 0 && typeof vp.fitProgramPointsIso === 'function' && vp.fitProgramPointsIso(cuts)) return
+  vp.fitToolpath()
+}
+
 export function ProgramPreview() {
   useText('control-screens-not-probing')
+  useText('g53-preview.wo3263')
   const programText = useMachineControl((s) => s.programText)
   const storeProgramContext = useMachineControl((s) => s.programContext)
   const stagedProgram = useMachineControl((s) => s.stagedProgram)
@@ -450,6 +505,8 @@ export function ProgramPreview() {
   // program as it always has. After that the view is his: only his Load (the
   // same file too) re-fits it, and that Load hands framing back. Nothing that
   // stages the program again on its own is a Load (see programLoadEpoch).
+  const programTextRef = useRef(programText)
+  programTextRef.current = programText
   const operatorViewRef = useRef(false)
   const loadEpoch = useSyncExternalStore(subscribeProgramLoadEpoch, programLoadEpoch, programLoadEpoch)
   const framedLoadRef = useRef(loadEpoch)
@@ -465,13 +522,39 @@ export function ProgramPreview() {
   // listing is redrawn only when a different listing is published; an arm of
   // the way back or an MDI line changes neither it nor its ids.
   const armedPathEpoch = stagedProgram ? null : epoch
-  const path = useMemo(
+  // WO-3186: a file his Load refused for a reason outside it (a line below the
+  // Z travel at this G54) is still drawn - the moves the file door read, each
+  // section in its own work frame, exactly as it would stage them. Nothing is
+  // staged or armed by drawing it. Read on every render: the session answers
+  // the same object while the reading is unchanged.
+  const waitingText = programAwaitingOffsetsText()
+  const refusedDrawn = programText === null && stagedProgram === null ? refusedFileView()?.drawn ?? null : null
+  // WO-2217: the controller's reported work rotations (read here for the G53
+  // placement below as well as for how the preview is drawn).
+  const rotations = useSyncExternalStore(subscribeWorkRotations, workRotations, workRotations)
+  // WO-3263: a loaded program's G53 feed moves are drawn at their machine
+  // targets, placed by the work offset rows and rotations the controller
+  // reports - the same rows the fit and grid read. Keyed so a program with no
+  // G53 word is not rebuilt when an offset changes.
+  const machinePlacementKey = programText !== null && /G\s*0*53(?![\d.])/i.test(programText)
+    ? JSON.stringify([activeWcs, offsets, rotations])
+    : ''
+  const placeMachineFrame = useMemo(
+    () => placeMachineFrameFromReported(offsets, activeWcs, rotations),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on what the placement reads, only for a program that has G53
+    [machinePlacementKey],
+  )
+  const path = useMemo<ProgramPath>(
     () => programText
-      ? buildProgramPath(programText)
+      ? (preparedSourceProgram(programText) && !preparedSourceProgram(programText)!.preview.moves.some(move => move.coordinateFrame === 'machine' && move.kind === 'feed')
+          ? preparedSourceProgram(programText)!.path : buildProgramPath(programText, placeMachineFrame))
       : stagedProgram
         ? stagedListingProgramPath(stagedProgram, stagedGeometryProgramPath())
-        : stagedGeometryProgramPath() ?? buildProgramPath(null),
-    [programText, stagedProgram, armedPathEpoch],
+        : refusedDrawn !== null
+          ? stagedListingProgramPath({ program: refusedDrawn.program, setups: [] }, null)
+          : waitingText !== null ? buildProgramPath(waitingText)
+            : stagedGeometryProgramPath() ?? buildProgramPath(null),
+    [programText, stagedProgram, armedPathEpoch, refusedDrawn, waitingText, placeMachineFrame],
   )
   // WO-2047: a program staged through the program door (a controller that
   // runs staged programs, Operator's LienCNC) has no text in the store, so its
@@ -508,7 +591,9 @@ export function ProgramPreview() {
   const programAxesCovered = useMemo(
     () => !programText || resolvedMotionCoversAddressedAxes(
       motion,
-      transferCheckJobFromProgram(programText).addressedAxes,
+      (preparedSourceProgram(programText)
+        ? transferCheckJobFromPreview(preparedSourceProgram(programText)!.preview)
+        : transferCheckJobFromProgram(programText)).addressedAxes,
     ),
     [motion, programText],
   )
@@ -543,7 +628,6 @@ export function ProgramPreview() {
   // WO-2217: the controller's reported work rotations decide how the preview is
   // DRAWN - the program turned where the machine runs it, the view framed by
   // the chosen grid. Display only: the program and file are never rotated.
-  const rotations = useSyncExternalStore(subscribeWorkRotations, workRotations, workRotations)
   const previewRotation = useMemo(
     () => resolvePreviewRotation({
       gridSelection,
@@ -585,7 +669,7 @@ export function ProgramPreview() {
   // `workBounds` (`buildPreviewModel`); the staged-geometry route now reports
   // the same exclusion itself (`stagedGeometryProgramPath().workBounds`).
   const previewModel = useMemo(
-    () => (programText ? buildPreviewModel(programText) : null),
+    () => (programText ? preparedSourceProgram(programText)?.preview ?? buildPreviewModel(programText) : null),
     [programText],
   )
   const stagedPath = useMemo(
@@ -655,7 +739,7 @@ export function ProgramPreview() {
   // nothing). It only ever changes the LABEL and the tint; the block itself is
   // read from the frozen snapshot and never follows a live edit.
   const loadedMotionDigest = useMemo(
-    () => (programContext ? computeMotionDigest(contextText ?? '') : null),
+    () => (programContext ? preparedSourceProgram(contextText)?.motionDigest ?? computeMotionDigest(contextText ?? '') : null),
     [programContext, contextText],
   )
   const intentIdentity = programIntentIdentity(project, toolLibrary)
@@ -684,23 +768,53 @@ export function ProgramPreview() {
     const progress = deriveOperationProgress(programContext, contextText, { phase: jobPhase, ackedSourceLine: contextAckedLine, armedFromLine })
     return progress?.activeSetup ?? setupAtSourceLine(programContext, contextAckedLine) ?? programContext.setups[0]
   }, [programContext, contextText, jobPhase, contextAckedLine, armedFromLine])
-  const intendedStockState = useMemo<IntendedStockState>(() => {
-    if (!programContext || !activeSetup) return 'no-context'
-    if (!postConfigForProject) return 'comparison-failed'
+  // WO-3120: fingerprint intent only on real input changes. Progress still
+  // selects the active setup above, but must never repeat the project walk.
+  const intendedStockVerdicts = useMemo<ReadonlyMap<string, IntendedStockState>>(() => {
+    if (!programContext) return new Map()
+    const setups = programContextSetups(programContext)
+    const failed = () => new Map(setups.map((s) => [s.setup.id, 'comparison-failed' as const]))
+    if (!postConfigForProject) return failed()
     try {
-      const perSetup = compareProgramContextPerSetup(programContext, intentProject, contextText, postConfigForProject, loadedMotionDigest ?? undefined)
-      return perSetup.find((v) => v.setup.id === activeSetup.setup.id)?.verdict
-        ?? compareProgramContext(programContext, intentProject, contextText, postConfigForProject, loadedMotionDigest ?? undefined)
+      const perSetup = preparedSetupLoadComparison(programContext, intentProject, contextText, postConfigForProject)?.perSetup
+        ?? compareProgramContextPerSetup(programContext, intentProject, contextText, postConfigForProject, loadedMotionDigest ?? undefined)
+      // Keep the existing whole-context fallback, evaluated at most once and
+      // only if a listed setup has no verdict. Normal comparisons cover all.
+      let fallback: ProgramContextComparison | undefined
+      return new Map(setups.map((s) => [s.setup.id,
+        perSetup.find((v) => v.setup.id === s.setup.id)?.verdict
+          ?? (fallback ??= compareProgramContext(programContext, intentProject, contextText, postConfigForProject, loadedMotionDigest ?? undefined)),
+      ]))
     } catch (err) {
       console.error(controlText('ProgramPreview.text009'), err)
-      return 'comparison-failed'
+      return failed()
     }
-  }, [programContext, activeSetup, intentProject, contextText, loadedMotionDigest, postConfigForProject])
+  }, [programContext, intentProject, contextText, loadedMotionDigest, postConfigForProject])
+  const intendedStockState: IntendedStockState = !programContext || !activeSetup
+    ? 'no-context'
+    : intendedStockVerdicts.get(activeSetup.setup.id) ?? 'comparison-failed'
   const intendedStockBox = useMemo(() => intendedStockWorkBox(activeSetup), [activeSetup])
   const intendedStockStale = intendedStockState !== 'current' && intendedStockState !== 'no-context'
   // Last block pushed into THREE: the scene is touched only on a real change
   // (and never at all while no setup was ever loaded).
   const lastIntendedRef = useRef<string>('')
+
+  // WO-3292: a Setup Load's adoption commit hands the preview its program
+  // inside that commit's store write. Drawing and framing it there was ~80 ms
+  // of one task on the slow test machine, so the draws below run, in their order, in the
+  // next task instead. A draw arriving while some are queued waits its turn.
+  const queuedDrawsRef = useRef<Array<() => void> | null>(null)
+  const drawProgram = (draw: () => void) => {
+    const queued = queuedDrawsRef.current
+    if (queued) { queued.push(draw); return }
+    if (!setupLoadAdoptionInProgress()) { draw(); return }
+    const queue: Array<() => void> = queuedDrawsRef.current = [draw]
+    void yieldSetupLoadTask().then(() => {
+      if (queuedDrawsRef.current !== queue) return
+      queuedDrawsRef.current = null
+      for (const run of queue) run()
+    })
+  }
 
   // Mount the viewport once. jsdom and any WebGL-less environment fall through
   // silently, exactly as the 2D canvas version did.
@@ -709,7 +823,8 @@ export function ProgramPreview() {
     if (!el) return
     let vp: CNCViewport
     try {
-      vp = new CNCViewport(el)
+      // WO-3265: the wheel zooms at the pointer in this view only.
+      vp = new CNCViewport(el, undefined, undefined, undefined, undefined, { zoomToCursor: true })
     } catch {
       return
     }
@@ -721,6 +836,7 @@ export function ProgramPreview() {
     vp.showToolMarker(true)
     return () => {
       vpRef.current = null
+      queuedDrawsRef.current = null
       lastPosRef.current = ''
       lastMoveRef.current = ''
       lastIntendedRef.current = ''
@@ -770,7 +886,7 @@ export function ProgramPreview() {
   }, [])
 
   // Program changed -> rebuild the 3D path and frame it.
-  useEffect(() => {
+  useEffect(() => drawProgram(() => {
     const vp = vpRef.current
     if (!vp) return
     // A new program has no done moves; clear first so the rebuild does not
@@ -788,7 +904,7 @@ export function ProgramPreview() {
     }
     // Frame the PROGRAM, not the scene: fitAll() includes the grid and machine
     // envelope, which shrinks a typical part to a speck at the origin.
-    if (path.moves.length > 1 && !operatorViewRef.current) vp.fitToolpath()
+    if (path.moves.length > 1 && !operatorViewRef.current) frameLoadedProgram(vp, path, programTextRef.current)
     if (followAppliedRef.current) {
       vp.setOrbitFocus(null)
       followPointRef.current = null
@@ -796,17 +912,17 @@ export function ProgramPreview() {
       followAppliedRef.current = false
       lastPosRef.current = ''
     }
-  }, [path])
+  }), [path])
 
   // WO-2675: a Load that lands after its program was drawn (a setup's, staged
   // before its Load answers) or draws the very path already shown frames it
   // here. A Load the [path] effect above already framed has nothing left to do.
-  useEffect(() => {
+  useEffect(() => drawProgram(() => {
     const vp = vpRef.current
     if (!vp || framedLoadRef.current === loadEpoch) return
     framedLoadRef.current = loadEpoch
     operatorViewRef.current = false
-    if (path.moves.length > 1) vp.fitToolpath()
+    if (path.moves.length > 1) frameLoadedProgram(vp, path, programTextRef.current)
     if (followAppliedRef.current) {
       vp.setOrbitFocus(null)
       followPointRef.current = null
@@ -814,14 +930,15 @@ export function ProgramPreview() {
       followAppliedRef.current = false
       lastPosRef.current = ''
     }
-  }, [loadEpoch, path.moves.length])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [loadEpoch, path.moves.length])
 
   // WO-2049: use the viewport's disposable preview layer for the changing
   // remainder. It hides the full static path without destroying it, disposes
   // each replaced geometry, and keeps fit-to-program based on the full job.
   // Older test doubles predate that public viewport method, so the capability
   // check leaves those unrelated seams on their established full-path view.
-  useEffect(() => {
+  useEffect(() => drawProgram(() => {
     const vp = vpRef.current
     if (!vp || typeof vp.setSimulationToolpathPreview !== 'function') return
     const running = cursorMove !== null && (jobPhase === 'streaming' || jobPhase === 'paused' || pausedProgram !== null)
@@ -850,7 +967,7 @@ export function ProgramPreview() {
     vp.setSimulationToolpathPreview(null)
     vp.renderToolpath([], true)
     staticPathClearedRef.current = true
-  }, [cursorMove, jobPhase, path, pausedProgram, remainingPathOnly, stepOrder])
+  }), [cursorMove, jobPhase, path, pausedProgram, remainingPathOnly, stepOrder])
 
   // Keep every program-owned object in one canonical machine frame. The
   // viewport translates its shared program group from the active WCS offset;
@@ -858,7 +975,7 @@ export function ProgramPreview() {
   // WO-2217: under a reported rotation the program group also turns (about the
   // program's work origin) and a rotated grid's view turns the machine-fixed
   // table under it; unrotated, the call is exactly what it always was.
-  useEffect(() => {
+  useEffect(() => drawProgram(() => {
     const vp = vpRef.current
     if (!vp) return
     const frameInput = rotatedPreviewFrameInput({
@@ -880,7 +997,7 @@ export function ProgramPreview() {
     )
     // WO-2675: a work offset or WCS write (same values too - applyOffset makes
     // a new offsets object) moves the program here; the operator's view stays.
-    if (path.moves.length > 1 && !operatorViewRef.current) vp.fitToolpath()
+    if (path.moves.length > 1 && !operatorViewRef.current) frameLoadedProgram(vp, path, programTextRef.current)
     if (followAppliedRef.current) {
       vp.setOrbitFocus(null)
       followPointRef.current = null
@@ -888,7 +1005,8 @@ export function ProgramPreview() {
       followAppliedRef.current = false
       lastPosRef.current = ''
     }
-  }, [gridResolution, path.moves.length, previewRotation])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [gridResolution, path.moves.length, previewRotation])
 
   // WO-380: the intended stock block follows the snapshot (placement) and the
   // comparison (tint) - nothing else. Under an armed/running program a live
@@ -1083,7 +1201,13 @@ export function ProgramPreview() {
             const vp = vpRef.current
             if (vp) {
               operatorViewRef.current = true
-              vp.fitToolpathPreservingView()
+              // WO-3265: frame the cutting part; with no cutting move (all
+              // rapids) the whole drawn path, as before.
+              const cuts = cuttingMovePoints(path, programText)
+              const framed = cuts.length > 0
+                && typeof vp.fitProgramPointsPreservingView === 'function'
+                && vp.fitProgramPointsPreservingView(cuts)
+              if (!framed) vp.fitToolpathPreservingView()
               if (followEnabledRef.current) {
                 vp.setOrbitFocus(null)
                 followPointRef.current = null
@@ -1112,7 +1236,9 @@ export function ProgramPreview() {
         />
       )}
       {path.moves.length === 0 && (
-        <div className="panel-empty control-preview-empty">{controlText('ProgramPreview.text027')}</div>
+        <div className="panel-empty control-preview-empty">{path.unplacedMachineLines
+          ? g53PreviewText()('machineMovesUnplaced')
+          : controlText('ProgramPreview.text027')}</div>
       )}
     </div>
   )

@@ -102,6 +102,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { tokenCss } from '../../theme/tokens'
 import {
   positionedClasses,
   walkRenderTree,
@@ -182,6 +183,17 @@ const EXTRA_SURFACE_DISPOSITIONS: typeof COMMITTED_SURFACE_DISPOSITIONS = {
   'components/model3d/referenceImage/ReferenceImagePlacement.tsx:ReferenceImagePlacement > button': {
     verdict: 'RESTYLE-NEEDED',
     reason: 'WO-2304 resize handle, four per image: inline position:fixed 12px square, display:none until placed over each image corner. Drifts from the standard: raw literals (background white, border 2px solid #167bc1, zIndex 35) instead of the --surface / --accent / --z tokens, and an inline position with no class. It is a small drag handle, functional and not covering the model beyond its 12px. BOOKED, not edited (WO-2458 is census-only, no product change).',
+  },
+  // WO-3116 + WO-3256 (WO-3312 RE-PIN 161 -> 163): the shared W/H size editor that
+  // replaced the duplicate axis-rectangle live labels, and the approved Guided setup
+  // window. Each adjudicated by reading its authoring site and the class it paints.
+  'lib/sketch/sketcher/overlays/SketchDrawValueInput.tsx:RectangleSizeInput > div.sketch-dim-editor.sketch-draw-value': {
+    verdict: 'COHESIVE',
+    reason: 'WO-3116 RectangleSizeInput is the ONE W/H editor an axis rectangle gets while rubber-banding, replacing the duplicate live labels this census had to carry. It reuses the committed .sketch-dim-editor surface (app.css:2334, the same absolute-positioned sketch-dim family already dispositioned COHESIVE for the other sketch dimension overlays) and .sketch-draw-value adds no rule of its own; the inline style carries only the parked translate(-1000px, -1000px) and pointer-events none, so it paints nothing until the sketch overlay port places it, and the W/H fields are ordinary .sketch-dim-input labels of the same family.',
+  },
+  'components/modals/GuidedSetupModal.tsx:GuidedSetupModal > div.modal-backdrop': {
+    verdict: 'MODAL-GOVERNED',
+    reason: 'WO-3256 approved Guided setup: the shared fixed .modal-backdrop scrim (app.css:4176) with a modal-container child, data-ui78-sanctioned, role=dialog, aria-modal, aria-labelledby and a focus ref, Escape leaves. Its only inline style is the card width; the backdrop has no rule of its own - the same shell as every sibling modal.',
   },
 }
 // WO-2431: the folded Offsets strip positions .panel-action-btn, but only under .control-offsets-view-folded;
@@ -321,11 +333,20 @@ function inlineStyleTokenDefs(file: string, text: string): Set<string> {
 
 function tokenDefs(): Set<string> {
   const defs = new Set<string>()
+  // WO-3312 RE-PIN: the ui2 token set is GENERATED at runtime, not written in a
+  // stylesheet, so a source sweep cannot see --sp4/--panel/--tx and friends and
+  // would report 70+ live tokens as phantoms. Ask production for them.
+  for (const m of tokenCss().matchAll(/(?:^|[;{\s])(--[a-zA-Z0-9-]+)\s*:/gm)) defs.add(m[1])
   for (const file of PAINTING_FILES) {
     if (!/\.(css|ts|tsx)$/.test(file)) continue
     const text = stripComments(readFileSync(file, 'utf8'))
     if (file.endsWith('.tsx')) for (const name of inlineStyleTokenDefs(file, text)) defs.add(name)
     if (file.endsWith('.css')) for (const m of text.matchAll(/(?:^|[;{\s])(--[a-zA-Z0-9-]+)\s*:/gm)) defs.add(m[1])
+    // Scoped layout declarations published through a CSSProperties object rather
+    // than a JSX style attribute (ui2/shell/index.tsx's --ui2-scale/--ui2-*-w/-h).
+    if (file.endsWith('.ts') || file.endsWith('.tsx')) {
+      for (const m of text.matchAll(/['"](--ui2-[a-zA-Z0-9-]+)['"]\s*:/g)) defs.add(m[1])
+    }
     for (const m of text.matchAll(/setProperty\(\s*['"`](--[a-zA-Z0-9-]+)['"`]/g)) defs.add(m[1])
   }
   return defs
@@ -389,7 +410,10 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
       // The tolerated remainder, named. These are icon components chosen from a
       // lookup (`const Icon = tab.icon`), which a parse-only scan cannot follow;
       // all sit in docked panels/toolbars, outside the viewport domain.
-      expect(new Set(walk.unresolved.map((u) => u.name))).toEqual(new Set(['ToolIcon', 'Icon']))
+      // WO-3324: the ui2 shell and its overlays also pick components off records (`item.Component`,
+      // `propertiesCard.Component`, `section.Component`, `w.Component`); the viewport assertion above
+      // still proves none sits in the viewport domain.
+      expect(new Set(walk.unresolved.map((u) => u.name))).toEqual(new Set(['ToolIcon', 'Icon', 'item.Component', 'propertiesCard.Component', 'section.Component', 'w.Component']))
     })
 
     it('only allowlisted external modules are treated as non-authoring', () => {
@@ -513,7 +537,7 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
         // 73 -> 74 (WO-1586): Seat in vise's re-hosted command strip, COHESIVE
         // (same sanctioned sketch-confirm-overlay family as Fillet/Chamfer/Shell).
         // WO-2784 RE-PIN 80 -> 83: WO-2748 preview connector svg, WO-2616 pattern-editor scrim + form.
-        COHESIVE: 91, // WO-3056: +3 drawing editor surfaces, +1 deviation panel host. // WO-2882: +3 WO-2865 Shell refusal lines. // WO-2838: +1 WO-2804 MoveHoleEntry. // WO-2651 adds the line menu and its shared transparent dismissal scrim. // 77 -> 78 WO-2431: intended-stock eye button (class-based scan of the folded-strip rule). // WO-2305 independent reference-image editor (+1); 75 -> 77 WO-2458: intended-stock line + badge.
+        COHESIVE: 92, // 91 -> 92 WO-3312: RectangleSizeInput's shared W/H editor (WO-3116). // WO-3056: +3 drawing editor surfaces, +1 deviation panel host. // WO-2882: +3 WO-2865 Shell refusal lines. // WO-2838: +1 WO-2804 MoveHoleEntry. // WO-2651 adds the line menu and its shared transparent dismissal scrim. // 77 -> 78 WO-2431: intended-stock eye button (class-based scan of the folded-strip rule). // WO-2305 independent reference-image editor (+1); 75 -> 77 WO-2458: intended-stock line + badge.
         'RESTYLE-NEEDED': 14, // 12 -> 14 WO-3056: drawing view selected border (raw hex), deviation legend swatches (raw hex), both booked. // 11 -> 12 WO-2458: ReferenceImagePlacement corner handle (booked).
         // 4 -> 11 (WO-1088 census catch-up): WO-1062 added seven in-flow
         // feed-summary layout wrappers that paint no floating surface.
@@ -534,7 +558,7 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
         // same way, one column beside the rail.
         // WO-2318: +1 shared scrim for both sketch file windows.
         // WO-2784 RE-PIN 30 -> 31: WO-2759 (2d220dbd0b) ReportProblemDialog's shared scrim.
-        'MODAL-GOVERNED': 31, // 29 -> 30 WO-2448 (e56294822): ExportModal's shared scrim.
+        'MODAL-GOVERNED': 32, // 31 -> 32 WO-3312: GuidedSetupModal's shared scrim (WO-3256). // 29 -> 30 WO-2448 (e56294822): ExportModal's shared scrim.
         'DEV-ROUTE': 13,
       })
       // 85 -> 86 (CAM-BINDING Stage 1 census reconciliation, 2026-07-22): the
@@ -642,8 +666,10 @@ describe('WO UI-70: in-viewport overlay design-cohesion census (closed domain, d
       // WO-2882 RE-PIN 152 -> 155: WO-2865's three Shell refusal lines, COHESIVE above.
       // WO-3056 RE-PIN 155 -> 161: four drawing editor surfaces (WO-2994/WO-3006) and the two deviation
       // panel surfaces (WO-2947), each dispositioned above.
-      expect(domain.length, 'overlay census derives 161 in-viewport surfaces').toBe(161)
-      expect(Object.keys(SURFACE_DISPOSITIONS).length, 'one disposition per in-viewport surface, exactly').toBe(161)
+      // WO-3312 RE-PIN 161 -> 163: the shared RectangleSizeInput W/H editor (WO-3116)
+      // and the approved Guided setup window (WO-3256), both dispositioned above.
+      expect(domain.length, 'overlay census derives 163 in-viewport surfaces').toBe(163)
+      expect(Object.keys(SURFACE_DISPOSITIONS).length, 'one disposition per in-viewport surface, exactly').toBe(163)
       // MERGE-SEAM NOTE (main 52ec79e9): 117 -> 119. Both new surfaces are the
       // UI-73 "restore floating tabs" portal-target divs in App.tsx (line 93,
       // FloatingModeTabs's own fallback; line 208, CamApp's Part-workspace

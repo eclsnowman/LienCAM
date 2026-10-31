@@ -436,10 +436,15 @@ describe('WO-2662 the operation after a 3D operation waits for its final result'
       projectOperationFingerprint(project, without3dResult, contour, contour.resolvedHeights!, undefined, resolveTool))
   })
 
-  it('with nothing to wait for, Regenerate All still dispatches its first job in the same turn', async () => {
+  it('with nothing to wait for, Regenerate All dispatches its first job after one renderer frame, waiting on no operation', async () => {
     engine.computeParallel3dMoves.mockImplementation(async (input) => ({ moves: finishMoves(input), computeTimeMs: 1 }))
     const batch = useCamStore.getState().computeAllToolpaths()
-    expect(operation('drill').status).toBe('computing')
+    // WO-3126: every batch dispatch, a job with nothing to wait for included,
+    // first leaves the renderer one input/paint frame. It waits on nothing else:
+    // the first job is computing before any operation has finished.
+    expect(operation('drill').status).toBe('pending')
+    await vi.waitFor(() => expect(operation('drill').status).toBe('computing'), { interval: 1 })
+    expect(operations().filter((o) => o.status === 'ready')).toEqual([])
     await batch
     await vi.waitFor(() => expect(useCamStore.getState().toolpathBatch).toBeNull())
     expect(operations().map((o) => o.status)).toEqual(['ready', 'ready', 'ready', 'ready'])

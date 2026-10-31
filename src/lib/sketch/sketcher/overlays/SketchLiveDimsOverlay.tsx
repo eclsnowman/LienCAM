@@ -60,7 +60,9 @@ export function SketchLiveDimsOverlay({ port }: Props) {
     sketchToolChain?.kind === 'ellipse-arc'
       ? sketchToolChain.kind
       : null
-  const supported = isSketch && !!activeSketch && kind !== null
+  // Axis rectangles have one W/H editor; do not show a contradictory second pair.
+  const supported = isSketch && !!activeSketch && kind !== null &&
+    !(sketchToolChain?.kind === 'rect' && !sketchToolChain.rotated)
 
   // Per-frame sync: recompute the labels from the LIVE chain + cursor and
   // mutate the slot divs (text / position / visibility) without re-rendering.

@@ -14,6 +14,7 @@ import { GeomEngine } from '../../geom/worker/geom-engine'
 import { loadOcctModel, _resetOcctModelForTest, type OcctModelModule } from '../../lib/cam/geometry/occt/model/loader'
 import { buildModelPayload } from '../../lib/cam/geometry/occt/model/core'
 import { DISPLAY_TESS_QUALITY } from '../../viewport3d/tessQuality'
+import { privateFixture } from '../helpers/privateFixture'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,7 +24,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 const WORKBENCH = join(here, '../../../Sample Parts/Workbench Part.step')
-const PORTAL = process.env.WO3022_STEP ?? 'H:/LienCAM/fixtures/PortalHandle.step'
+const PORTAL = process.env.WO3022_STEP ?? privateFixture('PortalHandle.step')
 
 function bounds(p: ArrayLike<number>) {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]

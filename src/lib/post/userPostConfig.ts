@@ -212,6 +212,9 @@ export function parseUserPostConfig(source: string): UserPostImportResult {
     }
 
     const capabilities: PostCapabilities = {
+      ...(capabilitiesRaw.machineCoordinates === undefined ? {} : {
+        machineCoordinates: bool(capabilitiesRaw.machineCoordinates, 'capabilities.machineCoordinates'),
+      }),
       arcs: bool(capabilitiesRaw.arcs, 'capabilities.arcs'),
       arcFullCircle: bool(capabilitiesRaw.arcFullCircle, 'capabilities.arcFullCircle'),
       arcCenterMode: choice(capabilitiesRaw.arcCenterMode, 'capabilities.arcCenterMode', ['ijk', 'r']),

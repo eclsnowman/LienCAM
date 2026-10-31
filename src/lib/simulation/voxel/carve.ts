@@ -498,6 +498,83 @@ export function carveSweep(
   const maxStep = 0.5 * field.dims.voxelSize
   // At least one carve (the endpoint) even for a zero-length move.
   const steps = Math.max(1, Math.ceil(len / maxStep))
+  const undercut = t.profile ? undercutSolidFor(t.profile, t.radius) : null
+  // A non-undercut cutter extends upward from its bottom profile. At fixed
+  // XY, the lowest original stamp contains every higher stamp, including for
+  // shaped drill/ball bottoms. Bounded undercut solids do NOT have this property.
+  if (dx === 0 && dy === 0 && dz !== 0 && undercut === null) {
+    carvePoint(field, from.x, from.y, Math.min(from.z, from.z + dz), t, band)
+    return
+  }
+  // WO-2929: a long facing move was re-stamping its entire elapsed prefix
+  // on every playback frame (up to 145 ms per sweep). For a horizontal,
+  // axis-aligned flat cutter, the DISCRETE radial/vertical envelope maximizes
+  // the SDF at each voxel. Visit the field once, retaining the original sample grid
+  // and interpolation arithmetic; this is not a continuous capsule shortcut.
+  const flat = t.profile
+    ? undercut === null && isFlatBottomProfile(t.profile, t.radius)
+    : t.type === 'flat_end_mill'
+  // The measured horizontal chamfer passes have a monotone conical bottom:
+  // both SDF terms improve toward the nearest XY stamp. Preserve its original
+  // radial profile (including its exact LUT arithmetic), not a flat surrogate.
+  const horizontalChamfer = dz === 0 && t.type === 'chamfer_mill' && undercut === null
+  if ((flat || horizontalChamfer) && ((dx === 0) !== (dy === 0)) && steps > 1) {
+    const bottom = toolProfile(t)
+    const axisX = dy === 0
+    const origin = axisX ? from.x : from.y
+    const delta = axisX ? dx : dy
+    const coordinate = (i: number) => origin + delta * (i / steps)
+    // Binary search uses the actual rounded sample coordinates, including for
+    // reverse moves, so no projection/rounding tolerance changes the geometry.
+    const distance = (x: number, y: number, i: number) => {
+      const u = i / steps
+      const rx = x - (from.x + dx * u)
+      const ry = y - (from.y + dy * u)
+      return Math.sqrt(rx * rx + ry * ry)
+    }
+    let lastX = NaN, lastY = NaN, radial = 0, nearest = 0, nearestDistance = 0
+    const sdf = (x: number, y: number, z: number) => {
+      if (x !== lastX || y !== lastY) {
+        lastX = x; lastY = y
+        const p = axisX ? x : y
+        let lo = 0, hi = steps
+        while (lo + 1 < hi) {
+          const mid = Math.floor((lo + hi) / 2)
+          if (delta > 0 ? coordinate(mid) <= p : coordinate(mid) >= p) lo = mid
+          else hi = mid
+        }
+        const dLo = distance(x, y, lo), dHi = distance(x, y, hi)
+        nearest = dLo < dHi ? lo : hi
+        nearestDistance = Math.min(dLo, dHi)
+        radial = t.radius - nearestDistance
+      }
+      if (dz === 0) return Math.min(z - (from.z + dz * 0 + bottom(Math.min(nearestDistance, t.radius))), radial)
+      // On the side toward the lower tip, one SDF term increases while the
+      // other decreases. Their crossing neighbors contain the exact maximum.
+      // On the other side both improve toward `nearest`, so it cannot win.
+      let lo = dz < 0 ? nearest : 0, hi = dz < 0 ? steps : nearest
+      while (lo + 1 < hi) {
+        const mid = Math.floor((lo + hi) / 2)
+        const a = z - (from.z + dz * (mid / steps))
+        const b = t.radius - distance(x, y, mid)
+        if (dz < 0 ? a < b : b < a) lo = mid
+        else hi = mid
+      }
+      const sample = (i: number) => Math.min(z - (from.z + dz * (i / steps)), t.radius - distance(x, y, i))
+      return Math.max(sample(lo), sample(hi))
+    }
+    const endX = from.x + dx, endY = from.y + dy, endZ = from.z + dz
+    csgSubtract(field, sdf, {
+      x: Math.min(from.x, endX) - t.radius - band,
+      y: Math.min(from.y, endY) - t.radius - band,
+      z: Math.min(from.z, endZ) - band,
+    }, {
+      x: Math.max(from.x, endX) + t.radius + band,
+      y: Math.max(from.y, endY) + t.radius + band,
+      z: field.dims.z0 + field.dims.nz * field.dims.voxelSize + band,
+    }, band)
+    return
+  }
   for (let i = 0; i <= steps; i++) {
     const u = i / steps
     carvePoint(field, from.x + dx * u, from.y + dy * u, from.z + dz * u, t, band)

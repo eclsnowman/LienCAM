@@ -67,7 +67,9 @@ function endpointsOf(entity: Sketch3dLineEntity | Sketch3dArcEntity): [Sketch3dV
   return entity.kind === 'line' ? [entity.start, entity.end] : [arcEndpoint(entity, 0), arcEndpoint(entity, 1)]
 }
 
-function segmentFor(entity: Sketch3dLineEntity | Sketch3dArcEntity, forward: boolean): ProfileSegment {
+/** One entity walked in one direction as an exact ProfileSegment (shared with
+ *  the sweep-path resolver, src/geom/sweep-path.ts). */
+export function segmentFor(entity: Sketch3dLineEntity | Sketch3dArcEntity, forward: boolean): ProfileSegment {
   if (entity.kind === 'line') {
     return forward
       ? { kind: 'line', a: [entity.start.x, entity.start.y], b: [entity.end.x, entity.end.y], srcId: entity.id }

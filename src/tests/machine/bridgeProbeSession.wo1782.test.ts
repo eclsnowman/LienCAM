@@ -18,7 +18,8 @@ describe('WO-1782 bridge session ownership boundary', () => {
     const serve = source.slice(source.indexOf('static void Serve(TcpClient client)'), source.indexOf('/** What this controller can actually do.'))
 
     expect(serve).toContain('if (live)')
-    expect(serve).toContain('machine.PanicStop();')
+    // WO-3124 609b6f7067 carries departing staging ownership into cleanup.
+    expect(serve).toContain('machine.PanicStop(departingStaging);')
     expect(serve).toContain('if (ownsSession) Interlocked.Exchange(ref sessionBusy, 0);')
     expect(serve).not.toMatch(/\n\s*Interlocked\.Exchange\(ref sessionBusy, 0\);/)
   })

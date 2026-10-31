@@ -271,28 +271,56 @@ export class ReorderNodeCommand implements Command {
  * promotion rewires) that named the body moved onto the new feature. Only
  * features after the insert point are touched; a consumer naming the body by
  * no carrier (a face sketch) keeps its edge. Returns the prior state for undo.
+ *
+ * WO-3244: a Body Transform that REPLACES its source (a Mirror, result
+ * 'replace') names the body it edits `sourceBodyId`, so it is recognized here
+ * too - inserting a Mirror before a rolled-back Fillet on the same body moves
+ * the Fillet onto the Mirror on every route that inserts at the marker, not
+ * only through the Mirror dialog. All-or-nothing: an edge that would loop
+ * restores every carrier already moved and rethrows.
  */
 function rewireRolledBackConsumers(
   dag: FeatureDag,
   input: DagNodeInput,
 ): Array<{ id: string; consumes: string[]; payload: Record<string, unknown> }> {
   const payload = input.payload ?? {}
-  const edited = typeof payload.ownerId === 'string' ? payload.ownerId : typeof payload.targetFeatureId === 'string' ? payload.targetFeatureId : undefined
+  const edited = typeof payload.ownerId === 'string'
+    ? payload.ownerId
+    : typeof payload.targetFeatureId === 'string'
+      ? payload.targetFeatureId
+      : typeof payload.sourceBodyId === 'string' && payload.result === 'replace'
+        ? payload.sourceBodyId
+        : undefined
   if (edited === undefined || !(input.consumes ?? []).includes(edited)) return []
   const order = dag.featureOrder()
   const after = order.slice(order.indexOf(input.id) + 1)
   const prior: Array<{ id: string; consumes: string[]; payload: Record<string, unknown> }> = []
-  for (const id of after) {
-    const node = dag.getNode(id)
-    if (node === undefined || !node.consumes.includes(edited)) continue
-    const carriers = BODY_IDENTITY_PAYLOAD_CARRIERS.filter((carrier) => node.payload[carrier] === edited)
-    if (carriers.length === 0) continue
-    const nextPayload: Record<string, unknown> = { ...node.payload }
-    for (const carrier of carriers) nextPayload[carrier] = input.id
-    const consumes = node.consumes.map((c) => (c === edited ? input.id : c))
-    prior.push({ id, consumes: dag.setConsumes(id, [...new Set(consumes)]), payload: dag.setPayload(id, nextPayload) })
+  try {
+    for (const id of after) {
+      const node = dag.getNode(id)
+      if (node === undefined || !node.consumes.includes(edited)) continue
+      const carriers = BODY_IDENTITY_PAYLOAD_CARRIERS.filter((carrier) => node.payload[carrier] === edited)
+      if (carriers.length === 0) continue
+      const nextPayload: Record<string, unknown> = { ...node.payload }
+      for (const carrier of carriers) nextPayload[carrier] = input.id
+      const consumes = node.consumes.map((c) => (c === edited ? input.id : c))
+      prior.push({ id, consumes: dag.setConsumes(id, [...new Set(consumes)]), payload: dag.setPayload(id, nextPayload) })
+    }
+  } catch (err) {
+    restoreRolledBackConsumers(dag, prior)
+    throw err
   }
   return prior
+}
+
+function restoreRolledBackConsumers(
+  dag: FeatureDag,
+  prior: Array<{ id: string; consumes: string[]; payload: Record<string, unknown> }>,
+): void {
+  for (const entry of [...prior].reverse()) {
+    dag.setPayload(entry.id, entry.payload)
+    dag.setConsumes(entry.id, entry.consumes)
+  }
 }
 
 /**
@@ -319,7 +347,12 @@ export class InsertAtMarkerCommand implements Command {
   do(dag: FeatureDag): void {
     const index = markerInsertIndex(dag.featureOrder(), dag.getRollbackMarker())
     dag.insertNode(this.input, index)
-    this.rewired = rewireRolledBackConsumers(dag, this.input)
+    try {
+      this.rewired = rewireRolledBackConsumers(dag, this.input)
+    } catch (err) {
+      dag.removeNode(this.input.id)
+      throw err
+    }
     this.priorMarker = dag.setRollbackMarker({ kind: 'after', nodeId: this.input.id })
   }
 
@@ -328,10 +361,7 @@ export class InsertAtMarkerCommand implements Command {
       throw new Error(`InsertAtMarkerCommand.undo: '${this.input.id}' was never inserted (do() has not run yet).`)
     }
     dag.setRollbackMarker(this.priorMarker)
-    for (const prior of [...this.rewired].reverse()) {
-      dag.setPayload(prior.id, prior.payload)
-      dag.setConsumes(prior.id, prior.consumes)
-    }
+    restoreRolledBackConsumers(dag, this.rewired)
     this.rewired = []
     dag.removeNode(this.input.id)
   }

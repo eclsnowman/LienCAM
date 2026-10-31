@@ -249,7 +249,10 @@ describe('emitFeature', () => {
     const i = moves.findIndex(m => m.type === 'rapid' && m.z === 15 && m.x === 3 && m.y === 0)
     expect(i).toBeGreaterThan(0)
     expect(moves[i + 1]).toMatchObject({ type: 'rapid', x: 9, y: 9, z: 15 })
-    expect(moves[i + 2]).toMatchObject({ type: 'feed', x: 9, y: 9, z: -2, feed: 300, role: 'plunge' })
+    // WO-3083 re-pin: the landing rapids down to 1 mm above the level's material (Top 0) and
+    // plunges from there - it used to plunge the whole way from Clearance at plunge rate.
+    expect(moves[i + 2]).toMatchObject({ type: 'rapid', x: 9, y: 9, z: 1 })
+    expect(moves[i + 3]).toMatchObject({ type: 'feed', x: 9, y: 9, z: -2, feed: 300, role: 'plunge' })
   })
 
   it('WO-437: a jumpType-2 link with microLift hops at passEndDepth + z instead of clearance', () => {

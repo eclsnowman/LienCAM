@@ -219,14 +219,14 @@ describe('WO-288 flip arithmetic', () => {
     // Back right, top of the block as the first side sees it...
     expect(far).toEqual({ x: 100, y: 50, z: 0 })
     // ...is front right, bottom once the block is turned about X.
-    expect(flipPointToSecondSide(far, 'x', plan)).toEqual({ x: 100, y: 0, z: -20 })
+    expect(flipPointToSecondSide(far, 'x', plan)).toEqual({ x: 100, y: -50, z: -20 })
   })
 })
 
 // -- 2. the plan and its refusals ----------------------------------------------
 
 describe('WO-288 second-side plan', () => {
-  it('takes the stock, corner, origin and work offset from the first side', () => {
+  it('keeps the stock, flips XY and zeros the next offset on the probed top', () => {
     const plan = planSecondSideSetup(
       projectWith([block('block', 'Vise Block', 56)], [firstSide()]),
       { parentSetupId: 'side-1', axis: 'x' },
@@ -236,15 +236,15 @@ describe('WO-288 second-side plan', () => {
     expect(plan.stockName).toBe('Vise Block')
     expect(plan.axis).toBe('x')
     expect(plan.parentSetupName).toBe('Top side')
-    // The block did not move, and the zero stays on its corner.
-    expect(plan.origin).toEqual({ x: 0, y: 0, z: 20 })
-    expect(plan.cornerRow).toBe(2)
+    // Owner decision 2026-10-25: flipped XY, but Z0 on the probed stock TOP.
+    expect(plan.origin).toEqual({ x: 0, y: 50, z: 20 })
+    expect(plan.cornerRow).toBe(0)
     expect(plan.cornerCol).toBe(0)
     expect(plan.cornerFace).toBe('top')
     expect(plan.stockSize).toEqual({ x: 100, y: 50, z: 20 })
     expect(plan.originInStock).toEqual({ x: 0, y: 0, z: 20 })
-    // The stock owns the offset; both sides run on it.
-    expect(plan.fixtureOffset).toBe(56)
+    // The child owns the first unused offset; parent and stock retain theirs.
+    expect(plan.fixtureOffset).toBe(54)
   })
 
   // WO-1291: a setup owns its own controller frame. The flip plan must resolve
@@ -255,19 +255,21 @@ describe('WO-288 second-side plan', () => {
     const parent = firstSide('side-1', 'block', 57)
     ;(parent.wcs as typeof parent.wcs & { fixtureOffsetOwner: 'setup' }).fixtureOffsetOwner = 'setup'
     const plan = planSecondSideSetup(
-      projectWith([block('block', 'Vise Block', 54)], [parent]),
+      projectWith([block('block', 'Vise Block', 54)], [parent,
+        ...[55, 56, 58, 59].map(n => firstSide(`held-${n}`, `stock-${n}`, n))]),
       { parentSetupId: 'side-1', axis: 'y' },
     )
     if (!plan.ok) throw new Error(`expected a plan, got ${plan.code}`)
     expect(plan.fixtureOffset).toBe(57)
+    expect(plan.requiresOffsetReuseConfirmation).toBe(true)
   })
-  it('inherits the SETUP offset when the stock predates per-stock offsets', () => {
+  it('finds the first unused slot when the stock predates per-stock offsets', () => {
     const plan = planSecondSideSetup(
       projectWith([block()], [firstSide('side-1', 'block', 55)]),
       { parentSetupId: 'side-1', axis: 'y' },
     )
     if (!plan.ok) throw new Error(`expected a plan, got ${plan.code}`)
-    expect(plan.fixtureOffset).toBe(55)
+    expect(plan.fixtureOffset).toBe(54)
   })
 
   // REFUSAL 1: different stock.
@@ -309,18 +311,26 @@ describe('WO-288 second-side plan', () => {
     expect(refusal.code).toBe('FLIP_STOCK_MISSING')
   })
 
-  // REFUSAL 2: the work offset both sides would run on is someone else's.
-  it('refuses when another owner already holds that work offset', () => {
+  // WO-3108: creation chooses an unclaimed destination even when the parent's
+  // slot is shared; it must not allocate into another physical owner's frame.
+  it('uses the first unused slot without changing the existing owners', () => {
     const project = projectWith(
-      [block('block', 'Vise Block', 56), block('other', 'Fixture Plate', 56)],
+      [block('block', 'Vise Block', 56), block('other', 'Fixture Plate', 57)],
       [firstSide()],
     )
-    const refusal = planSecondSideSetup(project, { parentSetupId: 'side-1', axis: 'x' })
-    expect(refusal.ok).toBe(false)
-    if (refusal.ok) return
-    expect(refusal.code).toBe('FLIP_WORK_OFFSET_CLAIMED')
-    expect(refusal.message).toContain('G56')
-    expect(refusal.message).toContain('Fixture Plate')
+    const before = JSON.stringify(project)
+    const plan = planSecondSideSetup(project, { parentSetupId: 'side-1', axis: 'x' })
+    expect(plan).toMatchObject({ ok: true, fixtureOffset: 54 })
+    expect(JSON.stringify(project)).toBe(before)
+  })
+
+  it('retains collision protection when every slot is held by another physical owner', () => {
+    const project = projectWith(
+      [block('block'), ...[54, 55, 56, 57, 58, 59].map(n => block(`b${n}`, `Fixture ${n}`, n))],
+      [firstSide()],
+    )
+    expect(planSecondSideSetup(project, { parentSetupId: 'side-1', axis: 'x' }))
+      .toMatchObject({ ok: false, code: 'FLIP_WORK_OFFSET_CLAIMED' })
   })
 
   it('refuses a first side whose offset is not a real G54-G59 slot', () => {
@@ -429,16 +439,17 @@ describe('WO-288 setup dialog', () => {
     expect(setups).toHaveLength(2)
     const secondSide = setups[1]
     expect(secondSide.flipOf).toEqual({ setupId: 'side-1', axis: 'y' })
-    // One block: same stock, same corner, same zero, same work offset.
+    // One block, reflected Y-turn corner and a separate setup-owned frame.
     expect(secondSide.wcs.originBinding).toEqual({
       kind: 'stock_corner',
       stockId: 'block',
       cornerRow: 2,
-      cornerCol: 0,
+      cornerCol: 2,
       cornerFace: 'top',
     })
-    expect(secondSide.wcs.origin).toEqual(setups[0].wcs.origin)
-    expect(secondSide.wcs.fixtureOffset).toBe(56)
+    expect(secondSide.wcs.origin).toEqual({ x: 100, y: 0, z: 20 })
+    expect(setups[0].wcs.origin).toEqual({ x: 0, y: 0, z: 20 })
+    expect(secondSide.wcs.fixtureOffset).toBe(54)
     expect(useCamStore.getState().project.stocks?.[0].fixtureOffset).toBe(56)
   })
 
@@ -521,7 +532,7 @@ describe('WO-288 setup dialog', () => {
     expect(created.wcs.originBinding).toEqual({
       kind: 'stock_corner',
       stockId: 'block',
-      cornerRow: 2,
+      cornerRow: 0,
       cornerCol: 0,
       cornerFace: 'top',
     })
@@ -553,7 +564,7 @@ describe('WO-288 setup dialog', () => {
     const created = useCamStore.getState().project.setups[1]
     expect(created.flipOf).toEqual({ setupId: 'side-1', axis: 'x' })
     expect(created.wcs.stockId).toBe('block')
-    expect(created.wcs.origin).toEqual({ x: 0, y: 0, z: 20 })
+    expect(created.wcs.origin).toEqual({ x: 0, y: 50, z: 20 })
   })
 
   it('never offers a second side while EDITING a setup (creation only)', () => {

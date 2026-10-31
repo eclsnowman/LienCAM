@@ -1105,6 +1105,9 @@ export interface ConsoleEntry {
 
 /** Why a job stopped, when it stopped badly. */
 export interface JobFault {
+  /** Presentation only: this event is reported in the console without a
+   * workspace fault card. It does not change the failed job lifecycle. */
+  consoleOnly?: boolean
   /** Backend-specific code (a GRBL error:N, a UC100 return code). */
   code: number | null
   /** A sentence an operator can act on - never a bare code. */

@@ -16,7 +16,7 @@ import type { ContourWorkerPayload } from '../../lib/cam/types'
 import { closestArcPosition } from '../../lib/viewport/tabPlacement'
 import type { ToolpathMove } from '../../types'
 import { createGeometryService, faceAdapter, signedArea } from '../../kernel/geometry'
-import { createWorkholdingService, PARITY_POLICY, planTabs, resolveTabs, type ObstacleInput, type ResolvedTabs } from '../../kernel/workholding'
+import { createWorkholdingService, PARITY_POLICY, planTabs, resolveTabs, type ObstacleInput, type ResolvedTabs, type TabPlan } from '../../kernel/workholding'
 
 type Pt = { x: number; y: number }
 type Recorded = { fn: string; args: unknown[]; result?: unknown; error?: string }
@@ -192,6 +192,21 @@ const finishSquare = (): Pt[] => computeContourTabPreviewLoop(square(0, 0, 60, 4
 const resolved: ResolvedTabs = { width: 8, count: 4, tabTopZ: -10, stockBottomZ: -12, shape: 'box' }
 
 describe('WO-3004 workholding service: the one tab block at parity', () => {
+  it('tab-top lifts: a depth level at the tab top is not a lift; a lift outside every tab is caught (WO-3223)', () => {
+    const plan = planTabs(finishSquare(), resolved)
+    if (!plan.ok) throw new Error(plan.line)
+    const { path, tabTopZ, intervals } = plan.value
+    const feed = (p: Pt, z: number): ToolpathMove => ({ type: 'feed', x: p.x, y: p.y, z, feed: 800, role: 'cut' })
+    // A whole lap at a depth level equal to the tab top, entered from above.
+    const level = [feed(path[0], tabTopZ + 2), ...path.map(p => feed(p, tabTopZ)), feed(path[0], tabTopZ)]
+    expect(tabTopLifts(plan.value, level)).toEqual([])
+    // A lift from below at the path seam, which sits in a gap between tabs.
+    expect(intervals[0].start).toBeGreaterThan(1)
+    expect(intervals[intervals.length - 1].end).toBeLessThan(plan.value.perimeter - 1)
+    const wrong = [feed(path[0], tabTopZ - 2), feed(path[0], tabTopZ)]
+    expect(tabTopLifts(plan.value, wrong).map(l => l.inside)).toEqual([false])
+  })
+
   it('plans the same tabs as the engine (even, custom, seam-spanning, triangular)', () => {
     const path = finishSquare()
     const cases: [typeof resolved, number[] | undefined][] = [
@@ -302,26 +317,44 @@ function compareCall(label: string, call: Recorded, count: Counters): void {
       payload.tool.diameter, payload.tool.cutHand)
     if (!preview) continue
     const custom = payload.params.tabLocations?.[loop.id]
-    const fractions = custom && custom.length > 0 ? custom : undefined
+    const fractions = Array.isArray(custom) && custom.length > 0 ? custom : undefined
     const kernel = planTabs(preview.path, tabs, fractions)
     let engine: unknown
     try { engine = { ok: true, value: buildContourTabPlan(preview.path, tabs, fractions) } } catch (error) { engine = { ok: false, line: (error as Error).message } }
     expect(kernel, `${label} ${loop.id} tab plan`).toEqual(engine)
     if (!kernel.ok || call.error) continue
-    // Independent check on the moves the engine emitted: every feed at the tab top on
-    // the finish contour lies inside one of the kernel's tab intervals.
+    // Independent check on the moves the engine emitted: every tab-top lift on the
+    // finish contour lies inside one of the kernel's tab intervals.
     const plan = kernel.value
-    for (const move of call.result as ToolpathMove[]) {
-      if (move.type !== 'feed' || Math.abs(move.z - plan.tabTopZ) > 1e-6) continue
-      const at = closestArcPosition(plan.path, move)
-      if (!at || at.euclidean > 1e-3) continue
-      const d = at.distance
-      const inside = plan.intervals.some(({ start, end }) => [d, d + plan.perimeter, d - plan.perimeter]
-        .some(x => x >= start - 1e-4 && x <= end + 1e-4))
+    for (const { distance: d, inside } of tabTopLifts(plan, call.result as ToolpathMove[])) {
       expect(inside, `${label} ${loop.id} tab-top move at ${d.toFixed(3)} mm`).toBe(true)
       count.tabMovesChecked++
     }
   }
+}
+
+/** The feeds at the tab top on the finish contour while the pass cuts below the tab
+ * top, with whether each lies inside a tab interval. A run of tab-top feeds entered
+ * from below is a tab lift; one entered from above is a depth level that sits exactly
+ * at the tab top (WO-3223: a 2 mm stepdown over a 2 mm tab), which cuts the whole lap
+ * there and leaves every tab whole, so it is not a lift. */
+function tabTopLifts(plan: TabPlan, moves: readonly ToolpathMove[]): Array<{ distance: number; inside: boolean }> {
+  const out: Array<{ distance: number; inside: boolean }> = []
+  const atTop = (z: number) => Math.abs(z - plan.tabTopZ) <= 1e-6
+  let lifted = false
+  let prevZ = Number.POSITIVE_INFINITY
+  for (const move of moves) {
+    const tabTop = move.type === 'feed' && atTop(move.z)
+    if (tabTop && !atTop(prevZ)) lifted = prevZ < plan.tabTopZ
+    prevZ = move.type === 'feed' ? move.z : Number.POSITIVE_INFINITY
+    if (!tabTop || !lifted) continue
+    const at = closestArcPosition(plan.path, move)
+    if (!at || at.euclidean > 1e-3) continue
+    const d = at.distance
+    out.push({ distance: d, inside: plan.intervals.some(({ start, end }) => [d, d + plan.perimeter, d - plan.perimeter]
+      .some(x => x >= start - 1e-4 && x <= end + 1e-4)) })
+  }
+  return out
 }
 
 describe('WO-3004 workholding service: the engine\'s own calls on the P0 measuring stick', () => {
@@ -331,10 +364,11 @@ describe('WO-3004 workholding service: the engine\'s own calls on the P0 measuri
     const covered = alpha3Chains()
       .filter(chain => ['ex02-toe-clamps', 'ex03-soft-jaws', 'ex07-relief-medallion'].some(id => chain.id.startsWith(id)))
       .map(chain => ({ ...chain, steps: chain.steps.filter(step => ['pocket_2d', 'adaptive_clearing_2d', 'contour_2d'].includes(step.type)) }))
-    // No P0 row cuts tabs: the default rows switch tabs off, and with tabs on the benchmark
-    // scene's viewport reports no stock, so the engine refuses (the BL-098 viewport
-    // dependency). One supplement row runs ex02's contour with tabs ON through the same
-    // app route; it is labelled a supplement, never a P0 row.
+    // The default rows switch tabs off; since WO-3218 the tab stock bottom comes from the
+    // stock record, so a declared row with tabs on cuts them headless. One supplement row
+    // runs ex02's contour with tabs ON through the same app route; it is labelled a
+    // supplement, never a P0 row. Its 2 mm stepdown puts a depth level exactly at the
+    // 2 mm tab top (WO-3223).
     const ex02 = covered.find(chain => chain.id === 'ex02-toe-clamps-default')!
     const contour = ex02.steps.find(step => step.type === 'contour_2d' && !step.unavailableReason)!
     const supplement = { ...ex02, id: 'supplement-ex02-contour-tabs-on', steps: [{ ...contour, params: { ...contour.params, tabs: true } }] }
@@ -351,8 +385,9 @@ describe('WO-3004 workholding service: the engine\'s own calls on the P0 measuri
       rows.push({ chain: chain.id, steps: planned.steps.map(s => ({ step: s.stepId, status: s.status, operatorText: s.operatorText })),
         ...count, equal: true })
     }
-    // Control, not app truth: that same app payload with the stock bottom the viewport
-    // could not supply (the contour's own bottom, a cut-through), so the engine cuts tabs.
+    expect(rows.find(r => r.chain === supplement.id)?.tabMovesChecked).toBeGreaterThan(0)
+    // Control, not app truth: that same app payload with the stock bottom at the contour's
+    // own bottom (a cut-through), so the tab top falls between depth levels.
     expect(supplementPayload).toBeDefined()
     const { buildContourToolpath } = await import('../../lib/cam/contour2d')
     const { bottomZ } = resolveHeights(supplementPayload!.heights, supplementPayload!.wcsOrigin)

@@ -60,6 +60,35 @@ export function extrudeCapId(featureId: string, which: 0 | 1): StableId {
   return `${featureId}:XTR:cap${which}`
 }
 
+/**
+ * Thin extrude wall generated from a sketch entity (WO-3233). Each entity gives
+ * two walls: `in` on the side toward its loop's enclosed area, `out` on the side
+ * away from it. "F12:XTR:S3.e7:thinIn" / "F12:XTR:S3.e7:thinOut".
+ */
+export function extrudeThinWallId(featureId: string, sketchEntityId: string, wall: 'in' | 'out'): StableId {
+  return `${featureId}:XTR:${sketchEntityId}:thin${wall === 'in' ? 'In' : 'Out'}`
+}
+
+/**
+ * Thin extrude material cap: the annular start/end face that closes one loop's
+ * wall (WO-3233), named by the loop's anchor entity (its smallest entity id) so
+ * it survives thickness/depth edits and segment reordering.
+ * "F12:XTR:S3.e0:thinCapStart".
+ */
+export function extrudeThinCapId(featureId: string, anchorEntityId: string, which: 'start' | 'end'): StableId {
+  return `${featureId}:XTR:${anchorEntityId}:thinCap${which === 'start' ? 'Start' : 'End'}`
+}
+
+/**
+ * One thin extrude face that carries several walls or caps at once, because
+ * overlapping wall bands fused into a single face (WO-3233). Contributors are
+ * sorted so the id never depends on kernel enumeration.
+ * "F12:XTR:merge:(F12:XTR:S3.e0:thinOut|F12:XTR:S3.h0:thinOut)".
+ */
+export function extrudeThinMergeId(featureId: string, contributors: readonly StableId[]): StableId {
+  return `${featureId}:XTR:merge:(${[...contributors].sort(compareIds).join('|')})`
+}
+
 /** Revolve surface generated from a sketch entity. "F14:REV:S3.e2:surf". */
 export function revolveFaceId(featureId: string, sketchEntityId: string): StableId {
   return `${featureId}:REV:${sketchEntityId}:surf`

@@ -53,7 +53,8 @@ import {
   type StagedSizeDrag,
 } from '../tools/stagedSizeDrag'
 import { sketcherTools } from './toolController'
-import { toolState } from './toolStore'
+import { hasCreationSize } from '../tools/drawValue'
+import { toolState, sketcherToolStore } from './toolStore'
 import { decodeEndpointSelectionRef, ownerIdForSelection } from '../centerReferences'
 import {
   constraintForEndpointDragSnap,
@@ -224,7 +225,7 @@ export class SketchInteraction {
    */
   private previewPoints(cursor: SketchVec2, tolWorld?: number): SketchVec2[] | null {
     const st = toolState()
-    return toolPreview({ tool: st.tool, chain: st.chain }, cursor, {
+    return toolPreview({ tool: st.tool, chain: st.chain }, sketcherTools.creationCursor(cursor), {
       gearParams: st.gearParams,
       polygonSides: st.polygonSides,
       polygonMode: st.polygonMode,
@@ -433,6 +434,7 @@ export class SketchInteraction {
       this.painter.setToolOverlayDisplay(null)
       return
     }
+    this.painter.setToolPreview(this.previewPoints(this.lastCursor, this.tolWorld(this.lastCursor)))
     this.painter.setToolOverlayDisplay(
       sketcherTools.overlay(this.lastCursor, this.tolWorld(this.lastCursor)) ?? null,
     )
@@ -465,6 +467,11 @@ export class SketchInteraction {
   private attachWindowKeys(): void {
     this.keyHandler = this.handleKeyDown
     window.addEventListener('keydown', this.keyHandler)
+    // Observe modifier release even in an editor, and click-away modifiers
+    // before native blur. These never consume an event or arm a shortcut.
+    window.addEventListener('keyup', this.handleCreationModifiers, true)
+    window.addEventListener('pointerdown', this.handleCreationModifiers, true)
+    window.addEventListener('blur', this.clearCreationModifiers)
   }
 
   detach(): void {
@@ -485,6 +492,9 @@ export class SketchInteraction {
     this.menu?.close()
     if (this.keyHandler) {
       window.removeEventListener('keydown', this.keyHandler)
+      window.removeEventListener('keyup', this.handleCreationModifiers, true)
+      window.removeEventListener('pointerdown', this.handleCreationModifiers, true)
+      window.removeEventListener('blur', this.clearCreationModifiers)
       this.keyHandler = null
     }
     // Last-resort cleanup tail: exit/dispose may arrive while any primary gesture is live. The same
@@ -518,13 +528,19 @@ export class SketchInteraction {
   // SHARED-PACKAGE SURFACE: this is the one Sketcher both hosts mount, so the disarm applies to
   // BOTH the 3D modeling workspace and the CAM sketcher instance identically (feedback_sketcher_parity_part_cam).
   suspendWindowKeys(): void {
+    sketcherTools.clearCreationSize()
+    sketcherToolStore.setState({ creationSessionActive: false, creationDocumentId: null })
     if (this.keyHandler) {
       window.removeEventListener('keydown', this.keyHandler)
+      window.removeEventListener('keyup', this.handleCreationModifiers, true)
+      window.removeEventListener('pointerdown', this.handleCreationModifiers, true)
+      window.removeEventListener('blur', this.clearCreationModifiers)
       this.keyHandler = null
     }
   }
 
   resumeWindowKeys(): void {
+    sketcherToolStore.setState({ creationSessionActive: true, creationDocumentId: this.doc?.getSketch()?.id ?? null })
     if (!this.keyHandler) this.attachWindowKeys()
   }
 
@@ -645,7 +661,14 @@ export class SketchInteraction {
 
   // ---- Keyboard ---------------------------------------------------------------
 
+  private handleCreationModifiers = (event: KeyboardEvent | PointerEvent) => {
+    sketcherTools.trackCreationModifiers(event.shiftKey)
+  }
+
+  private clearCreationModifiers = () => sketcherTools.trackCreationModifiers(false)
+
   private handleKeyDown = (e: KeyboardEvent) => {
+    this.handleCreationModifiers(e)
     // Escape during a staged size drag cancels the GESTURE, not the
     // selected corner set: restore the pointerdown size through the same
     // scalar setter used by typed edits, release capture, and leave the
@@ -737,7 +760,9 @@ export class SketchInteraction {
       // Enter confirmed the set and then "clicked" the armed tool button,
       // toggling the tool off (B16: Enter ended mirror doing nothing).
       e.preventDefault()
-      sketcherTools.end()
+      if (hasCreationSize(toolState().creationSize)) {
+        if (this.lastCursor) sketcherTools.commitCreationSizeAt(this.lastCursor)
+      } else sketcherTools.end()
       this.painter.setToolPreview(null)
       this.painter.setSnapDisplay(null)
       if (this.tool() !== 'project') this.projectPreviewCandidate = null
@@ -814,6 +839,7 @@ export class SketchInteraction {
     // different class and untouched, so the M1c drag-while-typing exception
     // below is unaffected.
     const focused = document.activeElement as HTMLElement | null
+    sketcherTools.setCreationPlacementPending(toolState().chain?.kind === 'rect')
     if (focused?.classList.contains('sketch-dim-input')) focused.blur()
     const pointerId = Number.isInteger(event.pointerId) ? event.pointerId : 0
     if (Number.isInteger(event.pointerId) && typeof this.el.setPointerCapture === 'function') {
@@ -892,6 +918,7 @@ export class SketchInteraction {
 
   private handlePointerMove = (event: PointerEvent) => {
     if (!this.doc) return
+    this.handleCreationModifiers(event)
 
     // Armed tool: no marquee churn; the rubber-band preview tracks the
     // cursor while a chain is in progress.
@@ -989,6 +1016,7 @@ export class SketchInteraction {
       const rawWorld = this.clientToLocal(event.clientX, event.clientY)
       const world = sketcherTools.lockCursor(rawWorld, event.shiftKey) ?? rawWorld
       const snap = sketcherTools.snap(world, this.wpp(world), event.shiftKey) ?? null
+      sketcherTools.trackCreationCursor(snap?.point ?? world)
       this.painter.setSnapDisplay(snap)
       // Woken refs (getSnap may just have woken one): persistent dimmed
       // rings, rebuilt per move (<= 3 small loops).
@@ -1123,9 +1151,12 @@ export class SketchInteraction {
 
   private handleDoubleClick = (event: MouseEvent) => {
     if (event.button !== 0) return
+    sketcherTools.trackCreationModifiers(event.shiftKey)
     // Armed CREATE tool: double-click ends an in-progress chain (Enter equiv).
     if (this.toolArmed()) {
-      sketcherTools.end()
+      if (hasCreationSize(toolState().creationSize)) {
+        if (this.lastCursor) sketcherTools.commitCreationSizeAt(this.lastCursor)
+      } else sketcherTools.end()
       this.painter.setToolPreview(null)
       this.painter.setSnapDisplay(null)
       this.refreshToolOverlay()
@@ -1167,6 +1198,7 @@ export class SketchInteraction {
     const shouldClearCursor = this.dragActive || this.dimDrag !== null || cancelledSizeDrag !== null
     const shouldClearSwipeDisplay = this.swipePath !== null && this.swipePath.length > 1
 
+    sketcherTools.setCreationPlacementPending(false)
     this.primaryPointerId = null
     this.capturedPointerId = null
     this.pointerDown = null

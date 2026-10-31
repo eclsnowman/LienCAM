@@ -515,7 +515,8 @@ describe('WO-1659: Home All header steady state', () => {
       }))
     })
 
-    expect(statusChip()).toBe('Alarm')
+    // WO-3098 (1524d1213d): the header shares Control's latched E-STOP label.
+    expect(statusChip()).toBe('E-STOP')
     expect(stateChip()).toBe('E-STOP')
   })
 

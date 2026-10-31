@@ -11,6 +11,16 @@
 // Follow-up for the owner of src/components/model3d/ (held by WO-2856 when
 // this was written): point those modules at this one and delete the copies.
 
+import {
+  expandSweepPathSelection,
+  resolveSweepPathChain,
+  type SweepPathNodeLookup,
+  type SweepPathResolution,
+} from '../../geom/sweep-path'
+import { expandBlocksForGeometry } from '../../lib/sketch/blocks'
+import type { Sketch } from '../../lib/sketch/types'
+import type { Sketch3dDocument } from '../../sketch3d/types'
+
 import { textFor } from '../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
 import type {
@@ -27,6 +37,8 @@ import type {
   ResolvedExtrudeFaceTarget,
   ResolvedExtrudePlaneTarget,
   ResolvedExtrudeTarget,
+  ThinExtrudeSide,
+  ThinOpenSide,
   Vec3,
 } from '../../geom/geom-service'
 import {
@@ -42,14 +54,16 @@ import {
   type ParamLookup,
 } from '../../doc'
 import type { BasePlaneKind, PlaneFrame } from '../../sketch3d'
-import type { ProfileSelector, ProfileSelectorResolution } from '../../components/model3d/workbench/regionSelector'
+import type { ExtrudeSelectionResolution, ProfileSelector, ProfileSelectorResolution } from '../../components/model3d/workbench/regionSelector'
 import type {
   BuildExtrudeRequestArgs,
   ExtrudeBoolMode,
   ExtrudeDirection,
   ExtrudeEndCondition,
   ExtrudeEndResolution,
+  ExtrudeParamsInput,
   ExtrudeRequestBuild,
+  ExtrudeWallResolution,
 } from '../../components/model3d/workbench/extrudeParams'
 import type { DrivenFieldResult } from '../../components/model3d/workbench/featureDimension'
 import type { BodyTargetLineageResolution, WorkbenchBodyOpType } from '../../components/model3d/bodyLineage'
@@ -83,6 +97,11 @@ export function resolveProfileSelector(
   regions: readonly ProfileRegion[] | undefined,
   selector: ProfileSelector | undefined,
 ): ProfileSelectorResolution {
+  // An open wire is never a region. Existing face-only replay consumers must
+  // refuse it until they explicitly support the open-wall request in WO-3237.
+  if (selector?.kind === 'sketch-chain') {
+    return { ok: false, code: 'open-chain-requires-thin', message: 'An open sketch chain requires Thin open walls.' }
+  }
   if (selector === undefined || selector.kind === 'whole-sketch') {
     return regions === undefined || regions.length === 0
       ? {
@@ -167,6 +186,71 @@ export function resolveProfileSelector(
   return { ok: true, profiles: [matches[ordinal]] }
 }
 
+/** Extrude uses the SAME ordered entity/direction selector and exact chain
+ * resolver as Sweep. Only source eligibility is adapted: construction geometry
+ * cannot become an Extrude wall, including a saved curve changed to construction.
+ * Flatten blocks with the existing adapter before filtering their members. */
+function openChainSourceLookup(lookup: SweepPathNodeLookup): SweepPathNodeLookup {
+  return (id) => {
+    const node = lookup(id)
+    if (node?.kind !== 'sketch') return node
+    const sketch = node.payload.sketch as Sketch | undefined
+    if (sketch !== undefined && sketch !== null && typeof sketch === 'object') {
+      const flat = expandBlocksForGeometry((sketch.entities ?? []).filter((entity) => !entity.construction), sketch.constraints ?? [], sketch.blockDefs)
+      return { ...node, payload: { ...node.payload, sketch: {
+        ...sketch, entities: flat.entities.filter((entity) => !entity.construction), constraints: flat.constraints, blockDefs: undefined,
+      } } }
+    }
+    const document = node.payload.document as Sketch3dDocument | undefined
+    if (document !== undefined && document !== null && typeof document === 'object') {
+      return { ...node, payload: { ...node.payload, document: {
+        ...document, entities: (document.entities ?? []).filter((entity) => !entity.construction),
+      } } }
+    }
+    return node
+  }
+}
+
+/** Resolve a persisted open-chain selection to a wire, never to a face. The
+ * selector's producer and ordered directions are authoritative; no region or
+ * whole-sketch fallback is permitted when any entity cannot resolve. */
+export function resolveOpenChainProfileSelector(
+  selector: unknown,
+  lookup: SweepPathNodeLookup,
+): SweepPathResolution {
+  return resolveSweepPathChain(selector, openChainSourceLookup(lookup))
+}
+
+/** One click expands only when the shared authority finds a unique open chain.
+ * Explicit ordered selectors may still name an unambiguous route at a branch. */
+export function expandOpenChainProfileSelection(
+  sketchId: string,
+  entityId: string,
+  lookup: SweepPathNodeLookup,
+) {
+  return expandSweepPathSelection(sketchId, entityId, openChainSourceLookup(lookup))
+}
+
+export function resolveExtrudeSelection(
+  sketchId: string,
+  regions: readonly ProfileRegion[] | undefined,
+  selector: ProfileSelector | undefined,
+  lookup: SweepPathNodeLookup,
+): ExtrudeSelectionResolution {
+  if (selector?.kind !== 'sketch-chain') {
+    const resolved = resolveProfileSelector(regions, selector)
+    return resolved.ok ? { ok: true, profiles: resolved.profiles, openChain: false } : resolved
+  }
+  if (selector.sketchId !== sketchId) {
+    return { ok: false, code: 'invalid-selector', message: thinOpenText('wrongSketch', { chainSketch: String(selector.sketchId), sketch: sketchId }) }
+  }
+  const chain = resolveOpenChainProfileSelector(selector, lookup)
+  if (!chain.ok) {
+    return { ok: false, code: chain.diagnostic.code, message: thinOpenText('chainUnresolved', { message: chain.diagnostic.message }) }
+  }
+  return { ok: true, profiles: [{ sketchId: chain.path.sketchId, plane: chain.path.plane, loops: [chain.path.segments] }], openChain: true }
+}
+
 // ---- verbatim from src/components/model3d/workbench/extrudeParams.ts ----
 
 export const EXTRUDE_DIRECTIONS = ['up', 'down', 'midplane'] as const
@@ -179,6 +263,24 @@ export const DEFAULT_EXTRUDE_DIRECTION: ExtrudeDirection = 'up'
 
 export const DEFAULT_EXTRUDE_BOOL_MODE: ExtrudeBoolMode = 'newBody'
 
+const thinText = textFor('thin-extrude.wo3234')
+
+const thinOpenText = textFor('thin-open-extrude.wo3237')
+
+export const EXTRUDE_END_CONDITION_LABELS: Record<ExtrudeEndCondition, string> = {
+  get blind() { return workbenchText('extrudeParams.blind') },
+  get symmetric() { return workbenchText('extrudeParams.symmetric') },
+  get upToNext() { return workbenchText('extrudeParams.upToNext') },
+  get toFace() { return workbenchText('extrudeParams.upToFacePlane') },
+  get toPart() { return workbenchText('extrudeParams.upToPartBody') },
+  get toVertex() { return workbenchText('extrudeParams.upToVertexPoint') },
+  get throughAll() { return workbenchText('extrudeParams.throughAll') },
+}
+
+export const THIN_WALL_SIDES = ['inside', 'outside', 'center'] as const satisfies readonly ThinExtrudeSide[]
+
+export const DEFAULT_THIN_WALL_SIDE: ThinExtrudeSide = 'inside'
+
 export function isExtrudeDirection(v: unknown): v is ExtrudeDirection {
   return typeof v === 'string' && (EXTRUDE_DIRECTIONS as readonly string[]).includes(v)
 }
@@ -189,6 +291,36 @@ export function isExtrudeBoolMode(v: unknown): v is ExtrudeBoolMode {
 
 export function isExtrudeEndCondition(v: unknown): v is ExtrudeEndCondition {
   return typeof v === 'string' && (EXTRUDE_END_CONDITIONS as readonly string[]).includes(v)
+}
+
+export function isThinWallSide(v: unknown): v is ThinExtrudeSide {
+  return typeof v === 'string' && (THIN_WALL_SIDES as readonly string[]).includes(v)
+}
+
+export const THIN_OPEN_WALL_SIDES = ['left', 'right', 'center'] as const satisfies readonly ThinOpenSide[]
+
+export const DEFAULT_THIN_OPEN_WALL_SIDE: ThinOpenSide = 'left'
+
+export function isThinOpenWallSide(v: unknown): v is ThinOpenSide {
+  return typeof v === 'string' && (THIN_OPEN_WALL_SIDES as readonly string[]).includes(v)
+}
+
+export function resolveExtrudeWall(payload: ExtrudeParamsInput, openChain = false): ExtrudeWallResolution {
+  const mode = payload.wallMode === undefined ? 'solid' : payload.wallMode
+  if (mode === 'solid') return openChain ? { ok: false, reason: thinOpenText('needsThin') } : { ok: true }
+  if (mode !== 'thin') return { ok: false, reason: thinText('unknownWallMode', { mode: String(mode) }) }
+  const thickness = payload.wallThickness
+  if (typeof thickness !== 'number' || !Number.isFinite(thickness) || thickness <= 0) {
+    return { ok: false, reason: thinText('thicknessMustBePositive', { thickness: String(thickness) }) }
+  }
+  if (openChain) {
+    const openSide = payload.wallSide === undefined ? DEFAULT_THIN_OPEN_WALL_SIDE : payload.wallSide
+    if (!isThinOpenWallSide(openSide)) return { ok: false, reason: thinOpenText('unknownOpenSide', { side: String(openSide) }) }
+    return { ok: true, thin: { thickness, side: openSide, open: true } }
+  }
+  const side = payload.wallSide === undefined ? DEFAULT_THIN_WALL_SIDE : payload.wallSide
+  if (!isThinWallSide(side)) return { ok: false, reason: thinText('unknownWallSide', { side: String(side) }) }
+  return { ok: true, thin: { thickness, side } }
 }
 
 export function extrudeKernelOp(mode: ExtrudeBoolMode): ExtrudeRequest['op'] {
@@ -401,6 +533,8 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
   if (!isExtrudeEndCondition(rawEnd)) {
     return { ok: false, reason: workbenchText('extrudeParams.unknownExtrudeEndCondition', { value1: String(String(rawEnd)) }) }
   }
+  const wall = resolveExtrudeWall(payload, args.openChain === true)
+  if (!wall.ok) return wall
 
   let end: ExtrudeEnd
   if (rawEnd === 'blind' || rawEnd === 'symmetric') {
@@ -513,6 +647,7 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
     op,
     ...(target !== undefined ? { target } : {}),
     ...(modelItemId !== undefined ? { modelItemId } : {}),
+    ...(wall.thin !== undefined ? { thin: wall.thin } : {}),
   }
   return op === 'newBody'
     ? { ok: true, req }
@@ -597,6 +732,10 @@ export const WORKBENCH_BODY_OP_DEFINITIONS = Object.freeze([
   // (payload = the picture + every control); replays through the geometry
   // worker's relief op (editFeature kind 'relief') and supersedes its owner.
   { opType: 'relief', historyRole: 'feature' },
+  // WO-3244 Mirror (replace original): ONE consumed body moved by an exact
+  // transform (src/doc/features/bodyTransform.ts); the reflection replaces
+  // its source, which carries the body's identity forward.
+  { opType: 'bodyTransform', historyRole: 'feature' },
 ] as const)
 
 export const WORKBENCH_BODY_OP_TYPES: readonly WorkbenchBodyOpType[] = Object.freeze(
@@ -661,6 +800,9 @@ function bodyEdgeCarriesMaterial(dag: FeatureDag, consumerId: string, producerId
     case 'form':
     case 'relief':
       return true
+    // The source body is the material; the plane is only where it reflects.
+    case 'bodyTransform':
+      return payload.sourceBodyId === producerId
     default:
       return false
   }

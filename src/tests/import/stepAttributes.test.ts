@@ -1,5 +1,6 @@
 // CAM-13 (+ CAM-13-R1) unit tests for the shared embedded-attribute picker +
-// reader glue. These do NOT touch a kernel - they prove the pure name/color
+// reader glue. WO-3093 (23585bb2e6) preserves per-part colours and treats
+// mixed names as ordinary assembly metadata. These do NOT touch a kernel - they prove the pure name/color
 // collapse logic (incl. the "every part agrees" rule, MAJOR 5), the reader's
 // diagnostics-to-warning consumption (MAJOR 4), and its single bounded
 // lifecycle deadline (MAJOR 6), all with an injected fake service. The
@@ -49,19 +50,18 @@ describe('pickDisplayAttributes', () => {
     expect(pickDisplayAttributes([{}], IMP)).toEqual({ name: undefined, color: undefined, warning: undefined })
   })
 
-  it('collapses an assembly: common name kept (no warning), differing names -> default + a named warning', () => {
+  it('keeps a common assembly name and falls back silently when names differ', () => {
     expect(pickDisplayAttributes([{ name: 'A' }, { name: 'A' }], IMP)).toEqual({ name: 'A', color: undefined })
     const differing = pickDisplayAttributes([{ name: 'A' }, { name: 'B' }], IMP)
     expect(differing.name).toBeUndefined()
-    expect(differing.warning).toContain('parts disagree on embedded name')
+    expect(differing.warning).toBeUndefined()
   })
 
-  it('MAJOR 5: one named part + one unnamed part -> degrades to default WITH a warning (not the one valid name)', () => {
-    // The audit's adversarial case: a synthetic/no-name second part must count
-    // as disagreement, not get filtered out before the comparison (the bug).
+  it('one named part + one unnamed part uses the filename without an assembly warning', () => {
+    // A partial name still cannot become the label of the combined row.
     const out = pickDisplayAttributes([{ name: 'Only One Named' }, { name: `${IMP}:step:body#1` }], IMP)
     expect(out.name).toBeUndefined()
-    expect(out.warning).toContain('parts disagree on embedded name (1/2 carry one)')
+    expect(out.warning).toBeUndefined()
   })
 
   it('reads a single/common embedded color as hex', () => {
@@ -69,18 +69,18 @@ describe('pickDisplayAttributes', () => {
     expect(pickDisplayAttributes([{ color: [1, 0, 0] }, { color: [1, 0, 0] }], IMP).color).toBe('#ff0000')
   })
 
-  it('differing part colors -> default swatch + a named warning (one mesh cannot show N colors)', () => {
+  it('different part colours keep the first-part row swatch without a warning', () => {
     const out = pickDisplayAttributes([{ color: [1, 0, 0] }, { color: [0, 1, 0] }], IMP)
-    expect(out.color).toBeUndefined()
-    expect(out.warning).toContain('parts disagree on embedded color')
+    expect(out.color).toBe('#ff0000')
+    expect(out.warning).toBeUndefined()
   })
 
-  it('MAJOR 5: one colored part + one uncolored part -> degrades to default WITH a warning (not the one valid color)', () => {
-    // The audit's other adversarial case: {color:'#ff0000'} used to win over a
-    // part with no color attribute at all.
+  it('a coloured first part keeps its swatch when another part uses the default', () => {
+    // WO-3093 uses the FIRST part for the row; missing first-part colour stays default.
     const out = pickDisplayAttributes([{ color: [1, 0, 0] }, {}], IMP)
-    expect(out.color).toBeUndefined()
-    expect(out.warning).toContain('parts disagree on embedded color (1/2 carry one)')
+    expect(out.color).toBe('#ff0000')
+    expect(out.warning).toBeUndefined()
+    expect(pickDisplayAttributes([{}, { color: [1, 0, 0] }], IMP).color).toBeUndefined()
   })
 
   it('rejects a non-finite color rather than showing it, WITH a named invalid-color warning (CAM-13-R2 MAJOR 2)', () => {
@@ -112,9 +112,9 @@ describe('pickDisplayAttributes', () => {
     expect(invalid.warning).toContain('malformed or out-of-[0,1]-range embedded color')
   })
 
-  it('CAM-13-R2 MAJOR 2: one valid + one invalid color -> degrades with BOTH the invalid-count and disagreement context', () => {
+  it('a malformed second colour warns without discarding the valid first-part swatch', () => {
     const out = pickDisplayAttributes([{ color: [1, 0, 0] }, { color: [1, 2, 3] }], IMP)
-    expect(out.color).toBeUndefined()
+    expect(out.color).toBe('#ff0000')
     expect(out.warning).toContain('1/2 part(s) carry a malformed or out-of-[0,1]-range embedded color')
   })
 })
@@ -282,7 +282,7 @@ describe('readStepDisplayAttributes (injected fake service)', () => {
     expect(out.warning).toBeUndefined()
   })
 
-  it('MAJOR 4: a diagnostics-derived warning AND a partial-attribute warning both surface, combined', async () => {
+  it('a genuine reader warning survives while mixed assembly names stay silent', async () => {
     const { svc } = fakeService({
       bodies: [
         { handle: 5, name: 'Real Name' },
@@ -293,7 +293,7 @@ describe('readStepDisplayAttributes (injected fake service)', () => {
     const out = await readStepDisplayAttributes(BYTES, IMP, () => svc)
     expect(out.name).toBeUndefined()
     expect(out.warning).toContain('importXCAFFromSTEP threw')
-    expect(out.warning).toContain('parts disagree on embedded name')
+    expect(out.warning).not.toContain('parts disagree')
   })
 
   it('MAJOR 6: a hung factory/init is bounded by ONE deadline, not just importStep, and still attempts teardown', async () => {

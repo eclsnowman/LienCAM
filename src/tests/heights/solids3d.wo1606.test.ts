@@ -130,7 +130,10 @@ async function frameAndSafety(r: SolidOperationReading, e: Common): Promise<void
   if (r.kind === 'parallel_3d') {
     expect(r.lowestRapidZ, 'lowest rapid Z: the stock top + standoff').toBeGreaterThanOrEqual(TRAVERSE_STANDOFF_MM - TOL)
   } else if (r.kind !== 'adaptive_3d') {
-    expect(r.lowestRapidZ, 'lowest rapid Z').toBeGreaterThanOrEqual(e.retract - TOL)
+    // WO-3083 re-pin (one entry rule, owner 2026-10-23): entries rapid down to 1 mm above the
+    // material they meet (was the Feed plane / Retract), so the rapid floor is that entry start.
+    const entryFloor = Math.min(e.retract, Math.min(e.top ?? 0, r.stockTopWcs) + 1)
+    expect(r.lowestRapidZ, 'lowest rapid Z').toBeGreaterThanOrEqual(entryFloor - TOL)
   }
   expect(highest(r.moves), 'clearance').toBeCloseTo(e.clearance, 2)
   // Nothing below the stock bottom (or below a through drill's own point).

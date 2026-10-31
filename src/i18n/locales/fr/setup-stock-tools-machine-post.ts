@@ -23,6 +23,7 @@ const words: Translation<'setup-stock-tools-machine-post'> = {
     could_not_read_the_selected_file: 'Impossible de lire le fichier sélectionné.',
   },
   PostProcessModal: {
+    "no_operations_selected": "Aucune opération sélectionnée. Sélectionnez les opérations à exporter.",
     controller_not_declared: 'Contrôleur non déclaré', built_in_templates: 'Modèles intégrés', saved_posts: 'Post-processeurs enregistrés',
     name_for_this_saved_post: 'Nom de ce post-processeur enregistré :', saved: '{{value1}} enregistré', delete: 'Supprimer', cancel: 'Annuler', deleted: '{{value1}} supprimé',
     downloaded: '{{value1}} téléchargé', posted_lines: '{{value1}} généré ({{value2}} lignes)', downloaded_and: '{{value1}} et {{value2}} téléchargés',

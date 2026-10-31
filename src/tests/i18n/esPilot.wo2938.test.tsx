@@ -48,6 +48,23 @@ afterEach(async () => {
   await applyLanguage('en')
 })
 
+// WO-3317 repin: WO-3257 (509745d10a) and WO-3307 (81eb1c8333) authored the Spanish
+// text beside its English key. Spanish names the physical keys as a Spanish keyboard
+// prints them ("Intro" for Enter) and describes the waterline finish by its Z levels,
+// so exactly these leaves carry a different literal-token set -- listed BY NAME, one
+// token at a time. Every other protected token (G-code words, dialects, key names,
+// units, file extensions) is still compared exactly, and a new unasked deviation
+// still fails.
+const LOCALIZED_LITERALS: Readonly<Record<string, Readonly<Record<string, { missing?: readonly string[]; extra?: readonly string[] }>>>> = {
+  'cam-shortcuts.wo3257': { hint: { missing: ['Enter'] } },
+  'ui2-operation-card-3d.wo3307': {
+    'type.waterline_3d': { extra: ['Z'] },
+    'help.steepStepdown': { extra: ['Z'] },
+  },
+}
+const without = (list: string[], removed?: readonly string[]): string[] =>
+  list.filter(token => !(removed ?? []).includes(token))
+
 describe('WO-2938 Spanish catalog', () => {
   it('discovers and loads Spanish without assuming the complete global roster', async () => {
     expect(AVAILABLE_LANGUAGES).toContain('es')
@@ -68,10 +85,32 @@ describe('WO-2938 Spanish catalog', () => {
         expect(value.trim(), label).not.toBe('')
         expect(tokens(value, /\{\{[^}]+\}\}/g), label).toEqual(tokens(source[key], /\{\{[^}]+\}\}/g))
         expect(tokens(value, /<\/?[A-Za-z][^>]*>/g), label).toEqual(tokens(source[key], /<\/?[A-Za-z][^>]*>/g))
-        expect(tokens(value, protectedTokens), label).toEqual(tokens(source[key], protectedTokens))
+        const localized = LOCALIZED_LITERALS[area]?.[key] ?? {}
+        expect(without(tokens(value, protectedTokens), localized.extra), label)
+          .toEqual(without(tokens(source[key], protectedTokens), localized.missing))
       }
     })
   }
+  it('every named localization still describes a real difference in the shipped catalogs', () => {
+    // Non-vacuity: an allowance that no longer matches a real difference is stale and
+    // must be deleted, so the table cannot quietly excuse anything later.
+    for (const [area, allowances] of Object.entries(LOCALIZED_LITERALS)) {
+      for (const [key, allow] of Object.entries(allowances)) {
+        const label = `${area}.${key}`
+        const value = flatten(spanish[area])[key]
+        expect(value, label).toBeTypeOf('string')
+        const englishValue = flatten(english[area] ?? {})[key]
+        for (const token of allow.missing ?? []) {
+          expect(tokens(englishValue, protectedTokens), label).toContain(token)
+          expect(tokens(value, protectedTokens), label).not.toContain(token)
+        }
+        for (const token of allow.extra ?? []) {
+          expect(tokens(value, protectedTokens), label).toContain(token)
+          expect(tokens(englishValue, protectedTokens), label).not.toContain(token)
+        }
+      }
+    }
+  })
   it('distinguishes machining meanings and interpolates actual values without decimal or command changes', async () => {
     await applyLanguage('es')
     const t = textFor('cam-operations-new-operation')

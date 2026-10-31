@@ -106,7 +106,11 @@ function buildRealFeatureDag(): InstanceType<typeof FeatureDag> {
     // fresh v5 authoring of this same extrude persists endCondition:'blind'
     // explicitly -- the exact default migrationV4ToV5 backfills for a
     // historical extrude with this same direction and no endCondition.
-    payload: { opType: 'extrude', sketchId: 'SK1', distance: 12, direction: 'up', boolMode: 'newBody', name: 'Bracket Body', endCondition: 'blind' },
+    // WO-3317: WO-3234 (migrationV6ToV7) records an explicit wallMode on every
+    // persisted extrude -- 'solid' for every schema-6 payload, since no schema-6
+    // reader honoured a wall field. The migrated fixture carries it, so a freshly
+    // authored extrude does too; nothing else about the payload moved.
+    payload: { opType: 'extrude', sketchId: 'SK1', distance: 12, direction: 'up', boolMode: 'newBody', name: 'Bracket Body', endCondition: 'blind', wallMode: 'solid' },
   })
   dag.insertNode({
     id: 'F2',

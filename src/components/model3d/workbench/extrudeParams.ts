@@ -12,15 +12,27 @@
 // the page's regen executor (buildExtrudeRequest) share the SAME mapping with
 // no forked truth.
 //
-// draftAngleDeg and thin (ExtrudeRequest.draftAngleDeg / thin, geom-service.ts
-// :160-161) are ACCEPTED-AND-IGNORED trap fields on the kernel op -- makeExtrude
-// never reads either. This WO does NOT wire them (BK-119 owns draft; thin/
-// surface is a separate GEO-lane build); they are intentionally absent here so
-// no UI control is ever bound to a dead field (the propagateTangent lesson,
-// geom-service.ts:243-245).
+// draftAngleDeg (ExtrudeRequest.draftAngleDeg) is an ACCEPTED-AND-IGNORED trap
+// field on the kernel op -- makeExtrude never reads it (BK-119 owns draft), so
+// it is intentionally absent here and no UI control is bound to a dead field
+// (the propagateTangent lesson, geom-service.ts:243-245).
+//
+// WO-3234: Thin IS wired. The payload says it explicitly -- wallMode 'solid'
+// (absent = solid) or 'thin' with wallThickness and wallSide -- and
+// resolveExtrudeWall below is the one place that turns that into the kernel's
+// ExtrudeRequest.thin (WO-3233). An old, never-read payload `thin` field is
+// not consulted: only wallMode can make an extrude thin.
+//
+// WO-3237: an explicitly selected open chain (the sketch-chain selector) is
+// built ONLY as a Thin open wall. Its wallSide is left / right / center of the
+// chain's persisted travel direction; buildExtrudeRequest is told the profile
+// is a chain (`openChain`) and refuses a solid by name - an open chain is never
+// filled, closed or swapped for a region.
 
 import { textFor } from '../../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
+const thinText = textFor('thin-extrude.wo3234')
+const thinOpenText = textFor('thin-open-extrude.wo3237')
 import type {
   BodyHandle,
   ExtrudeEndTargetIdentity,
@@ -33,6 +45,8 @@ import type {
   ResolvedExtrudeFaceTarget,
   ResolvedExtrudePlaneTarget,
   ResolvedExtrudeTarget,
+  ThinExtrudeSide,
+  ThinOpenSide,
 } from '../../../geom/geom-service'
 import type { BodyTargetLineageResolution } from '../bodyLineage'
 
@@ -87,6 +101,25 @@ export const DEFAULT_EXTRUDE_DIRECTION: ExtrudeDirection = 'up'
 export const DEFAULT_EXTRUDE_BOOL_MODE: ExtrudeBoolMode = 'newBody'
 export const DEFAULT_EXTRUDE_END_CONDITION: ExtrudeEndCondition = 'blind'
 
+// WO-3234: Thin. WO-3235: every end condition applies to Thin; the kernel
+// decides Up to next / part against each wall's own section (geom-service
+// ExtrudeRequest.thin), never the filled profile, and never falls back to Blind.
+export const EXTRUDE_WALL_MODES = ['solid', 'thin'] as const
+export type ExtrudeWallMode = (typeof EXTRUDE_WALL_MODES)[number]
+
+export const THIN_WALL_SIDES = ['inside', 'outside', 'center'] as const satisfies readonly ThinExtrudeSide[]
+
+/** OWNER DECISION (WO-3234 Notes): new Thin extrudes start Inside -- the
+ *  brief's proposal, recorded in the order and reversible by the owner. */
+export const DEFAULT_THIN_WALL_SIDE: ThinExtrudeSide = 'inside'
+export const DEFAULT_THIN_WALL_THICKNESS = 1
+
+export const THIN_WALL_SIDE_LABELS: Record<ThinExtrudeSide, string> = {
+  get inside() { return thinText('sideInside') },
+  get outside() { return thinText('sideOutside') },
+  get center() { return thinText('sideCenter') },
+}
+
 export function isExtrudeDirection(v: unknown): v is ExtrudeDirection {
   return typeof v === 'string' && (EXTRUDE_DIRECTIONS as readonly string[]).includes(v)
 }
@@ -97,6 +130,57 @@ export function isExtrudeBoolMode(v: unknown): v is ExtrudeBoolMode {
 
 export function isExtrudeEndCondition(v: unknown): v is ExtrudeEndCondition {
   return typeof v === 'string' && (EXTRUDE_END_CONDITIONS as readonly string[]).includes(v)
+}
+
+export function isThinWallSide(v: unknown): v is ThinExtrudeSide {
+  return typeof v === 'string' && (THIN_WALL_SIDES as readonly string[]).includes(v)
+}
+
+/** WO-3237: an open chain's wall sides, seen walking its persisted direction. */
+export const THIN_OPEN_WALL_SIDES = ['left', 'right', 'center'] as const satisfies readonly ThinOpenSide[]
+
+/** WO-3237 decide-and-log: a new open-chain Thin starts Left of travel
+ *  (reversible; Reverse or Right puts it on the other side). */
+export const DEFAULT_THIN_OPEN_WALL_SIDE: ThinOpenSide = 'left'
+
+export const THIN_OPEN_WALL_SIDE_LABELS: Record<ThinOpenSide, string> = {
+  get left() { return thinOpenText('sideLeft') },
+  get right() { return thinOpenText('sideRight') },
+  get center() { return thinText('sideCenter') },
+}
+
+export function isThinOpenWallSide(v: unknown): v is ThinOpenSide {
+  return typeof v === 'string' && (THIN_OPEN_WALL_SIDES as readonly string[]).includes(v)
+}
+
+export type ExtrudeWallResolution =
+  | { ok: true; thin?: { thickness: number; side: ThinExtrudeSide } | { thickness: number; side: ThinOpenSide; open: true } }
+  | { ok: false; reason: string }
+
+/** WO-3234: the payload's wall intent onto the kernel's ExtrudeRequest.thin.
+ *  Absent or 'solid' is an ordinary solid and reads nothing else -- a stale
+ *  thickness left behind when Thin was switched off is never validated. Only
+ *  'thin' reads wallThickness (finite, positive) and wallSide (absent = the
+ *  default side). Anything else refuses by name.
+ *  WO-3237: `openChain` - the profile is one open chain. Only a Thin wall can
+ *  be built from it (a solid refuses by name, never a filled or closed shape),
+ *  and its side is left / right / center of travel (absent = Left). */
+export function resolveExtrudeWall(payload: ExtrudeParamsInput, openChain = false): ExtrudeWallResolution {
+  const mode = payload.wallMode === undefined ? 'solid' : payload.wallMode
+  if (mode === 'solid') return openChain ? { ok: false, reason: thinOpenText('needsThin') } : { ok: true }
+  if (mode !== 'thin') return { ok: false, reason: thinText('unknownWallMode', { mode: String(mode) }) }
+  const thickness = payload.wallThickness
+  if (typeof thickness !== 'number' || !Number.isFinite(thickness) || thickness <= 0) {
+    return { ok: false, reason: thinText('thicknessMustBePositive', { thickness: String(thickness) }) }
+  }
+  if (openChain) {
+    const openSide = payload.wallSide === undefined ? DEFAULT_THIN_OPEN_WALL_SIDE : payload.wallSide
+    if (!isThinOpenWallSide(openSide)) return { ok: false, reason: thinOpenText('unknownOpenSide', { side: String(openSide) }) }
+    return { ok: true, thin: { thickness, side: openSide, open: true } }
+  }
+  const side = payload.wallSide === undefined ? DEFAULT_THIN_WALL_SIDE : payload.wallSide
+  if (!isThinWallSide(side)) return { ok: false, reason: thinText('unknownWallSide', { side: String(side) }) }
+  return { ok: true, thin: { thickness, side } }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +269,11 @@ export interface ExtrudeParamsInput {
   terminalOffset?: unknown
   endTarget?: unknown
   resolvedEndTargets?: unknown
+  /** WO-3234: 'solid' | 'thin'; absent = solid. */
+  wallMode?: unknown
+  /** WO-3234: read only when wallMode is 'thin'. */
+  wallThickness?: unknown
+  wallSide?: unknown
 }
 
 export type ExtrudeRequestBuild =
@@ -213,6 +302,9 @@ interface BuildExtrudeRequestArgsBase {
   /** Re-resolves a persisted base/construction datum node to its current
    * generation plane. Required only when Up to face names a planeFeatureId. */
   lookupPlaneTarget?: (featureId: string) => PlaneDef | undefined
+  /** WO-3237: the one profile is an open chain (regionSelector
+   *  resolveExtrudeSelection); only a Thin open wall may be built from it. */
+  openChain?: boolean
 }
 
 export type BuildExtrudeRequestArgs = BuildExtrudeRequestArgsBase & (
@@ -414,6 +506,8 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
   if (!isExtrudeEndCondition(rawEnd)) {
     return { ok: false, reason: workbenchText('extrudeParams.unknownExtrudeEndCondition', { value1: String(String(rawEnd)) }) }
   }
+  const wall = resolveExtrudeWall(payload, args.openChain === true)
+  if (!wall.ok) return wall
 
   let end: ExtrudeEnd
   if (rawEnd === 'blind' || rawEnd === 'symmetric') {
@@ -526,6 +620,7 @@ export function buildExtrudeRequest(args: BuildExtrudeRequestArgs): ExtrudeReque
     op,
     ...(target !== undefined ? { target } : {}),
     ...(modelItemId !== undefined ? { modelItemId } : {}),
+    ...(wall.thin !== undefined ? { thin: wall.thin } : {}),
   }
   return op === 'newBody'
     ? { ok: true, req }

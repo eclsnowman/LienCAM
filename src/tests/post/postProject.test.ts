@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 import { postProject } from '../../lib/post/postProject'
 import { UCCNC_CONFIG } from '../../lib/post/dialects/uccnc'
@@ -188,9 +189,19 @@ describe('postProject — combined mode', () => {
     expect(roughSpeed).toBeGreaterThanOrEqual(0)
     expect(finishSpeed).toBeGreaterThan(finishComment)
     expect(finishCut).toBeGreaterThan(finishSpeed)
-    await expect(res.combined!.gcode).toMatchFileSnapshot(
-      '../evidence/WO-1277/two-speed-same-tool.nc',
+    // WO-3123 adds exactly its required missing-safe-Z notice after the
+    // framing line. Keep the pre-existing fixture strict for every other byte.
+    // Git can check this historical fixture out with CRLF on Windows, but the
+    // post always emits its canonical LF program bytes. Normalize the fixture
+    // before adding the ordered notice so the full-program comparison remains
+    // byte-for-byte strict on either checkout.
+    const before = readFileSync(new URL('../evidence/WO-1277/two-speed-same-tool.nc', import.meta.url), 'utf8')
+      .replace(/\r\n/g, '\n')
+    const expected = before.replace(
+      'G90 G94 G17 G21 G64\n',
+      'G90 G94 G17 G21 G64\n( Machine safe Z is missing or rounds to zero; using work clearance for start/restart )\n',
     )
+    expect(res.combined!.gcode).toBe(expected)
   })
 
   it('carries spindle state across combined setup sections', () => {
@@ -241,10 +252,11 @@ describe('postProject — combined mode', () => {
 
     // Exactly one mid-program trailing retract (n-1 = 1) plus the postamble's
     // own final safe-Z retract, plus (WO-2023) the Z-only lift before the
-    // program's first XY travel = three total G0 Z5 lines.
+    // program's first XY travel, plus WO-3123's ordered same-tool setup-entry
+    // approach = four total G0 Z5 lines.
     expect(lines[lines.indexOf('G0 X10 Y20 Z5') - 1]).toBe('G0 Z5')
     expect(lines[lines.lastIndexOf('G0 Z5', g55Idx) + 1]).toBe('( Back )')
-    expect(countOf(lines, (l) => l === 'G0 Z5')).toBe(3)
+    expect(countOf(lines, (l) => l === 'G0 Z5')).toBe(4)
   })
 
   it('SAME-tool DEFAULT: no M5 between sections, setup 2 does NOT re-emit T#/M3, but its WCS IS present', () => {

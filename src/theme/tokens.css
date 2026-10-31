@@ -92,6 +92,7 @@
   --hue-helix: #ff8c00;       /* v3: merged with ramp (was #ffd700 gold) */
   --hue-ramp: #ff8c00;
   --hue-plunge: #ff44ff;
+  --hue-retract: #c6ff00;   /* WO-3200: lime, away from cut cyan so a retract never reads as a cut */
   --hue-finish: #ff85a8;
   --hue-stepover: #44ff88;
   --hue-wall-follow: #00d0a0;
@@ -406,6 +407,7 @@
   --role-helix: var(--hue-helix);
   --role-ramp: var(--hue-ramp);
   --role-plunge: var(--hue-plunge);
+  --role-retract: var(--hue-retract);
   --role-finish: var(--hue-finish);
   --role-stepover: var(--hue-stepover);
   --role-wall-follow: var(--hue-wall-follow);
@@ -846,6 +848,7 @@ html[data-ui-scale] {
   --hue-helix: #c96a00;
   --hue-ramp: #c96a00;
   --hue-plunge: #81158a;
+  --hue-retract: #4d7a00;
   --hue-finish: #8e1d4e;
   --hue-stepover: #16693a;
   --hue-wall-follow: #00865c;

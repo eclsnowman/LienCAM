@@ -375,6 +375,8 @@ describe('WO UI-70-R4 / L2: the pair is ONE gate -- sanctioned-and-censused, or 
       // WO-2301 6ce7ed850: hidden zero-size print document, outside the visible overlay domain.
       'lib/sketch/printDrawing.ts:printSketchDocument > document.body.appendChild(frame)',
       "lib/sketch/printDrawing.ts:printSketchDocument > document.createElement('iframe')",
+      // WO-3279 (WO-3324): the kit Tooltip's transient fixed portal, sanctioned and censused at its own key.
+      'components/kit/surfaces/tooltip.tsx:useTooltip > createPortal( <span ref={tipRef} id={id} role="tooltip" className="kit-tooltip" data-ki...',
     ].sort())
   })
 })

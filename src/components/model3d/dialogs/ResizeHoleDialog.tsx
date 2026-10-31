@@ -16,6 +16,8 @@ import { useText, textFor } from '../../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
 import type { FeatureClass, FeatureVerdict } from '../../../geom/geom-service'
 import { DialogShell } from './DialogShell'
+import type { PartFeature } from '../../../kernel/features'
+import { featureForVerdict, type ModelBodyFeatureResult } from '../../../lib/geometry/partFeatureBinding'
 
 export const RESIZE_HOLE_CLASSES = ['throughHole', 'blindHole', 'counterboreStack'] as const satisfies readonly FeatureClass[]
 
@@ -61,6 +63,30 @@ function resizeHoleDisabledReason(verdict: FeatureVerdict): string | undefined {
  *  set so the two surfaces can never drift apart on eligibility. */
 export function eligibleResizeHoleVerdicts(verdicts: FeatureVerdict[]): FeatureVerdict[] {
   return verdicts.filter((verdict) => RESIZE_HOLE_CLASS_SET.has(verdict.featureClass) && resizeHoleDisabledReason(verdict) === undefined)
+}
+
+/** WO-3202 (WO-3170 Slice B): the hole Resize Hole edits, read off the ONE
+ *  shared recognition result: the kernel verdict the edit command needs and
+ *  the common feature (by sourceKey) that Bore selects for the same wall.
+ *  The verdict stays the edit authority -- `feature` is undefined only when
+ *  the adapter could not list that verdict, which never blocks the edit. */
+export interface ResizeHoleTarget {
+  verdict: FeatureVerdict
+  feature: PartFeature | undefined
+}
+
+function targetOf(result: ModelBodyFeatureResult, verdict: FeatureVerdict | undefined): ResizeHoleTarget | undefined {
+  return verdict === undefined ? undefined : { verdict, feature: featureForVerdict(result, verdict.featureKey) }
+}
+
+/** The eligible hole whose faces include `faceId` (a viewport pick). */
+export function resizeHoleTargetOnFace(result: ModelBodyFeatureResult, faceId: string): ResizeHoleTarget | undefined {
+  return targetOf(result, eligibleResizeHoleVerdicts([...result.verdicts]).find((v) => v.faceIds.includes(faceId)))
+}
+
+/** The eligible hole with exactly `featureKey` (a supplement-list row). */
+export function resizeHoleTargetByKey(result: ModelBodyFeatureResult, featureKey: string): ResizeHoleTarget | undefined {
+  return targetOf(result, eligibleResizeHoleVerdicts([...result.verdicts]).find((v) => v.featureKey === featureKey))
 }
 
 /** BK-174: `featureKey`'s doc comment claims "identical geometry -> identical

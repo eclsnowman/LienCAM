@@ -187,6 +187,11 @@ const NOTCH_POLY: Vec2[] = [
   { x: 0, y: 0 }, { x: 80, y: 0 }, { x: 80, y: 50 }, { x: 68, y: 50 }, { x: 68, y: 10 },
   { x: 60, y: 10 }, { x: 60, y: 50 }, { x: 0, y: 50 },
 ]
+/** Where the contour relief starts on this fixture: the (68, 10) notch corner approached
+ *  at (65, 13), 3 mm out in -x and 3 mm along +y for the 6 mm mill. With relief enabled the
+ *  main path's exit move travels here instead of lifting in place, at Retract (WO-3083
+ *  rule 2). */
+const RELIEF_APPROACH: Vec2 = { x: 65, y: 13 }
 
 const POCKET_RECT: Vec2[] = [{ x: 10, y: 10 }, { x: 70, y: 10 }, { x: 70, y: 50 }, { x: 10, y: 50 }]
 // L-shaped island, its reflex corner at (38, 30).
@@ -333,8 +338,17 @@ describe('WO-2287: Pocket and Contour relieve inside corners through the product
     for (const style of STYLES) {
       it(`${style}: both slot corners are cut to the corner point at full depth; nothing else changes`, async () => {
         const moves = await compute(notchGeo, contourOp(notchLoop.id, style))
-        // The main path is untouched: relief is appended after it.
-        expect(moves.slice(0, plain.length)).toEqual(plain)
+        // The main path is untouched: relief is appended after it. Its EXIT move is the one
+        // move that IS different, and it is pinned move for move: instead of lifting in
+        // place to Clearance (25) the tool travels to the relief's approach point at Retract
+        // (17), because WO-3083 rule 2 crosses into a corner relief of the same operation at
+        // Retract. Type, role and every other field of that move still compare equal.
+        expect(plain[plain.length - 1]).toMatchObject({ type: 'rapid', z: heights.clearanceHeight })
+        expect(moves.slice(0, plain.length - 1)).toEqual(plain.slice(0, -1))
+        expect(moves[plain.length - 1]).toEqual({
+          ...plain[plain.length - 1],
+          x: RELIEF_APPROACH.x, y: RELIEF_APPROACH.y, z: heights.retractHeight,
+        })
         expect(moves.length).toBeGreaterThan(plain.length)
         const sim = simulate(moves, area.x0, area.y0, area.w, area.h)
         const bottom = levels[levels.length - 1]
@@ -375,6 +389,8 @@ describe('WO-2287: Pocket and Contour relieve inside corners through the product
     for (const style of STYLES) {
       it(`${style}: all four pocket corners and the island's reflex corner are cut at full depth`, async () => {
         const moves = await compute(pocketGeo, pocketOp(style))
+        // The whole main path is compared, exit move included: the relief behind a pocket's
+        // exit does not change it (measured 2026-10-29: rapid to Clearance, unchanged).
         expect(moves.slice(0, plain.length)).toEqual(plain)
         const sim = simulate(moves, area.x0, area.y0, area.w, area.h)
         const bottom = levels[levels.length - 1]

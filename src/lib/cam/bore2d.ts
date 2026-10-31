@@ -5,6 +5,7 @@ import { fitCircle } from './geometry'
 import { orderHoleLikePoints } from './holeOrder'
 import { generateHelixArcs } from './threadHelix'
 import { resolveHeights } from './heights'
+import { entryMaterialOf, entryStartZ, hopTo, liftTo } from './moves'
 import { directionForTool } from '../tool/cutHand'
 import { loopWindingFor } from './millingDirection'
 import { operatorLoopRef, type OperatorLoop } from './toolFluteReach'
@@ -46,24 +47,8 @@ function buildDepths(topZ: number, bottomZ: number, stepdown: number): number[] 
   return depths
 }
 
-function rapidTo(moves: ToolpathMove[], point: Pt, z: number): void {
-  moves.push({ type: 'rapid', x: point.x, y: point.y, z, role: 'rapid' })
-}
-
 function plungeAt(moves: ToolpathMove[], point: Pt, z: number, feed: number): void {
   moves.push({ type: 'feed', x: point.x, y: point.y, z, feed, role: 'plunge' })
-}
-
-function rapidEntryAt(
-  moves: ToolpathMove[],
-  point: Pt,
-  feedZ: number,
-  clearanceZ: number,
-  retractZ: number,
-): void {
-  rapidTo(moves, point, clearanceZ)
-  rapidTo(moves, point, retractZ)
-  rapidTo(moves, point, feedZ)
 }
 
 function isEndMillType(toolType: string | undefined): boolean {
@@ -251,13 +236,6 @@ function enterDepth(
   plungeAt(moves, pointOnCircle(c, orbitRadius, startAngle), targetZ, plungeRate)
 }
 
-function retractFromLast(moves: ToolpathMove[], retractZ: number, clearanceZ: number): void {
-  const last = moves[moves.length - 1]
-  if (!last) return
-  rapidTo(moves, { x: last.x, y: last.y }, retractZ)
-  rapidTo(moves, { x: last.x, y: last.y }, clearanceZ)
-}
-
 export function buildBoreToolpath(
   payload: BoreWorkerPayload,
   onProgress?: (fraction: number, phase?: string) => void,
@@ -270,6 +248,7 @@ export function buildBoreToolpath(
   const plannerDirection = directionForTool(params.direction, tool)
   const { clearanceZ, retractZ, feedZ, topZ, bottomZ } = resolveHeights(heights, wcsOrigin)
   const { feedRate, plungeRate, rampRate, fastTraverseRate, finishRate } = resolveFeedrates(tool, feedrateOverride)
+  const material = entryMaterialOf(payload, topZ, feedZ)
 
   if (!isEndMillType(tool.type)) {
     throw new Error('Bore: use a flat or bull-nose end mill. Drill bits, V-bits, and ball mills are not valid bore milling tools.')
@@ -373,13 +352,10 @@ export function buildBoreToolpath(
     for (let p = 0; p < orbitPlans.length; p++) {
       const plan = orbitPlans[p]
       const start = circleStart(center, plan.radius)
-      rapidEntryAt(moves, start, feedZ, clearanceZ, retractZ)
-
-      let currentZ = feedZ
-      if (currentZ > topZ + EPS) {
-        plungeAt(moves, start, topZ, plungeRate)
-        currentZ = topZ
-      }
+      // WO-3083: rapid down to just above the material the orbit sweeps (was a fed plunge
+      // from the Feed plane to Top), first entry through Clearance, later hops at Retract.
+      let currentZ = entryStartZ(material, center, plan.radius + tool.diameter / 2, boreBottomZ)
+      hopTo(moves, start, currentZ, retractZ, clearanceZ)
 
       for (let d = 0; d < depths.length; d++) {
         const depth = depths[d]
@@ -416,9 +392,10 @@ export function buildBoreToolpath(
         )
       }
 
-      retractFromLast(moves, retractZ, clearanceZ)
+      liftTo(moves, retractZ)
     }
   }
+  liftTo(moves, clearanceZ)
 
   for (const message of notices) notify?.(message)
   return moves

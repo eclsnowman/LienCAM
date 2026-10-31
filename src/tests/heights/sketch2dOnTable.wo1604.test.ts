@@ -118,7 +118,10 @@ async function checkCase(e: Expectation): Promise<void> {
       POCKET_TOOL_RADIUS, e.retract)
     expect(violations, 'pocket rapids vs the material left').toEqual([])
   } else {
-    expect(reading.lowestRapidZ, 'lowest rapid Z').toBeGreaterThanOrEqual(e.retract - TOL)
+    // WO-3083 re-pin (one entry rule, owner 2026-10-23): entries rapid down to 1 mm above the
+    // material they meet (was the Feed plane / Retract), so the rapid floor is that entry start.
+    const entryFloor = Math.min(e.retract, Math.min(e.top, reading.stockTopWcs) + 1)
+    expect(reading.lowestRapidZ, 'lowest rapid Z').toBeGreaterThanOrEqual(entryFloor - TOL)
     if (Number.isFinite(reading.lowestRapidOverStockZ)) {
       expect(reading.lowestRapidOverStockZ, 'lowest rapid over the stock').toBeGreaterThanOrEqual(e.top - TOL)
     }

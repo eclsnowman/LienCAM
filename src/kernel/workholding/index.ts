@@ -33,7 +33,8 @@ export interface TabBlockLoop {
 
 export interface TabBlock {
   readonly tabs: ResolvedTabs
-  /** One entry per loop in the caller's order; tab k of loop i has stable index `${loopId}#${k}`. */
+  /** One entry per loop in the caller's order; tab k of loop i has stable index `${loopId}#${k}`.
+   *  A loop whose locations are 'none' (WO-3220) carries no tabs and gets no entry. */
   readonly loops: readonly { readonly loopId: string; readonly plan: TabPlan; readonly tabIds: readonly string[] }[]
 }
 
@@ -133,13 +134,14 @@ export function createWorkholdingService(authorities: WorkholdingAuthorities, po
     },
 
     /** Steps 5-6: the one tab block for a contour operation. */
-    tabBlock(request: TabRequest, loops: readonly TabBlockLoop[], tabLocations?: Readonly<Record<string, readonly number[]>>): TabOutcome<TabBlock | null> {
+    tabBlock(request: TabRequest, loops: readonly TabBlockLoop[], tabLocations?: Readonly<Record<string, readonly number[] | 'none'>>): TabOutcome<TabBlock | null> {
       const resolved = resolveTabs(request)
       if (!resolved.ok) return resolved
       if (!resolved.value) return { ok: true, value: null }
       const planned: { loopId: string; plan: TabPlan; tabIds: string[] }[] = []
       for (const loop of loops) {
         const custom = tabLocations?.[loop.loopId]
+        if (custom === 'none') continue
         const plan = planTabs(loop.path, resolved.value, custom && custom.length > 0 ? custom : undefined)
         if (!plan.ok) return plan
         planned.push({ loopId: loop.loopId, plan: plan.value, tabIds: plan.value.intervals.map((_, k) => `${loop.loopId}#${k}`) })

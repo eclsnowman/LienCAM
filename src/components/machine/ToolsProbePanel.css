@@ -233,3 +233,10 @@
   min-width: 0;
   max-width: 100%;
 }
+
+/* WO-3198: Resume for a held Measure takes the Measure button's place and
+   size; filled motion green, as CYCLE START is on Main. */
+.control-tools-jog .control-tools-probe-card .control-tools-resume {
+  background: var(--green-600);
+  color: #fff;
+}

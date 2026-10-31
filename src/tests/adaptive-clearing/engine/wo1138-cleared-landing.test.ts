@@ -80,6 +80,9 @@ describe('WO-1138: tight-corner landing routes through cleared stock', () => {
     expect(rings[0].x).toBeCloseTo(132.68, 1)
     // WO-1896: the helix now winds the other way (climb keeps material right), which moves
     // the sample-average of its partial turn; the seed centre is unchanged.
-    expect(rings[0].y).toBeCloseTo(-20.23, 1)
+    // WO-3083 re-pin: the helix now starts 1 mm above the material (it began AT it after a fed
+    // plunge), so its partial turn is longer and the sample-average moves again (-20.23 ->
+    // -20.29); the seed centre is still unchanged.
+    expect(rings[0].y).toBeCloseTo(-20.29, 1)
   }, 240_000)
 })

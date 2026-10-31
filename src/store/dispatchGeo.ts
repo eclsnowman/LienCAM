@@ -288,6 +288,70 @@ export function isWorldBakedLayer(layer: Pick<Layer2D, 'projectionPlane' | 'fram
  * Z, so the owning geometry's position.z is added; world-baked planes (STL
  * projections) are returned verbatim.
  */
+/**
+ * The world Z plane a geometry's selected loops lie on (resolveTopZ's
+ * 'geometry_face'), and whether that plane is only ASSUMED. WO-3188: a plain
+ * DXF/SVG/sketch outline carries no height - its loops sit at the row's
+ * position.z wherever the import put it, usually the stock bottom - so its
+ * "plane" says nothing about where the part's material is. Chain Z, a layer's
+ * projection plane or the row's projection plane each carry a real height.
+ */
+export function geometryLoopPlane(
+  g: ImportedGeometry,
+  loopIds: ReadonlyArray<string> = [],
+): { worldZ: number; assumed: boolean } {
+  // WO-3066: an STL edge chain carries the part-local Z it lies at (one
+  // chain layer holds every Z, so the layer has no plane of its own).
+  // The picked chains' plane is that Z on the part, the highest of them
+  // the way layer planes aggregate below.
+  // A part tipped about X or Y has no single plane for a chain; it keeps
+  // the fallbacks below.
+  const level = Math.abs(g.rotation.x) < 1e-9 && Math.abs(g.rotation.y) < 1e-9
+  const chainZs = loopIds.length === 0 || !level ? [] : (g.loops ?? [])
+    .filter(lp => loopIds.includes(lp.id) && lp.z !== undefined)
+    .map(lp => lp.z as number)
+  if (chainZs.length > 0) return { worldZ: g.position.z + Math.max(...chainZs), assumed: false }
+  // Per-layer projection planes are set when loops come from STL/face
+  // projections - that IS the plane the projected lines are on.
+  // B-rep derived planes (frame 'geometry_local') store the MODEL Z;
+  // layerPlaneWorldZ adds g.position.z for those (world-baked pass through).
+  // Per ADR-0020, geometry_face is the plane of the op's SELECTED loops'
+  // OWNING layer, not the geometry-wide max - otherwise deriving a new (high)
+  // layer for one op leaks its plane into every other op on the same geometry.
+  let layers = g.layers2d ?? []
+  if (loopIds.length > 0) {
+    const ownerIds = new Set(
+      (g.loops ?? []).filter(lp => loopIds.includes(lp.id)).map(lp => lp.layerId),
+    )
+    const owned = layers.filter(l => ownerIds.has(l.id))
+    // No owning layer found (orphan / cross-geometry loopIds): fall back to
+    // the legacy aggregate over ALL layers rather than crashing.
+    if (owned.length > 0) layers = owned
+  }
+  const layerZs = layers
+    .map(l => layerPlaneWorldZ(l, g))
+    .filter((z): z is number => z !== undefined)
+  if (layerZs.length > 0) return { worldZ: Math.max(...layerZs), assumed: false }
+  if (g.projectionPlane) return { worldZ: g.projectionPlane.origin.z, assumed: false }
+  // Plain imported 2D (DXF/SVG/sketch): the loops are flat at position.z.
+  const flatOutline = (g.format === 'dxf' || g.format === 'svg' || g.format === 'sketch') &&
+    !isModelOriginGeometry(g)
+  return { worldZ: g.position.z, assumed: flatOutline }
+}
+
+/** WO-3188: every source the op reads is a plain 2D outline whose plane is
+ * only assumed (geometryLoopPlane). Empty sources are not 2D outlines. */
+export function sourcesAreHeightlessOutlines(
+  sources: ReadonlyArray<ImportedGeometry>,
+  loopIds: ReadonlyArray<string> = [],
+): boolean {
+  if (sources.length === 0) return false
+  return sources.every(g => {
+    const own = loopIds.filter(id => (g.loops ?? []).some(lp => lp.id === id))
+    return geometryLoopPlane(g, own).assumed
+  })
+}
+
 export function layerPlaneWorldZ(
   layer: Pick<Layer2D, 'projectionPlane' | 'frame'>,
   geo: GeoPose,
@@ -1375,43 +1439,8 @@ export function resolveTopZ(
     // height, which silently pushed the reference off the geometry plane). For
     // flat 2D imports the loops sit at the geometry's position.z; projected
     // layers carry the explicit plane they were projected onto.
-    const geoFaceZ = (g: ImportedGeometry, loopIds: ReadonlyArray<string> = []) => {
-      // WO-3066: an STL edge chain carries the part-local Z it lies at (one
-      // chain layer holds every Z, so the layer has no plane of its own).
-      // The picked chains' plane is that Z on the part, the highest of them
-      // the way layer planes aggregate below.
-      // A part tipped about X or Y has no single plane for a chain; it keeps
-      // the fallbacks below.
-      const level = Math.abs(g.rotation.x) < 1e-9 && Math.abs(g.rotation.y) < 1e-9
-      const chainZs = loopIds.length === 0 || !level ? [] : (g.loops ?? [])
-        .filter(lp => loopIds.includes(lp.id) && lp.z !== undefined)
-        .map(lp => lp.z as number)
-      if (chainZs.length > 0) return g.position.z + Math.max(...chainZs)
-      // Per-layer projection planes are set when loops come from STL/face
-      // projections - that IS the plane the projected lines are on.
-      // B-rep derived planes (frame 'geometry_local') store the MODEL Z;
-      // layerPlaneWorldZ adds g.position.z for those (world-baked pass through).
-      // Per ADR-0020, geometry_face is the plane of the op's SELECTED loops'
-      // OWNING layer, not the geometry-wide max - otherwise deriving a new (high)
-      // layer for one op leaks its plane into every other op on the same geometry.
-      let layers = g.layers2d ?? []
-      if (loopIds.length > 0) {
-        const ownerIds = new Set(
-          (g.loops ?? []).filter(lp => loopIds.includes(lp.id)).map(lp => lp.layerId),
-        )
-        const owned = layers.filter(l => ownerIds.has(l.id))
-        // No owning layer found (orphan / cross-geometry loopIds): fall back to
-        // the legacy aggregate over ALL layers rather than crashing.
-        if (owned.length > 0) layers = owned
-      }
-      const layerZs = layers
-        .map(l => layerPlaneWorldZ(l, g))
-        .filter((z): z is number => z !== undefined)
-      if (layerZs.length > 0) return Math.max(...layerZs)
-      if (g.projectionPlane) return g.projectionPlane.origin.z
-      // Plain imported 2D (DXF/SVG/sketch): the loops are flat at position.z.
-      return g.position.z
-    }
+    const geoFaceZ = (g: ImportedGeometry, loopIds: ReadonlyArray<string> = []) =>
+      geometryLoopPlane(g, loopIds).worldZ
     if (geometryId === '__all__') {
       // All-parts mode: the highest geometry plane across loaded parts. Do NOT
       // floor at wcsZ - geometry usually sits BELOW the WCS (which is on the
@@ -1574,4 +1603,34 @@ export function findTiltedGeometryLocalSource(
     if (kind !== 'aligned' && consumesGeometryLocal(g)) return { geo: g, kind }
   }
   return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WO-3305: sketch geometry as a toolpath input. The store-side door to
+// src/lib/cam/sketchInput (New UI screens may not import lib/cam). A model
+// sketch becomes an ordinary 2D layer on its own sketch part, so every
+// operation reads it through params.geometryId + loopIds like any imported
+// layer: nothing in the dispatch above changes for it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export {
+  readModelSketchSources, bakeSketchInput, sketchInputPart, sketchInputLink,
+  planSketchInputUpdate, parseSketchInputLayerId, IDENTITY_POSE,
+} from '../lib/cam/sketchInput'
+export type {
+  ModelSketchSource, SketchInputPose, SketchInputBake, SketchInputRefusal, SketchInputUpdate, SketchInputDag,
+} from '../lib/cam/sketchInput'
+
+/** Where a model item's sketches sit in the project: the item's whole-item placement, or the
+ *  identity when the project has no placement record for it (a model never placed). */
+export function sketchInputPose(
+  placementRecords: readonly ModelItemPlacementRegistryEntry[],
+  modelItemId: string,
+): { position: Vec3; rotation: Vec3 } {
+  try {
+    const frame = resolveModelReferenceFrame(placementRecords, modelItemId)
+    return { position: { ...frame.position }, rotation: { ...frame.rotation } }
+  } catch {
+    return { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } }
+  }
 }

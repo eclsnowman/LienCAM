@@ -34,6 +34,7 @@ const {
   continueClampPause,
   continueGuidedToolChange,
   disconnectMachine,
+  setSimulatedPart,
   getMachineController,
   loadMachineProgram,
 } = await import('../../lib/machine/machineSession')
@@ -94,6 +95,10 @@ describe('guided tool change end to end (simulator)', () => {
     act(() => { __resetEstopInterlockForTest() })
     getMachineController().home()
     await vi.advanceTimersByTimeAsync(2000)
+    // WO-3189 seeds the setup's stock box at every simulator connect; the M6
+    // measures on the machine's fixed pad, so this fixture says no part is
+    // placed (a placed part replaces the pad by design, WO-416).
+    setSimulatedPart(null)
   })
 
   afterEach(async () => {

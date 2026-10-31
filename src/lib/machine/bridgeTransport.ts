@@ -9,6 +9,8 @@
 // across a network by accident. That guard, and its tests, do not change
 // shape just because the payload moved from bytes to JSON.
 
+import { createBridgeSocket, type BridgeSocket } from './bridgeWorkerSocket'
+
 import type {
   ControllerCapabilities,
   ConnectionPhase,
@@ -1503,6 +1505,9 @@ export function __setActiveVfdPortLinkForTest(link: VfdPortLink | null): void {
 export interface BridgeTransportEvents {
   /** One decoded frame from the bridge: a reply, a push, or hello. */
   onMessage: (message: BridgeMessage) => void
+  /** Local keepalive delivery is distinct from a bridge reply. 'pending'
+   * precedes the worker result; no stale query is put on the wire. */
+  onCallDelivery?: (seq: number, state: 'pending' | 'sent' | 'discarded') => void
   /** Idempotent. Triggers onClose exactly once. */
   onClose: (reason: string | null) => void
 }
@@ -1517,7 +1522,7 @@ export type BridgeVfdFrameObserver = (value: BridgeVfdPush['v']) => void
  *  `ControllerBackend.transport` as - rather than at each connect call. */
 export class BridgeTransport implements MessageChannel {
   private readonly url: string
-  private socket: WebSocket | null = null
+  private socket: BridgeSocket | null = null
   private events: BridgeTransportEvents | null = null
   private closed = false
   /** Present only while start() is opening or waiting for its one retry. */
@@ -1581,7 +1586,7 @@ export class BridgeTransport implements MessageChannel {
         this.cancelPendingStart = null
       }
 
-      const detach = (socket: WebSocket) => {
+      const detach = (socket: BridgeSocket) => {
         socket.onopen = null
         socket.onmessage = null
         socket.onerror = null
@@ -1625,9 +1630,9 @@ export class BridgeTransport implements MessageChannel {
 
       const openAttempt = (attempt: 1 | 2) => {
         if (finished || this.closed) return
-        let socket: WebSocket
+        let socket: BridgeSocket
         try {
-          socket = new WebSocket(this.url)
+          socket = createBridgeSocket(this.url)
         } catch (err) {
           if (attempt === 1) {
             rejectStart(new Error(`Could not create a machine bridge WebSocket at ${this.url}: ${String(err)}`))
@@ -1734,7 +1739,28 @@ export class BridgeTransport implements MessageChannel {
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       throw new Error('Transport not started')
     }
-    socket.send(JSON.stringify(message))
+    const delivery = socket.send(JSON.stringify(message))
+    if (delivery && message.t === 'call') {
+      // Events survive send taps (machineSession observes overrides through a
+      // void wrapper). Do not make delivery ownership depend on return values.
+      const events = this.events
+      events?.onCallDelivery?.(message.seq, 'pending')
+      void delivery.then(sent => {
+        if (this.closed || this.socket !== socket) return
+        events?.onCallDelivery?.(message.seq, sent ? 'sent' : 'discarded')
+      })
+    }
+  }
+
+  /** True only when both the cadence and socket run in the dedicated worker. */
+  startKeepAlive(intervalMs: number, onTick: () => void): boolean {
+    if (!this.socket?.startKeepAlive) return false
+    this.socket.startKeepAlive(intervalMs, onTick)
+    return true
+  }
+
+  stopKeepAlive(): void {
+    this.socket?.stopKeepAlive?.()
   }
 
   async close(): Promise<void> {

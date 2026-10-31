@@ -258,6 +258,11 @@ describe('New Operation keyboard flow', () => {
 
     const name = screen.getByPlaceholderText('Contour 1') as HTMLInputElement
     fireEvent.change(name, { target: { value: 'Keyboard contour' } })
+    // WO-3137 (7ce28356a7): the operation name is part of the Smart Height draft, so
+    // typing it invalidates the resolved preview and Create is disabled until the
+    // preview re-resolves. Let the re-resolution land, as a person's pause before
+    // pressing Enter does; the flow this test pins is unchanged.
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.keyDown(name, { key: 'Enter', code: 'Enter' })
 
     await waitFor(() => expect(operationCount()).toBe(1))
@@ -266,7 +271,7 @@ describe('New Operation keyboard flow', () => {
     expect(screen.queryByTestId('op-create')).toBeNull()
   })
 
-  it('persists a new Target End and creates exactly once on the same numeric Enter', async () => {
+  it('persists a new Target End on the numeric Enter and creates exactly once on the next', async () => {
     render(<NewOperationModal />)
     openModal()
     await makeCreatable()
@@ -275,6 +280,13 @@ describe('New Operation keyboard flow', () => {
     const numeric = numericInput('Target End (WCS)')
     fireEvent.focus(numeric)
     fireEvent.change(numeric, { target: { value: '-12' } })
+    // WO-3324 (WO-3137, 7ce28356a7): the Enter commits the Target End as a new Smart Height draft, which
+    // hides the old preview and disables Create until the preview re-resolves, so that Enter persists the
+    // value and creates nothing yet; the next Enter, after the re-resolution a person waits for, creates once.
+    fireEvent.keyDown(numeric, { key: 'Enter', code: 'Enter' })
+    await flushDeferredCreate()
+    expect(operationCount()).toBe(0)
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.keyDown(numeric, { key: 'Enter', code: 'Enter' })
 
     await waitFor(() => expect(operationCount()).toBe(1))

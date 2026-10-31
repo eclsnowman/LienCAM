@@ -257,3 +257,60 @@ describe('WO-2328: hard-coded English guard', () => {
     expect(new Set(RESIDUAL_TEXT.map(e => `${e.file}\n${e.reason}`)).size).toBe(RESIDUAL_TEXT.length)
   })
 })
+
+
+// WO-3207: exercise catalogue discovery and runtime lookup, including the
+// operator's literal setup name and error text inside translated sentences.
+describe('WO-3207: extracted machine-definition text', () => {
+  it('preserves the English wording, including interpolated confirmation and errors', async () => {
+    const { applyLanguage, textFor } = await import('../../i18n')
+    await applyLanguage('en')
+    const t = textFor('machine-definition.wo3207')
+    expect([
+      t('networkTitle'), t('networkHelp'), t('wiredPort'), t('wiredPortLabel'),
+      t('chooseWiredPort'), t('portPlaceholder'), t('hostAddress'), t('hostAddressLabel'),
+      t('settingUp'), t('setupNetwork'),
+      t('listPortsError', { error: 'Error: offline' }),
+      t('setupError', { error: 'Error: offline' }),
+      t('reuseTitle', { fixtureOffset: 54 }),
+      t('reuseBody', { fixtureOffset: 54, parentSetupName: 'Front "A" & B' }),
+      t('reuseConfirm', { fixtureOffset: 54 }), t('cancel'),
+    ]).toEqual([
+      'Controller network',
+      'The AXBB-E uses 10.10.10.11 and has no DHCP server. Choose its wired port; this only sets addressing.',
+      'Wired port', 'Controller wired port', 'Choose wired port', 'e.g. enp1s0',
+      "This computer's address", 'Controller host address', 'Setting up...', 'Set up controller network',
+      'Could not list wired ports: Error: offline; enter the port name below.',
+      'Controller network setup could not finish: Error: offline',
+      'Reuse G54?',
+      'All six work offsets (G54-G59) are in use. Reuse G54 from "Front "A" & B" for this second side?',
+      'Reuse G54', 'Cancel',
+    ])
+  })
+
+  it.each(['de', 'es', 'fr'])('loads every extracted key in %s and preserves protected tokens', async language => {
+    const { applyLanguage, textFor } = await import('../../i18n')
+    const { ENGLISH_CATALOG, loadCatalog } = await import('../../i18n/catalogs')
+    const { structuralIssues } = await import('../../../tools/i18n-freshness.mjs')
+    const area = 'machine-definition.wo3207'
+    const english = ENGLISH_CATALOG[area]
+    const translated = (await loadCatalog(language))[area]
+    expect(Object.keys(translated).sort()).toEqual(Object.keys(english).sort())
+    for (const [key, text] of Object.entries(english)) {
+      expect(typeof translated[key], key).toBe('string')
+      expect(translated[key], key).not.toBe(text)
+      expect(structuralIssues(String(text), String(translated[key])), key).toEqual([])
+    }
+    try {
+      await applyLanguage(language)
+      const t = textFor(area)
+      expect(t('networkTitle')).toBe(translated.networkTitle)
+      expect(t('reuseBody', { fixtureOffset: 59, parentSetupName: 'Front "A" & B' }))
+        .toBe(String(translated.reuseBody).replace('{{fixtureOffset}}', '59').replace('{{parentSetupName}}', 'Front "A" & B'))
+      expect(t('setupError', { error: 'Error: <offline> & timeout' }))
+        .toBe(String(translated.setupError).replace('{{error}}', 'Error: <offline> & timeout'))
+    } finally {
+      await applyLanguage('en')
+    }
+  })
+})

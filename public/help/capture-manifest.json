@@ -858,94 +858,74 @@
       "topic": "height-references",
       "slot": "heights-tab",
       "path": "public/help/height-references/",
-      "subject": "New Operation (2D Pocket) Heights tab: five height rows with formula, WCS value and Smart / User Override; Bottom Height expanded with reference, sign, offset and End condition; height diagram",
+      "subject": "Settled Edit Operation Heights tab: collapsed explanation, Help icon, five reference rows and separate illustrative local route.",
       "surroundings": [
         "modal:new-operation"
       ],
       "generator": "scripted",
-      "generatorCmd": "node tools/capture/help/route.mjs WO-2133 walk.mjs setup tools op && node tools/capture/help/route.mjs WO-2133 pictures.mjs",
+      "generatorCmd": "node src/tests/evidence/WO-3103/capture.mjs",
       "locked": false,
-      "reviewNotes": "",
+      "reviewNotes": "Worker inspected current capture. Owner approved the pictures 2026-10-23 (WO-3103 card).",
       "captureRecord": {
         "topic": "height-references",
         "slot": "heights-tab",
         "file": "public/help/height-references/heights-tab.webp",
         "status": "captured",
-        "sourceCommit": "de72cf8ebe579f9bcaa3f5e1a956e43e00d4f628",
-        "route": "node tools/capture/help/route.mjs WO-2133 walk.mjs setup tools op && node tools/capture/help/route.mjs WO-2133 pictures.mjs",
-        "capturedAt": "2026-10-03T16:53:56.311Z",
-        "beforeDimensions": [
-          680,
-          722
-        ],
+        "sourceCommit": "3a128bee16cab9c5bbd6040392d22f9ebee8138c",
+        "route": "node src/tests/evidence/WO-3103/capture.mjs",
+        "capturedAt": "2026-10-23T19:14:50.131093-05:00",
         "afterDimensions": [
-          680,
-          722
+          646,
+          582
         ],
-        "sha256": "f700ccd2a2a0c74bc38a3279428ff0bab3ea2894917aa50c72ebf5731a63ca6d",
-        "changedPixels": 422,
-        "changedFraction": 0.0008595404920971159,
-        "meanAbsoluteDifference": 0.39978477540600726,
-        "changed": false,
-        "difference": "src/tests/evidence/WO-2491/difference/height-references--heights-tab.png",
-        "before": "src/tests/evidence/WO-2491/before/height-references/heights-tab.webp",
-        "after": "src/tests/evidence/WO-2491/after/height-references/heights-tab.webp",
+        "sha256": "d2aa9bed3aeb85a78c24aaf3350956e1fcba46fc832310d9e3c5a1028540f946",
         "viewport": [
-          1920,
-          1080
+          1600,
+          1000
         ],
         "deviceScaleFactor": 1,
-        "theme": "route default (dark)",
-        "scale": "route default (100%)",
-        "approval": "reviewed: whole-frame QA, WO-2491",
-        "retained": "committed picture (below threshold)"
+        "theme": "dark",
+        "scale": "100%",
+        "locale": "en",
+        "approval": "approved by architect and owner 2026-10-23 (WO-3103 card)",
+        "evidence": "src/tests/evidence/WO-3103/heights-tab.png"
       }
     },
     {
       "topic": "height-truthfulness",
       "slot": "resolved-heights",
       "path": "public/help/height-truthfulness/",
-      "subject": "Properties panel Heights group of a generated Contour: End policy, Edit Target End, and the five height rows with WCS values and Smart",
+      "subject": "Generated Drill operation Properties Heights group: all five resolved WCS reference values and drill depth policy.",
       "surroundings": [
         "properties-panel"
       ],
       "generator": "scripted",
-      "generatorCmd": "node tools/capture/help/route.mjs WO-2133 walk.mjs setup tools op && node tools/capture/help/route.mjs WO-2133 pictures.mjs",
+      "generatorCmd": "node src/tests/evidence/WO-3103/capture.mjs props",
       "locked": false,
-      "reviewNotes": "",
+      "reviewNotes": "Worker inspected current capture. Owner approved the pictures 2026-10-23 (WO-3103 card).",
       "captureRecord": {
         "topic": "height-truthfulness",
         "slot": "resolved-heights",
         "file": "public/help/height-truthfulness/resolved-heights.webp",
         "status": "captured",
-        "sourceCommit": "de72cf8ebe579f9bcaa3f5e1a956e43e00d4f628",
-        "route": "node tools/capture/help/route.mjs WO-2133 walk.mjs setup tools op && node tools/capture/help/route.mjs WO-2133 pictures.mjs",
-        "capturedAt": "2026-10-03T16:53:56.321Z",
-        "beforeDimensions": [
-          259,
-          323
-        ],
+        "sourceCommit": "3a128bee16cab9c5bbd6040392d22f9ebee8138c",
+        "route": "node src/tests/evidence/WO-3103/capture.mjs props",
+        "capturedAt": "2026-10-23T19:16:33.221183-05:00",
         "afterDimensions": [
           259,
-          323
+          462
         ],
-        "sha256": "e6f2d887963f6990d7c932556e3078d5254d6a11a40f10ee77c7bc1bc3e77ecf",
-        "changedPixels": 4,
-        "changedFraction": 0.00004781428930035741,
-        "meanAbsoluteDifference": 0.6940483163393381,
-        "changed": false,
-        "difference": "src/tests/evidence/WO-2491/difference/height-truthfulness--resolved-heights.png",
-        "before": "src/tests/evidence/WO-2491/before/height-truthfulness/resolved-heights.webp",
-        "after": "src/tests/evidence/WO-2491/after/height-truthfulness/resolved-heights.webp",
+        "sha256": "8a4d04dd07447b0b721cb2875aac57d3b7a7ae3e30ad44939c0b404bcbcfed07",
         "viewport": [
-          1920,
-          1080
+          1600,
+          1400
         ],
         "deviceScaleFactor": 1,
-        "theme": "route default (dark)",
-        "scale": "route default (100%)",
-        "approval": "reviewed: whole-frame QA, WO-2491",
-        "retained": "committed picture (below threshold)"
+        "theme": "dark",
+        "scale": "100%",
+        "locale": "en",
+        "approval": "approved by architect and owner 2026-10-23 (WO-3103 card)",
+        "evidence": "src/tests/evidence/WO-3103/resolved-heights-panel.png"
       }
     },
     {
@@ -5097,7 +5077,7 @@
       "topic": "height-planes-viewport",
       "slot": "planes-viewport",
       "path": "public/help/height-planes-viewport/",
-      "subject": "Toolpath view with Contour 1 selected, Display Mode flyout open, Height planes and all five per-plane boxes checked, planes drawn as faint dashed sheets",
+      "subject": "Generated Drill operation with Display Mode flyout and all five reference planes enabled.",
       "surroundings": [
         "viewport",
         "view-cube",
@@ -5105,42 +5085,32 @@
         "display-mode-flyout"
       ],
       "generator": "scripted",
-      "generatorCmd": "node tools/capture/help/route.mjs WO-2133 walk.mjs setup tools op planes && node tools/capture/help/route.mjs WO-2133 pictures.mjs",
+      "generatorCmd": "node src/tests/evidence/WO-3103/capture.mjs",
       "locked": false,
-      "reviewNotes": "",
+      "reviewNotes": "Worker inspected current capture. Owner approved the pictures 2026-10-23 (WO-3103 card).",
       "captureRecord": {
         "topic": "height-planes-viewport",
         "slot": "planes-viewport",
         "file": "public/help/height-planes-viewport/planes-viewport.webp",
         "status": "captured",
-        "sourceCommit": "de72cf8ebe579f9bcaa3f5e1a956e43e00d4f628",
-        "route": "node tools/capture/help/route.mjs WO-2133 walk.mjs setup tools op planes && node tools/capture/help/route.mjs WO-2133 pictures.mjs",
-        "capturedAt": "2026-10-03T16:53:56.271Z",
-        "beforeDimensions": [
-          890,
-          801
-        ],
+        "sourceCommit": "3a128bee16cab9c5bbd6040392d22f9ebee8138c",
+        "route": "node src/tests/evidence/WO-3103/capture.mjs",
+        "capturedAt": "2026-10-23T19:15:24.154815-05:00",
         "afterDimensions": [
-          1370,
-          981
+          1600,
+          1000
         ],
-        "sha256": "3043523ea9a8147088972f6727d31d63f7746f9260069421b7b5720e58e34b9a",
-        "changedPixels": 621349,
-        "changedFraction": 0.46232356377002465,
-        "meanAbsoluteDifference": 27.52175346175882,
-        "changed": true,
-        "difference": "src/tests/evidence/WO-2491/difference/height-planes-viewport--planes-viewport.png",
-        "before": "src/tests/evidence/WO-2491/before/height-planes-viewport/planes-viewport.webp",
-        "after": "src/tests/evidence/WO-2491/after/height-planes-viewport/planes-viewport.webp",
+        "sha256": "8a34047aefed148ebfd28e913f38592367c7e03ba9f2bb15882aeb358df809c0",
         "viewport": [
-          1920,
-          1080
+          1600,
+          1000
         ],
         "deviceScaleFactor": 1,
-        "theme": "route default (dark)",
-        "scale": "route default (100%)",
-        "approval": "reviewed: whole-frame QA, WO-2491",
-        "retained": "new capture"
+        "theme": "dark",
+        "scale": "100%",
+        "locale": "en",
+        "approval": "approved by architect and owner 2026-10-23 (WO-3103 card)",
+        "evidence": "src/tests/evidence/WO-3103/planes-viewport.png"
       }
     },
     {

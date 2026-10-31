@@ -281,6 +281,7 @@ function originSourceText(status: OriginSourceStatus): string {
 }
 
 export function SetupModal() {
+  const setupText = useText('machine-definition.wo3207')
   const words = useText('setup-stock-tools-machine-post')
   const activeModal    = useCamStore((s) => s.activeModal)
   const closeModal     = useCamStore((s) => s.closeModal)
@@ -457,6 +458,9 @@ export function SetupModal() {
   // A committed second side owns the stock, corner, offset and origin mode:
   // they follow from the first side rather than being typed in again.
   const secondSideLocked = secondSide?.ok === true
+  useEffect(() => {
+    if (secondSide?.ok) setFixture(secondSide.fixtureOffset)
+  }, [secondSide])
   // A held tab must LOOK held. app.css gives `.wcs-tab:hover` (0-2-0) more
   // weight than the global `button:disabled` colour (0-1-1), so a disabled tab
   // under the pointer still lit up as the live one - the row read as if Manual
@@ -732,9 +736,8 @@ export function SetupModal() {
     handleCircularStockSelect(stockId)
   }
 
-  // WO-288: adopt everything the flip decides - the first side's stock, its
-  // corner and face, its world origin (the block did not move) and the work
-  // offset that stock owns. A refusal leaves the form untouched and shows why.
+  // WO-3108: adopt the same stock, reflected corner/origin and next offset.
+  // Existing setups remain editable with their saved explicit choices.
   const applySecondSide = (parentSetupId: string | null, axis: FlipAxis) => {
     setFlipOfSetupId(parentSetupId)
     setFlipAxis(axis)
@@ -1136,8 +1139,37 @@ export function SetupModal() {
   }
   const canSave = setupAuthoringDecision(setupAuthoringFacts)
 
-  const handleSave = () => {
-    if (!projectedSetupHeights.heights) return
+  const confirmingOffsetReuse = useRef(false)
+  const handleSave = async () => {
+    if (!projectedSetupHeights.heights || confirmingOffsetReuse.current) return
+    // Re-plan at the write boundary: other setups may have claimed a slot
+    // since the operator selected the first side. Edit keeps its saved choice.
+    const currentProject = useCamStore.getState().project
+    const creationPlan = !isEditMode && flipOfSetupId
+      ? planSecondSideSetup(currentProject, { parentSetupId: flipOfSetupId, axis: flipAxis,
+          ...(selectedStockId ? { stockId: selectedStockId } : {}) })
+      : null
+    if (creationPlan?.ok === false) return
+    if (creationPlan?.requiresOffsetReuseConfirmation) {
+      confirmingOffsetReuse.current = true
+      let accepted: boolean
+      try {
+        accepted = await useCamStore.getState().requestConfirm({
+          title: setupText('reuseTitle', { fixtureOffset: creationPlan.fixtureOffset }),
+          body: setupText('reuseBody', { fixtureOffset: creationPlan.fixtureOffset, parentSetupName: creationPlan.parentSetupName }),
+          confirmLabel: setupText('reuseConfirm', { fixtureOffset: creationPlan.fixtureOffset }),
+          cancelLabel: setupText('cancel'),
+        })
+      } finally {
+        confirmingOffsetReuse.current = false
+      }
+      if (!accepted || !isOpenRef.current) return
+      // A changed project needs a fresh plan and, if still full, fresh consent.
+      if (useCamStore.getState().project !== currentProject) {
+        void saveRef.current()
+        return
+      }
+    }
     // Auto-bind to the lone named stock when nothing is explicitly selected
     // (MODE-AGNOSTIC: any single stock, auto or fixed). Without this a setup
     // created against a one-stock project would leave the WCS unbound and the
@@ -1222,10 +1254,10 @@ export function SetupModal() {
     // migration (ADR-0040).
     const savedFixture = existing && !fixtureWasEdited
       ? existing.wcs.fixtureOffset
-      : fixture
+      : creationPlan?.fixtureOffset ?? fixture
     const savedLabel = existing && !fixtureWasEdited
       ? existing.wcs.label
-      : `G${fixture}`
+      : `G${savedFixture}`
     const fixtureOffsetOwner = !existing || fixtureWasEdited || setupOwnsFixtureOffset(existing.wcs)
       ? { fixtureOffsetOwner: 'setup' as const }
       : {}
@@ -1251,6 +1283,15 @@ export function SetupModal() {
       snapLocalPt: (originMode === 'snap' || originMode === 'bore')  ? snapLocalPt : undefined,
       // Unified binding (kept in sync with the legacy fields above).
       originBinding,
+      ...(creationPlan ? {
+        origin: creationPlan.origin,
+        stockId: creationPlan.stockId,
+        cornerRow: creationPlan.cornerRow,
+        cornerCol: creationPlan.cornerCol,
+        cornerFace: creationPlan.cornerFace,
+        originBinding: { kind: 'stock_corner' as const, stockId: creationPlan.stockId,
+          cornerRow: creationPlan.cornerRow, cornerCol: creationPlan.cornerCol, cornerFace: creationPlan.cornerFace },
+      } : {}),
     }
 
     if (isEditMode && editingSetupId) {
@@ -1422,6 +1463,8 @@ export function SetupModal() {
         || event.key === 'Process'
       ) return
 
+      // The application confirmation owns Enter/Escape while it is open.
+      if (useCamStore.getState().confirmDialog) return
       const panel = document.querySelector<HTMLElement>('[data-testid="setup-modal-panel"]')
       if (event.key === 'Escape') {
         cancelPendingSave()
@@ -1811,7 +1854,7 @@ export function SetupModal() {
                 WO-288: this row is HELD while a flip is committed, exactly like
                 the stock, corner, face and offset controls it sits with. A second
                 side's origin FOLLOWS from the relationship - the same block, the
-                same corner - so Snap, Manual and Gizmo would type (or drag) an
+                reflected corner - so Snap, Manual and Gizmo would type (or drag) an
                 origin over a relationship that says it was not typed, and the
                 created setup would carry flipOf while bound to NO stock: the
                 "same block of material" the order requires could not be shown at
@@ -1917,7 +1960,7 @@ export function SetupModal() {
                 )}
 
                 {/* WO-288: while this setup IS a second side, the stock, corner,
-                    offset and the way the origin is set are the first side's.
+                    offset and origin mode follow the planned flipped frame.
                     Changing any of them here would make the recorded relationship
                     a lie, so they are held until the user sets "Second side of"
                     back to "Not a second side". */}

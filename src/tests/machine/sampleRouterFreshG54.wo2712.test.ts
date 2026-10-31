@@ -168,7 +168,7 @@ describe('WO-2712 amendment: a fresh profile places G54 logically on the Sample 
     const errors = useMachineControl.getState().consoleLines
       .filter((line) => line.severity === 'error')
       .map((line) => line.text)
-    expect(errors).toEqual([])
+    expect(errors, JSON.stringify(errors)).toEqual([])
   })
 
   it('G54 changed on the Offsets tab after Load: Cycle Start runs in the CURRENT zero, no re-load', async () => {
@@ -186,12 +186,18 @@ describe('WO-2712 amendment: a fresh profile places G54 logically on the Sample 
       await vi.advanceTimersByTimeAsync(500)
     }
     expect(liveG54()?.slice(0, 3)).toEqual([-250, -240, -60])
+    // WO-3184 validates the stored zero at Load. The initial zero was outside
+    // travel, as were the partially edited zeros. Those console errors are history.
+    const priorErrors = useMachineControl.getState().consoleLines.filter(line => line.severity === 'error')
+    expect(priorErrors.length).toBeGreaterThan(0)
+    expect(priorErrors.every(line => /program range .* exceeds soft limits/.test(line.text))).toBe(true)
 
     expect(await executeOperatorCycleStart()).toBe(true)
     const errors = useMachineControl.getState().consoleLines
       .filter((line) => line.severity === 'error')
       .map((line) => line.text)
-    expect(errors).toEqual([])
+      .slice(priorErrors.length)
+    expect(errors, JSON.stringify(errors)).toEqual([])
     // It runs at the new zero: the first rapid lands at work Z15 = machine Z -45.
     await vi.advanceTimersByTimeAsync(3_000)
     const touched = getMachineController().status().machinePos

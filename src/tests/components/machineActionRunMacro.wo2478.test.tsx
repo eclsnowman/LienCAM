@@ -220,7 +220,8 @@ describe('WO-2478 Run macro operation', () => {
     expect(lines.filter((line) => line === 'M6')).toHaveLength(1)
     expect(lines.indexOf('T1')).toBeGreaterThanOrEqual(0)
     expect(lines.indexOf('T1')).toBeLessThan(lines.indexOf('M6'))
-    const read = readGcodeProgram(lines.join('\n'), { dialect: 'uccnc', initialPosition: { x: 0, y: 0, z: 0 }, sessionWcs: 'G54', macroMCodes: 'report', machineDefinition: state().project.machine })
+    // Posted G53 targets require the fixture's known zero in the shared reader (deeb2ebe0ef).
+    const read = readGcodeProgram(lines.join('\n'), { dialect: 'uccnc', initialPosition: { x: 0, y: 0, z: 0 }, sessionWcs: 'G54', workOffsets: { G54: { x: 0, y: 0, z: 0 } }, macroMCodes: 'report', machineDefinition: state().project.machine })
     expect(read.ok, JSON.stringify(read)).toBe(true)
     if (read.ok) expect(read.program.items.filter((item) => item.kind === 'tool-change')).toHaveLength(1)
   })
@@ -236,7 +237,7 @@ describe('WO-2478 Run macro operation', () => {
         : op) })),
     } })))
     const text = posted().join('\n')
-    const read = readGcodeProgram(text, { dialect: 'uccnc', sessionWcs: 'G54', initialPosition: { x: 0, y: 0, z: 0 }, macroMCodes: 'report', machineDefinition: state().project.machine })
+    const read = readGcodeProgram(text, { dialect: 'uccnc', sessionWcs: 'G54', workOffsets: { G54: { x: 0, y: 0, z: 0 } }, initialPosition: { x: 0, y: 0, z: 0 }, macroMCodes: 'report', machineDefinition: state().project.machine })
     expect(read.ok, JSON.stringify(read)).toBe(true)
     if (!read.ok) return
     const items = read.program.items

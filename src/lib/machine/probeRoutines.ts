@@ -353,7 +353,7 @@ export interface SecondSideZeroInput {
    *  separately from `relationship.axis` on purpose: they come from two places
    *  and a stale one is refused, never quietly preferred. */
   flipAxis: FlipAxis
-  /** Block extents + the shared work zero inside it (a `SecondSidePlan`). */
+  /** Block extents + first-side and destination work zeros inside it (a `SecondSidePlan`). */
   frame: SecondSideFrame
   /** Where the probed feature sits in FIRST-side setup coordinates. Every axis
    *  that was probed needs one; a missing reference is refused rather than
@@ -366,7 +366,7 @@ export interface SecondSideZeroInput {
   /** Names, for the sentence the machinist checks against the part. */
   firstSideName: string
   secondSideName: string
-  /** Work offset the two sides share, and the one the caller would write to.
+  /** Saved second-side work offset, and the one the caller would write to.
    *  A flip-corrected zero written into somebody else's offset is still wrong. */
   relationshipOffsetG: number
   targetOffsetG: number
@@ -500,7 +500,7 @@ export function planSecondSideProbeZero(
       ok: false,
       code: 'SECOND_SIDE_OFFSET_DISAGREES',
       message:
-        `"${input.secondSideName}" and "${input.firstSideName}" are one block running on ` +
+        `"${input.secondSideName}" uses ` +
         `G${input.relationshipOffsetG}, but this panel would write G${input.targetOffsetG}. ` +
         `A second-side zero written into another offset is still the wrong offset. Select ` +
         `G${input.relationshipOffsetG} first.`,

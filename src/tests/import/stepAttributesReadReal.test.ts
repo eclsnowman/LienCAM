@@ -4,16 +4,9 @@
 // uses). Injected via readStepDisplayAttributes' factory param so no Web Worker
 // is needed in Node.
 //
-// COLOR: every committed fixture returns color=undefined here - occt-wasm's
-// compiled xcafImportSTEP binding does not surface XCAF color across a STEP
-// round-trip, even for its OWN self-authored export (measured directly against
-// the dependency, not inferred - see src/tests/geom/occtWasmColorGap.test.ts,
-// a committed pin of that exact probe, and stepAttributes.ts's module comment
-// for the full disposition). Part Studio has the identical gap since both
-// workspaces call this exact function. The color PLUMBING is proven
-// non-vacuously with an injected colored body in stepAttributes.test.ts; this
-// file asserts the real-fixture reality (names in, colors default) so the gate
-// can never silently "pass" a color it never read.
+// WO-3093 (436ff063c1): CAM's attribute reader supplements the kernel with
+// explicit STEP presentation metadata. tray.step therefore keeps #9dcfed;
+// fixtures without colour still use their default.
 //
 // CAM-13-R1 MAJOR 2: the cross-workspace parity gate that used to live here
 // (comparing GeomClient.importStep's name against readStepDisplayAttributes'
@@ -48,11 +41,8 @@ describe('CAM-13 real-kernel embedded-attribute read', () => {
     expect(out.partCount).toBeGreaterThanOrEqual(1)
     expect(out.name).toBe('Part 1')                       // embedded XCAF/PRODUCT name
     expect(resolveName(out.name, 'tray.step')).toBe('Part 1') // not the filename 'tray'
-    // The reader does not surface this fixture's color today -> default swatch.
-    // tray.step's own text carries COLOUR_RGB(#9dcfed) (see occtWasmColorGap.test.ts
-    // for why the reader can't reach it) - this is the honest, pinned reality,
-    // not a silently-accepted "nothing to see here" default.
-    expect(out.color).toBeUndefined()
+    // The fixture's COLOUR_RGB is independently present in its STEP bytes.
+    expect(out.color).toBe('#9dcfed')
   }, 60_000)
 
   it('WITHOUT color attributes: plate-holes.step -> color defaults (undefined)', async () => {

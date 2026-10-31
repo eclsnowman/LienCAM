@@ -70,6 +70,10 @@ import {
   rampDescent,
   cutLoopWithOverlap,
   retractFrom,
+  entryMaterialOf,
+  entryStartZ,
+  hopTo,
+  liftTo,
 } from './moves'
 
 /** Optional diagnostic sink; the production worker does not supply one. No
@@ -135,6 +139,11 @@ export function buildChamferToolpath(
   const zDrop    = chamferWidth + tipOffset  // total Z below the reference face
   const zCut     = topZ - zDrop             // absolute WCS Z for the tip during cutting
   const xyOffset = tipOffset * tanHalf      // XY path shift when tipOffset > 0
+  // WO-3083: every entry starts ENTRY_CLEARANCE_MM above the material under the tool at the
+  // entry point (was the Feed plane, Top + 5: a 3 deg ramp from there spent ~95 mm in air).
+  const material = entryMaterialOf(payload, topZ, feedZ)
+  const reach = Math.max(0, tool.diameter / 2)
+  const startAt = (p: Vec2) => entryStartZ(material, p, reach, zCut)
 
   const moves: ToolpathMove[] = []
   const clearSpace = params.entryPolicy === 'clear_space'
@@ -192,9 +201,10 @@ export function buildChamferToolpath(
       for (const span of extent) {
         const open = openChamferPath(loop.points as Vec2[], span, isOuter ? +xyOffset : -xyOffset, wantCW)
         if (!open) continue
-        rapidEntry(moves, open, feedZ, retractZ, clearanceZ)
+        const startZ = startAt(open[0])
+        hopTo(moves, open[0], startZ, retractZ, clearanceZ)
         let landed = 0
-        if (isRamp) landed = rampAlongOpenPath(moves, open, feedZ, zCut, tanRamp, plungeRate)
+        if (isRamp) landed = rampAlongOpenPath(moves, open, startZ, zCut, tanRamp, plungeRate)
         else plungeTo(moves, open, 0, zCut, plungeRate)
         // A ramp that landed past the start cuts back to it at depth first.
         for (let k = landed - 1; k >= 0; k--) {
@@ -203,7 +213,7 @@ export function buildChamferToolpath(
         for (let k = 1; k < open.length; k++) {
           moves.push({ type: 'feed', x: open[k].x, y: open[k].y, z: zCut, feed: feedRate, role: 'cut' })
         }
-        retractFrom(moves, retractZ, clearanceZ)
+        liftTo(moves, retractZ)
       }
       continue
     }
@@ -233,12 +243,14 @@ export function buildChamferToolpath(
       continue
     }
 
-    // Rapid to clearance, descend to feed height, then enter at cutting depth.
-    rapidEntry(moves, path, feedZ, retractZ, clearanceZ)
+    // First entry through Clearance, later hops at Retract (WO-3083), down to just above the
+    // material, then enter at cutting depth.
+    const startZ = startAt(path[0])
+    hopTo(moves, path[0], startZ, retractZ, clearanceZ)
 
     if (isRamp) {
       // Ramp entry: descend gradually along the path profile rather than plunging straight down.
-      const curIdx = rampTo(moves, path, 0, feedZ, zCut, tanRamp, plungeRate)
+      const curIdx = rampTo(moves, path, 0, startZ, zCut, tanRamp, plungeRate)
       cutLoopWithOverlap(moves, path, curIdx, zCut, feedRate, overlapMm)
     } else {
       // Plunge entry: drop straight to cutting depth at the start point.
@@ -246,8 +258,10 @@ export function buildChamferToolpath(
       cutLoopWithOverlap(moves, path, 0, zCut, feedRate, overlapMm)
     }
 
-    retractFrom(moves, retractZ, clearanceZ)
+    liftTo(moves, retractZ)
   }
+  // The operation's final exit to Clearance (the clear-space plan makes its own).
+  if (!clearSpace) liftTo(moves, clearanceZ)
 
   if (clearSpace) {
     if (moves.length === 0) throw new Error('Chamfer clear-space is unsupported: no nondegenerate cutting loop was produced.')

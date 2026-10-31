@@ -9,6 +9,92 @@ const help: CatalogTree = {
     machine: 'Machine', settings: 'Paramètres', troubleshooting: 'Dépannage',
   },
   topics: {
+    "height-references": {
+    "title": "Comprendre les hauteurs",
+    "summary": "Cinq plans de référence et les hauteurs réelles d’entrée et de déplacement selon le matériau.",
+    "keywords": "hauteurs référence dégagement retrait avance haut fond matériau brides",
+    "sections": {
+        "0": {
+            "text": "Les cinq valeurs sont des plans de référence en Z du repère pièce, pas toutes les hauteurs visitées par l’outil. Le dégagement sert à la première approche et à la sortie finale. Le retrait est le saut normal entre éléments. Les liaisons locales prouvées libres peuvent rester plus basses ; une traversée de bridage modélisé peut dépasser même le dégagement. L’avance est une référence d’entrée, souvent remplacée par un départ selon le matériau restant. Le haut définit le début d’usinage demandé, pas forcément la surface restante ; le fond définit la fin demandée. Les hauteurs par défaut du montage donnent les références initiales des nouvelles opérations."
+        },
+        "1": {
+            "steps": {
+                "0": "Ouvrez Hauteurs dans l’éditeur d’opération. Les cinq lignes affichent le calcul, la valeur Z du repère pièce et l’origine automatique ou imposée par l’utilisateur.",
+                "1": "Ouvrez une ligne avec la flèche. Choisissez la référence : retrait, dessus ou dessous du brut ou du modèle, plan géométrique, surface choisie ou Z absolu du repère pièce ; puis le signe et le décalage.",
+                "2": "Les hauteurs haute et basse suivent initialement la règle automatique de l’opération. Pour Poche 2D et Ébauche adaptative 2D, la ligne propose aussi la condition de fin : profondeur depuis le dessus du brut, référence géométrique, fond du brut, traverser, arrêter au-dessus du fond, surface choisie ou référence et décalage personnalisés.",
+                "3": "Le schéma montre cinq plans de référence et un trajet local illustratif séparé au-dessus du matériau restant. Développez « Utilisation de ces hauteurs » pour une explication courte ou appuyez sur ? pour cette aide."
+            }
+        },
+        "2": {
+            "text": "Dans Propriétés, Hauteurs affiche les valeurs de référence du repère pièce et leur origine automatique ou manuelle. Dégagement, Retrait et Avance peuvent y être modifiés. « Rétablir les hauteurs de sécurité du montage » rétablit les valeurs du montage."
+        },
+        "3": {
+            "text": "Les hauteurs relatives suivent leur source : un fond relatif au dessous du brut suit une modification d’épaisseur, contrairement à un Z absolu du repère pièce."
+        },
+        "5": {
+            "text": "Minimiser les déplacements en Z est coché par défaut, y compris pour les opérations enregistrées avant l’apparition de cette option. Cochée, l’option conserve les maintiens en profondeur et les liaisons locales basses validés par le matériau restant. Décochez-la pour ramener les liaisons XY hors coupe au plan de Retrait résolu. Décochée, elle utilise Dégagement pour la première approche et la sortie finale, Retrait pour les sauts entre éléments et Avance pour la transition du rapide à l’avance de coupe. Les traversées au-dessus du bridage qui nécessitent une hauteur supérieure restent plus hautes et la géométrie de coupe est préservée. La même option figure dans Propriétés. G98 natif démarre et revient à Retrait, avec R à Avance ; G99 utilise R à Avance, avec des sauts explicites à Retrait si nécessaire. Cochée par défaut, l’option conserve les entrées adaptées au matériau restant."
+        },
+        "6": {
+            "text": "La plupart des entrées 2D commencent environ 1 mm au-dessus du matériau prouvé sous l’empreinte d’entrée. Une Avance plus basse peut réduire cet écart si elle reste au-dessus du matériau ; l’augmenter n’ajoute généralement pas d’air. La preuve peut couvrir toute une zone, pas seulement le point de plongée. Les sauts normaux utilisent Retrait ; les liaisons sur fond dégagé prouvé peuvent rester plus basses et les traversées de brides modélisées montent. Dégagement ne plafonne pas l’évitement du bridage."
+        },
+        "7": {
+            "text": "Poche utilise Liaisons > Départ d’hélice au-dessus du matériau (normalement 1 mm) pour l’écart d’entrée, plutôt qu’Avance. Gravure utilise Avance directement. Les répétitions suivent l’opération enfant ; l’évidement plat de la gravure en V suit Poche."
+        },
+        "8": {
+            "text": "En perçage, les plans de retour dépendent du contrôleur. G98 natif utilise normalement le plan de saut Retrait comme plan initial et de retour ; le plan R commun dépend du matériau, généralement matériau + 1 mm. En G99 natif, le plan R et le retour utilisent Avance directement, même si elle diffère de Retrait. Le perçage développé ou transmis utilise le Retrait défini entre les trous. Première approche et sortie finale utilisent Dégagement ; les réapproches du débourrage et le brise-copeaux ont leurs propres règles."
+        },
+        "9": {
+            "text": "L’ébauche 3D peut entrer plus près lors des entrées suivantes (environ 0.05 mm au-dessus du matériau prouvé) ; la finition peut garder les liaisons locales prouvées basses. Certaines routes 3D bornent les entrées avec Avance et les traversées avec Dégagement. La famille et les vérifications du bridage déterminent le trajet réel ; les cinq plans ne décrivent pas chaque mouvement."
+        }
+    },
+    "images": {
+        "heights-tab": {
+            "alt": "Onglet Hauteurs avec explication fermée, cinq références Z et deux schémas"
+        }
+    }
+},
+    "height-truthfulness": {
+    "title": "Plans de référence résolus",
+    "summary": "Les plans enregistrés ne sont pas toutes les hauteurs du trajet généré.",
+    "keywords": "hauteurs référence dégagement retrait avance haut fond matériau brides",
+    "sections": {
+        "0": {
+            "text": "La génération enregistre les références demandées et leurs valeurs Z dans le repère pièce et machine. Propriétés montre des références Z résolues, pas le Z de chaque entrée ou liaison. Le trajet dépend aussi du matériau restant, de la famille et du bridage modélisé."
+        },
+        "1": {
+            "text": "Si les hauteurs, l’outil, la géométrie, le brut, l’origine ou le décalage du repère pièce, ou la machine changent, l’opération devient périmée et les mouvements enregistrés sont supprimés. Cette vérification se fait aussi à l’ouverture du projet. Régénérez avec les données actuelles."
+        }
+    },
+    "images": {
+        "resolved-heights": {
+            "alt": "Groupe Hauteurs dans Propriétés avec références Z résolues"
+        }
+    }
+},
+    "height-planes-viewport": {
+    "title": "Voir les plans de hauteur",
+    "summary": "La vue montre cinq plans de référence avec couleurs et cases individuelles.",
+    "keywords": "hauteurs référence dégagement retrait avance haut fond matériau brides",
+    "sections": {
+        "0": {
+            "steps": {
+                "0": "Sélectionnez une opération générée dans l’arbre. Les surfaces colorées montrent ses plans de référence résolus, pas chaque hauteur d’entrée, de liaison locale ou de traversée de bride.",
+                "1": "Ouvrez Mode d’affichage avec le cube à engrenage près du cube de vue.",
+                "2": "Activez Plans de hauteur. Chaque plan apparaît comme une surface teintée, avec contour pointillé et croix centrale de sa couleur.",
+                "3": "Utilisez les cases Dégagement, Retrait, Hauteur d’avance, Dessus du brut et Fond de coupe, chacune avec son point coloré."
+            }
+        },
+        "1": {
+            "text": "Afficher seulement le dessus du brut et le fond de coupe permet de situer le début et la fin de l’usinage."
+        }
+    },
+    "images": {
+        "planes-viewport": {
+            "alt": "Plans de référence dans la vue avec Mode d’affichage ouvert"
+        }
+    }
+},
+
     'welcome-overview': {
       title: 'Présentation de LienCAM', summary: 'Une application de FAO et de CAO qui transforme dessins et modèles en G-code et enregistre des fichiers projet autonomes.',
       keywords: 'bienvenue présentation introduction navigateur FAO CAO espace travail démarrer débutant onglets bibliothèque outils montage esquisse modèle parcours simulation post-traitement commande welcome overview introduction',
@@ -57,7 +143,6 @@ const help: CatalogTree = {
     'setup-wcs': { title: 'Montage et WCS', summary: 'Un montage définit le brut à usiner, son décalage et son origine pièce, les couches de montage sous le brut et les hauteurs par défaut de ses opérations.' },
     'wcs-origin-placement': { title: 'Placer l’origine pièce', summary: 'La fenêtre Montage propose cinq façons de placer l’origine pièce : un coin du brut, un sommet du modèle accroché, des coordonnées saisies, un manipulateur déplaçable dans la vue ou le centre d’un élément circulaire.' },
     workholding: { title: 'Serrage : étaux et brides', summary: 'Importez étau, mors ou brides comme pièce et activez Workholding : le corps devient un élément de serrage, jamais un brut ni une coupe ; les parcours l’évitent et Seat in vise y place les pièces en appui.' },
-    'height-references': { title: 'Comprendre les hauteurs', summary: 'Chaque opération utilise cinq plans - dégagement, retrait, avance, dessus et dessous - mesurés depuis une référence choisie ; l’onglet Heights indique leur Z dans le WCS.' },
     'creating-operations': { title: 'Créer une opération', summary: 'La fenêtre New Operation vous guide dans les onglets type, outil, géométrie, passes, hauteurs, liaisons et avance.' },
     contour: { title: 'Contour 2D', summary: 'Contour 2D usine un profil à une ou plusieurs profondeurs, avec quatre stratégies de coupe, des parcours ouverts, des attaches et une entrée en rampe.' },
     pocket: { title: 'Poche 2D', summary: 'Poche 2D évide une région fermée par passes concentriques, conserve les îlots, entre en hélice, en rampe ou en plongée et finit la paroi.' },

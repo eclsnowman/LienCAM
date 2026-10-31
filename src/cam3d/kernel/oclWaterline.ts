@@ -32,11 +32,10 @@
 // slightly better error, 1.6x faster on the 60 mm plate; 5.9 s per level on
 // the 300 mm plate at sampling 1.0 / 0.1.
 //
-// Loading: the 8.6 MB module is imported lazily on the first slice so the
-// other 3D families never pay for it. The loader is injectable because the
-// package's `main` field points at a native Node addon that is not shipped;
-// tests load the emscripten build directly (with a `window` shim the module
-// checks for) through `createOclWaterlineSlicer({ load })`.
+// Loading is lazy. Use the shipped native WASM factory directly: the package's
+// JS wrapper leaks independently allocated inputs and copied results (WO-3134).
+// Node uses the package's supported native-addon entry point, whose values are
+// managed by its Node binding rather than Embind. Both loads remain injectable.
 
 import type { CutterSpec, PartMesh } from './types';
 import type { Ring } from '../geom2d';
@@ -105,6 +104,9 @@ type OclTriangles = number[][][];
 
 interface OclOperationLike {
   chain: Promise<unknown>;
+  /** Release the operation and any independently owned borrowed inputs after
+   * getLoops() has copied results. The shipped wrapper only owns the operation. */
+  actualClass?: { delete?: () => void };
   setSTL(surface: { triangles?: OclTriangles }): void;
   setCutter(cutter: unknown): void;
   setSampling(sampling: number): void;
@@ -129,16 +131,178 @@ const CUTTER_LENGTH_MM = 100;
 
 const POISON_PATTERN = /Cannot enlarge memory|Aborted\(|native code called abort|RuntimeError/i;
 
-/** Default production loader: the package root, which bundlers resolve to the browser build. */
-async function loadPackage(): Promise<OclWaterlineModule> {
-  const m = (await import('@opencamlib/opencamlib')) as unknown as
-    | OclWaterlineModule
-    | { default: OclWaterlineModule };
-  const mod = 'AdaptiveWaterline' in m ? m : (m as { default: OclWaterlineModule }).default;
-  if (!mod || typeof mod.AdaptiveWaterline !== 'function') {
-    throw new Error('waterline: @opencamlib/opencamlib loaded but exposes no AdaptiveWaterline.');
+// The package keeps one Emscripten module behind its loader promise. Its
+// wrapper queues calls on each JS object, but native operations from separate
+// wrappers still share that module. Keep an operation alive through its copied
+// result and delete before allowing the next one to enter the native library.
+let oclOperationTail: Promise<void> = Promise.resolve();
+
+async function withOclOperation<T>(work: () => Promise<T>): Promise<T> {
+  const previous = oclOperationTail;
+  let release!: () => void;
+  oclOperationTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
   }
-  return mod;
+}
+
+// Native Embind values returned by constructors/vector.get are independently
+// owned. Triangle and STLSurf copy inputs; setSTL/setCutter BORROW them.
+interface NativeHandle { delete(): void }
+interface NativePoint extends NativeHandle { x: number; y: number; z: number }
+interface NativeVector<T> extends NativeHandle { size(): number; get(i: number): T }
+interface NativeSurface extends NativeHandle { addTriangle(t: NativeHandle): void }
+interface NativeOperation extends NativeHandle {
+  setSTL(surface: NativeSurface): void;
+  setCutter(cutter: NativeHandle): void;
+  setSampling(n: number): void;
+  setMinSampling(n: number): void;
+  setZ(n: number): void;
+  run(): void;
+  getLoops(): NativeVector<NativeVector<NativePoint>>;
+}
+interface NativeModule {
+  AdaptiveWaterline: new () => NativeOperation;
+  Point: new (x: number, y: number, z: number) => NativePoint;
+  Triangle: new (a: NativePoint, b: NativePoint, c: NativePoint) => NativeHandle;
+  STLSurf: new () => NativeSurface;
+  CylCutter: new (diameter: number, length: number) => NativeHandle;
+  BallCutter: new (diameter: number, length: number) => NativeHandle;
+  BullCutter: new (diameter: number, radius: number, length: number) => NativeHandle;
+}
+
+/** Attempt every destruction, including when an earlier destructor fails. */
+function deleteNative(handles: NativeHandle[]): void {
+  let failed = false;
+  let failure: unknown;
+  for (const handle of handles.reverse()) {
+    try { handle.delete(); } catch (error) { failed = true; failure ??= error; }
+  }
+  if (failed) throw failure;
+}
+
+/** A cleanup failure must never replace the error that caused unwinding. */
+function usingNative<T>(handles: NativeHandle[], work: () => T): T {
+  let result!: T;
+  let failed = false;
+  let failure: unknown;
+  try { result = work(); } catch (error) { failed = true; failure = error; }
+  let cleanupFailure: unknown;
+  try { deleteNative(handles); } catch (error) { cleanupFailure = error; }
+  if (failed) throw failure;
+  if (cleanupFailure !== undefined) throw cleanupFailure;
+  return result;
+}
+
+/** Copy before releasing vector.get's by-value handles, including partial copies. */
+function copyNativeLoops(raw: NativeVector<NativeVector<NativePoint>>): OclTriangles {
+  return usingNative([raw], () => {
+    const result: OclTriangles = [];
+    for (let i = 0; i < raw.size(); i++) {
+      const loop = raw.get(i);
+      result.push(usingNative([loop], () => {
+        const points: number[][] = [];
+        for (let j = 0; j < loop.size(); j++) {
+          const point = loop.get(j);
+          points.push(usingNative([point], () => [point.x, point.y, point.z]));
+        }
+        return points;
+      }));
+    }
+    return result;
+  });
+}
+
+// Match the existing wrapper API so injected package-wrapper controls still run.
+// Only this facade owns production native handles; it never patches the library.
+function ownedModule(native: NativeModule): OclWaterlineModule {
+  class Surface { triangles?: OclTriangles }
+  class CylCutter {
+    readonly diameter: number;
+    readonly length: number;
+    constructor(diameter: number, length: number) { this.diameter = diameter; this.length = length; }
+    create() { return new native.CylCutter(this.diameter, this.length); }
+  }
+  class BallCutter extends CylCutter {
+    create() { return new native.BallCutter(this.diameter, this.length); }
+  }
+  class BullCutter extends CylCutter {
+    readonly radius: number;
+    constructor(diameter: number, radius: number, length: number) { super(diameter, length); this.radius = radius; }
+    create() { return new native.BullCutter(this.diameter, this.radius, this.length); }
+  }
+  class AdaptiveWaterline implements OclOperationLike {
+    chain: Promise<unknown> = Promise.resolve();
+    private operation = new native.AdaptiveWaterline();
+    private inputs: NativeHandle[] = [];
+    actualClass = { delete: () => {
+      // Destroy the borrower BEFORE its surface/cutter. Clear ownership first
+      // so cleanup cannot double-delete even when destruction itself fails.
+      const handles = [...this.inputs, this.operation];
+      this.inputs = [];
+      deleteNative(handles);
+    } };
+    setSTL(surface: Surface) {
+      this.chain = this.chain.then(() => {
+        const surf = new native.STLSurf();
+        this.inputs.push(surf);
+        for (const vertices of surface.triangles!) {
+          const temporaries: NativeHandle[] = [];
+          usingNative(temporaries, () => {
+            const points = vertices.map(p => {
+              const point = new native.Point(p[0], p[1], p[2]);
+              temporaries.push(point);
+              return point;
+            });
+            const triangle = new native.Triangle(points[0], points[1], points[2]);
+            temporaries.push(triangle);
+            surf.addTriangle(triangle);
+          });
+        }
+        this.operation.setSTL(surf);
+      });
+    }
+    setCutter(cutter: unknown) {
+      this.chain = this.chain.then(() => {
+        const actual = (cutter as CylCutter).create();
+        this.inputs.push(actual);
+        this.operation.setCutter(actual);
+      });
+    }
+    setSampling(n: number) { this.chain = this.chain.then(() => this.operation.setSampling(n)); }
+    setMinSampling(n: number) { this.chain = this.chain.then(() => this.operation.setMinSampling(n)); }
+    setZ(n: number) { this.chain = this.chain.then(() => this.operation.setZ(n)); }
+    run() { this.chain = this.chain.then(() => this.operation.run()); }
+    getLoops(): Promise<OclTriangles> {
+      const loops = this.chain.then(() => copyNativeLoops(this.operation.getLoops()));
+      this.chain = loops;
+      return loops;
+    }
+  }
+  return { AdaptiveWaterline, STLSurf: Surface, CylCutter, BallCutter, BullCutter };
+}
+
+// One shared factory/module, including across slicer instances and repeat jobs.
+// A rejected load can retry; an actual native abort still poisons the worker.
+let packagePromise: Promise<OclWaterlineModule> | null = null;
+async function loadPackage(): Promise<OclWaterlineModule> {
+  if (!packagePromise) {
+    // The shipped WASM factory is compiled for web and requires window or
+    // importScripts. The package main selects the platform Node addon instead.
+    // Do not emulate a browser in Node or feed addon objects to Embind cleanup.
+    const runtime = typeof process === 'object' && process.versions?.node
+      ? import('@opencamlib/opencamlib').then(m =>
+        ('default' in m ? m.default : m) as unknown as OclWaterlineModule)
+      : import('@opencamlib/opencamlib/build/ocl.js')
+        .then(m => m.default() as Promise<NativeModule>)
+        .then(ownedModule);
+    packagePromise = runtime
+      .catch((error: unknown) => { packagePromise = null; throw error; });
+  }
+  return packagePromise;
 }
 
 /**
@@ -160,6 +324,30 @@ function trianglesOf(mesh: PartMesh): OclTriangles {
     ];
   }
   return out;
+}
+
+/**
+ * WO-3106: OCL's facetPush tests triangle membership in XY. A vertical
+ * facet has a singular XY projection; its expanded barycentric denominator
+ * can acquire cancellation noise and accept contacts far beyond the facet.
+ * Put an exact vertical edge first: the zero denominator then evaluates
+ * exactly (both XY differences are zero). OCL rejects the singular facet
+ * contact and its edge/vertex push tests still describe the same wall.
+ * Cyclic rotation preserves every coordinate, edge and winding. Do not
+ * perturb vertices or discard facets; the other cutter contacts need them.
+ * Normalize cropped tiles too: clipping may create another vertical edge.
+ */
+function stableFacetOrder(triangles: OclTriangles): OclTriangles {
+  return triangles.map((triangle) => {
+    for (let i = 1; i < 3; i++) {
+      const a = triangle[i];
+      const b = triangle[(i + 1) % 3];
+      if (a[0] === b[0] && a[1] === b[1]) {
+        return [a, b, triangle[(i + 2) % 3]];
+      }
+    }
+    return triangle;
+  });
 }
 
 function cutterOf(mod: OclWaterlineModule, spec: CutterSpec): unknown {
@@ -234,9 +422,13 @@ export function createOclWaterlineSlicer(
     load?: () => Promise<OclWaterlineModule>;
     /** Tests only: the footprint / sampling ratio past which a slice is tiled. */
     maxFootprintRatio?: number;
+    /** Native WASM factory injection; uses the production ownership adapter. */
+    loadNative?: () => Promise<NativeModule>;
   } = {},
 ): WaterlineSlicer {
-  const load = opts.load ?? loadPackage;
+  const load = opts.load ?? (opts.loadNative
+    ? () => opts.loadNative!().then(ownedModule)
+    : loadPackage);
   const maxRatio = opts.maxFootprintRatio ?? WATERLINE_MAX_FOOTPRINT_SAMPLING_RATIO;
   let modulePromise: Promise<OclWaterlineModule> | null = null;
   let poisoned: string | null = null;
@@ -267,32 +459,55 @@ export function createOclWaterlineSlicer(
         throw new Error(`waterline: sampling must be positive (got ${sampling.sampling} / ${sampling.minSampling}).`);
       }
       const mod = await moduleOnce();
-      const runOnce = async (triangles: OclTriangles, coarse: number): Promise<Ring[]> => {
+      const runOnce = (triangles: OclTriangles, coarse: number): Promise<Ring[]> => withOclOperation(async () => {
         // Fresh object per level, every time (WO-284 section 5).
         const wl = new mod.AdaptiveWaterline();
-        await wl.chain;
-        const surf = new mod.STLSurf();
-        surf.triangles = triangles;
-        wl.setSTL(surf);
-        wl.setCutter(cutterOf(mod, cutter));
-        wl.setSampling(coarse);
-        wl.setMinSampling(sampling.minSampling);
-        wl.setZ(z);
-        wl.run();
-        const raw = await wl.getLoops();
-        const loops: Ring[] = [];
-        for (const loop of raw) {
-          const ring = canonicalLoop(loop);
-          if (ring !== null) loops.push(ring);
+        let result: Ring[] | undefined;
+        let failed = false;
+        let failure: unknown;
+        try {
+          await wl.chain;
+          const surf = new mod.STLSurf();
+          surf.triangles = triangles;
+          wl.setSTL(surf);
+          wl.setCutter(cutterOf(mod, cutter));
+          wl.setSampling(coarse);
+          wl.setMinSampling(sampling.minSampling);
+          wl.setZ(z);
+          wl.run();
+          const raw = await wl.getLoops();
+          const loops: Ring[] = [];
+          for (const loop of raw) {
+            const ring = canonicalLoop(loop);
+            if (ring !== null) loops.push(ring);
+          }
+          result = sortLoops(loops);
+        } catch (error) {
+          failed = true;
+          failure = error;
         }
-        return sortLoops(loops);
-      };
+        // Loops are now JS coordinates. Release the operation and borrowed
+        // inputs before any other level, tile, job or slicer enters WASM.
+        // Queue the release behind the package wrapper's own chain: it may
+        // have appended native setup while getLoops was being awaited.
+        let cleanupFailure: unknown;
+        if (wl.actualClass?.delete !== undefined) {
+          wl.chain = wl.chain.then(
+            () => { wl.actualClass?.delete?.(); },
+            () => { wl.actualClass?.delete?.(); },
+          );
+          try { await wl.chain; } catch (error) { cleanupFailure = error; }
+        }
+        if (failed) throw failure;
+        if (cleanupFailure !== undefined) throw cleanupFailure;
+        return result!;
+      });
       try {
         const plan = waterlineTilePlan(mesh.bounds, cutter.diameter / 2, sampling.sampling, maxRatio);
         if (plan === null) {
           let triangles = triangleCache.get(mesh);
           if (triangles === undefined) {
-            triangles = trianglesOf(mesh);
+            triangles = stableFacetOrder(trianglesOf(mesh));
             triangleCache.set(mesh, triangles);
           }
           return await runOnce(triangles, sampling.sampling);
@@ -309,7 +524,7 @@ export function createOclWaterlineSlicer(
           const key = `${tile.box.minX},${tile.box.minY},${tile.box.maxX},${tile.box.maxY}`;
           let triangles = crops.get(key);
           if (triangles === undefined) {
-            triangles = cropTrianglesToBox(mesh, tile.box);
+            triangles = stableFacetOrder(cropTrianglesToBox(mesh, tile.box));
             crops.set(key, triangles);
           }
           perTile.push({ cell: tile.cell, loops: triangles.length > 0 ? await runOnce(triangles, plan.sampling) : [] });

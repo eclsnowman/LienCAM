@@ -16,16 +16,17 @@
  * have it available; the Stage-1 ops themselves run on OcctKernel directly,
  * which is the most robust path and sidesteps the worker-fillet bug (gotcha #7).
  */
-import { OcctKernel } from 'occt-wasm'
+import { OcctKernel, TransitionMode } from 'occt-wasm'
 import { StepImportCache, type StepImportKey } from '../stepImportCache'
 import { parseEdgeToFaceMap, planarEdgeAdjacency } from './planarAdjacency'
 import { registerKernel, OcctWasmAdapter } from 'brepjs'
-import type { EvolutionData, LabelTag, ShapeHandle, SurfaceKind, XCAFDocument } from 'occt-wasm'
+import type { BoundingBox, EvolutionData, LabelTag, ShapeHandle, SurfaceKind, XCAFDocument } from 'occt-wasm'
 import type {
   BodyHandle,
   BooleanRequest,
   ChamferRequest,
   Diag,
+  DiagCode,
   DraftRequest,
   EdgeClass,
   ElementMapDelta,
@@ -96,7 +97,7 @@ import {
   rebindDraftFaces,
   type BBox,
 } from './stable-id.ts'
-import { compareIds, parseStableId, vertexId } from '../../doc/stable-id.ts'
+import { compareIds, extrudeThinCapId, extrudeThinMergeId, extrudeThinWallId, parseStableId, vertexId } from '../../doc/stable-id.ts'
 // THE shared face-id resolver + its delta lineage, shared verbatim with the UI
 // lane (see src/geom/aliasLineage.ts for why it lives outside this file).
 import { aliasesFromDelta, foldAliasLineageIntoDelta, resolveFaceIdVia } from '../aliasLineage.ts'
@@ -105,6 +106,10 @@ import {
   axisFromThreeCirclePoints,
   capOrderRefs,
   capOrderScore,
+  chainDefect,
+  chainLegs,
+  chainPoint3d,
+  chainRepPoint,
   cross,
   dot,
   extrudeCapId,
@@ -115,11 +120,14 @@ import {
   lift,
   loftCapId,
   loftSideId,
+  legPointAt,
+  legSpanAt,
   loopClosed,
   normalize,
   patternInstanceId,
   patternMergeId,
   planeBasis,
+  profileOffsetRange,
   reflectPoint,
   reflectVector,
   revolveCapId,
@@ -129,8 +137,10 @@ import {
   segGeom2d,
   segRep2d,
   sub,
+  turnBeforeLeg,
   sweepCapId,
   sweepSideId,
+  type ChainLeg,
   type PlaneBasis,
   type SegGeom2D,
   type Vec3T,
@@ -143,12 +153,16 @@ import type {
   LoftRequest,
   PatternRequest,
   PlanarFaceSet,
+  TransformBodyRequest,
   ProfileRegion,
+  ProfileSegment,
   RevolveRequest,
   ResolvedExtrudeEnd,
   ResolvedExtrudeFaceTarget,
   ResolvedExtrudeTarget,
   SweepRequest,
+  ThinExtrudeSide,
+  ThinOpenSide,
 } from '../geom-service.ts'
 // MSH-3 registration (WO ruling 1): prismatic mesh->brep bridge lives entirely
 // in its own file; the method below is a thin delegator.
@@ -361,6 +375,14 @@ export function toSurfaceType(kind: FaceSurfaceKind): SurfaceType {
 }
 
 const AXIAL_KINDS: ReadonlySet<FaceSurfaceKind> = new Set(['cylinder', 'cone', 'torus'])
+
+/** WO-3325: faces whose bounding box the kernel finds quickly. Every other
+ *  kind (a Form body's B-spline faces above all) is boxed through
+ *  #faceBox's memo. */
+const ANALYTIC_KINDS: ReadonlySet<string> = new Set(['plane', 'cylinder', 'cone', 'sphere', 'torus'])
+
+/** WO-3325: how many free-form face boxes the engine remembers. */
+const FREE_FORM_BOX_MEMO_MAX = 4096
 
 /** Parameters driving constructed sweep lineage (see #assignSweptFaceIds). */
 interface SweepLineageParams {
@@ -822,6 +844,570 @@ interface CachedStepImport {
   diagnostics: Diag[]
 }
 
+// ---- thin closed-wall sections (WO-3233) ------------------------------------
+//
+// Exact 2D sharp-corner (intersection-join) loop offset for line/arc loops. The
+// wall wires are built from it edge by edge (#thinBandFace). Segments the
+// offset passes drop out exactly as in the true offset; a loop that closes to
+// nothing or crosses itself is refused here, before the kernel sees any of it.
+// Nothing is clamped. It is also the source of the wall points that name the
+// walls.
+
+type ThinP2 = [number, number]
+
+/** One loop segment in travel order: a line a -> b, or an arc of radius r about
+ *  c that starts at angle s and turns by the signed `sweep` (|sweep| = 2 pi for
+ *  a full circle). */
+type ThinSeg =
+  | { kind: 'line'; srcId: string; a: ThinP2; b: ThinP2 }
+  | { kind: 'arc'; srcId: string; c: ThinP2; r: number; s: number; sweep: number }
+
+type ThinOffset = { ok: true; loop: ThinSeg[]; area: number } | { ok: false; srcId: string; reason: string }
+
+const THIN_TWO_PI = Math.PI * 2
+
+function thinSegFrom(seg: ProfileSegment): ThinSeg {
+  if (seg.kind === 'line') return { kind: 'line', srcId: seg.srcId, a: [seg.a[0], seg.a[1]], b: [seg.b[0], seg.b[1]] }
+  // Same sweep rule as #buildProfileFace, so the guard sees the edge the kernel builds.
+  if (Math.abs(seg.a1 - seg.a0) >= THIN_TWO_PI - 1e-6) {
+    return { kind: 'arc', srcId: seg.srcId, c: [seg.c[0], seg.c[1]], r: seg.r, s: seg.a0, sweep: seg.ccw ? THIN_TWO_PI : -THIN_TWO_PI }
+  }
+  let sweep = seg.a1 - seg.a0
+  if (seg.ccw && sweep <= 0) sweep += THIN_TWO_PI
+  if (!seg.ccw && sweep >= 0) sweep -= THIN_TWO_PI
+  return { kind: 'arc', srcId: seg.srcId, c: [seg.c[0], seg.c[1]], r: seg.r, s: seg.a0, sweep }
+}
+
+function thinAt(seg: ThinSeg, f: number): ThinP2 {
+  if (seg.kind === 'line') return [seg.a[0] + (seg.b[0] - seg.a[0]) * f, seg.a[1] + (seg.b[1] - seg.a[1]) * f]
+  const ang = seg.s + seg.sweep * f
+  return [seg.c[0] + seg.r * Math.cos(ang), seg.c[1] + seg.r * Math.sin(ang)]
+}
+
+function thinReverse(seg: ThinSeg): ThinSeg {
+  return seg.kind === 'line'
+    ? { ...seg, a: seg.b, b: seg.a }
+    : { ...seg, s: seg.s + seg.sweep, sweep: -seg.sweep }
+}
+
+const thinIsFullCircle = (seg: ThinSeg): boolean => seg.kind === 'arc' && Math.abs(seg.sweep) >= THIN_TWO_PI - 1e-6
+
+/** Signed enclosed area of a closed travel-ordered loop (positive = CCW): the
+ *  chord shoelace plus each arc's circular segment. */
+function thinLoopArea(loop: readonly ThinSeg[]): number {
+  let area = 0
+  for (const seg of loop) {
+    const p = thinAt(seg, 0)
+    const q = thinAt(seg, 1)
+    area += (p[0] * q[1] - q[0] * p[1]) / 2
+    if (seg.kind === 'arc') area += (seg.r * seg.r / 2) * (seg.sweep - Math.sin(seg.sweep))
+  }
+  return area
+}
+
+/** A profile loop chained head to tail (any input order or direction) and
+ *  turned CCW, or null when it is not one closed chain. */
+function thinChainLoop(loop: readonly ProfileSegment[], tol: number): ThinSeg[] | null {
+  const segs = loop.map(thinSegFrom)
+  if (segs.length === 0) return null
+  const near = (p: ThinP2, q: ThinP2): boolean => Math.hypot(p[0] - q[0], p[1] - q[1]) <= tol
+  let chained: ThinSeg[]
+  if (segs.length === 1) {
+    if (!thinIsFullCircle(segs[0])) return null
+    chained = segs
+  } else {
+    if (segs.some(thinIsFullCircle)) return null
+    chained = [segs[0]]
+    const left = segs.slice(1)
+    while (left.length > 0) {
+      const end = thinAt(chained[chained.length - 1], 1)
+      const i = left.findIndex((s) => near(thinAt(s, 0), end) || near(thinAt(s, 1), end))
+      if (i < 0) return null
+      const next = left.splice(i, 1)[0]
+      chained.push(near(thinAt(next, 0), end) ? next : thinReverse(next))
+    }
+    if (!near(thinAt(chained[chained.length - 1], 1), thinAt(chained[0], 0))) return null
+  }
+  const area = thinLoopArea(chained)
+  if (!(Math.abs(area) > tol * tol)) return null
+  return area > 0 ? chained : chained.reverse().map(thinReverse)
+}
+
+/** Unit normal on the right of travel (away from a CCW loop's interior). */
+function thinRightNormal(seg: ThinSeg, f: number): ThinP2 {
+  if (seg.kind === 'line') {
+    const dx = seg.b[0] - seg.a[0]
+    const dy = seg.b[1] - seg.a[1]
+    const l = Math.hypot(dx, dy) || 1
+    return [dy / l, -dx / l]
+  }
+  const ang = seg.s + seg.sweep * f
+  const e: ThinP2 = [Math.cos(ang), Math.sin(ang)]
+  return seg.sweep > 0 ? e : [-e[0], -e[1]]
+}
+
+/** Radius of an arc's carrier after the loop is offset by d (d > 0 grows). */
+const thinOffsetRadius = (seg: Extract<ThinSeg, { kind: 'arc' }>, d: number): number => (seg.sweep > 0 ? seg.r + d : seg.r - d)
+
+/** Points where the offset carriers of two segments meet. */
+function thinCarrierMeet(A: ThinSeg, B: ThinSeg, d: number): ThinP2[] {
+  type Carrier = { kind: 'line'; p: ThinP2; u: ThinP2 } | { kind: 'circle'; c: ThinP2; r: number }
+  const carrier = (seg: ThinSeg): Carrier => {
+    if (seg.kind === 'arc') return { kind: 'circle', c: seg.c, r: thinOffsetRadius(seg, d) }
+    const n = thinRightNormal(seg, 0)
+    const l = Math.hypot(seg.b[0] - seg.a[0], seg.b[1] - seg.a[1]) || 1
+    return { kind: 'line', p: [seg.a[0] + n[0] * d, seg.a[1] + n[1] * d], u: [(seg.b[0] - seg.a[0]) / l, (seg.b[1] - seg.a[1]) / l] }
+  }
+  const lineCircle = (L: { p: ThinP2; u: ThinP2 }, C: { c: ThinP2; r: number }): ThinP2[] => {
+    const w: ThinP2 = [L.p[0] - C.c[0], L.p[1] - C.c[1]]
+    const bq = L.u[0] * w[0] + L.u[1] * w[1]
+    const disc = bq * bq - (w[0] * w[0] + w[1] * w[1] - C.r * C.r)
+    if (disc < 0) return []
+    const sq = Math.sqrt(disc)
+    return [-bq - sq, -bq + sq].map((t): ThinP2 => [L.p[0] + L.u[0] * t, L.p[1] + L.u[1] * t])
+  }
+  const a = carrier(A)
+  const b = carrier(B)
+  if (a.kind === 'line' && b.kind === 'line') {
+    const den = a.u[0] * b.u[1] - a.u[1] * b.u[0]
+    if (Math.abs(den) < 1e-12) return []
+    const t = ((b.p[0] - a.p[0]) * b.u[1] - (b.p[1] - a.p[1]) * b.u[0]) / den
+    return [[a.p[0] + a.u[0] * t, a.p[1] + a.u[1] * t]]
+  }
+  if (a.kind === 'line' && b.kind === 'circle') return lineCircle(a, b)
+  if (a.kind === 'circle' && b.kind === 'line') return lineCircle(b, a)
+  if (a.kind === 'circle' && b.kind === 'circle') {
+    const dx = b.c[0] - a.c[0]
+    const dy = b.c[1] - a.c[1]
+    const D = Math.hypot(dx, dy)
+    if (D < 1e-12 || D > a.r + b.r || D < Math.abs(a.r - b.r)) return []
+    const x = (D * D + a.r * a.r - b.r * b.r) / (2 * D)
+    const h = Math.sqrt(Math.max(0, a.r * a.r - x * x))
+    const m: ThinP2 = [a.c[0] + (dx * x) / D, a.c[1] + (dy * x) / D]
+    return [[m[0] - (dy * h) / D, m[1] + (dx * h) / D], [m[0] + (dy * h) / D, m[1] - (dx * h) / D]]
+  }
+  return []
+}
+
+/** True when two closed 2D segments p0-p1 and q0-q1 cross or touch. */
+function thinSegmentsMeet(p0: ThinP2, p1: ThinP2, q0: ThinP2, q1: ThinP2, tol: number): boolean {
+  const orient = (a: ThinP2, b: ThinP2, c: ThinP2): number => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+  const o1 = orient(p0, p1, q0)
+  const o2 = orient(p0, p1, q1)
+  const o3 = orient(q0, q1, p0)
+  const o4 = orient(q0, q1, p1)
+  const lp = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1
+  const lq = Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) || 1
+  const sideP = (o: number): number => (Math.abs(o) / lp <= tol ? 0 : Math.sign(o))
+  const sideQ = (o: number): number => (Math.abs(o) / lq <= tol ? 0 : Math.sign(o))
+  const s1 = sideP(o1), s2 = sideP(o2), s3 = sideQ(o3), s4 = sideQ(o4)
+  if (s1 * s2 > 0 || s3 * s4 > 0) return false
+  if (s1 === 0 && s2 === 0) {
+    // Collinear: overlap only if their projections on p overlap.
+    const ux = (p1[0] - p0[0]) / lp, uy = (p1[1] - p0[1]) / lp
+    const t = (p: ThinP2): number => (p[0] - p0[0]) * ux + (p[1] - p0[1]) * uy
+    const lo = Math.min(t(q0), t(q1)), hi = Math.max(t(q0), t(q1))
+    return hi >= -tol && lo <= lp + tol
+  }
+  return true
+}
+
+/** True when a closed loop crosses itself anywhere but at its own joints. Arcs
+ *  are followed at <= pi/64 chords. `open` (WO-3237): an open chain, whose
+ *  first and last pieces are not joined, so they may not touch either. */
+function thinLoopSelfCrosses(loop: readonly ThinSeg[], tol: number, open = false): boolean {
+  const pieces: Array<{ p: ThinP2; q: ThinP2 }> = []
+  for (const seg of loop) {
+    const n = seg.kind === 'line' ? 1 : Math.max(2, Math.ceil(Math.abs(seg.sweep) / (Math.PI / 64)))
+    for (let i = 0; i < n; i++) pieces.push({ p: thinAt(seg, i / n), q: thinAt(seg, (i + 1) / n) })
+  }
+  const box = pieces.map(({ p, q }) => [Math.min(p[0], q[0]) - tol, Math.max(p[0], q[0]) + tol, Math.min(p[1], q[1]) - tol, Math.max(p[1], q[1]) + tol])
+  const n = pieces.length
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (!open && i === 0 && j === n - 1) continue // the loop's own closing joint
+      const a = box[i], b = box[j]
+      if (a[1] < b[0] || b[1] < a[0] || a[3] < b[2] || b[3] < a[2]) continue
+      if (thinSegmentsMeet(pieces[i].p, pieces[i].q, pieces[j].p, pieces[j].q, tol)) return true
+    }
+  }
+  return false
+}
+
+/** Where the moved carriers of two consecutive loop segments meet, or null. */
+function thinCorner(A: ThinSeg, B: ThinSeg, d: number, tol: number): ThinP2 | null {
+  const aEnd = thinAt(A, 1)
+  const bStart = thinAt(B, 0)
+  const nA = thinRightNormal(A, 1)
+  const nB = thinRightNormal(B, 0)
+  const joined = Math.hypot(aEnd[0] - bStart[0], aEnd[1] - bStart[1]) <= tol
+  // A smooth joint stays smooth: it moves straight out along the shared normal.
+  if (joined && Math.hypot(nA[0] - nB[0], nA[1] - nB[1]) < 1e-9) return [aEnd[0] + nA[0] * d, aEnd[1] + nA[1] * d]
+  const v: ThinP2 = [(aEnd[0] + bStart[0]) / 2, (aEnd[1] + bStart[1]) / 2]
+  if (A.kind === 'line' && B.kind === 'line' && Math.abs(nA[0] * nB[1] - nA[1] * nB[0]) < 1e-12 && nA[0] * nB[0] + nA[1] * nB[1] > 0) {
+    // Two parallel lines brought together by a dropped segment: one straight
+    // line if they now lie on one carrier, otherwise no sharp meeting point.
+    const gap = (B.a[0] - A.a[0]) * nA[0] + (B.a[1] - A.a[1]) * nA[1]
+    return Math.abs(gap) <= tol ? [v[0] + nA[0] * d, v[1] + nA[1] * d] : null
+  }
+  const cosT = nA[0] * nB[0] + nA[1] * nB[1]
+  const guess: ThinP2 = 1 + cosT > 1e-9
+    ? [v[0] + ((nA[0] + nB[0]) * d) / (1 + cosT), v[1] + ((nA[1] + nB[1]) * d) / (1 + cosT)]
+    : [v[0] + nA[0] * d, v[1] + nA[1] * d]
+  const meets = thinCarrierMeet(A, B, d)
+  if (meets.length === 0) return null
+  meets.sort((p, q) => Math.hypot(p[0] - guess[0], p[1] - guess[1]) - Math.hypot(q[0] - guess[0], q[1] - guess[1]))
+  return meets[0]
+}
+
+/**
+ * The CCW loop offset by `d` (d > 0 grows the enclosed area, d < 0 shrinks it)
+ * with sharp corners: lines move along their normal, arcs keep their centre and
+ * change radius, and each corner is where the two moved carriers meet (a smooth
+ * joint stays smooth). A segment or arc the offset passes - a fillet arc whose
+ * radius reaches zero, a chamfer that shrinks to nothing, a notch that fills -
+ * drops out and its neighbours meet directly, which is what the exact offset
+ * does; this repeats until no segment is lost. Nothing is clamped. Refused only
+ * when the loop closes to nothing or the offset loop would cross itself.
+ */
+function thinOffsetLoop(loop: readonly ThinSeg[], d: number, tol: number): ThinOffset {
+  if (d === 0) return { ok: true, loop: [...loop], area: thinLoopArea(loop) }
+  const name = [...loop.map((s) => s.srcId)].sort(compareIds)[0]
+  const closed: ThinOffset = { ok: false, srcId: name, reason: 'the offset closes the loop to nothing' }
+  let out: ThinSeg[] = []
+  if (loop.length === 1) {
+    const seg = loop[0] as Extract<ThinSeg, { kind: 'arc' }>
+    const r = thinOffsetRadius(seg, d)
+    if (!(r > tol)) return closed
+    out = [{ ...seg, r }]
+  } else {
+    let segs = [...loop]
+    for (;;) {
+      if (segs.length < 2) return closed
+      const n = segs.length
+      const gone = new Set<number>()
+      segs.forEach((seg, i) => { if (seg.kind === 'arc' && !(thinOffsetRadius(seg, d) > tol)) gone.add(i) })
+      const corners: ThinP2[] = []
+      if (gone.size === 0) {
+        for (let i = 0; i < n; i++) {
+          const c = thinCorner(segs[i], segs[(i + 1) % n], d, tol)
+          if (c === null) { gone.add(i); gone.add((i + 1) % n) } else corners.push(c)
+        }
+      }
+      if (gone.size === 0) {
+        out = []
+        for (let i = 0; i < n; i++) {
+          const seg = segs[i]
+          const a = corners[(i + n - 1) % n]
+          const b = corners[i]
+          if (seg.kind === 'line') {
+            const dx = b[0] - a[0]
+            const dy = b[1] - a[1]
+            if (!(Math.hypot(dx, dy) > tol) || dx * (seg.b[0] - seg.a[0]) + dy * (seg.b[1] - seg.a[1]) <= 0) gone.add(i)
+            else out.push({ ...seg, a, b })
+            continue
+          }
+          const r = thinOffsetRadius(seg, d)
+          const s0 = Math.atan2(a[1] - seg.c[1], a[0] - seg.c[0])
+          const s1 = Math.atan2(b[1] - seg.c[1], b[0] - seg.c[0])
+          const turn = seg.sweep > 0 ? s1 - s0 : s0 - s1
+          const mag = ((turn % THIN_TWO_PI) + THIN_TWO_PI) % THIN_TWO_PI
+          if (!(mag * r > tol) || Math.abs(mag - Math.abs(seg.sweep)) >= Math.PI) gone.add(i)
+          else out.push({ ...seg, r, s: s0, sweep: seg.sweep > 0 ? mag : -mag })
+        }
+      }
+      if (gone.size === 0) break
+      if (gone.size >= n) return closed
+      segs = segs.filter((_, i) => !gone.has(i))
+    }
+  }
+  const area = thinLoopArea(out)
+  if (!(area > tol * tol)) return closed
+  if (area > thinLoopArea(loop) !== d > 0 || thinLoopSelfCrosses(out, tol)) {
+    return { ok: false, srcId: name, reason: 'the offset loop would cross itself' }
+  }
+  return { ok: true, loop: out, area }
+}
+
+/** Distance from a 2D point to a loop segment (bounded: endpoints included). */
+function thinDistanceToSeg(q: ThinP2, seg: ThinSeg): number {
+  if (seg.kind === 'line') {
+    const dx = seg.b[0] - seg.a[0]
+    const dy = seg.b[1] - seg.a[1]
+    const l2 = dx * dx + dy * dy || 1
+    const f = Math.max(0, Math.min(1, ((q[0] - seg.a[0]) * dx + (q[1] - seg.a[1]) * dy) / l2))
+    return Math.hypot(q[0] - seg.a[0] - dx * f, q[1] - seg.a[1] - dy * f)
+  }
+  const turn = Math.atan2(q[1] - seg.c[1], q[0] - seg.c[0]) - seg.s
+  const along = ((Math.sign(seg.sweep) * turn) % THIN_TWO_PI + THIN_TWO_PI) % THIN_TWO_PI
+  if (along <= Math.abs(seg.sweep)) return Math.abs(Math.hypot(q[0] - seg.c[0], q[1] - seg.c[1]) - seg.r)
+  const p0 = thinAt(seg, 0)
+  const p1 = thinAt(seg, 1)
+  return Math.min(Math.hypot(q[0] - p0[0], q[1] - p0[1]), Math.hypot(q[0] - p1[0], q[1] - p1[1]))
+}
+
+/** The least and greatest g . q over the points q of a loop's boundary (lines
+ *  at their ends, arcs also where they turn through the direction of g); a
+ *  linear function over the region the loop encloses has the same extremes. */
+function thinLoopExtent(loop: readonly ThinSeg[], g: ThinP2): { min: number; max: number } {
+  let min = Infinity
+  let max = -Infinity
+  const take = (q: ThinP2): void => {
+    const v = g[0] * q[0] + g[1] * q[1]
+    min = Math.min(min, v)
+    max = Math.max(max, v)
+  }
+  for (const seg of loop) {
+    take(thinAt(seg, 0))
+    take(thinAt(seg, 1))
+    if (seg.kind !== 'arc' || Math.hypot(g[0], g[1]) <= 0) continue
+    for (const ang of [Math.atan2(g[1], g[0]), Math.atan2(-g[1], -g[0])]) {
+      const along = ((Math.sign(seg.sweep) * (ang - seg.s)) % THIN_TWO_PI + THIN_TWO_PI) % THIN_TWO_PI
+      if (along <= Math.abs(seg.sweep)) take([seg.c[0] + seg.r * Math.cos(ang), seg.c[1] + seg.r * Math.sin(ang)])
+    }
+  }
+  return { min, max }
+}
+
+/** One band's sweep along the sketch normal. `plane` is set when the band ends
+ *  on a plane tilted to the sketch (WO-3235 audit): `end` is then the plane's
+ *  farthest point over the band and `near` its nearest, both signed like
+ *  `end`; the plane's normal points along the extrusion. */
+type ThinRange = { start: number; end: number; plane?: { point: Vec3T; normal: Vec3T; near: number } }
+
+/** Back to the profile vocabulary, for the shared loop-wire builder. */
+function thinToProfile(seg: ThinSeg): ProfileSegment {
+  if (seg.kind === 'line') return { kind: 'line', a: seg.a, b: seg.b, srcId: seg.srcId }
+  return { kind: 'arc', c: seg.c, r: seg.r, a0: seg.s, a1: seg.s + seg.sweep, ccw: seg.sweep > 0, srcId: seg.srcId }
+}
+
+/** One loop's wall band: `outer` is the loop grown by `grow`, `inner` the loop
+ *  shrunk by `shrink` (either may be the loop itself). */
+interface ThinBandPlan {
+  loop: ThinSeg[]
+  area: number
+  grow: number
+  shrink: number
+  outer: ThinOffset & { ok: true }
+  inner: ThinOffset & { ok: true }
+  /** The loop's smallest entity id: names its material caps. */
+  anchor: string
+  /** A point inside the band (sketch coords), for the material caps. */
+  capPoint: ThinP2
+  /** WO-3237: an open-chain wall. `outer` is then the whole band outline and
+   *  `inner` is empty; these are its walls, each named by its source entity
+   *  and role (left / right of travel, start / end of the chain). */
+  openWalls?: Array<{ srcId: string; role: ThinOpenWallRole; seg: ThinSeg }>
+}
+
+type ThinOpenWallRole = 'thinLeft' | 'thinRight' | 'thinStart' | 'thinEnd'
+
+/**
+ * Plan one loop's band. Material lies inside an outer loop and outside a hole
+ * loop, so 'inside' shrinks an outer loop and grows a hole loop by t,
+ * 'outside' does the opposite, and 'center' moves t/2 each way. Loop
+ * orientation never enters: every loop is chained and turned CCW first.
+ */
+function thinBandPlan(
+  loop: readonly ProfileSegment[],
+  hole: boolean,
+  side: ThinExtrudeSide,
+  t: number,
+): { ok: true; plan: ThinBandPlan } | { ok: false; code: DiagCode; reason: string } {
+  const first = loop[0]?.srcId ?? '(empty loop)'
+  let span = 1
+  for (const s of loop) {
+    for (const v of s.kind === 'line' ? [s.a, s.b] : [s.c]) span = Math.max(span, Math.abs(v[0]), Math.abs(v[1]))
+    if (s.kind === 'arc') span = Math.max(span, s.r)
+  }
+  const tol = span * 1e-9 + 1e-9
+  const chained = thinChainLoop(loop, Math.max(1e-6, span * 1e-9))
+  if (chained === null) return { ok: false, code: 'OPEN_PROFILE', reason: `the profile loop of ${first} is not one closed chain` }
+  const toMaterialShrinks = !hole
+  const half = t / 2
+  const [grow, shrink] = side === 'center'
+    ? [half, half]
+    : (side === 'inside') === toMaterialShrinks ? [0, t] : [t, 0]
+  const outer = thinOffsetLoop(chained, grow, tol)
+  if (!outer.ok) return { ok: false, code: 'KERNEL_OP_FAILED', reason: `a ${t} mm ${side} thin wall cannot be built on ${outer.srcId}: ${outer.reason}` }
+  const inner = thinOffsetLoop(chained, -shrink, tol)
+  if (!inner.ok) return { ok: false, code: 'KERNEL_OP_FAILED', reason: `a ${t} mm ${side} thin wall cannot be built on ${inner.srcId}: ${inner.reason}` }
+  const anchor = [...chained.map((s) => s.srcId)].sort(compareIds)[0]
+  // Cap point: on the longest segment's midpoint normal, halfway between walls.
+  let longest = chained[0]
+  const segLen = (s: ThinSeg): number => (s.kind === 'line' ? Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) : Math.abs(s.sweep) * s.r)
+  for (const s of chained) if (segLen(s) > segLen(longest)) longest = s
+  const m = thinAt(longest, 0.5)
+  const nr = thinRightNormal(longest, 0.5)
+  const off = (grow - shrink) / 2
+  return {
+    ok: true,
+    plan: {
+      loop: chained,
+      area: thinLoopArea(chained),
+      grow,
+      shrink,
+      outer,
+      inner,
+      anchor,
+      capPoint: [m[0] + nr[0] * off, m[1] + nr[1] * off],
+    },
+  }
+}
+
+// ---- thin open-chain walls (WO-3237) ---------------------------------------
+//
+// An open chain's wall is one band: the chain offset to its left and to its
+// right of travel (sharp joints, exact arcs, the same corner rule as a closed
+// loop), closed by two straight ends square to the chain at its first and last
+// point. Side is read from the persisted travel direction only, never from the
+// shape the chain bends into. A chain that crosses itself, or a wall that would,
+// is refused in one line: overlapping walls of one chain need a union contract
+// this route does not have. Nothing closes, fills or joins the chain.
+
+/** The open chain offset by `d` to the right of travel (d < 0: to the left).
+ *  Interior segments the offset passes drop out as in the closed loop offset;
+ *  an end segment cannot (its square end would move), so that is refused. */
+function thinOffsetChain(chain: readonly ThinSeg[], d: number, tol: number):
+  { ok: true; chain: ThinSeg[] } | { ok: false; srcId: string; reason: string } {
+  if (d === 0) return { ok: true, chain: [...chain] }
+  const first = chain[0]
+  const last = chain[chain.length - 1]
+  const p0 = thinAt(first, 0)
+  const n0 = thinRightNormal(first, 0)
+  const p1 = thinAt(last, 1)
+  const n1 = thinRightNormal(last, 1)
+  const start: ThinP2 = [p0[0] + n0[0] * d, p0[1] + n0[1] * d]
+  const end: ThinP2 = [p1[0] + n1[0] * d, p1[1] + n1[1] * d]
+  let segs = [...chain]
+  for (;;) {
+    const n = segs.length
+    const gone = new Set<number>()
+    segs.forEach((seg, i) => { if (seg.kind === 'arc' && !(thinOffsetRadius(seg, d) > tol)) gone.add(i) })
+    const corners: ThinP2[] = []
+    if (gone.size === 0) {
+      for (let i = 0; i + 1 < n; i++) {
+        const c = thinCorner(segs[i], segs[i + 1], d, tol)
+        if (c === null) { gone.add(i); gone.add(i + 1) } else corners.push(c)
+      }
+    }
+    const out: ThinSeg[] = []
+    if (gone.size === 0) {
+      for (let i = 0; i < n; i++) {
+        const seg = segs[i]
+        const a = i === 0 ? start : corners[i - 1]
+        const b = i === n - 1 ? end : corners[i]
+        if (seg.kind === 'line') {
+          const dx = b[0] - a[0]
+          const dy = b[1] - a[1]
+          if (!(Math.hypot(dx, dy) > tol) || dx * (seg.b[0] - seg.a[0]) + dy * (seg.b[1] - seg.a[1]) <= 0) gone.add(i)
+          else out.push({ ...seg, a, b })
+          continue
+        }
+        const r = thinOffsetRadius(seg, d)
+        const s0 = Math.atan2(a[1] - seg.c[1], a[0] - seg.c[0])
+        const s1 = Math.atan2(b[1] - seg.c[1], b[0] - seg.c[0])
+        const turn = seg.sweep > 0 ? s1 - s0 : s0 - s1
+        const mag = ((turn % THIN_TWO_PI) + THIN_TWO_PI) % THIN_TWO_PI
+        if (!(mag * r > tol) || Math.abs(mag - Math.abs(seg.sweep)) >= Math.PI) gone.add(i)
+        else out.push({ ...seg, r, s: s0, sweep: seg.sweep > 0 ? mag : -mag })
+      }
+    }
+    if (gone.size === 0) return { ok: true, chain: out }
+    const endGone = [0, n - 1].find((i) => gone.has(i))
+    if (endGone !== undefined) {
+      return { ok: false, srcId: segs[endGone].srcId, reason: 'the wall is thicker than the end curve allows: its square end would cross the wall' }
+    }
+    segs = segs.filter((_, i) => !gone.has(i))
+  }
+}
+
+/**
+ * Plan an open chain's band. `chain` is in persisted travel order with every
+ * segment walked that way (the sweep-path resolver's contract); it is checked,
+ * never re-ordered or flipped. 'left' puts all of t on the left of travel,
+ * 'right' on the right, 'center' t/2 each side.
+ */
+function thinOpenBandPlan(
+  chain: readonly ProfileSegment[],
+  side: ThinOpenSide,
+  t: number,
+): { ok: true; plan: ThinBandPlan } | { ok: false; code: DiagCode; reason: string } {
+  const first = chain[0]?.srcId ?? '(empty chain)'
+  if (chain.length === 0) return { ok: false, code: 'OPEN_PROFILE', reason: 'an open-chain thin wall needs at least one curve' }
+  let span = 1
+  for (const s of chain) {
+    for (const v of s.kind === 'line' ? [s.a, s.b] : [s.c]) span = Math.max(span, Math.abs(v[0]), Math.abs(v[1]))
+    if (s.kind === 'arc') span = Math.max(span, s.r)
+  }
+  const tol = span * 1e-9 + 1e-9
+  const joinTol = Math.max(1e-6, span * 1e-9)
+  const segs = chain.map(thinSegFrom)
+  const near = (p: ThinP2, q: ThinP2): boolean => Math.hypot(p[0] - q[0], p[1] - q[1]) <= joinTol
+  const full = segs.find(thinIsFullCircle)
+  if (full !== undefined) return { ok: false, code: 'OPEN_PROFILE', reason: `${full.srcId} is a full circle, so the chain of ${first} is not open` }
+  for (let i = 0; i + 1 < segs.length; i++) {
+    if (!near(thinAt(segs[i], 1), thinAt(segs[i + 1], 0))) {
+      return { ok: false, code: 'OPEN_PROFILE', reason: `the chain breaks between ${segs[i].srcId} and ${segs[i + 1].srcId} in its travel order` }
+    }
+  }
+  if (near(thinAt(segs[segs.length - 1], 1), thinAt(segs[0], 0))) {
+    return { ok: false, code: 'OPEN_PROFILE', reason: `the chain of ${first} ends where it starts, so it is a closed loop, not an open chain` }
+  }
+  if (thinLoopSelfCrosses(segs, tol, true)) {
+    return { ok: false, code: 'KERNEL_OP_FAILED', reason: `the chain of ${first} crosses itself; walls from a self-crossing chain need a union contract that is not available` }
+  }
+  const [L, R] = side === 'left' ? [t, 0] : side === 'right' ? [0, t] : [t / 2, t / 2]
+  const left = thinOffsetChain(segs, -L, tol)
+  if (!left.ok) return { ok: false, code: 'KERNEL_OP_FAILED', reason: `a ${t} mm ${side} thin wall cannot be built on ${left.srcId}: ${left.reason}` }
+  const right = thinOffsetChain(segs, R, tol)
+  if (!right.ok) return { ok: false, code: 'KERNEL_OP_FAILED', reason: `a ${t} mm ${side} thin wall cannot be built on ${right.srcId}: ${right.reason}` }
+  const startId = segs[0].srcId
+  const endId = segs[segs.length - 1].srcId
+  const lEnd = thinAt(left.chain[left.chain.length - 1], 1)
+  const rEnd = thinAt(right.chain[right.chain.length - 1], 1)
+  const lStart = thinAt(left.chain[0], 0)
+  const rStart = thinAt(right.chain[0], 0)
+  const endCap: ThinSeg = { kind: 'line', srcId: endId, a: lEnd, b: rEnd }
+  const startCap: ThinSeg = { kind: 'line', srcId: startId, a: rStart, b: lStart }
+  let band: ThinSeg[] = [...left.chain, endCap, ...[...right.chain].reverse().map(thinReverse), startCap]
+  let area = thinLoopArea(band)
+  if (area < 0) {
+    band = band.reverse().map(thinReverse)
+    area = -area
+  }
+  if (!(area > tol * tol)) return { ok: false, code: 'KERNEL_OP_FAILED', reason: `a ${t} mm ${side} thin wall on the chain of ${first} has no area` }
+  if (thinLoopSelfCrosses(band, tol)) {
+    return { ok: false, code: 'KERNEL_OP_FAILED', reason: `a ${t} mm ${side} thin wall on the chain of ${first} would overlap itself; overlapping walls of one chain need a union contract that is not available` }
+  }
+  const anchor = [...segs.map((s) => s.srcId)].sort(compareIds)[0]
+  let longest = segs[0]
+  const segLen = (s: ThinSeg): number => (s.kind === 'line' ? Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) : Math.abs(s.sweep) * s.r)
+  for (const s of segs) if (segLen(s) > segLen(longest)) longest = s
+  const m = thinAt(longest, 0.5)
+  const nr = thinRightNormal(longest, 0.5)
+  const off = (R - L) / 2
+  return {
+    ok: true,
+    plan: {
+      loop: segs,
+      area,
+      grow: L,
+      shrink: R,
+      outer: { ok: true, loop: band, area },
+      inner: { ok: true, loop: [], area: 0 },
+      anchor,
+      capPoint: [m[0] + nr[0] * off, m[1] + nr[1] * off],
+      openWalls: [
+        ...left.chain.map((seg) => ({ srcId: seg.srcId, role: 'thinLeft' as const, seg })),
+        ...right.chain.map((seg) => ({ srcId: seg.srcId, role: 'thinRight' as const, seg })),
+        { srcId: startId, role: 'thinStart' as const, seg: startCap },
+        { srcId: endId, role: 'thinEnd' as const, seg: endCap },
+      ],
+    },
+  }
+}
+
 export class GeomEngine {
   #kernel: OcctKernel | null = null
   #wasm: GeomEngineOptions['wasm']
@@ -901,6 +1487,7 @@ export class GeomEngine {
   // ---- lifecycle -------------------------------------------------------
   async init(onProgress?: (pct: number, phase: string) => void): Promise<KernelInfo> {
     this.#stepImportCache.clear()
+    this.#freeFormBoxes.clear()
     onProgress?.(2, 'geom:starting')
     onProgress?.(10, 'geom:loading-wasm')
     const kernel = await OcctKernel.init(this.#wasm ? { wasm: this.#wasm } : undefined)
@@ -952,6 +1539,7 @@ export class GeomEngine {
    */
   async disposeKernel(): Promise<void> {
     this.#stepImportCache.clear()
+    this.#freeFormBoxes.clear()
     // Release everything we still hold before dropping the kernel.
     for (const r of this.#bodies.values()) {
       try { this.#kernel?.release(r.shape as ShapeHandle) } catch { /* ignore */ }
@@ -969,9 +1557,52 @@ export class GeomEngine {
   }
 
   // ---- geometry probing ------------------------------------------------
+  /**
+   * WO-3325: the kernel's surface-precise box of a free-form face costs about
+   * half a second on a Form body's B-spline faces, and every face of every
+   * boolean result and every restored body was boxed again - an Extrude Remove
+   * on a Form body spent ~95% of its preview and its Apply here (~13 of ~14 s
+   * measured; the boolean itself ~0.25 s). The box depends only on the face's
+   * surface and trim, so a face that comes through a boolean untouched, or
+   * back from a serialize/restore round trip, has the box it had: those are
+   * remembered under the face's geometry - its surface kind, uv bounds, area
+   * and a 5 x 5 grid of points on it - and the kernel's own answer for that
+   * geometry is returned. Analytic faces, and a face carrying a mesh when the
+   * caller asks for the mesh to be used, go to the kernel exactly as before.
+   */
+  readonly #freeFormBoxes = new Map<string, BoundingBox>()
+
+  #faceBox(face: ShapeHandle, useTriangulation: boolean, kind: string): BoundingBox {
+    const k = this.#k()
+    // with a mesh on the face the two modes differ; without one they are the same analysis
+    if (ANALYTIC_KINDS.has(kind) || (useTriangulation && k.hasTriangulation(face))) return k.getBoundingBox(face, useTriangulation)
+    let key: string
+    try {
+      const uv = k.uvBounds(face)
+      const parts: number[] = [uv.uMin, uv.uMax, uv.vMin, uv.vMax, k.getSurfaceArea(face)]
+      for (let i = 0; i < 5; i++) {
+        for (let j = 0; j < 5; j++) {
+          const q = k.pointOnSurface(face, uv.uMin + (uv.uMax - uv.uMin) * i / 4, uv.vMin + (uv.vMax - uv.vMin) * j / 4)
+          parts.push(q.x, q.y, q.z)
+        }
+      }
+      if (!parts.every(Number.isFinite)) return k.getBoundingBox(face, useTriangulation)
+      key = `${kind}|${parts.join(',')}`
+    } catch {
+      return k.getBoundingBox(face, useTriangulation)
+    }
+    const known = this.#freeFormBoxes.get(key)
+    if (known !== undefined) return { ...known }
+    const b = k.getBoundingBox(face, useTriangulation)
+    if (this.#freeFormBoxes.size >= FREE_FORM_BOX_MEMO_MAX) this.#freeFormBoxes.delete(this.#freeFormBoxes.keys().next().value as string)
+    this.#freeFormBoxes.set(key, { ...b })
+    return b
+  }
+
   #probeFace(face: ShapeHandle): FaceProbe {
     const k = this.#k()
-    const b = k.getBoundingBox(face, true)
+    const surfaceKind = k.surfaceType(face)
+    const b = this.#faceBox(face, true, surfaceKind)
     const centroid: [number, number, number] = [
       (b.xmin + b.xmax) / 2,
       (b.ymin + b.ymax) / 2,
@@ -984,7 +1615,7 @@ export class GeomEngine {
       const n = k.surfaceNormal(face, (uv.uMin + uv.uMax) / 2, (uv.vMin + uv.vMax) / 2)
       normal = [n.x, n.y, n.z]
     } catch { /* normal best-effort */ }
-    const kind = toFaceKind(k.surfaceType(face))
+    const kind = toFaceKind(surfaceKind)
     // GEO-3 BK-14: axial faces (cylinder/cone/torus) get their ANALYTIC axis of
     // revolution by sampling THREE points along a latitude circle (same V,
     // three well-separated U) and taking that circle's plane normal. A
@@ -1045,8 +1676,34 @@ export class GeomEngine {
   }
 
   #bodyBBox(shape: ShapeHandle): BBox {
-    const b = this.#k().getBoundingBox(shape, false)
+    const b = this.#shapeBox(shape)
     return { min: [b.xmin, b.ymin, b.zmin], max: [b.xmax, b.ymax, b.zmax] }
+  }
+
+  /**
+   * WO-3325: a solid's surface-precise box. A body with a free-form face is
+   * boxed face by face through #faceBox's memo (the kernel's body box is the
+   * union of its face boxes); an all-analytic body goes to the kernel exactly
+   * as before.
+   */
+  #shapeBox(shape: ShapeHandle): BoundingBox {
+    const k = this.#k()
+    const faces = k.getSubShapes(shape, 'face')
+    try {
+      const kinds = faces.map((f) => k.surfaceType(f))
+      if (faces.length === 0 || kinds.every((kind) => ANALYTIC_KINDS.has(kind))) return k.getBoundingBox(shape, false)
+      const out = { xmin: Infinity, ymin: Infinity, zmin: Infinity, xmax: -Infinity, ymax: -Infinity, zmax: -Infinity }
+      faces.forEach((f, i) => {
+        const b = this.#faceBox(f, false, kinds[i])
+        out.xmin = Math.min(out.xmin, b.xmin); out.ymin = Math.min(out.ymin, b.ymin); out.zmin = Math.min(out.zmin, b.zmin)
+        out.xmax = Math.max(out.xmax, b.xmax); out.ymax = Math.max(out.ymax, b.ymax); out.zmax = Math.max(out.zmax, b.zmax)
+      })
+      return out
+    } finally {
+      for (const f of faces) {
+        try { k.release(f) } catch { /* already released */ }
+      }
+    }
   }
 
   /** GEO-2-R1.3: getSubShapes('face') mints one caller-owned ShapeHandle per
@@ -2069,6 +2726,7 @@ export class GeomEngine {
   }
 
   async makeExtrude(req: ExtrudeRequest): Promise<OpResult> {
+    if (req.thin !== undefined && req.thin !== null) return this.#makeThinExtrude(req, req.thin)
     const k = this.#k()
     const scratch: ShapeHandle[] = []
     let bodyShape: ShapeHandle | null = null
@@ -2201,6 +2859,533 @@ export class GeomEngine {
     } finally {
       for (const s of scratch) {
         if (s === bodyShape) continue
+        try { k.release(s) } catch { /* already released */ }
+      }
+    }
+  }
+
+  // ---- thin closed-wall extrude (WO-3233) --------------------------------
+  //
+  // Each loop of each profile becomes a band between two sharp-corner offsets
+  // of that loop (#thinLoopBands); every band is extruded and the bands fused,
+  // so overlapping walls measure as their union, not their sum. The fused tool
+  // then goes through the same NewBody / #applyToolBoolean route as an ordinary
+  // extrude. A wall the kernel cannot build exactly is refused in one line and
+  // nothing is touched: no solid fallback, no floor, no clamped thickness.
+  //
+  // WO-3235: the target-driven ends use the ordinary-solid resolvers and their
+  // policy unchanged. Up to face / plane / vertex and Through all name one
+  // plane or range for every wall; a face or datum plane tilted to the sketch
+  // is reached by every wall ON that plane: each band is swept past the plane
+  // and cut by it (#thinCutAtPlane). Up to next / part are decided against the
+  // wall section itself, never the filled profile: each connected wall
+  // component (#thinWallComponents) must be fully covered by a planar target
+  // face, so a target over only the hollow centre is missed, and disconnected
+  // walls each stop at their own target.
+
+  async #makeThinExtrude(req: ExtrudeRequest, thin: NonNullable<ExtrudeRequest['thin']>): Promise<OpResult> {
+    const k = this.#k()
+    const scratch: ShapeHandle[] = []
+    let bodyShape: ShapeHandle | null = null
+    const refuse = (code: DiagCode, reason: string): OpResult => ({
+      ok: false,
+      diagnostics: [{ code, severity: 'error', params: { op: 'extrude:thin', reason } }],
+    })
+    try {
+      const t = thin.thickness
+      if (typeof t !== 'number' || !Number.isFinite(t) || !(t > 0)) {
+        return refuse('KERNEL_OP_FAILED', `thin wall thickness must be a positive finite length, got ${String(t)}`)
+      }
+      const profiles = 'profiles' in req && req.profiles !== undefined ? req.profiles : [req.profile]
+      if (profiles.length === 0) return refuse('KERNEL_OP_FAILED', 'extrude requires at least one profile region')
+      const primaryProfile = profiles[0]
+      const basis = planeBasis(primaryProfile.plane)
+
+      // Exact 2D bands for every loop first; the kernel is asked for nothing
+      // until every offset is known to exist.
+      const bandPlans: ThinBandPlan[] = []
+      if (thin.open === true) {
+        // WO-3237: one open chain, one band; never a region, never closed.
+        const side = thin.side ?? 'left'
+        if (side !== 'left' && side !== 'right' && side !== 'center') {
+          return refuse('KERNEL_OP_FAILED', `an open-chain thin wall side must be left, right or center, got ${String(side)}`)
+        }
+        if (profiles.length !== 1 || primaryProfile.loops.length !== 1) {
+          return refuse('OPEN_PROFILE', 'an open-chain thin wall takes exactly one chain')
+        }
+        const plan = thinOpenBandPlan(primaryProfile.loops[0], side, t)
+        if (!plan.ok) return refuse(plan.code, plan.reason)
+        bandPlans.push(plan.plan)
+      } else {
+        const side = thin.side ?? 'inside'
+        if (side !== 'inside' && side !== 'outside' && side !== 'center') {
+          return refuse('KERNEL_OP_FAILED', `thin wall side must be inside, outside or center, got ${String(side)}`)
+        }
+        for (const profile of profiles) {
+          for (let li = 0; li < profile.loops.length; li++) {
+            const plan = thinBandPlan(profile.loops[li], li > 0, side, t)
+            if (!plan.ok) return refuse(plan.code, plan.reason)
+            bandPlans.push(plan.plan)
+          }
+        }
+      }
+      const bandFaces: ShapeHandle[] = []
+      for (const plan of bandPlans) {
+        const band = this.#thinBandFace(plan, basis, scratch)
+        if (!band.ok) return refuse('KERNEL_OP_FAILED', band.reason)
+        bandFaces.push(band.face)
+      }
+
+      const ends = this.#thinEndRanges(req, bandPlans, bandFaces, basis, scratch)
+      if (!ends.ok) return refuse(ends.code, ends.reason)
+      const { ranges } = ends
+      for (const range of ranges) {
+        const sweep = range.end - range.start
+        if (!Number.isFinite(sweep) || Math.abs(sweep) <= 1e-7) {
+          return refuse('KERNEL_OP_FAILED', 'resolved end condition has zero or non-finite depth')
+        }
+      }
+
+      let solid: ShapeHandle | null = null
+      for (let i = 0; i < bandPlans.length; i++) {
+        const plan = bandPlans[i]
+        const { start: startDistance, end: endDistance, plane } = ranges[i]
+        const start = scale(basis.normal, startDistance)
+        // A tilted end plane: sweep past its farthest point, then cut there.
+        const past = plane === undefined ? 0 : Math.sign(endDistance) * Math.max(1, t)
+        const extVec = scale(basis.normal, endDistance + past - startDistance)
+        let face = bandFaces[i]
+        if (startDistance !== 0) {
+          face = k.translate(face, start[0], start[1], start[2])
+          scratch.push(face)
+        }
+        let wall = k.extrude(face, extVec[0], extVec[1], extVec[2])
+        scratch.push(wall)
+        if (plane !== undefined) {
+          const cut = this.#thinCutAtPlane(wall, plane, scratch)
+          if (cut === null) return refuse('INVALID_RESULT', `the thin wall of ${plan.anchor} could not be ended on the target plane`)
+          wall = cut
+        }
+        if (!k.isValid(wall)) return refuse('INVALID_RESULT', `the thin wall of ${plan.anchor} is not a valid solid`)
+        if (solid === null) {
+          solid = wall
+        } else {
+          const fused = k.fuse(solid, wall)
+          scratch.push(fused)
+          solid = fused
+        }
+      }
+      if (solid === null || !k.isValid(solid)) return refuse('INVALID_RESULT', 'the fused thin walls are not a valid solid')
+      if (bandPlans.length > 1) {
+        // Fusing touching or overlapping bands leaves their shared caps and
+        // walls cut into fragments along the old band outlines. Merge them back
+        // so one flat cap is one face; the volume must not move.
+        const fusedVolume = k.getVolume(solid)
+        const unified = k.unifySameDomain(solid)
+        scratch.push(unified)
+        if (!k.isValid(unified) || Math.abs(k.getVolume(unified) - fusedVolume) > Math.max(1e-9, fusedVolume * 1e-9)) {
+          return refuse('INVALID_RESULT', 'the fused thin walls did not merge into a valid solid')
+        }
+        solid = unified
+      }
+
+      // Walls that stop at different targets report the farthest end; every
+      // target any wall stopped at is listed.
+      const far = ranges.reduce((a, b) => (Math.abs(b.end) > Math.abs(a.end) ? b : a))
+      const resolvedExtrudeEnd: ResolvedExtrudeEnd = { kind: req.end.kind, startDistance: far.start, endDistance: far.end, targets: ends.targets }
+      const assign = this.#assignThinFaceIds(solid, req.featureId, primaryProfile.sketchId, bandPlans, basis, ranges, t)
+
+      if (req.op === 'newBody') {
+        const handle = this.#mint({ shape: solid as number, faceMap: assign.faceMap, snapshots: assign.snapshots })
+        bodyShape = solid
+        const geometry: Record<StableId, ContractGeometrySnapshot> = {}
+        for (const [id, snap] of assign.snapshots) geometry[id] = toContractGeometry(snap)
+        return {
+          ok: true,
+          body: handle,
+          elementMap: { featureId: req.featureId, modified: {}, generated: assign.generated, deleted: [], geometry },
+          resolvedExtrudeEnd,
+          diagnostics: okDiag(),
+        }
+      }
+      if (req.target === undefined) return refuse('KERNEL_OP_FAILED', `a thin ${req.op} needs a target body`)
+      const result = this.#applyToolBoolean(req.featureId, req.op, req.target, solid, assign)
+      bodyShape = result.bodyShape
+      if (result.opResult.ok) result.opResult.resolvedExtrudeEnd = resolvedExtrudeEnd
+      return result.opResult
+    } catch (e) {
+      return {
+        ok: false,
+        diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { op: 'extrude:thin', message: (e instanceof Error ? e.message : String(e)).slice(0, 200) } }],
+      }
+    } finally {
+      for (const s of scratch) {
+        if (s === bodyShape) continue
+        try { k.release(s) } catch { /* already released */ }
+      }
+    }
+  }
+
+  /**
+   * WO-3235: the [start, end] of every band (index-aligned with `plans`).
+   * Blind, Symmetric, Through all and Up to face / plane / vertex give one
+   * range to every wall, from the same resolvers an ordinary solid uses. Up to
+   * next / part resolve each connected wall component on its own wall
+   * section, so the hollow centre never terminates anything and two separate
+   * walls may stop at two different targets.
+   */
+  #thinEndRanges(
+    req: ExtrudeRequest,
+    plans: readonly ThinBandPlan[],
+    bandFaces: readonly ShapeHandle[],
+    basis: PlaneBasis,
+    scratch: ShapeHandle[],
+  ):
+    | { ok: true; ranges: ThinRange[]; targets: ExtrudeEndTargetIdentity[] }
+    | { ok: false; code: DiagCode; reason: string } {
+    const end = req.end
+    const all = (start: number, stop: number, targets: ExtrudeEndTargetIdentity[] = []) =>
+      ({ ok: true as const, ranges: plans.map(() => ({ start, end: stop })), targets })
+    if (end.kind === 'blind') return all(0, end.distance)
+    if (end.kind === 'symmetric') return all(-end.distance / 2, end.distance / 2)
+    const dir = scale(basis.normal, end.direction)
+    if (end.kind === 'throughAll') {
+      const range = this.#throughAllRange(req, basis.origin, dir, end.targets, end.symmetric === true)
+      if (!range.ok) return range
+      return end.symmetric
+        ? all(range.start, range.end, range.identities)
+        : all(end.direction * range.start, end.direction * range.end, range.identities)
+    }
+    if (end.kind === 'toFace') {
+      const tilted = this.#thinTiltedTargetPlane(req, end.target, basis.normal)
+      if (tilted !== undefined) return this.#thinTiltedRanges(plans, basis, end.direction, tilted, end.offset ?? 0, end.target.identity)
+    }
+    if (end.kind === 'toFace' || end.kind === 'toVertex') {
+      const terminal = end.kind === 'toFace'
+        ? this.#selectedFaceTerminal(req, basis.origin, dir, end.target, end.offset ?? 0)
+        : this.#selectedVertexTerminal(req, basis.origin, dir, end.target, end.offset ?? 0)
+      if (!terminal.ok) return terminal
+      return all(0, end.direction * terminal.terminal.distance, terminal.terminal.targets)
+    }
+    const label = end.kind === 'toPart' ? 'Up to part' : 'Up to next'
+    const candidates = end.kind === 'toPart' ? [end.target] : end.candidates
+    const components = this.#thinWallComponents(bandFaces, scratch)
+    const ranges: ThinRange[] = plans.map(() => ({ start: 0, end: 0 }))
+    const targets: ExtrudeEndTargetIdentity[] = []
+    const seen = new Set<string>()
+    for (const component of components) {
+      const terminal = this.#partTerminal(req, component.section, basis.origin, dir, candidates, end.offset ?? 0, label)
+      if (!terminal.ok) {
+        if (components.length === 1) return terminal
+        const anchors = component.members.map((i) => plans[i].anchor).sort(compareIds).join(', ')
+        return { ok: false, code: terminal.code, reason: `the thin wall of ${anchors}: ${terminal.reason}` }
+      }
+      for (const i of component.members) ranges[i] = { start: 0, end: end.direction * terminal.terminal.distance }
+      for (const identity of terminal.terminal.targets) {
+        const key = JSON.stringify(identity)
+        if (seen.has(key)) continue
+        seen.add(key)
+        targets.push(identity)
+      }
+    }
+    return { ok: true, ranges, targets }
+  }
+
+  /**
+   * WO-3235 audit: the live plane of an Up to face / datum plane target that is
+   * tilted to the sketch - neither parallel to it nor to the extrusion. Every
+   * other target, and every target that does not resolve, gives undefined and
+   * stays with #selectedFaceTerminal, which keeps today's result and refusals.
+   */
+  #thinTiltedTargetPlane(req: ExtrudeRequest, target: ResolvedExtrudeFaceTarget, sketchNormal: Vec3T):
+    { point: Vec3T; normal: Vec3T; label: string } | undefined {
+    let point: Vec3T
+    let raw: Vec3T
+    let label: string
+    if ('plane' in target) {
+      if (req.modelItemId !== undefined && target.identity.modelItemId !== req.modelItemId) return undefined
+      const { origin: o, normal: n } = target.plane
+      point = [o.x, o.y, o.z]
+      raw = [n.x, n.y, n.z]
+      label = `Up to plane target '${target.identity.planeFeatureId}'`
+    } else {
+      if (this.#validateExtrudeTargetItem(req, target) !== undefined) return undefined
+      const wanted = this.#targetStableIds(target.identity, 'face')
+      if (!wanted) return undefined
+      const rec = this.#rec(target.body)
+      const roots = new Set(wanted.map((id) => this.#resolveFaceId(rec, id)))
+      const k = this.#k()
+      const faces = k.getSubShapes(rec.shape as ShapeHandle, 'face')
+      try {
+        const matches = faces.filter((face) => {
+          const id = rec.faceMap.get(k.hashCode(face, HM))
+          return id !== undefined && roots.has(id)
+        })
+        if (matches.length !== 1 || k.surfaceType(matches[0]) !== 'plane') return undefined
+        const uv = k.uvBounds(matches[0])
+        const p = k.pointOnSurface(matches[0], (uv.uMin + uv.uMax) / 2, (uv.vMin + uv.vMax) / 2)
+        const n = k.surfaceNormal(matches[0], (uv.uMin + uv.uMax) / 2, (uv.vMin + uv.vMax) / 2)
+        point = [p.x, p.y, p.z]
+        raw = [n.x, n.y, n.z]
+      } finally {
+        for (const face of faces) try { k.release(face) } catch { /* already released */ }
+      }
+      label = `Up to face target '${target.identity.subshape!.stableId}'`
+    }
+    const length = Math.hypot(raw[0], raw[1], raw[2])
+    if (![...point, ...raw].every(Number.isFinite) || !(length > 1e-12)) return undefined
+    const normal = scale(raw, 1 / length)
+    const along = Math.abs(dot(normal, sketchNormal))
+    if (along <= 1e-9 || along >= 1 - 1e-12) return undefined
+    return { point, normal, label }
+  }
+
+  /**
+   * WO-3235 audit: every band ends ON a tilted plane. The travel along the
+   * extrusion from a sketch point to the plane is linear over the sketch, so
+   * its nearest and farthest values over a band come from the band's outer
+   * loop (thinLoopExtent). The terminal offset moves the plane along the
+   * extrusion, as it moves a parallel target. A plane that meets a band's
+   * footprint - part of that wall would end at or behind the sketch - is
+   * refused by name; nothing is clamped.
+   */
+  #thinTiltedRanges(
+    plans: readonly ThinBandPlan[],
+    basis: PlaneBasis,
+    direction: 1 | -1,
+    tilted: { point: Vec3T; normal: Vec3T; label: string },
+    offset: number,
+    identity: ExtrudeEndTargetIdentity,
+  ): { ok: true; ranges: ThinRange[]; targets: ExtrudeEndTargetIdentity[] } | { ok: false; code: DiagCode; reason: string } {
+    const dir = scale(basis.normal, direction)
+    const normal = dot(tilted.normal, dir) > 0 ? tilted.normal : scale(tilted.normal, -1)
+    const denom = dot(dir, normal)
+    const point = add(tilted.point, scale(dir, offset))
+    // travel(q) = c0 - g . q for a sketch point q, before the offset.
+    const c0 = dot(sub(tilted.point, basis.origin), normal) / denom
+    const g: ThinP2 = [dot(basis.xDir, normal) / denom, dot(basis.yDir, normal) / denom]
+    const ranges: ThinRange[] = []
+    for (const plan of plans) {
+      const extent = thinLoopExtent(plan.outer.loop, g)
+      const near = c0 - extent.max
+      const far = c0 - extent.min + offset
+      if (!(near > 1e-7)) {
+        return { ok: false, code: 'KERNEL_OP_FAILED', reason: `${tilted.label} is not ahead of the whole thin wall of ${plan.anchor} in the selected extrusion direction; part of the wall would end at or behind the sketch plane` }
+      }
+      if (!Number.isFinite(far)) {
+        return { ok: false, code: 'KERNEL_OP_FAILED', reason: `${tilted.label} terminal offset must produce a finite endpoint` }
+      }
+      if (!(near + offset > 1e-7)) {
+        return { ok: false, code: 'KERNEL_OP_FAILED', reason: `${tilted.label} is ahead of the thin wall of ${plan.anchor} before offset, but the terminal offset crosses the thin wall of ${plan.anchor}; reduce or reverse the offset` }
+      }
+      ranges.push({ start: 0, end: direction * far, plane: { point, normal, near: direction * (near + offset) } })
+    }
+    return { ok: true, ranges, targets: [identity] }
+  }
+
+  /** The part of a wall on the sketch side of its tilted end plane: the wall
+   *  minus a prism standing on the plane that covers everything beyond it.
+   *  Null when the kernel does not return a valid non-empty solid. */
+  #thinCutAtPlane(wall: ShapeHandle, plane: { point: Vec3T; normal: Vec3T }, scratch: ShapeHandle[]): ShapeHandle | null {
+    const k = this.#k()
+    const b = k.getBoundingBox(wall, false)
+    const reach = Math.hypot(b.xmax - b.xmin, b.ymax - b.ymin, b.zmax - b.zmin) + 1
+    const mid: Vec3T = [(b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, (b.zmin + b.zmax) / 2]
+    const centre = sub(mid, scale(plane.normal, dot(sub(mid, plane.point), plane.normal)))
+    const u = normalize(cross(plane.normal, Math.abs(plane.normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]))
+    const v = cross(plane.normal, u)
+    const P = (q: Vec3T): Vec3 => ({ x: q[0], y: q[1], z: q[2] })
+    const corners = [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([a, c]) => add(centre, add(scale(u, a * reach), scale(v, c * reach))))
+    const edges = corners.map((q, i) => {
+      const edge = k.makeLineEdge(P(q), P(corners[(i + 1) % 4]))
+      scratch.push(edge)
+      return edge
+    })
+    const wire = k.makeWire(edges)
+    scratch.push(wire)
+    const square = k.makeFace(wire)
+    scratch.push(square)
+    const beyond = scale(plane.normal, 2 * reach)
+    const prism = k.extrude(square, beyond[0], beyond[1], beyond[2])
+    scratch.push(prism)
+    const cut = k.cut(wall, prism)
+    scratch.push(cut)
+    if (!k.isValid(cut) || k.getSubShapes(cut, 'solid').length === 0 || !(k.getVolume(cut) > 0)) return null
+    return cut
+  }
+
+  /**
+   * WO-3235: group band faces whose material overlaps into one wall, and give
+   * each group its exact 2D section (the union of its bands, so an overlap is
+   * not counted twice). Bands that only touch along an edge or at a point stay
+   * separate walls: nothing joins them that a wall of material crosses.
+   */
+  #thinWallComponents(bandFaces: readonly ShapeHandle[], scratch: ShapeHandle[]): Array<{ members: number[]; section: ShapeHandle }> {
+    const k = this.#k()
+    const parent = bandFaces.map((_, i) => i)
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+    for (let i = 0; i < bandFaces.length; i++) {
+      for (let j = i + 1; j < bandFaces.length; j++) {
+        if (find(i) === find(j)) continue
+        const tol = Math.max(1e-9, Math.min(k.getSurfaceArea(bandFaces[i]), k.getSurfaceArea(bandFaces[j])) * 1e-7)
+        const overlap = k.common(bandFaces[i], bandFaces[j])
+        scratch.push(overlap)
+        if (k.getSurfaceArea(overlap) > tol) parent[find(j)] = find(i)
+      }
+    }
+    const groups = new Map<number, number[]>()
+    bandFaces.forEach((_, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), i]))
+    return [...groups.values()].map((members) => {
+      let section = bandFaces[members[0]]
+      for (const i of members.slice(1)) {
+        const fused = k.fuse(section, bandFaces[i])
+        scratch.push(fused)
+        section = fused
+      }
+      return { members, section }
+    })
+  }
+
+  /**
+   * One loop's band as a planar face: the outer offset loop with the inner one
+   * as its hole, both built edge by edge from the exact sharp-corner offset
+   * (lines and true circular arcs, the same edge builder as a profile loop).
+   * Not offsetWire2D: with sharp joins it returns a broken one-edge wire on
+   * the grow side of an acute corner (a 26.6 degree triangle corner, recorded
+   * in src/tests/evidence/WO-3233/CONTEXT.md), and asking it for a collapsing
+   * side corrupts the kernel heap (#grownOutline). The kernel still has to
+   * accept the band as a valid face of exactly the planned area.
+   */
+  #thinBandFace(plan: ThinBandPlan, basis: PlaneBasis, scratch: ShapeHandle[]): { ok: true; face: ShapeHandle } | { ok: false; reason: string } {
+    const k = this.#k()
+    const outerWire = this.#buildLoopWireForLoft(plan.outer.loop.map(thinToProfile), basis, scratch)
+    const outerFace = k.makeFace(outerWire)
+    scratch.push(outerFace)
+    let face = outerFace
+    // WO-3237: an open chain's band is one outline with no hole.
+    if (plan.inner.loop.length > 0) {
+      const innerWire = this.#buildLoopWireForLoft(plan.inner.loop.map(thinToProfile), basis, scratch)
+      face = k.addHolesInFace(outerFace, [innerWire])
+      scratch.push(face)
+    }
+    const want = plan.outer.area - plan.inner.area
+    if (!k.isValid(face) || Math.abs(k.getSurfaceArea(face) - want) > Math.max(1e-9, want * 1e-6)) {
+      return { ok: false, reason: `the thin wall section of ${plan.anchor} is not a valid band` }
+    }
+    return { ok: true, face }
+  }
+
+  /**
+   * CONSTRUCTED lineage for a thin tool. Every face is named by the exact wall
+   * points that lie on it (bounded distance, not nearest): each source entity
+   * owns an `in` and an `out` wall, each loop owns a start and an end material
+   * cap. A face holding points of several walls (bands fused into one face)
+   * gets a merge id listing them all; it is never handed to whichever is
+   * nearest. Points sit at least t/4 apart from any other wall, so two offset
+   * sides are never equally near.
+   */
+  #assignThinFaceIds(
+    solid: ShapeHandle,
+    featureId: string,
+    sketchId: string,
+    plans: readonly ThinBandPlan[],
+    basis: PlaneBasis,
+    ranges: readonly ThinRange[],
+    t: number,
+  ): { faceMap: Map<number, StableId>; snapshots: Map<StableId, GeometrySnapshot>; generated: StableId[] } {
+    const k = this.#k()
+    const own: ShapeHandle[] = []
+    try {
+      const tol = Math.min(t / 4, Math.max(1e-5, this.#diagOf(solid) * 1e-7))
+      const at = (p: ThinP2, h: number): Vec3T => add(lift(basis, p), scale(basis.normal, h))
+      type Witness = { id: StableId; cap: 'start' | 'end' | null; p: Vec3T; v: ShapeHandle | null }
+      const witnesses: Witness[] = []
+      const wallSegs: Array<{ id: StableId; seg: ThinSeg }> = []
+      plans.forEach((plan, i) => {
+        const { start: startDistance, end: endDistance, plane } = ranges[i]
+        // Below a tilted end plane's nearest point every wall is still whole.
+        const midH = (startDistance + (plane?.near ?? endDistance)) / 2
+        const walls = plan.openWalls !== undefined
+          // WO-3237: open-chain walls, named by entity and side of travel.
+          ? plan.openWalls.map((w) => ({ id: `${featureId}:XTR:${w.srcId}:${w.role}` as StableId, seg: w.seg }))
+          : ([['out', plan.outer.loop], ['in', plan.inner.loop]] as const).flatMap(([wall, loop]) =>
+              loop.map((seg) => ({ id: extrudeThinWallId(featureId, seg.srcId, wall), seg })))
+        for (const { id, seg } of walls) {
+          wallSegs.push({ id, seg })
+          for (const f of [0.25, 0.5, 0.75]) witnesses.push({ id, cap: null, p: at(thinAt(seg, f), midH), v: null })
+        }
+        for (const which of ['start', 'end'] as const) {
+          const h = which === 'start' || plane === undefined
+            ? (which === 'start' ? startDistance : endDistance)
+            : dot(sub(plane.point, lift(basis, plan.capPoint)), plane.normal) / dot(basis.normal, plane.normal)
+          witnesses.push({ id: extrudeThinCapId(featureId, plan.anchor, which), cap: which, p: at(plan.capPoint, h), v: null })
+        }
+      })
+      const faces = k.getSubShapes(solid, 'face')
+      own.push(...faces)
+      // Every wall starts at the same height and sweeps the same way; only
+      // where it stops may differ (WO-3235).
+      const startDistance = ranges[0].start
+      const capDir = normalize(scale(basis.normal, ranges[0].end - startDistance))
+      const endGap = (r: ThinRange, c: Vec3T, h: number): number =>
+        r.plane === undefined ? Math.abs(h - r.end) : Math.abs(dot(sub(c, r.plane.point), r.plane.normal))
+      const isStartCap = (c: Vec3T): boolean => {
+        const h = dot(sub(c, basis.origin), basis.normal)
+        return Math.abs(h - startDistance) < Math.min(...ranges.map((r) => endGap(r, c, h)))
+      }
+      // A cap on a tilted end plane lies in that plane.
+      const onEndPlane = (n: Vec3T, c: Vec3T): boolean => ranges.some((r) =>
+        r.plane !== undefined && Math.abs(dot(n, r.plane.normal)) > 0.99 && endGap(r, c, 0) <= tol)
+      const named: Array<{ probe: FaceProbe; id: StableId }> = []
+      for (const f of faces) {
+        const probe = this.#probeFace(f)
+        const n = probe.snapshot.normal
+        const cap = probe.snapshot.type === 'plane'
+          && (Math.abs(dot(n as Vec3T, capDir)) > 0.99 || onEndPlane(n as Vec3T, probe.snapshot.centroid as Vec3T))
+        const b = k.getBoundingBox(f, true)
+        const hits = new Set<StableId>()
+        if (!cap) {
+          // A wall fragment (bands fused, a wall cut short) may hold none of
+          // its wall's witness points; any interior point of it still lies on
+          // exactly the wall segment that made it.
+          const sample = this.#faceInteriorSample(f)
+          if (sample !== null) {
+            const rel3 = sub([sample.p.x, sample.p.y, sample.p.z], basis.origin)
+            const q: ThinP2 = [dot(rel3, basis.xDir), dot(rel3, basis.yDir)]
+            for (const w of wallSegs) if (thinDistanceToSeg(q, w.seg) <= tol) hits.add(w.id)
+          }
+        }
+        for (const w of witnesses) {
+          if ((w.cap !== null) !== cap) continue
+          if (w.p[0] < b.xmin - tol || w.p[0] > b.xmax + tol || w.p[1] < b.ymin - tol || w.p[1] > b.ymax + tol || w.p[2] < b.zmin - tol || w.p[2] > b.zmax + tol) continue
+          if (w.v === null) { w.v = k.makeVertex(w.p[0], w.p[1], w.p[2]); own.push(w.v) }
+          if (k.distanceBetween(w.v, f) <= tol) hits.add(w.id)
+        }
+        let id: StableId
+        if (hits.size === 1) id = [...hits][0]
+        else if (hits.size > 1) id = extrudeThinMergeId(featureId, [...hits])
+        else if (cap) id = extrudeThinCapId(featureId, sketchId, isStartCap(probe.snapshot.centroid as Vec3T) ? 'start' : 'end')
+        else id = `${featureId}:XTR:${sketchId}:thinWall`
+        named.push({ probe, id })
+      }
+      const faceMap = new Map<number, StableId>()
+      const snapshots = new Map<StableId, GeometrySnapshot>()
+      const generated: StableId[] = []
+      const byId = new Map<StableId, FaceProbe[]>()
+      for (const { probe, id } of named) byId.set(id, [...(byId.get(id) ?? []), probe])
+      for (const [base, probes] of byId) {
+        const sorted = [...probes].sort((a, c) => compareSnapshots(a.snapshot, c.snapshot))
+        sorted.forEach((p, j) => {
+          const id: StableId = sorted.length === 1 ? base : `${base}#${j}`
+          faceMap.set(p.hash, id)
+          snapshots.set(id, p.snapshot)
+          generated.push(id)
+        })
+      }
+      generated.sort()
+      return { faceMap, snapshots, generated }
+    } finally {
+      for (const s of own) {
         try { k.release(s) } catch { /* already released */ }
       }
     }
@@ -2409,7 +3594,9 @@ export class GeomEngine {
   //
   // Empirical kernel findings (GEO-5 throwaway spikes, deleted before commit):
   //  - occt-wasm 3.6.1's sweep(), sweepOriented(), sweepPipeShell() ALL throw
-  //    WebAssembly.Exception. Only pipe() (BRepOffsetAPI_MakePipe,
+  //    WebAssembly.Exception when handed a profile FACE. (WO-3229: sweep() with
+  //    a profile WIRE works and yields a capped solid; the right-corner chain
+  //    sweep below uses it.) Only pipe() (BRepOffsetAPI_MakePipe,
   //    corrected-Frenet transport) works, and it yields a CAPPED SOLID when
   //    handed a profile FACE. pipe REQUIRES the profile placed at the spine
   //    START with its plane normal == the spine start tangent — a misaligned
@@ -2557,6 +3744,221 @@ export class GeomEngine {
     }
   }
 
+  /**
+   * WO-3229: right-corner (mitred) chain sweep. The outer loop is swept as a
+   * wire with OCCT's right-corner transition (the profile is transported
+   * rigidly and each corner is cut by the tangent bisector plane), giving one
+   * capped solid with exact lines and arcs. Holes are swept the same way and
+   * cut out, since the kernel refuses a holed face for this sweep. Returns the
+   * solid plus its constructed lineage, or the one-line reason it cannot.
+   * Every kernel handle it makes goes to `scratch`.
+   */
+  #buildRightCornerSweep(
+    req: SweepRequest,
+    ctx: { pathBasis: PlaneBasis; placement: PlaneBasis; start3d: Vec3T; startTan: Vec3T; endTan: Vec3T },
+    scratch: ShapeHandle[],
+  ): { solid: ShapeHandle; assign: { faceMap: Map<number, StableId>; snapshots: Map<StableId, GeometrySnapshot>; generated: StableId[] } } | { reason: string } {
+    const k = this.#k()
+    const N = ctx.pathBasis.normal
+    const leftN = cross(N, ctx.startTan)
+    const legs = chainLegs(req.path.segments)
+    // A profile 2D point p maps to left offset q = p . g and plane offset h = p . gh.
+    const g: [number, number] = [dot(ctx.placement.xDir, leftN), dot(ctx.placement.yDir, leftN)]
+    const defect = chainDefect(legs, profileOffsetRange(req.profile.loops[0], g))
+    if (defect) return { reason: `${defect} (path ${req.path.sketchId})` }
+
+    const spine = this.#buildPathWire(req.path, ctx.pathBasis, scratch)
+    let solid: ShapeHandle
+    try {
+      solid = k.sweep(this.#buildLoopWireForLoft(req.profile.loops[0], ctx.placement, scratch), spine, TransitionMode.RightCorner)
+      scratch.push(solid)
+      for (const hole of req.profile.loops.slice(1)) {
+        const holeSolid = k.sweep(this.#buildLoopWireForLoft(hole, ctx.placement, scratch), spine, TransitionMode.RightCorner)
+        scratch.push(holeSolid)
+        solid = k.cut(solid, holeSolid)
+        scratch.push(solid)
+      }
+    } catch {
+      return { reason: `the right-corner sweep of profile ${req.profile.sketchId} along path ${req.path.sketchId} could not be constructed by the kernel` }
+    }
+    const solids = k.getSubShapes(solid, 'solid')
+    for (const s of solids) scratch.push(s)
+    if (!k.isValid(solid) || solids.length !== 1 || !(k.getVolume(solid) > 1e-12)) {
+      return { reason: `the right-corner sweep of profile ${req.profile.sketchId} along path ${req.path.sketchId} did not produce one valid solid` }
+    }
+    let overlap: string | null
+    try {
+      overlap = this.#chainSelfOverlap(req, legs, ctx, scratch)
+    } catch {
+      overlap = `the right-corner sweep along path ${req.path.sketchId} could not be checked for running into itself by the kernel`
+    }
+    if (overlap) return { reason: overlap }
+    const assign = this.#assignChainSweepFaceIds(solid, req, legs, ctx, scratch)
+    if ('reason' in assign) return assign
+    return { solid, assign }
+  }
+
+  /**
+   * Kernel check that the swept envelope does not pass through itself: the
+   * outer loop is swept separately along each piece of the chain (arcs split
+   * into quarter turns, so a long arc can meet itself), and any two pieces that
+   * are not neighbours must share no volume. A crossing or folded path still
+   * gives a kernel-valid solid with a plausible volume, so validity and volume
+   * cannot catch this.
+   */
+  #chainSelfOverlap(
+    req: SweepRequest,
+    legs: ChainLeg[],
+    ctx: { pathBasis: PlaneBasis; placement: PlaneBasis },
+    scratch: ShapeHandle[],
+  ): string | null {
+    const k = this.#k()
+    const N = ctx.pathBasis.normal
+    const P = (v: Vec3T): Vec3 => ({ x: v[0], y: v[1], z: v[2] })
+    const pieces: Array<{ srcId: string; leg: number; u0: number; u1: number }> = []
+    legs.forEach((leg, i) => {
+      const n = leg.kind === 'arc' ? Math.max(1, Math.ceil(Math.abs(leg.sweep!) / (Math.PI / 2) - 1e-9)) : 1
+      const span = leg.kind === 'arc' ? Math.abs(leg.sweep!) : leg.length
+      for (let j = 0; j < n; j++) pieces.push({ srcId: leg.srcId, leg: i, u0: (span * j) / n, u1: (span * (j + 1)) / n })
+    })
+    if (pieces.length < 3) return null
+    const at = (leg: ChainLeg, u: number): Vec3T => lift(ctx.pathBasis, legPointAt(leg, u).p)
+    const solids = pieces.map((pc) => {
+      const leg = legs[pc.leg]
+      const turn = turnBeforeLeg(legs, pc.leg) + (leg.kind === 'arc' ? Math.sign(leg.sweep!) * pc.u0 : 0)
+      const { t } = legPointAt(leg, pc.u0)
+      const frame: PlaneBasis = {
+        origin: at(leg, pc.u0),
+        xDir: rotateAboutAxis(ctx.placement.xDir, [0, 0, 0], N, turn),
+        yDir: rotateAboutAxis(ctx.placement.yDir, [0, 0, 0], N, turn),
+        normal: normalize(add(scale(ctx.pathBasis.xDir, t[0]), scale(ctx.pathBasis.yDir, t[1]))),
+      }
+      const edge = leg.kind === 'line'
+        ? k.makeLineEdge(P(at(leg, pc.u0)), P(at(leg, pc.u1)))
+        : k.makeArcEdge(P(at(leg, pc.u0)), P(at(leg, (pc.u0 + pc.u1) / 2)), P(at(leg, pc.u1)))
+      scratch.push(edge)
+      const spine = k.makeWire([edge])
+      scratch.push(spine)
+      const s = k.sweep(this.#buildLoopWireForLoft(req.profile.loops[0], frame, scratch), spine, TransitionMode.Transformed)
+      scratch.push(s)
+      return { s, v: k.getVolume(s) }
+    })
+    for (let i = 0; i < pieces.length; i++) {
+      for (let j = i + 2; j < pieces.length; j++) {
+        const common = k.common(solids[i].s, solids[j].s)
+        scratch.push(common)
+        if (k.getVolume(common) > 1e-6 * Math.min(solids[i].v, solids[j].v)) {
+          const a = pieces[i].srcId, b = pieces[j].srcId
+          return a === b
+            ? `the profile swept along arc ${a} of path ${req.path.sketchId} runs into itself`
+            : `the profile swept along path ${req.path.sketchId} runs into itself between segments ${a} and ${b}`
+        }
+      }
+    }
+    return null
+  }
+
+  /**
+   * Constructed lineage for a right-corner chain sweep. Caps are recognised by
+   * where they must be, not by orientation alone: a planar face perpendicular to
+   * the path at the start (end) point whose area centroid is the profile section
+   * centroid carried there. Sides are recognised by a representative point of
+   * each profile entity carried by the transported frame to the middle of each
+   * path segment's swept span; the point lies on exactly one face (bounded
+   * face distance, so coplanar faces of neighbouring legs never tie). Every
+   * face must be attributed and there must be exactly two caps, otherwise the
+   * request is refused rather than named by enumeration order.
+   */
+  #assignChainSweepFaceIds(
+    resultShape: ShapeHandle,
+    req: SweepRequest,
+    legs: ChainLeg[],
+    ctx: { pathBasis: PlaneBasis; placement: PlaneBasis; start3d: Vec3T; startTan: Vec3T; endTan: Vec3T },
+    scratch: ShapeHandle[],
+  ): { faceMap: Map<number, StableId>; snapshots: Map<StableId, GeometrySnapshot>; generated: StableId[] } | { reason: string } {
+    const k = this.#k()
+    const N = ctx.pathBasis.normal
+    const leftN = cross(N, ctx.startTan)
+    const toQH = (p: Vec3T): [number, number] => [dot(sub(p, ctx.start3d), leftN), dot(sub(p, ctx.start3d), N)]
+    const tol = Math.max(1e-5, this.#diagOf(resultShape) * 1e-6)
+
+    const section = this.#buildProfileFace(req.profile, ctx.placement, scratch)
+    const area = k.getSurfaceArea(section)
+    const com = k.getSurfaceCenterOfMass(section)
+    const [qc, hc] = toQH([com.x, com.y, com.z])
+    const first = legs[0], last = legs[legs.length - 1]
+    const endSpan = legSpanAt(last, qc)
+    const capAt = {
+      start: { centroid: chainPoint3d(ctx.pathBasis, first, 0, qc, hc), tangent: ctx.startTan },
+      end: { centroid: chainPoint3d(ctx.pathBasis, last, endSpan ? endSpan.u1 : last.length, qc, hc), tangent: ctx.endTan },
+    }
+
+    const reps: Array<{ profSrc: string; pathSrc: string; vertex: ShapeHandle }> = []
+    for (const loop of req.profile.loops) {
+      for (const seg of loop) {
+        const [q, h] = toQH(lift(ctx.placement, segRep2d(seg)))
+        for (const leg of legs) {
+          const p = chainRepPoint(ctx.pathBasis, leg, q, h)
+          if (!p) continue
+          const vertex = k.makeVertex(p[0], p[1], p[2])
+          scratch.push(vertex)
+          reps.push({ profSrc: seg.srcId, pathSrc: leg.srcId, vertex })
+        }
+      }
+    }
+
+    const faces = k.getSubShapes(resultShape, 'face')
+    try {
+      const caps: { start: FaceProbe[]; end: FaceProbe[] } = { start: [], end: [] }
+      const sides = new Map<string, { profSrc: string; pathSrc: string; probes: FaceProbe[] }>()
+      let unmatched = 0
+      for (const f of faces) {
+        const probe = this.#probeFace(f)
+        if (probe.snapshot.type === 'plane') {
+          const n = probe.snapshot.normal as Vec3T
+          const c = k.getSurfaceCenterOfMass(f)
+          const which = (['start', 'end'] as const).find((w) =>
+            Math.abs(dot(n, capAt[w].tangent)) > 1 - 1e-9
+            && len(sub([c.x, c.y, c.z], capAt[w].centroid)) <= tol
+            && Math.abs(k.getSurfaceArea(f) - area) <= tol * Math.max(1, Math.sqrt(area)))
+          if (which) { caps[which].push(probe); continue }
+        }
+        let best: (typeof reps)[number] | null = null
+        let bestDist = Infinity
+        for (const r of reps) {
+          const d = k.distanceBetween(r.vertex, f)
+          if (d < bestDist) { bestDist = d; best = r }
+        }
+        if (!best || bestDist > tol) { unmatched++; continue }
+        const key = `${best.profSrc}x${best.pathSrc}`
+        const grp = sides.get(key) ?? { profSrc: best.profSrc, pathSrc: best.pathSrc, probes: [] }
+        grp.probes.push(probe)
+        sides.set(key, grp)
+      }
+      if (unmatched > 0 || caps.start.length !== 1 || caps.end.length !== 1) {
+        return { reason: `the right-corner sweep along path ${req.path.sketchId} gave ${unmatched} face(s) that match no profile and path entity and ${caps.start.length + caps.end.length} cap(s) instead of 2, so its face identities cannot be attributed` }
+      }
+
+      const faceMap = new Map<number, StableId>()
+      const snapshots = new Map<StableId, GeometrySnapshot>()
+      const generated: StableId[] = []
+      const put = (p: FaceProbe, id: StableId): void => { faceMap.set(p.hash, id); snapshots.set(id, p.snapshot); generated.push(id) }
+      for (const grp of sides.values()) {
+        const sorted = [...grp.probes].sort((a, b) => compareSnapshots(a.snapshot, b.snapshot))
+        const base = sweepSideId(req.featureId, grp.profSrc, grp.pathSrc)
+        sorted.forEach((p, j) => put(p, sorted.length === 1 ? base : `${base}#${j}`))
+      }
+      put(caps.start[0], sweepCapId(req.featureId, req.profile.sketchId, 'start'))
+      put(caps.end[0], sweepCapId(req.featureId, req.profile.sketchId, 'end'))
+      generated.sort()
+      return { faceMap, snapshots, generated }
+    } finally {
+      for (const f of faces) {
+        try { k.release(f) } catch { /* already released */ }
+      }
+    }
+  }
+
   async makeSweep(req: SweepRequest): Promise<OpResult> {
     const k = this.#k()
     const scratch: ShapeHandle[] = []
@@ -2598,6 +4000,33 @@ export class GeomEngine {
 
       const xHint: Vec3T = [req.profile.plane.xDir.x, req.profile.plane.xDir.y, req.profile.plane.xDir.z]
       const placement = frameFromNormal(start3d, startTan, xHint)
+
+      if (req.transition !== undefined && req.transition !== 'rightCorner') {
+        return fail(`sweep transition '${String(req.transition)}' is not one this kernel builds -- the only corner transition is 'rightCorner'`)
+      }
+      if (req.transition === 'rightCorner') {
+        const built = this.#buildRightCornerSweep(req, { pathBasis, placement, start3d, startTan, endTan }, scratch)
+        if ('reason' in built) return fail(built.reason)
+        if (req.op === 'newBody') {
+          bodyShape = built.solid
+          const handle = this.#mint({ shape: built.solid as number, faceMap: built.assign.faceMap, snapshots: built.assign.snapshots })
+          const geometry: Record<StableId, ContractGeometrySnapshot> = {}
+          for (const [id, snap] of built.assign.snapshots) geometry[id] = toContractGeometry(snap)
+          return {
+            ok: true,
+            body: handle,
+            elementMap: { featureId: req.featureId, modified: {}, generated: built.assign.generated, deleted: [], geometry },
+            diagnostics: okDiag(),
+          }
+        }
+        if (req.target === undefined) {
+          return fail(`sweep op '${req.op}' requires a target body`)
+        }
+        const result = this.#applyToolBoolean(req.featureId, req.op, req.target, built.solid, built.assign)
+        bodyShape = result.bodyShape
+        return result.opResult
+      }
+
       const face = this.#buildProfileFace(req.profile, placement, scratch)
       const spine = this.#buildPathWire(req.path, pathBasis, scratch)
 
@@ -3249,31 +4678,16 @@ export class GeomEngine {
       const snapshots = new Map<StableId, GeometrySnapshot>()
       const generated: StableId[] = []
       const modified: Record<StableId, StableId[]> = {}
-      const usedPred = new Set<Pred>()
-      const sortedFaces = [...resultFaces].sort((a, b) => compareSnapshots(a.snapshot, b.snapshot))
       // Pass 1: assign each result face to its nearest unused predicted (instance,
       // seed face) — the clean 1:1 case (non-overlapping instances, and the
       // outermost survivors of overlapping ones).
-      const unmatched: FaceProbe[] = []
-      for (const rf of sortedFaces) {
-        let best: Pred | undefined
-        let bestD = Infinity
-        for (const pr of preds) {
-          if (usedPred.has(pr)) continue
-          if (pr.type !== rf.snapshot.type) continue
-          const d = Math.hypot(rf.snapshot.centroid[0] - pr.c[0], rf.snapshot.centroid[1] - pr.c[1], rf.snapshot.centroid[2] - pr.c[2])
-          if (d < bestD) { bestD = d; best = pr }
-        }
-        if (best && bestD <= tol) {
-          usedPred.add(best)
-          const id: StableId = best.n === 0 ? best.seedId : patternInstanceId(req.featureId, best.n, best.seedId)
-          faceMap.set(rf.hash, id)
-          snapshots.set(id, rf.snapshot)
-          if (best.n === 0) modified[best.seedId] = [best.seedId]
-          else generated.push(id)
-        } else {
-          unmatched.push(rf)
-        }
+      const { matched, unmatched } = matchPredictedFaces(resultFaces, preds, tol)
+      for (const { face: rf, pred: best } of matched) {
+        const id: StableId = best.n === 0 ? best.seedId : patternInstanceId(req.featureId, best.n, best.seedId)
+        faceMap.set(rf.hash, id)
+        snapshots.set(id, rf.snapshot)
+        if (best.n === 0) modified[best.seedId] = [best.seedId]
+        else generated.push(id)
       }
       // Pass 2 (GEO-5-R1.3): overlapping instances fuse coplanar walls into ONE
       // result face that no single prediction's centroid matches. stable-id-spec
@@ -3352,6 +4766,115 @@ export class GeomEngine {
         try { k.release(s) } catch { /* already released */ }
       }
     }
+  }
+
+  /**
+   * WO-3244: ONE body moved by ONE exact rigid transform -- the transformed
+   * BREP itself, never a fused pattern with the unwanted solids thrown away,
+   * and never reflected Three vertices (the result is tessellated like every
+   * other body). Each result face is named from the KERNEL's own record of
+   * the transform (mirrorWithHistory / translateWithHistory: the source face
+   * every result face was built from), as `<featureId>:PAT:i1:<sourceFaceId>`.
+   * No face position is predicted or compared, so no plane angle and no face
+   * shape can make a valid moved body unnameable. A face the record does not
+   * carry one-to-one fails the whole op with a plain reason -- no
+   * nearest-guess id is ever persisted.
+   */
+  async transformBody(req: TransformBodyRequest): Promise<OpResult> {
+    const k = this.#k()
+    const fail = (reason: string): OpResult => ({
+      ok: false,
+      diagnostics: [{ code: 'PATTERN_FAILED', severity: 'error', params: { reason } }],
+    })
+    const source = this.#rec(req.body)
+    const t = req.transform
+    const inputHashes = [...source.faceMap.keys()]
+    let move: () => EvolutionData
+    if (t.kind === 'mirror') {
+      const o: Vec3T = [t.plane.origin.x, t.plane.origin.y, t.plane.origin.z]
+      if (!o.every(Number.isFinite)) return fail('the mirror plane has no finite position')
+      const nrm = normalize([t.plane.normal.x, t.plane.normal.y, t.plane.normal.z])
+      if (!nrm.every(Number.isFinite) || len(nrm) < 1e-9) return fail('the mirror plane has no direction')
+      move = () => k.mirrorWithHistory(source.shape as ShapeHandle, t.plane.origin, { x: nrm[0], y: nrm[1], z: nrm[2] }, inputHashes, HM)
+    } else {
+      const d: Vec3T = [t.delta.x, t.delta.y, t.delta.z]
+      if (!d.every(Number.isFinite)) return fail('the move distance is not a number')
+      move = () => k.translateWithHistory(source.shape as ShapeHandle, d[0], d[1], d[2], inputHashes, HM)
+    }
+
+    let moved: ShapeHandle | undefined
+    try {
+      const evo = move()
+      moved = evo.result
+      if (!k.isValid(moved) || !(k.getVolume(moved) > 1e-12)) {
+        return fail('the moved body is not a valid solid')
+      }
+      const rebound = this.#rebindThroughTransform(evo, source.faceMap)
+      if (typeof rebound === 'string') return fail(rebound)
+
+      const faceMap = new Map<number, StableId>()
+      const snapshots = new Map<StableId, GeometrySnapshot>()
+      const generated: StableId[] = []
+      const modified: Record<StableId, StableId[]> = {}
+      for (const [hash, sourceId] of rebound.faceMap) {
+        const id = patternInstanceId(req.featureId, 1, sourceId)
+        faceMap.set(hash, id)
+        snapshots.set(id, rebound.snapshots.get(sourceId)!)
+        if (req.identity === 'replace') modified[sourceId] = [id]
+        else generated.push(id)
+      }
+      generated.sort()
+
+      const handle = this.#mint({ shape: moved as number, faceMap, snapshots })
+      moved = undefined
+      const geometry: Record<StableId, ContractGeometrySnapshot> = {}
+      for (const [id, snap] of snapshots) geometry[id] = toContractGeometry(snap)
+      return {
+        ok: true,
+        body: handle,
+        elementMap: { featureId: req.featureId, modified, generated, deleted: [], geometry },
+        diagnostics: okDiag(),
+      }
+    } catch (e) {
+      return fail(`the transform failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`)
+    } finally {
+      if (moved !== undefined) {
+        try { k.release(moved) } catch { /* already released */ }
+      }
+    }
+  }
+
+  /** WO-3244: carry every face id of a body through ONE rigid kernel transform
+   *  by the kernel's own record of it (`*WithHistory` modified: each input
+   *  face hash -> the one result face built from it). A rigid transform keeps
+   *  every face, so the record must be one-to-one and cover the whole result;
+   *  anything else returns a plain reason instead of a guess. Snapshots are
+   *  the result's OWN probes (new hashes, moved centroids), keyed by the
+   *  carried id. Shared by transformBody and draft's frame conjugations. */
+  #rebindThroughTransform(
+    evo: EvolutionData,
+    faceMap: Map<number, StableId>,
+  ): { faceMap: Map<number, StableId>; snapshots: Map<StableId, GeometrySnapshot> } | string {
+    const probes = new Map(this.#faceProbes(evo.result).map((p) => [p.hash, p]))
+    if (probes.size !== faceMap.size) {
+      return `the moved body has ${probes.size} faces where the source has ${faceMap.size}`
+    }
+    const images = new Map<number, number[]>()
+    for (const r of decodeEvolution(evo.modified)) images.set(r.inHash, r.outHashes)
+    const out = new Map<number, StableId>()
+    const snapshots = new Map<StableId, GeometrySnapshot>()
+    let unnamed = 0
+    for (const [hash, id] of faceMap) {
+      const img = images.get(hash)
+      const probe = img !== undefined && img.length === 1 ? probes.get(img[0]) : undefined
+      if (probe === undefined || out.has(probe.hash)) { unnamed++; continue }
+      out.set(probe.hash, id)
+      snapshots.set(id, probe.snapshot)
+    }
+    if (unnamed > 0) {
+      return `${unnamed} face(s) of the moved body have no single source face in the kernel's record of the move, so they cannot be named`
+    }
+    return { faceMap: out, snapshots }
   }
 
   // ---- dress-up features (fillet / chamfer / shell / draft) — GEO-4 -----
@@ -4847,9 +6370,10 @@ export class GeomEngine {
 
     if (conjugate) {
       // Shift the body into the frame where the neutral plane is the origin
-      // plane, rebinding every id by the EXACT rigid translation.
-      const shifted = k.translate(target.shape as ShapeHandle, shift[0], shift[1], shift[2])
-      const rb = this.#rebindByShift(shifted, target.snapshots, shift)
+      // plane, carrying every id through the kernel's record of the move.
+      const shiftEvo = k.translateWithHistory(target.shape as ShapeHandle, shift[0], shift[1], shift[2], [...target.faceMap.keys()], HM)
+      const shifted = shiftEvo.result
+      const rb = this.#rebindOrNull(shiftEvo, target.faceMap)
       if (!rb) {
         try { k.release(shifted) } catch { /* already released */ }
         return { ok: false, diagnostics: [{ code: 'DRAFT_FAILED', severity: 'error', params: { faces: req.faces.join(', '), reason: `draft could not re-anchor the body onto neutral plane through origin ${req.neutralPlane.origin.x}, ${req.neutralPlane.origin.y}, ${req.neutralPlane.origin.z}` } }] }
@@ -4861,15 +6385,18 @@ export class GeomEngine {
     }
 
     if (rotateConjugate) {
-      const rotated = k.rotate(
+      const rotateEvo = k.rotateWithHistory(
         currentShape,
         {
           point: { x: 0, y: 0, z: 0 },
           direction: { x: rotationAxis[0], y: rotationAxis[1], z: rotationAxis[2] },
         },
         rotationAngle,
+        [...currentFaceMap.keys()],
+        HM,
       )
-      const rb = this.#rebindByRotation(rotated, currentSnapshots, rotationAxis, rotationAngle)
+      const rotated = rotateEvo.result
+      const rb = this.#rebindOrNull(rotateEvo, currentFaceMap)
       if (!rb) {
         try { k.release(rotated) } catch { /* already released */ }
         if (ownsCurrentShape) {
@@ -5006,15 +6533,18 @@ export class GeomEngine {
     }
 
     if (rotateConjugate) {
-      const restored = k.rotate(
+      const restoreEvo = k.rotateWithHistory(
         currentShape,
         {
           point: { x: 0, y: 0, z: 0 },
           direction: { x: rotationAxis[0], y: rotationAxis[1], z: rotationAxis[2] },
         },
         -rotationAngle,
+        [...currentFaceMap.keys()],
+        HM,
       )
-      const rb = this.#rebindByRotation(restored, currentSnapshots, rotationAxis, -rotationAngle)
+      const restored = restoreEvo.result
+      const rb = this.#rebindOrNull(restoreEvo, currentFaceMap)
       if (ownsCurrentShape) {
         try { k.release(currentShape) } catch { /* already released */ }
       }
@@ -5031,8 +6561,9 @@ export class GeomEngine {
     // caller's world frame, rebinding every id by the EXACT inverse translation.
     if (conjugate) {
       const back: Vec3T = [-shift[0], -shift[1], -shift[2]]
-      const restored = k.translate(currentShape, back[0], back[1], back[2])
-      const rb = this.#rebindByShift(restored, currentSnapshots, back)
+      const backEvo = k.translateWithHistory(currentShape, back[0], back[1], back[2], [...currentFaceMap.keys()], HM)
+      const restored = backEvo.result
+      const rb = this.#rebindOrNull(backEvo, currentFaceMap)
       if (ownsCurrentShape) {
         try { k.release(currentShape) } catch { /* already released */ }
       }
@@ -5070,99 +6601,16 @@ export class GeomEngine {
     }
   }
 
-  /** Rebind every prior id to a rigidly TRANSLATED copy of a shape: each face's
-   *  centroid moved by exactly `shift`, normal/type/area unchanged. Exact match
-   *  (translate is rigid), so tolerances are tight. Returns null if any id fails
-   *  to find its translated face (never silently mis-binds — used by the BK-53
-   *  draft translate-conjugation). Snapshots returned are the translated shape's
-   *  OWN probes (correct hashes + post-shift centroids). */
-  #rebindByShift(
-    shape: ShapeHandle,
-    priorSnapshots: Map<StableId, GeometrySnapshot>,
-    shift: Vec3T,
+  /** Draft's frame conjugations (BK-53 shift, GEO-18 rotation) carry every id
+   *  through the kernel's record of the rigid move (#rebindThroughTransform),
+   *  never a predicted face position: a bounding-box centre is not carried by
+   *  a rotation for an asymmetric face (WO-3244). Null fails the draft by name. */
+  #rebindOrNull(
+    evo: EvolutionData,
+    faceMap: Map<number, StableId>,
   ): { faceMap: Map<number, StableId>; snapshots: Map<StableId, GeometrySnapshot> } | null {
-    const probes = this.#faceProbes(shape)
-    const remaining = new Set(probes)
-    const faceMap = new Map<number, StableId>()
-    const snapshots = new Map<StableId, GeometrySnapshot>()
-    const tol = Math.max(1e-5, this.#diagOf(shape) * 1e-6)
-    for (const [id, s] of priorSnapshots) {
-      const t: Vec3T = [s.centroid[0] + shift[0], s.centroid[1] + shift[1], s.centroid[2] + shift[2]]
-      let best: FaceProbe | undefined
-      let bestD = Infinity
-      for (const p of remaining) {
-        if (p.snapshot.type !== s.type) continue
-        const d = Math.hypot(p.snapshot.centroid[0] - t[0], p.snapshot.centroid[1] - t[1], p.snapshot.centroid[2] - t[2])
-        if (d < bestD) { bestD = d; best = p }
-      }
-      if (best && bestD <= tol) {
-        faceMap.set(best.hash, id)
-        snapshots.set(id, best.snapshot)
-        remaining.delete(best)
-      } else {
-        return null
-      }
-    }
-    return { faceMap, snapshots }
-  }
-
-  /** Rebind every prior id through an exact rigid rotation about the world
-   *  origin. Centroid is the acceptance gate; transformed normal breaks ties
-   *  for symmetric faces that share a centroid. */
-  #rebindByRotation(
-    shape: ShapeHandle,
-    priorSnapshots: Map<StableId, GeometrySnapshot>,
-    axis: Vec3T,
-    angleRad: number,
-  ): { faceMap: Map<number, StableId>; snapshots: Map<StableId, GeometrySnapshot> } | null {
-    const probes = this.#faceProbes(shape)
-    const remaining = new Set(probes)
-    const faceMap = new Map<number, StableId>()
-    const snapshots = new Map<StableId, GeometrySnapshot>()
-    const tol = Math.max(1e-5, this.#diagOf(shape) * 1e-6)
-    const zero: Vec3T = [0, 0, 0]
-    for (const [id, s] of priorSnapshots) {
-      const expectedCentroid = rotateAboutAxis(s.centroid, zero, axis, angleRad)
-      const expectedNormal = normalize(rotateAboutAxis(s.normal, zero, axis, angleRad))
-      let best: FaceProbe | undefined
-      let bestCentroidDistance = Infinity
-      let bestScore = Infinity
-      for (const p of remaining) {
-        if (p.snapshot.type !== s.type) continue
-        const centroidDistance = Math.hypot(
-          p.snapshot.centroid[0] - expectedCentroid[0],
-          p.snapshot.centroid[1] - expectedCentroid[1],
-          p.snapshot.centroid[2] - expectedCentroid[2],
-        )
-        const probeNormal = normalize(p.snapshot.normal)
-        const normalDistance = Math.min(
-          Math.hypot(
-            probeNormal[0] - expectedNormal[0],
-            probeNormal[1] - expectedNormal[1],
-            probeNormal[2] - expectedNormal[2],
-          ),
-          Math.hypot(
-            probeNormal[0] + expectedNormal[0],
-            probeNormal[1] + expectedNormal[1],
-            probeNormal[2] + expectedNormal[2],
-          ),
-        )
-        const score = centroidDistance + normalDistance * tol
-        if (score < bestScore) {
-          best = p
-          bestScore = score
-          bestCentroidDistance = centroidDistance
-        }
-      }
-      if (best !== undefined && bestCentroidDistance <= tol) {
-        faceMap.set(best.hash, id)
-        snapshots.set(id, best.snapshot)
-        remaining.delete(best)
-      } else {
-        return null
-      }
-    }
-    return { faceMap, snapshots }
+    const rb = this.#rebindThroughTransform(evo, faceMap)
+    return typeof rb === 'string' ? null : rb
   }
 
   // ---- tessellation ----------------------------------------------------
@@ -9101,4 +10549,35 @@ export class GeomEngine {
     for (const [id, snap] of rec.snapshots) out[id] = snap
     return out
   }
+}
+
+/** Parameter-derived face matching for applyBodyPattern (GEO-5): result
+ *  faces, visited in geometric order, each go to the nearest unused prediction
+ *  of the same surface type within `tol`. The predictions come from the
+ *  operation's own parameters, never kernel enumeration order. */
+function matchPredictedFaces<P extends { c: Vec3T; type: string }>(
+  faces: readonly FaceProbe[],
+  preds: readonly P[],
+  tol: number,
+): { matched: Array<{ face: FaceProbe; pred: P }>; unmatched: FaceProbe[] } {
+  const used = new Set<P>()
+  const matched: Array<{ face: FaceProbe; pred: P }> = []
+  const unmatched: FaceProbe[] = []
+  const sorted = [...faces].sort((a, b) => compareSnapshots(a.snapshot, b.snapshot))
+  for (const rf of sorted) {
+    let best: P | undefined
+    let bestD = Infinity
+    for (const pr of preds) {
+      if (used.has(pr) || pr.type !== rf.snapshot.type) continue
+      const d = Math.hypot(rf.snapshot.centroid[0] - pr.c[0], rf.snapshot.centroid[1] - pr.c[1], rf.snapshot.centroid[2] - pr.c[2])
+      if (d < bestD) { bestD = d; best = pr }
+    }
+    if (best && bestD <= tol) {
+      used.add(best)
+      matched.push({ face: rf, pred: best })
+    } else {
+      unmatched.push(rf)
+    }
+  }
+  return { matched, unmatched }
 }

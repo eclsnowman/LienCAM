@@ -49,7 +49,7 @@ function withCaps(base: PostConfig, caps: Partial<PostConfig['capabilities']>): 
   return { ...base, capabilities: { ...base.capabilities, ...caps } }
 }
 
-// An arcs-DISABLED clone of UCCNC, to assert the unchanged fail-loud behavior.
+// An arcs-DISABLED clone of UCCNC, to assert the owner-approved SP-1 line output.
 const UCCNC_NO_ARCS = withCaps(UCCNC_CONFIG, { arcs: false })
 
 // --- UCCNC golden tests ------------------------------------------------------
@@ -59,7 +59,8 @@ describe('emitProgram — UCCNC', () => {
     const op = postOp(twoMoveOp(), makeTool({ id: 't1', toolNumber: 1 }))
     const { lines } = emitProgram(makeInput([op]), UCCNC_CONFIG)
     expect(lines[0]).toBe('G90 G94 G17 G21 G64')
-    expect(lines[1]).toBe('G54')
+    expect(lines[1]).toBe('( Machine safe Z is missing or rounds to zero; using work clearance for start/restart )')
+    expect(lines[2]).toBe('G54')
   })
 
   it('sanitizes parens in an op name to avoid nested-paren comments', () => {
@@ -211,7 +212,7 @@ describe('emitProgram — UCCNC', () => {
     expect(idxReturnMove).toBeGreaterThan(idxReassert)
   })
 
-  it('an arc move with arcs DISABLED -> ok:false + ARC_UNSUPPORTED via postProgram', () => {
+  it('an arc move with arcs DISABLED exports G1 segments via postProgram', () => {
     const op = postOp(
       makeOp({
         id: 'op1',
@@ -225,9 +226,11 @@ describe('emitProgram — UCCNC', () => {
       makeTool({ id: 't1', toolNumber: 1 }),
     )
     const res = postProgram(makeInput([op]), UCCNC_NO_ARCS)
-    expect(res.ok).toBe(false)
-    expect(res.gcode).toBe('')
-    expect(res.diagnostics.some((d) => d.code === 'ARC_UNSUPPORTED')).toBe(true)
+    expect(res.ok).toBe(true)
+    expect(res.gcode).toContain('G1')
+    expect(res.gcode).not.toMatch(/\bG[23]\b/)
+    expect(res.gcode).toContain('M30')
+    expect(res.diagnostics.filter((d) => d.level === 'error')).toEqual([])
   })
 
   it('programEndMode safe_z_only retracts UP in work Z + M30 (no G53 plunge, no end XY)', () => {
@@ -277,7 +280,11 @@ describe('emitProgram — arcs', () => {
     // but I/J are NOT (world-difference, frame-invariant).
     const wcs = makeWcs({ origin: { x: 100, y: 200, z: 0 } })
     const prev = { x: 10, y: 0 }
-    const arc = { x: 10, y: 10, cx: 0, cy: 0 } // world center (0,0)
+    // WO-3316: centre (0,5) is equidistant from both endpoints (r = sqrt(125)), so this
+    // is a real quarter arc. WO-3215 posts lines when the written start and end radii
+    // disagree, and the old centre (0,0) put the end at r 14.14 against the start's 10:
+    // no controller can run that as one G2 (WO-1384).
+    const arc = { x: 10, y: 10, cx: 0, cy: 5 } // world center (0,5)
     const op = postOp(
       makeOp({
         id: 'op1',
@@ -298,10 +305,10 @@ describe('emitProgram — arcs', () => {
     // modal-suppressed; only Y is re-emitted. F is modal too: the anchor feed
     // already emitted F2000, so it is suppressed on the arc block.
     // I = cx - xPrevWorld, J = cy - yPrevWorld (world difference, NO toWork).
-    expect(g2).toBe('G2 Y-190 I-10 J0')
+    expect(g2).toBe('G2 Y-190 I-10 J5')
     // Sanity: assert the I/J formula explicitly.
     expect(arc.cx - prev.x).toBe(-10) // I
-    expect(arc.cy - prev.y).toBe(0) // J
+    expect(arc.cy - prev.y).toBe(5) // J
     // The toWork-transformed endpoint Y is present; X (unchanged) is suppressed.
     expect(g2).toContain('Y-190')
     expect(g2).not.toContain('X')
@@ -419,7 +426,8 @@ describe('emitProgram — LinuxCNC', () => {
     const op = postOp(twoMoveOp(), makeTool({ id: 't1', toolNumber: 1 }))
     const { lines } = emitProgram(makeInput([op]), LINUXCNC_CONFIG)
     expect(lines[0]).toBe('G90 G94 G17 G21 G64')
-    expect(lines[1]).toBe('G54')
+    expect(lines[1]).toBe('; Machine safe Z is missing or rounds to zero; using work clearance for start/restart')
+    expect(lines[2]).toBe('G54')
   })
 
   it('section comments use ; semicolon style, not parentheses', () => {

@@ -164,6 +164,27 @@ function axisFeedPeak(job: TransferCheckJob, key: TransferAxisKey): number {
   return peak
 }
 
+/** Pure program summaries, never a readiness verdict. Reused only on a deeply
+ * frozen move list; live machine, offsets, rotations and limits stay below. */
+export interface TransferCheckGeometry {
+  workCoordinates: WcsId[]
+  hasUnknownWorkCoordinate: boolean
+  bounds: Bounds3 | null
+  peaks: Record<TransferAxisKey, number>
+}
+const preparedGeometry = new WeakMap<TransferCheckJob['moves'], TransferCheckGeometry>()
+export function prepareTransferCheckGeometry(job: TransferCheckJob): TransferCheckGeometry {
+  return {
+    workCoordinates: [...new Set(job.moves.filter(move => move.coordinateFrame === 'work' && move.workCoordinateSystem).map(move => move.workCoordinateSystem as WcsId))],
+    hasUnknownWorkCoordinate: job.moves.some(move => move.coordinateFrame === 'work' && !move.workCoordinateSystem),
+    bounds: jobBounds(job),
+    peaks: { x: axisFeedPeak(job, 'x'), y: axisFeedPeak(job, 'y'), z: axisFeedPeak(job, 'z') },
+  }
+}
+export function retainTransferCheckGeometry(job: TransferCheckJob, geometry: TransferCheckGeometry): void {
+  if (Object.isFrozen(job.moves)) preparedGeometry.set(job.moves, geometry)
+}
+
 function postedController(job: TransferCheckJob): ReturnType<typeof resolveDeclaredController> | null {
   if (!job.postedFor) return null
   // The resolver reads only the declared controller. Keep the transfer snapshot
@@ -196,12 +217,13 @@ export function checkJobAgainstMachine(
     }
   }
 
+  const geometry = preparedGeometry.get(job.moves)
   const envelope = motion.envelope
   const offsetTable = isOffsetTable(workOffset) ? workOffset : null
-  const usedWorkCoordinates = new Set(job.moves
+  const usedWorkCoordinates = new Set(geometry?.workCoordinates ?? job.moves
     .filter((move) => move.coordinateFrame === 'work' && move.workCoordinateSystem)
     .map((move) => move.workCoordinateSystem as WcsId))
-  const hasUnknownWorkCoordinate = job.moves.some(
+  const hasUnknownWorkCoordinate = geometry?.hasUnknownWorkCoordinate ?? job.moves.some(
     (move) => move.coordinateFrame === 'work' && !move.workCoordinateSystem,
   )
   const activeWcsFallback = offsetTable && usedWorkCoordinates.size === 0 && hasUnknownWorkCoordinate
@@ -478,7 +500,8 @@ export function checkJobAgainstMachine(
       max: { x: 0, y: 0, z: 0 },
     }
     const combinedAxes: TransferWorkOffset = {}
-    const bounds = jobBounds(job, rotationDegOf(singleOffset))
+    const rotation = rotationDegOf(singleOffset)
+    const bounds = geometry && rotation === 0 ? geometry.bounds : jobBounds(job, rotation)
     for (const { key } of AXES) {
       const ranges: Array<{ min: number; max: number }> = []
       const origin = offset[key]
@@ -503,7 +526,7 @@ export function checkJobAgainstMachine(
 
   for (const { key, label } of AXES) {
     const limit = motion.axes[key].maxVelocityMmMin
-    const peak = axisFeedPeak(job, key)
+    const peak = geometry ? geometry.peaks[key] : axisFeedPeak(job, key)
     if (limit !== null && finite(peak) && peak > limit + EPS) {
       warnings.push(`${label} feed reaches ${fmt(peak)} mm/min; ${machine.name} allows ${fmt(limit)} mm/min.`)
     }

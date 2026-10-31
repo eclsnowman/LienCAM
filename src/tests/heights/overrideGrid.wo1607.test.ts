@@ -149,12 +149,11 @@ async function checkCase(e: Expectation): Promise<void> {
       POCKET_TOOL_RADIUS, e.top + 5)
     expect(violations, 'pocket rapids vs the material left').toEqual([])
   } else {
-    // Every rapid at or above the Feed plane this case implies (the Setup's
-    // own default formula, Top + 5, unaffected by a Retract/Bottom override):
-    // a rapid-to-feed-plane approach legitimately sits between Feed and
-    // Retract, so the floor a Retract override must hold is Feed, not itself.
-    const expectedFeed = e.top + 5
-    expect(reading.lowestRapidZ, 'lowest rapid Z').toBeGreaterThanOrEqual(expectedFeed - TOL)
+    // WO-3083 re-pin (one entry rule, owner 2026-10-23): every entry now rapids down to
+    // 1 mm above the material it meets (was the Feed plane, Top + 5), so the floor a
+    // Retract override must hold is the entry start, 1 mm over the material.
+    const entryFloor = Math.min(e.top, reading.stockTopWcs) + 1
+    expect(reading.lowestRapidZ, 'lowest rapid Z').toBeGreaterThanOrEqual(entryFloor - TOL)
     if (Number.isFinite(reading.lowestRapidOverStockZ)) {
       expect(reading.lowestRapidOverStockZ, 'lowest rapid over the stock').toBeGreaterThanOrEqual(e.top - TOL)
     }

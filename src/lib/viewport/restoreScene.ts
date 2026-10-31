@@ -27,8 +27,8 @@ import { seedPlacementIds, nestOwnedGeometryIds, visibleSeedLoops } from '../cam
 // Coordinate hierarchy Phase 4 - Item 1: route part PLACEMENT reads through the
 // single world-transform seam. Identity under Option 1 (snapshot-identical),
 // but it is the one site a workspace tier / stored-relative transform composes.
-import { partWorldTransform } from '../../store/partTransform'
-import { useCamStore } from '../../store'
+import { partWorldTransform, partWorldTransformAsSetupHoldsIt, type PartWorldTransform } from '../../store/partTransform'
+import { activeSetupPartTurn, useCamStore } from '../../store'
 import {
   LEGACY_MODEL_ITEM_ID,
   peekDurableDocumentRevision,
@@ -76,6 +76,18 @@ function liveModelItemPlacements(): readonly { modelItemId: string; bodyId?: str
     return useCamStore.getState().project.modelItemPlacements ?? []
   } catch {
     return []
+  }
+}
+
+/** WO-3196: a part placed as the ACTIVE setup holds it - a second side draws
+ *  its solid turned inside the block, as its 3D toolpaths were computed. Same
+ *  runtime-only, defensive live-store read as liveModelItemPlacements: no live
+ *  store (a pure fixture) places the part as stored. */
+function placedAsActiveSetupHoldsIt(geo: ImportedGeometry, placement: PartWorldTransform): PartWorldTransform {
+  try {
+    return partWorldTransformAsSetupHoldsIt(placement, activeSetupPartTurn(useCamStore.getState().project, geo))
+  } catch {
+    return placement
   }
 }
 
@@ -368,7 +380,8 @@ export async function retessellateBrepParts(
     if (geo.format !== 'step') continue          // B-rep only; STL/2D untouched
     if (ownedSeedIds.has(geo.id)) continue        // nest-owned source: rendered only in the nest
     if (!isCurrent()) return                       // superseded before this part started
-    const { position: worldPos, rotation: worldRot } = partWorldTransform(geo, stocks)
+    const { position: worldPos, rotation: worldRot } =
+      placedAsActiveSetupHoldsIt(geo, partWorldTransform(geo, stocks))
     const tess = resolveBrepDeflection()
     try {
       const bytes = await stepCache.loadCachedStep(geo.id)
@@ -458,7 +471,8 @@ export async function restoreGeometryToViewport(
   for (const geo of geometry) {
     if (!isCurrent()) return
     if (ownedSeedIds.has(geo.id)) continue   // nest-owned source: rendered only in the nest
-    const { position: worldPos, rotation: worldRot } = partWorldTransform(geo, stocks)
+    const { position: worldPos, rotation: worldRot } =
+      placedAsActiveSetupHoldsIt(geo, partWorldTransform(geo, stocks))
     if (geo.format === 'stl') {
       try {
         const buffer = await loadCachedSTL(geo.id)
@@ -571,9 +585,9 @@ export async function restoreGeometryToViewport(
           // name, rather than silently falling back to the stale identity
           // `worldPos` computed above.
           try {
-            const { position: modelPos, rotation: modelRot } = resolveModelReferenceFrame(
+            const { position: modelPos, rotation: modelRot } = placedAsActiveSetupHoldsIt(geo, resolveModelReferenceFrame(
               liveModelItemPlacements(), modelItemId, geo.modelBody.ref.bodyId,
-            )
+            ))
             vp.addModelBody(geo.id, display, geo.name, modelPos, modelRot, geo.color)
             if (geo.hidden) vp.setSTLVisible(geo.id, false)
           } catch (err) {

@@ -168,7 +168,8 @@ describe('WO-1349 every fresh connection starts with the E-STOP armed', () => {
 
     expect(session.estopNeedsReset()).toBe(true)
     expect(session.estopTripNeedsReset()).toBe(false)
-    expect(screen.getByTestId('control-state-chip').textContent).toBe('Idle')
+    // WO-3190 (owner's CT-2): the chip says E-STOP for every latch, this one included.
+    expect(screen.getByTestId('control-state-chip').textContent).toBe('E-STOP')
 
     act(() => { session.triggerEmergencyStop() })
 

@@ -3,11 +3,11 @@
 // React-render SMOKE test for SketchLiveDimsOverlay (live W/H + a/b labels
 // while rubber-band drawing). Same harness pattern as
 // NestModal.smoke.test.tsx / SketchTextInput.smoke.test.tsx: jsdom + the real
-// singleton store + a minimal viewport stub. Pins that a mocked MID-DRAG rect
-// chain renders the expected W and H label text OUTSIDE the shape on screen
-// (W above the top edge, H left of the left edge — Operator's placement verdict),
-// an ellipse minor phase renders a and b, and that the overlay is ABSENT when
-// idle (no chain) — the labels must exist only while actively drawing.
+// singleton store + a minimal viewport stub. Pins that a mocked MID-DRAG chain
+// renders its live labels OUTSIDE the shape on screen (Operator's placement
+// verdict), an ellipse minor phase renders a and b, that the overlay is ABSENT
+// when idle (no chain), and that an AXIS rectangle carries NO duplicate pair -
+// WO-3116 gave it one shared W/H editor instead.
 
 import type { SketcherOverlaySurface } from '../../lib/sketch/sketcher'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -91,23 +91,28 @@ describe('SketchLiveDimsOverlay (live draw dimensions)', () => {
     expect(screen.queryByText('40')).toBeNull()
   })
 
-  it('mid-drag rect chain renders live W and H labels with the expected text', () => {
-    // Anchor (0,0), cursor (40,-30): a 40 x 30 rubber-band rectangle.
+  it('mid-drag AXIS rect chain leaves W and H to the one shared size editor', () => {
+    // Anchor (0,0), cursor (40,-30): a 40 x 30 rubber-band rectangle. WO-3116
+    // suppresses this duplicate pair - the shared W/H editor owns the dimensions
+    // of an axis rectangle, and two contradictory pairs is the defect it fixed.
     setSketchState({ kind: 'rect', mode: 'corner', anchor: { x: 0, y: 0 } })
     cursor = { x: 40, y: -30 }
     render(<SketchLiveDimsOverlay port={port} />)
-    const w = screen.getByText('40') // W
-    const h = screen.getByText('30') // H
-    // OUTSIDE placement on SCREEN (Operator's verdict): the rect spans world
-    // x [0,40], y [-30,0] -> screen x [100,140], y [100,130]. W must land
-    // ABOVE the top edge (screen y < 100) centered on it (x = 120); H must
-    // land LEFT of the left edge (screen x < 100) centered on it (y = 115).
-    const wp = screenPos(w)
-    expect(wp.x).toBeCloseTo(120, 6)
-    expect(wp.y).toBeLessThan(100)
-    const hp = screenPos(h)
-    expect(hp.x).toBeLessThan(100)
-    expect(hp.y).toBeCloseTo(115, 6)
+    expect(document.querySelector('.sketch-live-dim-layer')).toBeNull()
+    expect(screen.queryByText('40')).toBeNull()
+    expect(screen.queryByText('30')).toBeNull()
+  })
+
+  it('mid-drag ROTATED rect chain renders its live edge length outside the shape', () => {
+    // WO-3116 keeps the live labels for the routes the shared editor does not
+    // cover. First edge only, anchor (0,0) -> cursor (40,0): the 40 mm length
+    // sits at the edge midpoint, a constant screen gap off the segment.
+    setSketchState({ kind: 'rect', mode: 'corner', anchor: { x: 0, y: 0 }, rotated: true })
+    cursor = { x: 40, y: 0 }
+    render(<SketchLiveDimsOverlay port={port} />)
+    const edge = screenPos(screen.getByText('40'))
+    expect(edge.x).toBeCloseTo(120, 6) // world x 20 -> screen 120, midpoint
+    expect(Math.abs(edge.y - 100)).toBeCloseTo(18, 6) // 18 px off the segment
     // Display-only: the labels are never click targets or inputs.
     expect(document.querySelectorAll('.sketch-live-dim input')).toHaveLength(0)
   })
@@ -124,12 +129,16 @@ describe('SketchLiveDimsOverlay (live draw dimensions)', () => {
   })
 
   it('labels VANISH when the chain commits/cancels (chain -> null)', () => {
-    setSketchState({ kind: 'rect', mode: 'corner', anchor: { x: 0, y: 0 } })
-    cursor = { x: 40, y: -30 }
+    // Ellipse route: the live-label route WO-3116 kept (an axis rect has none).
+    setSketchState(
+      { kind: 'ellipse', center: { x: 0, y: 0 }, major: { x: 10, y: 0 } },
+      'ellipse',
+    )
+    cursor = { x: 0, y: 3 }
     render(<SketchLiveDimsOverlay port={port} />)
-    expect(screen.getByText('40')).not.toBeNull()
+    expect(screen.getByText('10')).not.toBeNull()
     act(() => { sketcherToolStore.setState({ chain: null }) })
-    expect(screen.queryByText('40')).toBeNull()
+    expect(screen.queryByText('10')).toBeNull()
     expect(document.querySelector('.sketch-live-dim-layer')).toBeNull()
   })
 })

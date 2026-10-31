@@ -20,6 +20,56 @@ export function setGenerationEngineResolver(resolve: (type: Operation['type']) =
   generationEngineId = resolve
 }
 
+// WO-3153: the engine id names WHICH planner ran, never which version of it, so
+// a path an older planner saved read as current beside a fresh one (Full
+// Suite's Adaptive Clearing 1: 10 saved rapids, 2,736 today, one stamp). Every
+// operation type names its generator revision here; the complete Record makes
+// a new type impossible to add without one. A planner whose output changes for
+// the same authored inputs bumps its entry, and a path saved before the bump
+// then regenerates once (ADR-0040). Revision 1 is each planner as the stamp
+// first hashed it and stays out of the stamp, so an unchanged planner's saved
+// paths stay current.
+//
+// A number, not a hash of each planner's source: 327 commits touched the engine
+// sources in the 14 days to 2026-10-27, nearly all through linking, entry and
+// geometry code every family imports. A source hash would stale every saved
+// path in every project about 23 times a day, comments and refactors included.
+const GENERATOR_REVISIONS: Record<Operation['type'], number> = {
+  face: 1,
+  // Full Suite's Contour 2 moved under Generate All with its stamp unchanged.
+  contour_2d: 2,
+  pocket_2d: 1,
+  // 2D adaptive linking/entry changed after Full Suite's 2026-10-16 regen
+  // (WO-3054, WO-3056, WO-3083 among them).
+  adaptive_clearing_2d: 2,
+  // Full Suite's Drill 2 moved under Generate All with its stamp unchanged.
+  drill: 2,
+  bore: 1,
+  thread_mill: 1,
+  engrave: 1,
+  vcarve: 1,
+  chamfer: 1,
+  pattern: 1,
+  // Full Suite's 3D Finish 3 moved under Generate All with its stamp unchanged.
+  parallel_3d: 2,
+  waterline_3d: 1,
+  // Full Suite's X part - 6mm rough and 3D Rough 1 moved the same way.
+  adaptive_3d: 2,
+  scallop_3d: 1,
+  steep_shallow_3d: 1,
+  pencil_3d: 1,
+}
+export function generatorRevision(type: Operation['type']): number | undefined {
+  const revision = GENERATOR_REVISIONS[type]
+  return revision > 1 ? revision : undefined
+}
+/** Tests stamp a path as another revision of its planner would have. */
+export function withGeneratorRevision<T>(type: Operation['type'], revision: number, run: () => T): T {
+  const saved = GENERATOR_REVISIONS[type]
+  GENERATOR_REVISIONS[type] = revision
+  try { return run() } finally { GENERATOR_REVISIONS[type] = saved }
+}
+
 const SAVED_HEIGHT_EPSILON = 1e-6
 
 const HEIGHT_PLANE_NAMES = [
@@ -53,6 +103,19 @@ const STOCK_LIFTED_TRAVERSE_OPERATION_TYPES: ReadonlySet<Operation['type']> = ne
   'steep_shallow_3d',
   'scallop_3d',
   'pencil_3d',
+])
+
+// WO-3196: the strategies that machine the part mesh a second side hands them
+// turned over (store cam3dPartAsSetupHoldsIt). The turn is an input of their
+// result only; every other family reads the same claim as before, and a first
+// side has no flipOf, which canonical() drops.
+const TURNED_PART_OPERATION_TYPES: ReadonlySet<Operation['type']> = new Set([
+  'parallel_3d',
+  'waterline_3d',
+  'steep_shallow_3d',
+  'scallop_3d',
+  'pencil_3d',
+  'adaptive_3d',
 ])
 
 function finiteSavedHeightPlanes(value: unknown): value is Record<(typeof HEIGHT_PLANE_NAMES)[number], number> {
@@ -258,6 +321,20 @@ type PredecessorDependentOperation = Operation & {
 
 export function operationDependsOnPredecessors(operation: Operation): boolean {
   return (operation as PredecessorDependentOperation).dependsOnPredecessors === true
+    || hasTabRemovalSource(operation)
+}
+
+/**
+ * WO-3221: a tab removal contour is made from an earlier tabbed Contour, so it
+ * reads that operation's live inputs through the predecessor fingerprints:
+ * reordering, suppressing, deleting or editing the source outdates it, on the
+ * store's compute path and on a saved file's reconciliation alike. The
+ * binding is authored data, so no regeneration's derived flag can erase it.
+ * Any value present counts, even one too malformed to compute from.
+ */
+function hasTabRemovalSource(operation: Operation): boolean {
+  return operation.type === 'contour_2d'
+    && (operation.params as { tabRemovalSource?: unknown } | undefined)?.tabRemovalSource !== undefined
 }
 
 function canonical(value: unknown): unknown {
@@ -276,14 +353,19 @@ function canonical(value: unknown): unknown {
   )
 }
 
-function hashText(text: string): string {
-  let a = 0x811c9dc5
-  let b = 0x9e3779b9
+interface HashState { a: number; b: number }
+function hashTextState(text: string, state?: HashState): HashState {
+  let a = state?.a ?? 0x811c9dc5
+  let b = state?.b ?? 0x9e3779b9
   for (let index = 0; index < text.length; index++) {
     const code = text.charCodeAt(index)
     a = Math.imul(a ^ code, 0x01000193) >>> 0
     b = Math.imul(b ^ code, 0x85ebca6b) >>> 0
   }
+  return { a, b }
+}
+function hashText(text: string, state?: HashState): string {
+  const { a, b } = hashTextState(text, state)
   return `${a.toString(16).padStart(8, '0')}${b.toString(16).padStart(8, '0')}`
 }
 
@@ -299,6 +381,10 @@ function operationGenerationInputs(operation: Operation): Record<string, unknown
     // height authority. Legacy scalar planes are intentionally excluded so
     // mutating stale V1 data cannot alter a valid V2 generation claim.
     smartHeight: operation.smartHeight,
+    // WO-3104: independent operator travel policy, not a legacy scalar plane.
+    // Omit checked/default so saved claims and programs retain their identity.
+    ...(operation.heights?.minimizeZTravel === false
+      ? { minimizeZTravel: false } : {}),
     passes: operation.passes,
     linking: operation.linking,
     feedrateOverride: operation.feedrateOverride,
@@ -416,28 +502,90 @@ function toolGenerationInputsBeforeWo2027(tool: Tool | undefined): unknown {
   return legacyInputs
 }
 
+// WO-3126: sorting/cloning/stringifying the same display tessellation for
+// every operation dominated publication. Reference identity selects a witness,
+// never proves currency: inspect all live content, including raw nested and
+// typed-array edits, before reusing the exact canonical JSON bytes.
+interface GeometryJson { witness: unknown; text: string; prefixes: Map<string, HashState> }
+const geometryJson = new WeakMap<readonly ImportedGeometry[], Map<boolean, GeometryJson>>()
+function sameGeometryData(live: unknown, witness: unknown): boolean {
+  if (Object.is(live, witness)) return true
+  if (!live || !witness || typeof live !== 'object' || typeof witness !== 'object') return false
+  if (ArrayBuffer.isView(live) || ArrayBuffer.isView(witness)) {
+    if (!ArrayBuffer.isView(live) || !ArrayBuffer.isView(witness)) return false
+    const a = live as unknown as ArrayLike<number>, b = witness as unknown as ArrayLike<number>
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false
+    return true
+  }
+  if (Array.isArray(live) || Array.isArray(witness)) {
+    if (!Array.isArray(live) || !Array.isArray(witness) || live.length !== witness.length) return false
+    for (let i = 0; i < live.length; i++) if (!sameGeometryData(live[i], witness[i])) return false
+    return true
+  }
+  const a = live as Record<string, unknown>, b = witness as Record<string, unknown>
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !sameGeometryData(a[key], b[key])) return false
+  }
+  return true
+}
+function canonicalGeometryJson(geometry: readonly ImportedGeometry[], operation: Operation): GeometryJson {
+  const mode = hiddenDecidesWhatOperationCuts(operation)
+  let modes = geometryJson.get(geometry)
+  const cached = modes?.get(mode)
+  if (cached && sameGeometryData(geometry, cached.witness)) return cached
+  const text = JSON.stringify(canonical(geometryGenerationInputs(geometry, operation)))
+  modes ??= new Map()
+  const entry = { witness: structuredClone(geometry), text, prefixes: new Map<string, HashState>() }
+  modes.set(mode, entry)
+  geometryJson.set(geometry, modes)
+  return entry
+}
+
 function generationFingerprintWithMachineInputs(
-  input: GenerationFingerprintInput,
+  input: Omit<GenerationFingerprintInput, 'resolvedHeights'> & Partial<Pick<GenerationFingerprintInput, 'resolvedHeights'>>,
   selectMachineInputs: MachineGenerationInputSelector,
   selectToolInputs: ToolGenerationInputSelector = toolGenerationInputs,
 ): string {
   const { operation, predecessors, ...rest } = input
   const operationInputs = operationGenerationInputs(operation)
-  return `camgen-v${CAM_GENERATION_CONTRACT_VERSION}-${hashText(JSON.stringify(canonical({
+  const fields: Record<string, unknown> = {
     contractVersion: CAM_GENERATION_CONTRACT_VERSION,
     engineId: generationEngineId(operation.type),
+    generatorRevision: generatorRevision(operation.type),
     operation: operationInputs,
     ...(operationDependsOnPredecessors(operation) && predecessors && predecessors.length > 0
       ? { predecessors }
       : {}),
-    setup: { id: rest.setup.id, wcs: rest.setup.wcs, stock: rest.setup.stock },
+    setup: {
+      id: rest.setup.id, wcs: rest.setup.wcs, stock: rest.setup.stock,
+      ...(TURNED_PART_OPERATION_TYPES.has(operation.type) ? { flipOf: rest.setup.flipOf } : {}),
+    },
     tool: selectToolInputs(rest.tool),
     resolvedHeights: rest.resolvedHeights,
-    geometry: geometryGenerationInputs(rest.geometry, operation),
+    geometry: null,
     stocks: rest.stocks,
     sceneStock: rest.sceneStock,
     machine: selectMachineInputs(rest.machine),
-  })))}`
+  }
+  const geometry = canonicalGeometryJson(rest.geometry, operation)
+  // Keep exactly canonical()'s locale ordering, omission and JSON encoding.
+  const keys = Object.keys(fields).filter(key => fields[key] !== undefined)
+    .sort((a, b) => a.localeCompare(b))
+  const at = keys.indexOf('geometry')
+  const encode = (key: string) => JSON.stringify(key) + ':' + JSON.stringify(canonical(fields[key]))
+  const prefix = '{' + keys.slice(0, at).map(encode).join(',') + ',"geometry":'
+  let state = geometry.prefixes.get(prefix)
+  if (!state) {
+    state = hashTextState(geometry.text, hashTextState(prefix))
+    geometry.prefixes.set(prefix, state)
+  }
+  // Continue the identical two character-by-character hashes after geometry;
+  // its bytes and their incoming hash state have already been proved exact.
+  const suffix = ',' + keys.slice(at + 1).map(encode).join(',') + '}'
+  return `camgen-v${CAM_GENERATION_CONTRACT_VERSION}-${hashText(suffix, state)}`
 }
 
 export function generationFingerprint(input: GenerationFingerprintInput): string {
@@ -479,6 +627,7 @@ function predecessorFingerprint(
   return `camgen-predecessor-v2-${hashText(JSON.stringify(canonical({
     operation: operationGenerationInputs(candidate),
     engineId: generationEngineId(candidate.type),
+    generatorRevision: generatorRevision(candidate.type),
     tool: selectToolInputs(tool),
     hiddenParts: hiddenDecidesWhatOperationCuts(candidate)
       ? project.geometry.filter((part) => part.hidden === true).map((part) => part.id)
@@ -549,6 +698,32 @@ export function projectOperationFingerprint(
   return projectOperationFingerprintWithMachineInputs(
     project, setup, operation, resolvedHeights, toolOverride, resolveTool,
   )
+}
+
+/**
+ * WO-3153: what regenerating this operation reads - the claim a compute would
+ * stamp, without the heights that compute resolves for itself. Equal keys mean
+ * the same inputs; editing the operation, its tool, the scene, the machine or
+ * an earlier result it reads changes the key.
+ */
+export function operationRegenerationInputsKey(
+  project: Project,
+  setup: Setup,
+  operation: Operation,
+  resolveTool?: ToolResolver,
+): string {
+  return generationFingerprintWithMachineInputs({
+    operation,
+    setup,
+    tool: resolveTool
+      ? resolveTool(operation.toolId)
+      : project.toolLibrary.find((tool) => tool.id === operation.toolId),
+    geometry: project.geometry,
+    stocks: project.stocks ?? [],
+    sceneStock: project.sceneStock,
+    machine: project.machine,
+    predecessors: precedingOperationFingerprints(project, setup, operation, resolveTool),
+  }, machineGenerationInputs)
 }
 
 function hasComputingPredecessor(setup: Setup, operation: Operation): boolean {

@@ -15,6 +15,7 @@ import { importDXF } from './dxfImporter'
 import { importIGES } from './igesImporter'
 import { objToBinaryStl } from './objImporter'
 import type { DxfImport2DResult, DxfImportReport } from './dxfImporter'
+import type { JoinReport } from '../geometry/path2d'
 import { assignStableLoopIds } from '../geometry/loopId'
 import { cacheSTL } from '../stlCache'
 import { cache2DGeometry } from '../geometry2dCache'
@@ -78,6 +79,32 @@ export function formatDxfImportReport(report: DxfImportReport): string {
     parts.push('drawing origin kept')
   }
   return parts.length > 0 ? parts.join(', ') : 'no gaps closed, nothing skipped'
+}
+
+/**
+ * WO-3276: the SVG counterpart. An SVG import was silent about joining; now it
+ * says what it closed, and stays silent on a file where nothing needed joining
+ * (that console line is unchanged). Returns '' when there is nothing to say.
+ */
+export function formatSvgImportReport(report: JoinReport | undefined): string {
+  if (!report) return ''
+  const parts: string[] = []
+  if (report.gapsClosed > 0) {
+    const largest = Number(report.largestGapMM.toFixed(3))
+    parts.push(`${report.gapsClosed} gap${report.gapsClosed === 1 ? '' : 's'} closed (largest ${largest}mm)`)
+  }
+  const tJunctions = report.tJunctionsSplit ?? 0
+  if (tJunctions > 0) {
+    parts.push(`${tJunctions} place${tJunctions === 1 ? '' : 's'} where a line ends on another line joined`)
+  }
+  const faces = report.facesClosed ?? 0
+  if (faces > 0) {
+    parts.push(`${faces} closed shape${faces === 1 ? '' : 's'} found`)
+  }
+  if (parts.length > 0 && report.openChains > 0) {
+    parts.push(`${report.openChains} chain${report.openChains === 1 ? '' : 's'} left open`)
+  }
+  return parts.join(', ')
 }
 
 /**
@@ -248,6 +275,10 @@ export async function importGeometryFile(
       // second dialog, no prompt.
       // WO-1840: same event also says what joinSegments closed/left open and
       // which entity types it dropped -- never silent, even on a clean file.
+      if (ext === 'svg') {
+        const svgNote = formatSvgImportReport(result.report)
+        if (svgNote) unitNote = ` -- ${svgNote}`
+      }
       if (ext === 'dxf') {
         const dxfResult = result as DxfImport2DResult
         const noteParts: string[] = []

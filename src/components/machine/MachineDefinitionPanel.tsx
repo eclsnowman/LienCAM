@@ -27,6 +27,36 @@ import { useMachineDefinitionPanel, type MachineDefinitionPanelProps } from './d
 export type { MachineDefinitionPanelProps } from './definition/useMachineDefinitionPanel'
 export { unmarkedControlsIn, doublyMarkedControlsIn } from './definition/DefinitionFields'
 export { definitionProblemGroup } from './definition/DefinitionNavigation'
+
+export function LinuxControllerNetworkSetup({ state }: {
+  state: ReturnType<typeof import('./definition/useMachineDefinitionPanel').useLinuxControllerSetup>
+}) {
+  const t = useText('machine-definition.wo3207')
+  if (!state.available) return null
+  return <section data-testid="linux-controller-network" style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6, margin: '8px 0' }}>
+    <strong>{t('networkTitle')}</strong>
+    <p>{t('networkHelp')}</p>
+    {state.message && <p role="status">{state.message}</p>}
+    <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
+      <label>{t('wiredPort')}
+        {state.ports.length > 0 ? <select className="mform-input" aria-label={t('wiredPortLabel')} value={state.port}
+          onChange={event => state.setPort(event.target.value)} disabled={state.busy}>
+          <option value="">{t('chooseWiredPort')}</option>
+          {state.ports.map(port => <option key={port} value={port}>{port}</option>)}
+        </select> : <input className="mform-input" aria-label={t('wiredPortLabel')} placeholder={t('portPlaceholder')}
+          value={state.port} onChange={event => state.setPort(event.target.value)} disabled={state.busy} />}
+      </label>
+      <label>{t('hostAddress')}
+        <input className="mform-input" aria-label={t('hostAddressLabel')} value={state.address}
+          onChange={event => state.setAddress(event.target.value)} disabled={state.busy} />
+      </label>
+      <button type="button" className="control-chip-btn" disabled={state.busy || !state.port}
+        onClick={() => { void state.setup() }}>{state.busy ? t('settingUp') : t('setupNetwork')}</button>
+    </div>
+    {state.result && <p role="status">{state.result.message}</p>}
+    {state.result?.commands && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text' }}>{state.result.commands}</pre>}
+  </section>
+}
 import { ControllerSetupSection } from './definition/ControllerSetupSection'
 import { ImportIssuesSection } from './definition/ImportIssuesSection'
 import { MachineArea } from './definition/MachineArea'
@@ -397,6 +427,9 @@ export function MachineDefinitionPanel(props: MachineDefinitionPanelProps = {}) 
         <DefinitionSectionNav {...panel} />
         </div>
 
+        {(section === 'controller' || section === 'overview') && <LinuxControllerNetworkSetup state={panel.linuxSetup} />}
+        {panel.linuxSetup.serialPermission && <p role="status" data-testid="linux-serial-permission">{panel.linuxSetup.serialPermission}</p>}
+
         {/* ---- A MACHINE WITH NO CONTROLLER DEFINITION ------------------------
             WO-1720: the seven areas all read the definition, so a machine
             without one gets the page the Legacy tab used to draw for it, on
@@ -547,7 +580,7 @@ const REFERENCE_POINT_NUMBERS = [1, 2, 3, 4] as const
 /** App-owned G30 parameters. UCCNC has no G30 position register, so these are
  * marked as driving this app: the reader turns them into checked G53 rapids,
  * while Apply to Machine sends none of them. */
-class ReferencePositionsSection extends Component<{
+export class ReferencePositionsSection extends Component<{
   machine: MachineConfig
   onChange: (mut: (machine: MachineConfig) => MachineConfig) => void
 }, { editing: boolean }> {

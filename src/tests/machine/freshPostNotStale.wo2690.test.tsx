@@ -68,6 +68,7 @@ const { makeMachine, makeOp, makeStock, makeTool, makeWcs, move, stampGeneration
 const { SMART_HEIGHT_INTENT_VERSION, SMART_HEIGHT_POLICY_VERSION } =
   await import('../../lib/cam/smartHeights')
 import type { PhysicalStock, Project, Setup, Tool } from '../../types'
+import { setupLoadAdoptionInProgress, setupLoadInProgress, yieldSetupLoadTask } from '../../lib/machine/setupLoadPreparation'
 
 function faceIntent() {
   const owner = { kind: 'operation_policy' as const }
@@ -171,7 +172,11 @@ async function loadSetup1(): Promise<void> {
   const setupId = useCamStore.getState().project.setups[0].id
   fireEvent.click(screen.getByTestId('control-load-menu'))
   await act(async () => { fireEvent.click(screen.getByTestId(`control-load-setup-item-${setupId}`)) })
-  await act(async () => {})
+  // WO-3125/WO-3292 made Setup Load span several real tasks (worker prep, then
+  // scan, load and preview draw each in its own task); wait for it to finish.
+  for (let i = 0; i < 500 && (setupLoadInProgress() || setupLoadAdoptionInProgress()); i++) {
+    await act(async () => { await yieldSetupLoadTask() })
+  }
 }
 
 async function fileOpen(project: Project): Promise<void> {

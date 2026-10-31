@@ -7,8 +7,13 @@ import {
   getAdaptive3dCarvedStock,
   camSketchDocumentPort,
   onCamStoreHydrated,
+  activeSetupPartTurn,
+  activeSetupTurnedPartPlacements,
+  storedPoseForActiveSetupDrop,
+  partBasePlacement,
 } from '../../store'
 import { useUiPrefs } from '../../store/uiPrefs'
+import { partWorldTransformAsSetupHoldsIt } from '../../store/partTransform'
 import { CNCViewport } from './CNCViewport'
 import { shouldDisplayAdaptiveCarvedStock } from '../../lib/viewport/stockRemovalDisplayAuthority'
 import { serializeCamera, deserializeCamera } from '../../lib/viewport/cameraPersist'
@@ -318,12 +323,16 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
         if (vp) applyViseDrawPoses(vp)
         return
       }
+      // WO-3196: a second side draws its part turned; the drop is stored as
+      // the pose that is drawn where it was dropped. A first side: as dropped.
+      const drop = { position: pos, rotation: rot }
+      const stored = geo ? storedPoseForActiveSetupDrop(project, geo, drop) : drop
       if (geo && isModelOriginGeometry(geo)) {
         const itemId = geo.modelItemId ?? LEGACY_MODEL_ITEM_ID
-        updateModelItemPlacement(itemId, geo.modelBody?.ref.bodyId, pos, rot)
+        updateModelItemPlacement(itemId, geo.modelBody?.ref.bodyId, stored.position, stored.rotation)
         return
       }
-      updateGeometryTransform(id, pos, rot)
+      updateGeometryTransform(id, stored.position, stored.rotation)
     },
     [updateGeometryTransform, updateModelItemPlacement]
   )
@@ -1251,7 +1260,8 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
           return {
             loopId: l.loopId,
             path: l.path,
-            fractions: custom && custom.length > 0 ? custom : evenTabFractions(count),
+            // 'none' (WO-3220): the applied suggestion found no place -> no tabs.
+            fractions: custom === 'none' ? [] : custom && custom.length > 0 ? custom : evenTabFractions(count),
             minSeparationFraction: width / l.perimeter,
           }
         }),
@@ -1411,9 +1421,10 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
     for (const geo of modelGeos) {
       const itemId = geo.modelItemId ?? LEGACY_MODEL_ITEM_ID
       try {
-        const { position, rotation } = resolveModelReferenceFrame(
+        // WO-3196: drawn as the active setup holds it (a second side turns it).
+        const { position, rotation } = partWorldTransformAsSetupHoldsIt(resolveModelReferenceFrame(
           project.modelItemPlacements ?? [], itemId, geo.modelBody?.ref.bodyId,
-        )
+        ), activeSetupPartTurn(project, geo))
         vp.addModelBody(geo.id, geo.modelBody!.display!, geo.name, position, rotation, geo.color)
         if (geo.hidden) vp.setSTLVisible(geo.id, false)
       } catch (err) {
@@ -1453,6 +1464,32 @@ export function Viewport({ suspended = false }: ViewportProps = {}) {
     // WO-2192: placed clamps follow the same key (the model, the active setup, the shape rows).
     void applyClampDrawings(vp)
   }, [viseDrawKey])
+
+  // WO-3196: a second side holds its part turned over inside the block, and
+  // its 3D toolpaths are computed on that turned part - so the part is drawn
+  // turned while that setup is active, and back as stored when it is not.
+  // Re-fires on the active setup, any turned pose (a part or its block moved)
+  // and a finished File > Open scene restore.
+  const turnedPartsKey = useCamStore((s) => {
+    const turned = activeSetupTurnedPartPlacements(s.project)
+    return turned.length ? JSON.stringify([turned, s.projectOpen?.phase ?? null]) : ''
+  })
+  const turnedPartIds = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    const vp = viewportRef.current
+    if (!vp || (turnedPartsKey === '' && turnedPartIds.current.size === 0)) return
+    const project = useCamStore.getState().project
+    const turned = activeSetupTurnedPartPlacements(project)
+    const now = new Set(turned.map((p) => p.id))
+    for (const id of turnedPartIds.current) {
+      if (now.has(id)) continue
+      const geo = project.geometry.find((g) => g.id === id)
+      const pose = geo ? partBasePlacement(project, geo) : null
+      if (pose) vp.setPartTransform(id, pose.position, pose.rotation)
+    }
+    for (const p of turned) vp.setPartTransform(p.id, p.position, p.rotation)
+    turnedPartIds.current = now
+  }, [turnedPartsKey])
 
   // Expose viewport instance globally for other components
   useEffect(() => {

@@ -184,11 +184,12 @@ describe('toolpathBatch start/finish console writer', () => {
     expect(useCamStore.getState().consoleEvents.filter(e => e.source === 'batch')).toEqual([])
   })
 
-  it('finish: the terminal worker message (success OR error) lands exactly one success/batch event and clears the batch', () => {
+  it('finish: the terminal worker message (success OR error) lands exactly one success/batch event and clears the batch', async () => {
     useCamStore.getState().computeAllToolpaths()
     expect(useCamStore.getState().toolpathBatch).toMatchObject({ total: 1, completed: 0 })
     expect(useCamStore.getState().toolpathBatch?.id).toEqual(expect.any(String))
-    expect(MockWorker.instances.length).toBe(1)
+    // WO-3126: the batch leaves the renderer one frame before it dispatches.
+    await vi.waitFor(() => expect(MockWorker.instances.length).toBe(1))
 
     // Drive the terminal edge via the worker's error path — markBatchOpDone runs on
     // EITHER terminal branch (TOOLPATH_ERROR/onerror or TOOLPATH_COMPLETE); the error

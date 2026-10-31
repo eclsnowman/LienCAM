@@ -48,7 +48,7 @@ import { localToWorld } from '../../../sketch3d/planeMath'
 import type { SceneRuntime } from '../sceneRuntime'
 import { sketchSessionStore, type SketchSessionState } from './sketchSessionStore'
 import { resolveSolverAvailability, unverifiableApplyNotice } from './solverAvailability'
-import { workbenchSketchDocumentPort } from './workbenchSketchDocumentPort'
+import { workbenchSketchDocumentPort, hasWorkbenchDimensionPlacement, settleWorkbenchDimensionPlacement } from './workbenchSketchDocumentPort'
 
 /** The package's hooks, supplied by the host. Named `useSessionValue`, not `sel`: it IS a custom
  *  hook, and `rules-of-hooks` says so. */
@@ -149,7 +149,7 @@ function applyWithVerdict(next: Sketch, addedIds: string[], label: string): bool
 
   // Stood. Route the write through the document port's own single write path so the undo step, the
   // store mirror, the dag payload and the regen kick all happen exactly once, in one place.
-  workbenchSketchDocumentPort.beginStep()
+  if (!addedIds.some(hasWorkbenchDimensionPlacement)) workbenchSketchDocumentPort.beginStep()
   workbenchSketchDocumentPort.replace({
     entities: outcome.entities,
     constraints: next.constraints,
@@ -288,7 +288,10 @@ export const workbenchOverlaysPort: SketcherOverlaysPort = {
             : { ...x, value: signedValue, expression })),
     }
     if (applyWithVerdict(next, [dimId], label)) {
+      settleWorkbenchDimensionPlacement(dimId, true)
       sketchSessionStore.setState({ dimEditor: null })
+    } else {
+      settleWorkbenchDimensionPlacement(dimId, false)
     }
   },
 

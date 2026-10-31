@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { typedMock } from '../support/typedMock'
 
 import { ZDexelField, remainingAbove } from '../../cam3d/stock'
 import { area, boolean, ensureGeom2dReady } from '../../cam3d/geom2d'
@@ -12,6 +13,21 @@ import {
   ensureEngineClipperReady,
   type Loop,
 } from '../../lib/cam/adaptiveClearing2d/engine/clipperEngine'
+
+// WO-3067 (architect oracle ruling 2026-10-27 8:12 PM CT): steering smoothing ships ON; the smooth
+// hole also runs with it OFF so its flip counts have their control.
+type PolicyModule = typeof import('../../kernel/ops/adaptive/policy')
+const switchState = vi.hoisted(() => ({ steeringSmoothing: true }))
+vi.mock('../../kernel/ops/adaptive/policy', async (importOriginal) => {
+  const real = await importOriginal<PolicyModule>()
+  return typedMock<PolicyModule>({
+    ...real,
+    ADAPTIVE_MOTION_SWITCHES: {
+      ...real.ADAPTIVE_MOTION_SWITCHES,
+      get steeringSmoothing() { return switchState.steeringSmoothing },
+    },
+  })
+})
 
 const CELL = 0.8
 const SIZE = 64
@@ -178,8 +194,12 @@ describe('WO-1211 round-boss cut-path smoothness', () => {
     const smoothHole = ringToLoop(interpolatedComponent.holes[0])
     const faceted = processFeature({ boundary, holes: [facetedHole] }, PARAMS)
     const smooth = processFeature({ boundary, holes: [smoothHole] }, PARAMS)
+    switchState.steeringSmoothing = false
+    let smoothOff: ReturnType<typeof processFeature>
+    try { smoothOff = processFeature({ boundary, holes: [smoothHole] }, PARAMS) } finally { switchState.steeringSmoothing = true }
     const facetedMetrics = turnMetrics(faceted.passes)
     const smoothMetrics = turnMetrics(smooth.passes)
+    const smoothOffMetrics = turnMetrics(smoothOff.passes)
     const analyticSectionRadius = Math.sqrt(RADIUS * RADIUS - Z * Z)
     const analyticSectionArea = Math.PI * analyticSectionRadius * analyticSectionRadius
     const analyticAreaTolerance = Math.PI * (
@@ -199,6 +219,7 @@ describe('WO-1211 round-boss cut-path smoothness', () => {
       smoothRadial,
       faceted: facetedMetrics,
       smooth: smoothMetrics,
+      smoothSteeringOff: smoothOffMetrics,
     }))
 
     expect(facetedMetrics.turns).toBeGreaterThan(0)
@@ -206,7 +227,11 @@ describe('WO-1211 round-boss cut-path smoothness', () => {
     expect(smoothRadial.maxAnalyticRadialDeviation).toBeLessThan(PARAMS.tolerance)
     expect(smoothMetrics.flipsOverFiveDegrees)
       .toBeLessThanOrEqual(Math.floor(facetedMetrics.flipsOverFiveDegrees / 2))
-    expect(smoothMetrics.p95FlipDegrees).toBeLessThan(10)
+    // WO-3067 ruling: the bar is the flip COUNT, never above the smoothing-OFF control at either
+    // threshold. p95 is reported above, not a bar: it is taken over the flips that remain, so it
+    // rises as smoothing removes the small ones.
+    expect(smoothMetrics.flipsOverFiveDegrees).toBeLessThanOrEqual(smoothOffMetrics.flipsOverFiveDegrees)
+    expect(smoothMetrics.flipsOverOneDegree).toBeLessThanOrEqual(smoothOffMetrics.flipsOverOneDegree)
     expect(Math.abs(
       Math.abs(area(interpolatedComponent.holes[0])) - analyticSectionArea,
     )).toBeLessThan(analyticAreaTolerance)

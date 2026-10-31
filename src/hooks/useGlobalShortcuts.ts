@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
 import { useCamStore } from '../store'
+import { useUiPrefs } from '../store/uiPrefs'
+import { matchCamShortcut } from '../lib/shortcuts/camShortcutRegistry'
 import type { Workspace } from '../types'
 
 // Global CAM keyboard shortcuts (Phase 7, P12 / 7.3).
@@ -7,6 +9,8 @@ import type { Workspace } from '../types'
 //   Shift+G    generate all toolpaths
 //   N          new operation on the active setup
 //   Delete     delete the selected tree item (geometry > op > setup), WITH confirm
+// G, Shift+G and N are the defaults of three rows the operator can remap in Settings
+// (WO-3257); lib/shortcuts decides which action a key means. Delete is not remappable.
 //
 // Active ONLY when the CAM workspace is active (WO INT-13C, see `workspace` below), no
 // input/textarea/select/contenteditable is focused, and no modal is open. Sketch mode is
@@ -87,19 +91,26 @@ export function useGlobalShortcuts(): void {
 
       const key = e.key
 
-      // G / Shift+G — regenerate. e.key is case-sensitive to Shift, so match both.
-      if (key === 'g' || key === 'G') {
+      // G / Shift+G / N, or whatever the operator remapped them to. Read at event time, so a
+      // change in Settings applies to the next key press with no re-subscription.
+      const action = matchCamShortcut(e, useUiPrefs.getState().camShortcutOverrides)
+
+      // Regenerate the selected operation.
+      if (action === 'computeOperationToolpath') {
         e.preventDefault()
-        if (e.shiftKey) {
-          s.computeAllToolpaths()
-        } else if (setupId && opId) {
-          s.computeOperationToolpath(setupId, opId)
-        }
+        if (setupId && opId) s.computeOperationToolpath(setupId, opId)
         return
       }
 
-      // N — new operation on the active setup.
-      if ((key === 'n' || key === 'N') && !e.shiftKey) {
+      // Generate all toolpaths.
+      if (action === 'computeAllToolpaths') {
+        e.preventDefault()
+        s.computeAllToolpaths()
+        return
+      }
+
+      // New operation on the active setup.
+      if (action === 'openModal:new-operation') {
         if (!setupId) return
         e.preventDefault()
         s.setActiveSetup(setupId)

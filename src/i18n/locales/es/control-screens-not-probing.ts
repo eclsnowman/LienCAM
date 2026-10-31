@@ -2,6 +2,17 @@
 // Commands and shortcuts remain literal; see docs/i18n/GLOSSARY-es.md.
 import type { Translation } from '../../index'
 const words: Translation<'control-screens-not-probing'> = {
+  ProgramInsight: {
+    "title": "Información del programa",
+    "unknown": "Desconocido",
+    "feed": "Avance de corte (programado)",
+    "spindle": "Husillo durante el corte (programado)",
+    "tools": "Herramientas de corte usadas",
+    "bounds": "Límites de trabajo",
+    "time": "Tiempo estimado",
+    "minutes": "{{value}} min",
+    "note": "Valores programados, sin realimentación. El tiempo es estimado; los cambios de herramienta y las paradas pueden tardar más."
+},
   ControlTransportBar: {
     programHeld: 'En pausa', programRunning: 'En marcha', text001: 'PARADA DE EMERGENCIA',
     text002: 'PARADA DE EMERGENCIA - detención inmediata y reinicio del controlador', text003: 'ESPERE',
@@ -77,7 +88,7 @@ const words: Translation<'control-screens-not-probing'> = {
     text056: 'Activar inundación', text057: ' Inundación', text059: 'Aspiración en marcha; pulse para apagar con M9',
     text060: ' Aspiración', text062: '{{value1}} apagado',
   },
-  ProgramPanel: { setupNotesButton: 'Notas de la configuración', setupNotesTitle: 'Notas de la configuración - {{value1}}', setupNotesClose: 'Cerrar notas', setupNotesEmpty: 'Aún no hay notas para esta configuración.', setupNotesEdit: 'Editar', setupNotesAdd: 'Añadir notas', setupNotesSave: 'Guardar', setupNotesCancel: 'Cancelar' },
+  ProgramPanel: { setupNotesButton: 'Notas de la configuración', setupNotesInsightButton: 'Notas', setupNotesInsightTitle: 'Notas de la configuración e información del programa - {{value1}}', setupNotesTitle: 'Notas de la configuración - {{value1}}', setupNotesClose: 'Cerrar notas', setupNotesEmpty: 'Aún no hay notas para esta configuración.', setupNotesEdit: 'Editar', setupNotesAdd: 'Añadir notas', setupNotesSave: 'Guardar', setupNotesCancel: 'Cancelar' },
   RunClock: { unavailable: 'no disponible', text001: 'Transcurrido {{value1}}{{value2}}Restante estimado {{value3}}',
     text002: 'Transcurrido {{value1}}; tiempo restante estimado no disponible',
     text003: 'Transcurrido {{value1}}; tiempo restante estimado {{value2}}' },

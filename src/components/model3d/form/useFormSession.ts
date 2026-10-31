@@ -10,7 +10,7 @@
 // Model history gets one step per Finish.
 
 import { useText } from '../../../i18n'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, Circle, Copy, Cylinder, Link, Dot, Donut, Magnet, Expand, Shrink, SquareDashedMousePointer, PenTool, SquarePlus, LocateFixed, Spline, Target, Grid3x3, Merge, Route, Eye, Import, Unlink, RectangleHorizontal, Ruler, Grip, ArrowUpFromLine, Rotate3d, FlipHorizontal2, FlipVertical2, FoldHorizontal, Grid2x2, Layers, Link2, Move, Redo2, Repeat2, RotateCw, Rows3, Rows4, Scaling, SeparatorHorizontal, Slash, Square, SquareDashed, Sun, Trash2, Undo2, Waves } from 'lucide-react'
 import type { CommandHistory, FeatureDag } from '../../../doc'
 import { useFormStore } from '../../../form/formStore'
@@ -33,6 +33,8 @@ import { createFeatureCommand } from '../dialogs/createFeatureCommand'
 import { EditFeaturePayloadCommand } from '../dialogs/EditFeaturePayloadCommand'
 import { nextId } from '../dialogs/nextId'
 import { FormInteraction } from './formInteraction'
+import { formModePort } from './formModePort'
+import { railSignature } from './modePort'
 
 // WO-2504: Operator ruling: hide Pull to body for the alpha. Restore this one rail entry after the alpha; keep its action.
 const SHOW_PULL_TO_BODY = false
@@ -102,7 +104,8 @@ declare global {
  * is copied, never transferred (an STL body's buffers stay its own). Where there is no Worker (tests) or the
  * worker cannot start, it runs here as before.
  */
-function formFromBodyOffPage(mesh: BodyMesh): Promise<FormFromBodyResult> {
+function formFromBodyOffPage(mesh: BodyMesh, signal: AbortSignal): Promise<FormFromBodyResult> {
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
   if (typeof Worker === 'undefined') return Promise.resolve(formFromBody(mesh))
   return new Promise((resolve, reject) => {
     let worker: Worker
@@ -112,10 +115,13 @@ function formFromBodyOffPage(mesh: BodyMesh): Promise<FormFromBodyResult> {
       resolve(formFromBody(mesh))
       return
     }
-    worker.onmessage = (e: MessageEvent<FormFromBodyResult>) => { worker.terminate(); resolve(e.data) }
+    const abort = () => { stop(); reject(new DOMException('Aborted', 'AbortError')) }
+    const stop = () => { signal.removeEventListener('abort', abort); worker.terminate() }
+    signal.addEventListener('abort', abort, { once: true })
+    worker.onmessage = (e: MessageEvent<FormFromBodyResult>) => { stop(); resolve(e.data) }
     worker.onerror = (e) => {
       e.preventDefault()
-      worker.terminate()
+      stop()
       try { resolve(formFromBody(mesh)) } catch (err) { reject(err) }
     }
     worker.postMessage({ position: mesh.position, index: mesh.index, triFace: mesh.triFace })
@@ -136,6 +142,14 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
   const faceReplacing = faceTool?.replace === true
   const depsRef = useRef(deps)
   useEffect(() => { depsRef.current = deps })
+  const fromBodyRequest = useRef<AbortController | null>(null)
+  const [fromBodyBusy, setFromBodyBusy] = useState(false)
+  const cancelFromBody = useCallback(() => {
+    fromBodyRequest.current?.abort()
+    fromBodyRequest.current = null
+    setFromBodyBusy(false)
+  }, [])
+  useEffect(() => () => { fromBodyRequest.current?.abort(); fromBodyRequest.current = null }, [])
   const overlayRef = useRef<FormOverlay | null>(null)
   // the zebra display reaches the smooth skin while form mode is open
   const zebra = deps.zebra === true
@@ -224,6 +238,7 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
   const loftRailsRef = useRef<Array<{ name: string; path: SketchPath; frame: PlaneFrame }>>([])
 
   const open = useCallback((featureId?: string) => {
+    cancelFromBody()
     loftRef.current = []
     loftRailsRef.current = []
     overlayRef.current?.setProfileOutlines([])
@@ -239,16 +254,17 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
     }
     const id = nextId(dag, 'FRM')
     useFormStore.getState().openSession({ featureId: null, name: workbenchText('useFormSession.form', { value1: String(id.slice(3)) }) })
-  }, [setEdgePicks])
+  }, [setEdgePicks, cancelFromBody])
 
   const leave = useCallback(() => {
+    cancelFromBody()
     const s = useFormStore.getState()
     if (s.featureId !== null) depsRef.current.showBody(s.featureId, true)
     // WO-2125 audit: From body hides its source body for the session; leaving (Cancel or Finish) repaints it.
     if (s.sourceBodyId !== null) depsRef.current.showBody(s.sourceBodyId, true)
     setEdgePicks([])
     s.closeSession()
-  }, [setEdgePicks])
+  }, [setEdgePicks, cancelFromBody])
 
   const finish = useCallback(() => {
     const s = useFormStore.getState()
@@ -273,32 +289,57 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
   }, [leave])
 
   const startFromBody = useCallback(async () => {
-    const source = await depsRef.current.selectedBodyMesh?.()
-    if (!source) { useFormStore.getState().setNotice(workbenchText('useFormSession.selectABodyInTheModelTreeFirstThen')); return }
-    const r = await formFromBodyOffPage(source.mesh)
-    // WO-3022: the conversion runs off the page now, and form mode may have been left while it ran
-    if (!useFormStore.getState().active) return
-    const st = useFormStore.getState()
-    // WO-2865: applyCage's own refusal names a cage face index ("face 2106
-    // repeats a point") with no next step. Check first and say it in shop words;
-    // the index stays in the debug log for whoever traces the conversion.
-    const check = validateCage(r.cage)
-    if (!check.ok) {
-      console.info(`Form - From body: cage check failed: ${check.problems.join('; ')}`)
-      st.setNotice(workbenchText('useFormSession.fromBodyCouldNotShapeThisBody'))
-      return
+    // Each click takes the current selection, even while another body is being
+    // acquired or converted. Retire its reply before starting the replacement;
+    // Cancel/Open or another starter must still invalidate this cage/session.
+    fromBodyRequest.current?.abort()
+    const request = new AbortController()
+    fromBodyRequest.current = request
+    setFromBodyBusy(true)
+    const cage = useFormStore.getState().cage
+    const off = useFormStore.subscribe(s => {
+      if (!s.active || s.cage !== cage) request.abort()
+    })
+    try {
+      const source = await depsRef.current.selectedBodyMesh?.()
+      if (request.signal.aborted) return
+      if (!source) { useFormStore.getState().setNotice(workbenchText('useFormSession.selectABodyInTheModelTreeFirstThen')); return }
+      const r = await formFromBodyOffPage(source.mesh, request.signal)
+      // WO-3022: the conversion runs off the page now, and form mode may have been left while it ran
+      if (request.signal.aborted || fromBodyRequest.current !== request || !useFormStore.getState().active) return
+      off()
+      const st = useFormStore.getState()
+      // WO-2865: applyCage's own refusal names a cage face index ("face 2106
+      // repeats a point") with no next step. Check first and say it in shop words;
+      // the index stays in the debug log for whoever traces the conversion.
+      const check = validateCage(r.cage)
+      if (!check.ok) {
+        console.info(`Form - From body: cage check failed: ${check.problems.join('; ')}`)
+        st.setNotice(workbenchText('useFormSession.fromBodyCouldNotShapeThisBody'))
+        return
+      }
+      if (!st.applyCage(r.cage, {
+        topology: true, record: true, startFrom: true,
+        notice: workbenchText('useFormSession.fromBodySharpEdgesCreasedTheBodyIsHidden', { value1: String([
+          r.flatFaces > 0 ? workbenchText('useFormSession.flatFaceKeptWhole', { value1: String(r.flatFaces), value2: String(r.flatFaces === 1 ? '' : 's') }) : '',
+          r.gridFaces > 0 ? workbenchText('useFormSession.faceRemeshedIntoQuads', { value1: String(r.gridFaces), value2: String(r.gridFaces === 1 ? '' : 's') }) : '',
+          r.curvedTriangles > 0 ? workbenchText('useFormSession.trianglesOfCurvedFacesSmoothed', { value1: String(r.curvedTriangles) }) : '',
+        ].filter(Boolean).join(', ')), length: String(r.cage.creases.length) }),
+      })) return
+      st.setSourceBodyId(source.featureId)
+      useFormStore.setState({ startedFrom: 'body' })
+      depsRef.current.showBody(source.featureId, false)
+    } catch (error) {
+      if (!request.signal.aborted) {
+        throw error
+      }
+    } finally {
+      off()
+      if (fromBodyRequest.current === request) {
+        fromBodyRequest.current = null
+        setFromBodyBusy(false)
+      }
     }
-    if (!st.applyCage(r.cage, {
-      topology: true, record: true, startFrom: true,
-      notice: workbenchText('useFormSession.fromBodySharpEdgesCreasedTheBodyIsHidden', { value1: String([
-        r.flatFaces > 0 ? workbenchText('useFormSession.flatFaceKeptWhole', { value1: String(r.flatFaces), value2: String(r.flatFaces === 1 ? '' : 's') }) : '',
-        r.gridFaces > 0 ? workbenchText('useFormSession.faceRemeshedIntoQuads', { value1: String(r.gridFaces), value2: String(r.gridFaces === 1 ? '' : 's') }) : '',
-        r.curvedTriangles > 0 ? workbenchText('useFormSession.trianglesOfCurvedFacesSmoothed', { value1: String(r.curvedTriangles) }) : '',
-      ].filter(Boolean).join(', ')), length: String(r.cage.creases.length) }),
-    })) return
-    st.setSourceBodyId(source.featureId)
-    useFormStore.setState({ startedFrom: 'body' })
-    depsRef.current.showBody(source.featureId, false)
   }, [])
 
   const startPipe = useCallback(() => {
@@ -512,10 +553,10 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
       },
       {
         testId: 'form-starter-body',
-        label: workbenchText('useFormSession.fromBody'),
+        label: fromBodyBusy ? workbenchText('MassPropertiesPanel.computing') : workbenchText('useFormSession.fromBody'),
         icon: Import,
         active: startedFrom === 'body' && !faceReplacing,
-        title: workbenchText('useFormSession.startFromTheBodySelectedInTheModelTree'),
+        title: fromBodyBusy ? `${workbenchText('useFormSession.fromBody')} - ${workbenchText('MassPropertiesPanel.computing')}` : workbenchText('useFormSession.startFromTheBodySelectedInTheModelTree'),
         onClick: () => { void startFromBody() },
       },
       ],
@@ -641,5 +682,10 @@ export function useFormSession(deps: FormSessionDeps): FormSession {
     },
   ].filter((section) => section.tools.length > 0)
 
-  return { active, bodyEdgeClick, open, finish, cancel: leave, undo, redo, canUndo, canRedo, railSections }
+  const session: FormSession = { active, bodyEdgeClick, open, finish, cancel: leave, undo, redo, canUndo, canRedo, railSections }
+  // WO-3301: the New UI ribbon reaches this session through the port; the page's own rail still reads the return value
+  const [owner] = useState(() => ({}))
+  useEffect(() => { formModePort.update(session, railSignature(active, railSections), owner) })
+  useEffect(() => () => formModePort.release(owner), [owner])
+  return session
 }

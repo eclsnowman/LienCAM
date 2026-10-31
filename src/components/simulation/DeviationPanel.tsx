@@ -1,12 +1,14 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { getOperationStockDomain, useCamStore } from '../../store'
+import { setupDisplayPartTurn, setupProvenStockId, smartHeightStockBounds, useCamStore } from '../../store'
+import { operationMaterialStockIdOf, operationStockWorldFrame } from '../../store/operationStockInputs'
 import { wcsBoundStockId } from '../../lib/post/workOffsets'
 import { loadDeviationTarget } from '../../lib/simulation/deviationTarget'
-import { compareDeviation, readFinalStockSurface, type DeviationResult } from '../../lib/simulation/deviationComparison'
+import { compareDeviation, type DeviationResult } from '../../lib/simulation/deviationComparison'
+import { finalStockPlan, type FinalStockWaitKind } from '../../lib/simulation/finalStockPlan'
+import { sampleFinalStock } from '../../lib/simulation/finalStockSampler'
 import { DEVIATION_COLORS } from '../../lib/viewport/deviationOverlay'
 import { useText } from '../../i18n'
-import type { Operation } from '../../types'
 
 // Stylesheet, not words: kept out of the JSX so the English guard reads only text.
 const STACK_OFFSET_CSS = `
@@ -18,17 +20,13 @@ const STACK_OFFSET_CSS = `
 // comparison) or already-worded text from the comparison itself.
 type StatusKey = 'comparing' | 'needStock' | 'domainUnavailable' | 'recomputing'
 // An operation the final stock waits for, named as the Setup tree names it.
-type WaitKind = 'waitGenerate' | 'waitComputing' | 'waitRegenerate'
-type Waiting = { id: string; name: string; kind: WaitKind }
+// WO-3096: a READY operation is never one of them (finalStockPlan).
+type Waiting = { id: string; name: string; kind: FinalStockWaitKind }
 type Status = { key: StatusKey } | { text: string } | { waiting: readonly Waiting[] } | null
-function waitingOn(operations: readonly Operation[], ids: readonly string[]): Waiting[] {
-  return ids.flatMap(id => {
-    const op = operations.find(candidate => candidate.id === id)
-    if (!op) return []
-    const kind: WaitKind = op.status === 'computing' ? 'waitComputing'
-      : op.status === 'ready' || op.status === 'outdated' ? 'waitRegenerate' : 'waitGenerate'
-    return [{ id, name: op.name || op.id, kind }]
-  })
+// WO-3096: the plan area of each class, and the material volume for excess and gouge.
+function legendAmount(result: DeviationResult, kind: keyof DeviationResult['counts']): string {
+  const area = `${Math.round(result.areas[kind]).toLocaleString()} mm\u00b2`
+  return kind === 'residual' || kind === 'gouge' ? `${area}, ${Math.round(result.volumes[kind]).toLocaleString()} mm\u00b3` : area
 }
 class StatusError extends Error {
   readonly key: StatusKey
@@ -40,6 +38,7 @@ export interface DeviationPanelProps {
 }
 export function DeviationPanel({ onOverlay }: DeviationPanelProps) {
   const t = useText('simulation-deviation')
+  const shellText = useText('app-shell-settings-menus')
   const anchor = useRef<HTMLSpanElement>(null)
   const panel = useRef<HTMLElement>(null)
   const [atEnd, setAtEnd] = useState(false)
@@ -51,11 +50,15 @@ export function DeviationPanel({ onOverlay }: DeviationPanelProps) {
   const [enabled, setEnabled] = useState(false)
   const [toleranceMm, setTolerance] = useState(0.1)
   const [maxCellMm, setCell] = useState(0.5)
-  const [opacity, setOpacity] = useState(0.75)
+  // WO-3096 colour round: opaque by default, so the class colours win over the stock blue.
+  const [opacity, setOpacity] = useState(1)
   const [scaleMm, setScale] = useState(2)
   const [revision, setRevision] = useState(0)
   const [result, setResult] = useState<DeviationResult | null>(null)
   const [message, setMessage] = useState<Status>(null)
+  // WO-3096: a running compare shows how far it got and can be stopped.
+  const [progress, setProgress] = useState<number | null>(null)
+  const running = useRef<AbortController | null>(null)
   // Every finished check leaves a stamp, so Compare again never looks like nothing happened.
   const [checked, setChecked] = useState<{ at: Date; count: number } | null>(null)
   const checks = useRef(0)
@@ -108,7 +111,6 @@ export function DeviationPanel({ onOverlay }: DeviationPanelProps) {
     if (hasResult.current) setResult(null)
     if (!enabled || mode !== 'simulation') return
     const controller = new AbortController()
-    let off: (() => void) | undefined
     let target: Awaited<ReturnType<typeof loadDeviationTarget>> | undefined
     const stamp = () => { if (!controller.signal.aborted) setChecked({ at: new Date(), count: ++checks.current }) }
     // WO-3052: start on the next task, not inside this commit. Open in Simulate,
@@ -117,32 +119,43 @@ export function DeviationPanel({ onOverlay }: DeviationPanelProps) {
     const start = setTimeout(() => void (async () => {
       setMessage({ key: 'comparing' })
       setChecked(null)
+      setProgress(null)
+      running.current = controller
       try {
         if (!setup || !stockId) throw new StatusError('needStock')
-        const domain = getOperationStockDomain(setup.id, stockId)
-        if (!domain) throw new StatusError('domainUnavailable')
-        // Subscribe before reading: settlement may happen while loading target.
-        off = domain.authority.subscribe(() => { controller.abort(); setResult(null); setRevision(value => value + 1) })
-        const read = readFinalStockSurface(domain)
-        if (read.status === 'recomputing') {
-          const waiting = waitingOn(setup.operations, read.waitingFor)
-          setMessage(waiting.length ? { waiting } : { key: 'recomputing' })
-          stamp()
-          return
-        }
-        if (read.status !== 'ready') throw new Error(read.reason)
-        target = await loadDeviationTarget(project, stockId, domain.frame, controller.signal)
-        const compared = await compareDeviation(read.surface, target, { toleranceMm, maxCellMm, signal: controller.signal })
+        const bounds = smartHeightStockBounds(project, stockId)
+        if (!bounds) throw new StatusError('domainUnavailable')
+        // WO-3096: the final stock is what the stored toolpaths cut, read the
+        // way the Setup tree reads them; a READY operation is never waited for.
+        // Only this stock's operations count (audit 2026-10-23).
+        const plan = finalStockPlan(project, setup, useCamStore.getState().toolLibrary, { stockId,
+          stockIdOf: op => operationMaterialStockIdOf(project, op, () => setupProvenStockId(setup, project)) })
+        if (plan.waiting.length) { setMessage({ waiting: plan.waiting }); stamp(); return }
+        const frame = operationStockWorldFrame(project.id)
+        // WO-3196: a second side's cuts are compared with the part as it holds it.
+        target = await loadDeviationTarget(project, stockId, frame, controller.signal,
+          geo => setupDisplayPartTurn(project, setup, geo))
+        const surface = await sampleFinalStock(plan.operations, { frame, cellMm: maxCellMm, signal: controller.signal,
+          bounds: { minX: bounds.min.x, minY: bounds.min.y, minZ: bounds.min.z, maxX: bounds.max.x, maxY: bounds.max.y, maxZ: bounds.max.z },
+          onProgress: fraction => { if (!controller.signal.aborted) setProgress(fraction / 2) } })
+        // Point samples are exact where taken: a wider spacing is fewer
+        // samples, never a coarsened envelope, so it is compared as requested.
+        // WO-3096: progress and Cancel replace the 3 s refusal for a large part.
+        const compared = await compareDeviation(surface, target, { toleranceMm, maxCellMm: surface.cellMm, signal: controller.signal,
+          maxMs: 120_000, onProgress: fraction => { if (!controller.signal.aborted) setProgress(0.5 + fraction / 2) } })
         controller.signal.throwIfAborted()
-        if (!domain.authority.isCurrent(read.surface.token) || useCamStore.getState().project !== project) return
+        if (useCamStore.getState().project !== project) return
         setResult({ ...compared, estimatedBytes: compared.estimatedBytes + target.estimatedBytes })
         setMessage(null)
         stamp()
       } catch (error) {
         if (!controller.signal.aborted) { stamp(); setMessage(error instanceof StatusError ? { key: error.key } : { text: error instanceof Error ? error.message : String(error) }); setResult(null) }
-      } finally { target?.dispose(); target = undefined }
+      } finally {
+        target?.dispose(); target = undefined
+        if (running.current === controller) { running.current = null; setProgress(null) }
+      }
     })(), 0)
-    return () => { clearTimeout(start); controller.abort(); off?.(); target?.dispose() }
+    return () => { clearTimeout(start); controller.abort(); target?.dispose() }
   }, [enabled, mode, project, setup, stockId, toleranceMm, maxCellMm, revision])
 
   useEffect(() => {
@@ -171,18 +184,22 @@ export function DeviationPanel({ onOverlay }: DeviationPanelProps) {
         <div aria-label={t('legendAria')}>
           {([['gouge', t('legendGouge')], ['residual', t('legendResidual')], ['match', t('legendMatch')],
             ['possible-residual', t('legendPossibleResidual')], ['unknown', t('legendUnknown')]] as const).map(([kind, label]) =>
-            <span className="tp-legend-item" key={kind}><i className="tp-legend-line" style={{ background: DEVIATION_COLORS[kind] }} />{label}{result ? `: ${result.counts[kind]}` : ''}</span>)}
+            <span className="tp-legend-item" key={kind} data-testid={`deviation-legend-${kind}`}><i className="tp-legend-line" style={{ background: DEVIATION_COLORS[kind], height: 10, width: 14 }} />{label}{result ? `: ${legendAmount(result, kind)}` : ''}</span>)}
         </div>
         <div role="status" data-testid="deviation-status">{message && ('waiting' in message ? <>
           {t('waitingHeader')}
           <ul>{message.waiting.map(item => <li key={item.id}>{t(item.kind, { value1: item.name })}</li>)}</ul>
-        </> : 'key' in message ? t(message.key) : message.text)}{result && <>
+        </> : 'key' in message ? t(message.key) : message.text)}{progress !== null && <>
+          {' '}<progress data-testid="deviation-progress" max={1} value={progress} /> {Math.round(progress * 100)}%{' '}
+          <button type="button" className="sim-speed-btn" data-testid="deviation-cancel" onClick={() => {
+            running.current?.abort(); running.current = null; setProgress(null); setMessage(null)
+          }}>{shellText('ConfirmModal.cancel')}</button>
+        </>}{result && <>
           <div>{t('cells', { value1: result.sourceCellMm.toFixed(3), value2: result.cellMm.toFixed(3) })}</div>
           <div>{t('samples', { value1: result.cells.length.toLocaleString(), value2: result.elapsedMs.toFixed(0), value3: (result.estimatedBytes / 1048576).toFixed(1) })}</div>
         </>}</div>
         {checked && <div aria-live="polite" data-testid="deviation-checked">{t('checkedAt', { value1: checked.at.toLocaleTimeString(), value2: checked.count })}</div>}
         <small>{t('stockHint')}</small>
-        <small>{t('caveat')}</small>
         <button type="button" className="sim-speed-btn" onClick={() => setRevision(value => value + 1)}>{t('compareAgain')}</button>
       </div>}
       <button type="button" className="tp-legend-chip" role="checkbox" aria-checked={enabled}

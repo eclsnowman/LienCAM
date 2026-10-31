@@ -43,6 +43,8 @@ const { i18n } = await import('../../i18n')
 // WO-2620: re-recorded after WO-2591, WO-2609 and WO-2612 rewrote seven Help
 // topics (post-options and machine Help); every other key is WO-2593's, byte for byte.
 // WO-2650: WO-2626 corrected Help and WO-2628 added the PC-move topic.
+// WO-2883: re-recorded the `help *` keys only (146 topics, updating-liencam added);
+// every non-help key is left as it was.
 const golden = 'src/tests/evidence/WO-2685/english-main.wo2320.json'
 const noop = () => {}
 

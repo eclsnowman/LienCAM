@@ -24,7 +24,7 @@ export type RoleRate =
 /** The 12 roles, in the order src/types MoveRole declares them. */
 export const MOVE_ROLES = [
   'rapid', 'cut', 'helix', 'ramp', 'plunge', 'stepover', 'fast_traverse',
-  'lead_in', 'lead_out', 'loop_back', 'wall_follow', 'finish',
+  'lead_in', 'lead_out', 'retract', 'loop_back', 'wall_follow', 'finish',
 ] as const satisfies readonly MoveRole[]
 
 export type LinkRole = (typeof MOVE_ROLES)[number]
@@ -80,6 +80,7 @@ export const ROLE_FEED_TABLE: Readonly<Record<LinkRole, RoleFeedRow>> = Object.f
     { family: 'chamfer', rate: 'plungeRate', why: 'chamfer2d.ts:211 rampTo(..., plungeRate)' },
   ]),
   plunge: row('plunge', 'plungeRate'),
+  retract: row('retract', 'leadOutRate'), // preview-only; no CAM producer
   stepover: row('stepover', 'feedRate'),
   fast_traverse: row('fast_traverse', 'fastTraverseRate', true),
   lead_in: row('lead_in', 'leadInRate'),

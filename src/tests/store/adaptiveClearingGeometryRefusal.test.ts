@@ -318,6 +318,8 @@ describe('Adaptive Clearing geometry-boundary refusal — REAL end-to-end (SKC-4
       },
     })
 
+    // WO-3126: the result's stock witness is prepared before it is published.
+    await vi.waitFor(() => expect(opAfter().status).toBe('ready'))
     const op = opAfter()
     expect(op.status).toBe('ready')
     expect(op.toolpathMoves).toEqual(generatedMoves)

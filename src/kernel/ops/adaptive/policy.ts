@@ -311,8 +311,9 @@ export const ADAPTIVE_MOTION_SWITCHES: Readonly<{ keepDownCapForm: boolean; stee
    *  guess toward the load target instead of keeping any guess inside the accept band; (C) the
    *  stepper's momentum learns the departure-clamped turn the tool made, and a mid-pass clamped step
    *  is no longer pinned against the pass's path cleanup (only the departure head off a planted wall
-   *  start stays pinned). Numbers: STEERING_SMOOTHING. processFeature.ts reads the switch. */
-  steeringSmoothing: false,
+   *  start stays pinned). Numbers: STEERING_SMOOTHING. processFeature.ts reads the switch.
+   *  WO-3067: ON by the owner's 2026-10-22 card answer "Turn it on (recommended)". */
+  steeringSmoothing: true,
   /** WO-3037 (owner 2026-10-21 on the torus spikes, card on his yes): OFF keeps today's keep-down
    *  links to the bit. ON: a short hop whose straight chord would graze the finished wall bows
    *  round it on a shallow arc through proven-cleared stock instead of the perpendicular V detour;

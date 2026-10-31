@@ -11,10 +11,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { typedMock } from '../support/typedMock'
+import { dxfGeometryFingerprint } from './dxfGeometryFingerprint.wo3154'
 
 const mem = new Map<string, string>()
 const memStorage: Storage = {
@@ -61,9 +61,8 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '../../..')
 // sha256 of JSON.stringify(importDXF(text) minus its `report`, numbers rounded
 // to 1e-9), first 16 hex.
 function digestOfDefault(text: string): string {
-  const { report, ...rest } = importDXF(text)
-  const stable = JSON.stringify(rest, (_k, v) => typeof v === 'number' ? Math.round(v * 1e9) / 1e9 : v)
-  return createHash('sha256').update(stable).digest('hex').slice(0, 16)
+  const { report: _report, ...rest } = importDXF(text)
+  return dxfGeometryFingerprint(rest)
 }
 
 describe('WO-1900 acceptance 1: a part at X100 Y50', () => {

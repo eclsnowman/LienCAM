@@ -47,7 +47,9 @@ describe('3D dome-to-square adaptive flow', () => {
         expect(length).toBeLessThan(500)
         // WO-2752: the material-side-correct tangent changes the entry seam by
       // 0.424 mm; preserve the path-length pin and all coverage/direction guards.
-      expect(length).toBeCloseTo(435.10, 1)
+      // WO-3067 RE-PIN (435.10 -> 390.11 mm at every level, a length): steering smoothing ships
+      // ON (owner 2026-10-22 "Turn it on (recommended)"); still two circuits, inside 300..500.
+      expect(length).toBeCloseTo(390.11, 1)
       }
       expect(ir.meta?.params?.smoothingSafetyFallback).toBe(false)
       expect(ir.meta?.params?.wallCleanupSafetyFallback).toBe(false)

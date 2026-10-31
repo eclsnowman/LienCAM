@@ -3,7 +3,7 @@
 // Not here by design: the shared binder (step 4) and the registry hook (step 6).
 import { partFeatureList } from './identity'
 import type { AdapterResult } from './adapters'
-import type { FeatureSource, PartFeatureList, PartFrame } from './types'
+import type { FeatureSource, FeatureSourceScope, PartFeatureList, PartFrame } from './types'
 
 export * from './types'
 export { faceSignature, edgeSignature, edgeMeasure, geometrySignature, identifyFaces, identifyEdges, partFeatureList } from './identity'
@@ -17,10 +17,11 @@ export { assignIds, canonicalAxis, canonicalRing, contentHash, COORD_QUANTUM_MM,
 
 /** Recognition never blocks: a recogniser or adapter that throws on one body
  *  gives that body no features and one line saying so. */
-export function recognisedFeatureList(frame: PartFrame, source: FeatureSource, recognise: () => AdapterResult): PartFeatureList {
+export function recognisedFeatureList(frame: PartFrame, source: FeatureSource, recognise: () => AdapterResult, scope?: FeatureSourceScope): PartFeatureList {
+  const owned = scope ? { scope: structuredClone(scope) } : {}
   let result: AdapterResult
   try { result = recognise() } catch (error) {
-    return partFeatureList(frame, source, [], [`${source} recognition failed on this body, so it lists no features (${error instanceof Error ? error.message : String(error)})`])
+    return { ...partFeatureList(frame, source, [], [`${source} recognition failed on this body, so it lists no features (${error instanceof Error ? error.message : String(error)})`]), ...owned }
   }
-  return partFeatureList(frame, source, result.candidates, result.notes)
+  return { ...partFeatureList(frame, source, result.candidates, result.notes), ...owned }
 }

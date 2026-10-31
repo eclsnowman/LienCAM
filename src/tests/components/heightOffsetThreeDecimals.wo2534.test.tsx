@@ -129,6 +129,8 @@ describe('WO-2534 height offset box shows 3 decimals', () => {
     fireEvent.focus(box())
     fireEvent.blur(box())
     expect(box().value).toBe('15.202')
+    // WO-3137 invalidates the previous plan when an offset changes.
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByTestId('op-create'))
     const created = useCamStore.getState().project.setups[0].operations.at(-1)!
     // The untouched box wrote nothing: still the detected-floors plan, no rounded depth stored anywhere.
@@ -148,6 +150,8 @@ describe('WO-2534 height offset box shows 3 decimals', () => {
     fireEvent.blur(box())
     await waitFor(() => expect(box().value).toBe('12.34567'))
     // Saved and reopened: the operator's value is still shown as typed.
+    // WO-3137 invalidates the previous plan when an offset changes.
+    await waitFor(() => expect((screen.getByTestId('op-create') as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByTestId('op-create'))
     const created = useCamStore.getState().project.setups[0].operations.at(-1)!
     act(() => useCamStore.getState().closeModal())

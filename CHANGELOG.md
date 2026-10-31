@@ -8,6 +8,33 @@ need re-saving in the next; nothing is promised to keep working before 1.0. Unre
 
 ## [Unreleased]
 
+## [0.37.0-alpha.3.2] - 2026-10-30
+
+A follow-up to alpha.3.1.
+
+Release notes: `docs/release/notes-0.37.0-alpha.3.2.md`.
+
+### Added
+
+- Modelling: Thin extrude, Sweep along a sketch path, editable Mirror.
+- Toolpaths: tab suggestions and a separate tab-removal Contour; Slot (centerline); Thread Mill top-down or bottom-up; Detect holes for Bore on STEP and modelled bodies; per-operation Minimize Z travel.
+- Tool Library: Programmed cut results (chip thickness, removal rate, power and torque).
+- Posting: line numbers. Control: gamepad step-jog with a deadman button. App: in-app update, Guided setup, remappable CAM shortcuts.
+
+### Changed
+
+- Adaptive turns are smoothed by default; links and rapids no longer cross uncut stock, and a 2D Adaptive lift never rises above Clearance.
+- Every program start goes up to a safe height, over, then down.
+- Helix and ramp entries start about 1 mm above the material on every operation; 2D operations take their Z from the Heights tab.
+- On Linux the native bridge is the default.
+
+### Fixed
+
+- Setup Load, Regenerate All and Form snap no longer freeze the window; the spindle keepalive no longer depends on a busy window.
+- Extrude Remove on a Form body previews in about 4 seconds instead of about 12.
+- The shipped example projects open with their toolpaths ready.
+- E-STOP shows on every machine route; console messages name the real state.
+
 ## [0.37.0-alpha.3.1] - 2026-10-22
 
 A follow-up to alpha.3.

@@ -439,10 +439,15 @@ function lgplModules(worker = false): Plugin {
         runtimeExports(name).map(symbol => `export const ${symbol} = engine.${symbol};`).join('\n')
     },
     transform(code, id) {
-      if (!id.replaceAll('\\', '/').endsWith('/@opencamlib/opencamlib/browser.js')) return
+      // The public wrapper uses browser.js, while Waterline owns raw Embind
+      // handles through build/ocl.js. They each contain one copy of the same
+      // 6 MB OpenCAMLib WASM; rewrite either factory to the declared asset.
+      const moduleId = id.replaceAll('\\', '/').split('?', 1)[0]
+      if (!moduleId.endsWith('/@opencamlib/opencamlib/browser.js') &&
+        !moduleId.endsWith('/@opencamlib/opencamlib/build/ocl.js')) return
       const binary = /'data:application\/octet-stream;base64,([A-Za-z0-9+/=]+)'/g
       const matches = [...code.matchAll(binary)]
-      if (matches.length !== 1) throw new Error('WO-2485: OpenCAMLib embedded WASM format changed')
+      if (matches.length !== 1) throw new Error(`WO-2485: expected one embedded OpenCAMLib WASM in ${moduleId}`)
       const reference = this.emitFile({ type: 'asset', fileName: oclWasmFile, source: Buffer.from(matches[0][1], 'base64') })
       return code.replace(binary, `import.meta.ROLLUP_FILE_URL_${reference}`)
         .replace('wasmBinaryFile = locateFile(wasmBinaryFile);', '// The emitted URL is already absolute.')

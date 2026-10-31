@@ -26,6 +26,8 @@ function addFeature(dag: FeatureDag, id: string, opType: string, consumes: strin
   if (opType === 'extrude' && consumes.length > 0) {
     payload.boolMode = 'add'
     payload.targetFeatureId = consumes[0]
+  } else if (opType === 'bodyTransform' && consumes.length > 0) {
+    payload.sourceBodyId = consumes[0]
   } else if (opType === 'boolean' && consumes.length > 0) {
     payload.boolOp = 'fuse'
     payload.targetFeatureId = consumes[0]
@@ -61,6 +63,31 @@ describe('WO UI-28 body-lineage projection', () => {
     expect(projectBodyLineages(modifyDag, ['ROOT', 'LEAF'], ['LEAF'])).toEqual([
       { bodyId: 'LEAF', lineageId: 'ROOT' },
     ])
+  })
+
+  it('WO-3244: a Mirror (replace original) carries its source identity; its plane carries none', () => {
+    const dag = new FeatureDag()
+    addSketch(dag, 'SK-A')
+    addSketch(dag, 'SK-B')
+    addFeature(dag, 'ROOT', 'extrude', ['SK-A'])
+    addFeature(dag, 'OTHER', 'extrude', ['SK-B'])
+    dag.insertNode({ id: 'PLANE', kind: 'datum', consumes: [], payload: { datumType: 'plane' } })
+    dag.insertNode({
+      id: 'MIRROR',
+      kind: 'feature',
+      consumes: ['ROOT', 'PLANE'],
+      payload: { opType: 'bodyTransform', version: 1, sourceBodyId: 'ROOT', transform: { kind: 'mirror', planeNodeId: 'PLANE' }, result: 'replace', name: 'Mirror' },
+    })
+    const bodies = ['ROOT', 'OTHER', 'MIRROR']
+    expect(projectBodyLineages(dag, bodies, ['OTHER', 'MIRROR'])).toEqual([
+      { bodyId: 'OTHER', lineageId: 'OTHER' },
+      { bodyId: 'MIRROR', lineageId: 'ROOT' },
+    ])
+    // a persisted reference to the source follows its material to the mirror
+    expect(resolveBodyTargetLineage(dag, bodies, ['OTHER', 'MIRROR'], 'ROOT')).toEqual({ ok: true, bodyId: 'MIRROR' })
+    // a payload naming another body as its source carries no material from ROOT
+    dag.setPayload('MIRROR', { ...dag.getNode('MIRROR')!.payload, sourceBodyId: 'OTHER' })
+    expect(resolveBodyTargetLineage(dag, bodies, ['OTHER', 'MIRROR'], 'ROOT')).toEqual({ ok: false, reason: 'lost', candidates: [] })
   })
 
   it('keeps two independently modified bodies as two rows addressing their own leaves', () => {

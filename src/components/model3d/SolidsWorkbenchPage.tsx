@@ -1,7 +1,9 @@
-import { readableInternalIds } from '../../lib/operatorLabels'
+import { bodyTransformRefusalText, mirrorCarryReplayText, readableInternalIds } from '../../lib/operatorLabels'
 import { MoveHoleEntry, parseHoleMove } from './dialogs/MoveHoleEntry'
 import { useText, textFor } from '../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
+const mirrorText = textFor('body-mirror.wo3244')
+const sweepPathText = textFor('sweep-path.wo3230')
 import { ReferenceImagePlacement } from './referenceImage/ReferenceImagePlacement'
 import { dressUpDeadClickLine, editableImportedChamfer, editableImportedFillet, importedChamferDistance } from './dressUpDeadClick'
 import type { ImagePlacement } from '../../referenceImage/place'
@@ -100,6 +102,7 @@ import type {
   HoleRequest,
   LoftRequest,
   OpResult,
+  PathChain,
   PlaneDef,
   ProfileRegion,
   RevolveRequest,
@@ -260,15 +263,23 @@ import { edgeIdCollisionMessage } from './measure/edgeIdCollisions'
 import { useCamStore, sameModelBodyShape } from '../../store'
 import { useModelSelectionBridge } from '../../store/modelSelectionBridge'
 import type { BodyResolution } from '../../lib/cam/modelReferenceResolution'
+import {
+  readLiveModelBodyFeatures,
+  selectionFromResult,
+  type FeatureResultSelection,
+  type ModelBodyFeatureResult,
+} from '../../lib/geometry/partFeatureBinding'
 import { referenceStableIds } from '../../lib/cam/modelReferenceResolution'
 import { AO_OFF_THREAD_KEY, AO_SKIP_KEY, onBodyAoLanded } from '../../lib/viewport/lighting/vertexAO'
 import { createDefaultSceneRuntime, type CreateSceneRuntime, type DepthClipProbe, type SceneRuntime, type WorkbenchViewName } from './sceneRuntime'
 import { FeatureTree, planFeatureDelete, visibleFeatureTreeOrder, type FeatureTreeEditEntry } from './tree'
 import { BodyListPanel, type BodyListEntry } from './BodyListPanel'
-import { DrawingEntry, type DrawingSourceStatus } from './drawing/DrawingEntry'
+import { DrawingEntry, meshBodyRead, type DrawingBody, type DrawingSourceStatus } from './drawing/DrawingEntry'
+import { buildMeshDrawingSource } from '../../lib/drawing/meshSource'
 import { DrawingEditor } from './drawing/DrawingEditor'
 import { ModelWorkspaceHeader } from './ModelWorkspaceHeader'
 import { isWorkbenchBodyOpType, lineageIdOf, projectBodyLineages, featureLabel, bodyFeatureIds, liveBodyFeatureIds, resolveBodyTargetLineage } from './bodyLineage'
+import { bodyTransformConsumes, mirrorReplacePayload, parseBodyTransformPayload, replayBodyTransform, resolveReferencesThroughMirrors } from '../../doc/features/bodyTransform'
 import { composeWorkbenchStl, mergeTessellatedBodies, type StlBodyInput } from './modelStlExport'
 import { export3mf as write3mf } from '../meshlab/threeMf'
 import { EditFeaturePayloadCommand } from './dialogs/EditFeaturePayloadCommand'
@@ -348,6 +359,7 @@ import { BASE_PLANE_PICK_TIE_EPSILON, resolveBasePlanePick } from './workbench/b
 import { asNumber } from '../../theme/viewportColors'
 import {
   ExtrudeDialog,
+  extrudeWallPayloadFields,
   isUpstreamProducer,
   type ExtrudeApplyAcceptance,
   type ExtrudeEndTargetPickKind,
@@ -420,6 +432,8 @@ import type { PushPullFeaturePayload } from './dialogs/PushPullEditDialog'
 import {
   ResizeHoleDialog,
   eligibleResizeHoleVerdicts,
+  resizeHoleTargetByKey,
+  resizeHoleTargetOnFace,
   buildResizeHoleListRows,
   validateResizeDiameter,
   validateHoleDepth,
@@ -449,7 +463,9 @@ import {
   type ProfilePickResult,
   type StartProfilePick,
 } from './workbench/profileRegionPicker'
-import { resolveProfileSelector } from './workbench/regionSelector'
+import { resolveExtrudeSelection, resolveOpenChainProfileSelector, resolveProfileSelector } from './workbench/regionSelector'
+import { resolveSweepPathChain, type SketchChainPathSelector } from '../../geom/sweep-path'
+import { sweepPathCandidatesForSketch, sweepPathPreviewSegments } from './workbench/sweepPathPicker'
 // WO SKC-15: Origin + the three base planes (Operator A1/A2).
 import { seedGenesisNodes } from './workbench/basePlanes'
 
@@ -495,9 +511,14 @@ import { ReliefPanel } from './relief/ReliefPanel'
 import { faceFrameOfDisplayedFace } from './relief/reliefFaceFrame'
 import { isReliefFeaturePayload, pictureOf, reliefKernelFields, type ReliefKernelFields } from '../../relief/reliefFeature'
 import { Mountain as ReliefIcon } from 'lucide-react'
+import { FlipHorizontal2 as MirrorIcon } from 'lucide-react'
+import { MirrorDialog, type MirrorPreviewState, type MirrorSelection } from './dialogs/MirrorDialog'
 import {
+  findStlEdgeChain,
   findStlSharpEdge,
+  stlCurvedSurfaceOf,
   stlChamferShape,
+  stlFilletShape,
   stlDraftShape,
   stlFaceRef,
   stlFacetNormal,
@@ -506,6 +527,7 @@ import {
   stlShapeSeed,
   stlShellShape,
   type StlHoleRequest,
+  type StlEdgeChain,
   type StlSharpEdge,
 } from './workbench/stlFeatureEdits'
 import { describeMeshEdit, MOVE_HOLE_KIND, MOVE_FLAT_FACE_KIND, primeBoringKernel, type BooleanBodyParameters } from '../../mesh/edit'
@@ -1328,6 +1350,8 @@ type DialogState =
   | { kind: 'revolve'; mode: 'create' | 'edit'; featureId?: string; treeSketchPick?: TreeSketchPick }
   | { kind: 'boolean'; mode: 'create' }
   | { kind: 'boolean'; mode: 'edit'; featureId: string }
+  | { kind: 'mirror'; mode: 'create' }
+  | { kind: 'mirror'; mode: 'edit'; featureId: string }
   | { kind: 'fillet'; mode: 'create'; ownerId?: string; edgeIds: string[] }
   | { kind: 'fillet'; mode: 'edit'; featureId: string; selectedEdgeIds: string[] }
   | { kind: 'fillet'; mode: 'imported-edit'; ownerId: string; featureKey: string; faceId: string; currentRadius: number }
@@ -1360,6 +1384,9 @@ type DialogState =
    *  in the row's journal), not a DAG feature. */
   | { kind: 'stl-hole'; origin: Vec3; normal: Vec3 }
   | { kind: 'stl-chamfer'; edges: StlSharpEdge[] }
+  /** WO-3092: Fillet opens on the STL's picked sharp edges (each a whole
+   *  tangent run - a hole's rim all the way round); a boolean-body edit too. */
+  | { kind: 'stl-fillet'; edges: StlEdgeChain[] }
   /** WO-2090: Shell and Draft open on the STL body's flat faces - the faces
    *  to open; the neutral face, then the faces to draft. Their preview and
    *  Apply are the STL tool session's too (a boolean-body edit). */
@@ -1374,6 +1401,10 @@ type DialogState =
 /** WO-2089: how near (on screen) a click must land to an STL sharp edge for
  *  Chamfer to pick it, and the least that reaches on the part, mm. */
 const STL_EDGE_PICK_PX = 8
+/** WO-3092: the STL edges the open Chamfer or Fillet has picked (drawn over the part). */
+function stlPickedEdges(dialog: DialogState): ReadonlyArray<StlSharpEdge | StlEdgeChain> {
+  return dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-fillet' ? dialog.edges : []
+}
 const STL_EDGE_PICK_FLOOR_MM = 0.25
 /** WO-2089: what the STL Hole's Apply guard answers once the STL edit is
  *  recorded - it stops HoleDialog committing a kernel feature too. The
@@ -1392,6 +1423,8 @@ const CHAMFER_PREVIEW_BODY_ID = '__chamfer-preview__'
 const SHELL_PREVIEW_BODY_ID = '__shell-preview__'
 
 const RESIZE_HOLE_PREVIEW_BODY_ID = '__resize-hole-preview__'
+
+const MIRROR_PREVIEW_BODY_ID = '__mirror-preview__'
 
 
 interface DraftPreviewBaseline {
@@ -2148,9 +2181,10 @@ function dressUpEntityKind(feature: DressUpFeature): 'edge' | 'face' {
 const TOOL_IN_USE_LABEL: Record<Exclude<DialogState['kind'], 'none'>, string> = {
   get 'reference-image'() { return workbenchText('SolidsWorkbenchPage.referenceImage') },
   get 'offset-plane'() { return workbenchText('SolidsWorkbenchPage.offsetPlane') }, get axis() { return workbenchText('SolidsWorkbenchPage.axis') }, get 'picked-plane'() { return workbenchText('SolidsWorkbenchPage.plane') }, get 'point-datum'() { return workbenchText('SolidsWorkbenchPage.point') }, get extrude() { return workbenchText('SolidsWorkbenchPage.extrude') }, get revolve() { return workbenchText('SolidsWorkbenchPage.revolve') }, get boolean() { return workbenchText('SolidsWorkbenchPage.boolean') },
+  get mirror() { return mirrorText('railLabel') },
   get fillet() { return workbenchText('SolidsWorkbenchPage.fillet') }, get defeature() { return workbenchText('SolidsWorkbenchPage.defeature') }, get chamfer() { return workbenchText('SolidsWorkbenchPage.chamfer') }, get shell() { return workbenchText('SolidsWorkbenchPage.shell') }, get draft() { return workbenchText('SolidsWorkbenchPage.draft') },
   get sweep() { return workbenchText('SolidsWorkbenchPage.sweep') }, get loft() { return workbenchText('SolidsWorkbenchPage.loft') }, get hole() { return workbenchText('SolidsWorkbenchPage.hole') }, get 'resize-hole'() { return workbenchText('SolidsWorkbenchPage.resizeHole') },
-  get 'stl-hole'() { return workbenchText('SolidsWorkbenchPage.hole') }, get 'stl-chamfer'() { return workbenchText('SolidsWorkbenchPage.chamfer') }, get 'stl-shell'() { return workbenchText('SolidsWorkbenchPage.shell') }, get 'stl-draft'() { return workbenchText('SolidsWorkbenchPage.draft') },
+  get 'stl-hole'() { return workbenchText('SolidsWorkbenchPage.hole') }, get 'stl-chamfer'() { return workbenchText('SolidsWorkbenchPage.chamfer') }, get 'stl-fillet'() { return workbenchText('SolidsWorkbenchPage.fillet') }, get 'stl-shell'() { return workbenchText('SolidsWorkbenchPage.shell') }, get 'stl-draft'() { return workbenchText('SolidsWorkbenchPage.draft') },
 }
 
 const DRESS_UP_PICK_LINE: Record<DressUpFeature, string> = {
@@ -2209,7 +2243,7 @@ function toolInUseLine(
     // tool in use is still Hole or Chamfer (their dialog branch below).
     // WO-2090: so do STL Shell and Draft.
     case 'boolean':
-      if (dialog.kind === 'stl-hole' || dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-shell' || dialog.kind === 'stl-draft') break
+      if (dialog.kind === 'stl-hole' || dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-fillet' || dialog.kind === 'stl-shell' || dialog.kind === 'stl-draft') break
       return { key: 'boolean', line: workbenchText('SolidsWorkbenchPage.booleanSetItInThePanelThenApply') }
   }
   if (resizeHolePickMode.kind !== 'none') {
@@ -2228,6 +2262,7 @@ function toolInUseLine(
   // ...", "Selected a ... mm edge on ..."), and keeps the armed pick's key.
   if (dialog.kind === 'stl-hole') return { key: 'hole', line: null }
   if (dialog.kind === 'stl-chamfer') return { key: 'chamfer', line: null }
+  if (dialog.kind === 'stl-fillet') return { key: 'fillet', line: null }
   if (dialog.kind === 'stl-shell') return { key: 'shell', line: null }
   if (dialog.kind === 'stl-draft') return { key: 'draft', line: null }
   const label = dialog.kind === 'offset-plane' && dialog.planeType !== undefined && dialog.planeType !== 'offset'
@@ -2276,6 +2311,12 @@ export interface SolidsWorkbenchHooks {
    *  map can still reach. The lineage round-trip test asserts on resolve() here. */
   map: ElementMap
   client: GeomClient
+  /** WO-3202: the Model Item this mount holds; a body id is read through
+   *  these hooks only for this item (two items may share a raw body id). */
+  modelItemId: string
+  /** WO-3202: the shared-result binding behind the latest Resize Hole
+   *  selection (token + common feature), or null before the first one. */
+  getResizeHoleFeatureSelection(): FeatureResultSelection | null
   getBodyHandle(featureId: string): BodyHandle | undefined
   /** Test seam for exact committed/preview presentation visibility. */
   getBodyPresentationVisible(featureId: string): boolean | undefined
@@ -3631,6 +3672,8 @@ function SolidsWorkbenchPageDocument({
   const offsetPlaneFaceSourceSequenceRef = useRef(0)
   const [profilePickMode, setProfilePickMode] = useState<ProfilePickMode | null>(null)
   const [profilePickPreview, setProfilePickPreview] = useState<ProfilePickResult | null>(null)
+  // WO-3230: the open Sweep dialog's chosen sketch path, drawn with its start arrow.
+  const [sweepPathPreview, setSweepPathPreview] = useState<PathChain | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   // WO UI-24: separate from exportError (STEP export) -- a debug-export failure and a STEP-export
   // failure are unrelated causes and must not clobber each other's message.
@@ -4393,6 +4436,14 @@ function SolidsWorkbenchPageDocument({
   // SAME refresh -- the two maps never disagree about which bodies
   // contribute holes vs. failures.
   const resizeHoleRecognitionFailuresRef = useRef<Map<string, string>>(new Map())
+  // WO-3202 (WO-3170 Slice B): the shared recognition results the verdict
+  // cache above was read from, by the SAME lineage key and refreshed in the
+  // same pass (resizeHoleVerdictsRef holds each one's verdicts). A Setup Bore
+  // pick of the same body revision reads these very results from the
+  // session's memo instead of recognizing the body again.
+  const resizeHoleResultsRef = useRef<Map<string, ModelBodyFeatureResult>>(new Map())
+  // WO-3202: the binding behind the current selection (hooks seam).
+  const resizeHoleFeatureSelectionRef = useRef<FeatureResultSelection | null>(null)
 
   // WO UI-23 (C3): "N" -> one-shot normal-to-face pick. A plain boolean (not
   // a bigger union like PushPullMode/DressUpPickMode) -- there is only one
@@ -4638,6 +4689,24 @@ function SolidsWorkbenchPageDocument({
           }
         }
       }
+      // WO-3237: an open chain chosen for a Thin wall - the chain itself plus
+      // the arrow of its persisted direction, which Left / Right are read from.
+      if (previewKey !== null && previewSelector?.kind === 'sketch-chain') {
+        const chain = resolveOpenChainProfileSelector(previewSelector, (id) => dag.getNode(id))
+        if (chain.ok) {
+          const outline = makeProfileRegionPickOutline(
+            { sketchId: chain.path.sketchId, plane: chain.path.plane, loops: [sweepPathPreviewSegments(chain.path)] },
+            PROFILE_PICK_SELECTED_COLOR,
+            4.25,
+          )
+          if (outline !== null) {
+            outline.userData.profilePickRegionKey = previewKey
+            outline.userData.thinOpenChain = previewKey
+            profilePickOutlinesRef.current.push(outline)
+            runtimeRef.current?.addObject(outline)
+          }
+        }
+      }
     }
     runtimeRef.current?.requestRender()
     return () => {
@@ -4648,6 +4717,26 @@ function SolidsWorkbenchPageDocument({
       profilePickOutlinesRef.current = []
     }
   }, [profilePickMode, profilePickPreview, dagVersion, dag])
+
+  // WO-3230: draw the chosen sweep path (and which way it starts) while the Sweep dialog is open.
+  useEffect(() => {
+    if (sweepPathPreview === null) return
+    const outline = makeProfileRegionPickOutline(
+      { sketchId: sweepPathPreview.sketchId, plane: sweepPathPreview.plane, loops: [sweepPathPreviewSegments(sweepPathPreview)] },
+      PROFILE_PICK_SELECTED_COLOR,
+      4.25,
+    )
+    if (outline === null) return
+    outline.userData.sweepPathPreview = sweepPathPreview.sketchId
+    const runtime = runtimeRef.current
+    runtime?.addObject(outline)
+    runtime?.requestRender()
+    return () => {
+      runtime?.removeObject(outline)
+      disposeProfileRegionPickOutline(outline)
+      runtime?.requestRender()
+    }
+  }, [sweepPathPreview])
 
   // WO UI-15 (B1.1 "leaving the mode clears it"): push-pull disarming/mounting, dress-up Done/Cancel/
   // dialog-apply, and sketch-pick cancel/resolve all land here as a `.kind` change away from the
@@ -4747,13 +4836,18 @@ function SolidsWorkbenchPageDocument({
     setResizeHoleRecognizing(true)
     void (async () => {
       const next = new Map<string, FeatureVerdict[]>()
+      const results = new Map<string, ModelBodyFeatureResult>()
       const failures = new Map<string, string>()
       for (const id of liveIds) {
         const handle = bodyHandlesRef.current.get(id)
         if (handle === undefined) continue
         const lineageId = lineageIdOf(dag, lineageCensus, id)
         try {
-          next.set(lineageId, await client.recognizeFeatures(handle))
+          // WO-3202: the session's shared result for this committed body
+          // revision -- recognized once, whoever asks first.
+          const result = await readLiveModelBodyFeatures(session, id)
+          results.set(lineageId, result)
+          next.set(lineageId, [...result.verdicts])
         } catch (err) {
           // WO UI-58-R1 (major 2, ADR-0003): a per-body recognition failure
           // still degrades ONLY that one body to "no eligible holes" here
@@ -4770,13 +4864,14 @@ function SolidsWorkbenchPageDocument({
       }
       if (cancelled) return
       resizeHoleVerdictsRef.current = next
+      resizeHoleResultsRef.current = results
       resizeHoleRecognitionFailuresRef.current = failures
       resizeHoleVerdictsDagVersionRef.current = dagVersion
       setResizeHoleRecognizing(false)
       setResizeHoleVerdictsTick((t) => t + 1)
     })()
     return () => { cancelled = true }
-  }, [resizeHolePickMode.kind, dagVersion, dag])
+  }, [resizeHolePickMode.kind, dagVersion, dag, session])
 
   // The uncommitted PREVIEW body handle from the most recent in-flight
   // editFeature call (never written to bodyHandlesRef -- that map only ever
@@ -6420,6 +6515,12 @@ function SolidsWorkbenchPageDocument({
       }
       if (!result.ok) {
         dropProfile()
+        // WO-3230: a sketch that encloses nothing but draws an open line/arc chain is a valid sweep
+        // PATH. It still has no profile (regions stay absent, nothing pretends otherwise); it is
+        // simply not a problem, so no warning. Read after the stale-result guard above, from the
+        // same pinned sketch and frame, through the one path authority.
+        const enclosesNothing = result.refusal.code === 'open-loop' || result.refusal.code === 'no-geometry'
+        if (enclosesNothing && sweepPathCandidatesForSketch(nodeId, (id) => targetDag.getNode(id)).candidates.length > 0) return []
         return [{ code: 'OPEN_PROFILE', severity: 'warning', params: { sketch: nodeId, refusal: result.refusal.code, message: result.refusal.message } }]
       }
       targetDag.setPayload(nodeId, {
@@ -7840,11 +7941,21 @@ function SolidsWorkbenchPageDocument({
   const makeReplayExecutor = useCallback(
     (world: ReplayWorld): FeatureOp => {
       const finalizeBody = makeReplayFinalizer(world)
-      return async (node: DagNodeSnapshot): Promise<OpResult> => {
+      return async (stored: DagNodeSnapshot): Promise<OpResult> => {
       const client = clientRef.current
       if (client === null) {
         return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.clientNotReady') } }] }
       }
+      // WO-3244: a feature authored on a body a Mirror later replaced keeps
+      // its own references; they are resolved through the Mirror's CURRENT
+      // plane here, the same resolver the background replay runs, and never
+      // written back - so moving the plane carries them along.
+      const throughMirrors = resolveReferencesThroughMirrors(world.dag, stored, world.lookupExtrudePlaneTarget ?? ((id) => extrudePlaneDef(world.dag, id, world.scheduler.statusOf(id))))
+      if (!throughMirrors.ok) {
+        const name = typeof stored.payload.name === 'string' ? stored.payload.name : undefined
+        return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { id: stored.id, reason: mirrorCarryReplayText(throughMirrors.error, name) } }] }
+      }
+      const node = throughMirrors.node
       // WO SKC-5: 'datum' (face-plane frame resolution) and 'sketch' (which
       // now covers BOTH the pre-existing rectangle-profile sketches -- whose
       // payload carries no `document`, so makeSketch3dExecutor would choke
@@ -8112,9 +8223,13 @@ function SolidsWorkbenchPageDocument({
       if (opType === 'extrude') {
         const p = payload as unknown as ExtrudeFeaturePayload
         const sketchNode = world.dag.getNode(p.sketchId)
-        const profileSelection = resolveProfileSelector(
+        // WO-3237: a saved open chain resolves to the chain itself and may be
+        // built only as a Thin open wall; regions resolve exactly as before.
+        const profileSelection = resolveExtrudeSelection(
+          p.sketchId,
           sketchNode?.payload.regions as ProfileRegion[] | undefined,
           p.profileSelector,
+          (id) => world.dag.getNode(id),
         )
         if (!profileSelection.ok) {
           return {
@@ -8161,6 +8276,7 @@ function SolidsWorkbenchPageDocument({
           featureId: node.id,
           payload: p,
           profiles: profileSelection.profiles,
+          openChain: profileSelection.openChain,
           distance: driven.value,
           lookupTarget: lookupLiveBody,
           // End-condition references may follow material into one live
@@ -8465,8 +8581,34 @@ function SolidsWorkbenchPageDocument({
         // deliberately keeps the prior first-region behavior here.
         const profile = profileSelection.profiles[0]
         await world.disposePriorReplayHandle(node.id)
-        const path = buildAxisPathChain(p.axis, p.length)
-        const req: SweepRequest = { featureId: node.id, profile, path, orientation: p.orientation, op: 'newBody' }
+        if (p.path === undefined) {
+          const path = buildAxisPathChain(p.axis, p.length)
+          const req: SweepRequest = { featureId: node.id, profile, path, orientation: p.orientation, op: 'newBody' }
+          const result = await client.makeSweep(req)
+          return finalizeBody(node, result)
+        }
+        // WO-3230: a sketch-chain path. The ONE resolver (WO-3228) reads the path sketch's CURRENT
+        // curves and plane; a path it cannot resolve is named and builds nothing -- never the dormant
+        // axis/length, never a straight substitute. Which was created first does not matter: the path
+        // sketch is one of this sweep's inputs, so regeneration builds it first (dependency order). It
+        // only has to exist at this build -- not deleted, not rolled back past.
+        const pathSelector = p.path as SketchChainPathSelector
+        const pathProducer = typeof pathSelector?.sketchId === 'string' ? pathSelector.sketchId : ''
+        if (world.dag.getNode(pathProducer) === undefined || world.dag.isRolledBack(pathProducer)) {
+          return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { op: 'sweep', reason: sweepPathText('pathSketchMissing', { sketchId: pathProducer }) } }] }
+        }
+        const pathResolution = resolveSweepPathChain(pathSelector, (id) => world.dag.getNode(id))
+        if (!pathResolution.ok) {
+          return {
+            ok: false,
+            diagnostics: [{
+              code: 'KERNEL_OP_FAILED',
+              severity: 'error',
+              params: { op: 'sweep', reason: sweepPathText('pathUnresolved', { code: pathResolution.diagnostic.code, message: pathResolution.diagnostic.message }) },
+            }],
+          }
+        }
+        const req: SweepRequest = { featureId: node.id, profile, path: pathResolution.path, orientation: p.orientation, op: 'newBody', transition: 'rightCorner' }
         const result = await client.makeSweep(req)
         return finalizeBody(node, result)
       }
@@ -8646,6 +8788,25 @@ function SolidsWorkbenchPageDocument({
         if (result.ok && result.body !== undefined) world.setFeatureVisible(payload.ownerId, false)
         return finalizeBody(node, result)
       }
+
+      if (opType === 'bodyTransform') {
+        // WO-3244 Mirror (replace original): the shared adapter the background
+        // replay calls too. The plane's CURRENT frame is read on every pass,
+        // and the source keeps its handle (for undo, like fillet's owner).
+        await world.disposePriorReplayHandle(node.id)
+        const p = parseBodyTransformPayload(node.payload)
+        // the source resolves through the same live-body gate as every owner
+        // (sourceBodyId is a BODY_IDENTITY_PAYLOAD_CARRIERS member)
+        const sourceBody = p === undefined ? undefined : lookupLiveBody(p.sourceBodyId)
+        const result = await replayBodyTransform(node, {
+          client,
+          lookupLiveBody: (id) => (id === p?.sourceBodyId ? sourceBody : undefined),
+          resolvePlane: world.lookupExtrudePlaneTarget ?? ((id) => extrudePlaneDef(world.dag, id, world.scheduler.statusOf(id))),
+          refusalText: bodyTransformRefusalText,
+        })
+        if (result.ok && result.body !== undefined && p !== undefined) world.setFeatureVisible(p.sourceBodyId, false)
+        return finalizeBody(node, result)
+      }
       const unhandledOpType: never = opType
       return { ok: false, diagnostics: [{ code: 'KERNEL_OP_FAILED', severity: 'error', params: { reason: workbenchText('SolidsWorkbenchPage.unhandledOpType', { value1: String(String(unhandledOpType)) }) } }] }
       }
@@ -8678,6 +8839,63 @@ function SolidsWorkbenchPageDocument({
   }), [dag, map, scheduler, setFeatureVisible, disposePriorReplayHandle, paintFeatureBody, recomputeSketchProfile])
 
   const executor = useMemo(() => makeReplayExecutor(liveReplayWorld), [makeReplayExecutor, liveReplayWorld])
+
+  // WO-3244: the Mirror dialog's preview - the same adapter and kernel op the
+  // replay runs, on the source's current handle, painted as a preview body.
+  // Nothing reaches history, the source stays shown, and a newer choice (or
+  // closing the dialog) retires the older preview and its handle.
+  const [mirrorPreview, setMirrorPreview] = useState<MirrorPreviewState>({ kind: 'idle' })
+  const mirrorPreviewRef = useRef<{ generation: number; handle: BodyHandle | null }>({ generation: 0, handle: null })
+  const handleMirrorSelectionChange = useCallback((selection: MirrorSelection | null): void => {
+    const state = mirrorPreviewRef.current
+    const generation = ++state.generation
+    const isCurrent = (): boolean => mirrorPreviewRef.current.generation === generation
+    const client = clientRef.current
+    const prior = state.handle
+    state.handle = null
+    evictStaleBodyMesh(MIRROR_PREVIEW_BODY_ID)
+    runtimeRef.current?.requestRender()
+    if (prior !== null) void client?.dispose(prior).catch(() => undefined)
+    if (selection === null || client === null) {
+      setMirrorPreview({ kind: 'idle' })
+      return
+    }
+    setMirrorPreview({ kind: 'building' })
+    void (async () => {
+      const payload = mirrorReplacePayload({ ...selection, name: '' })
+      const result = await replayBodyTransform(
+        { id: 'mirror-preview', kind: 'feature', consumes: bodyTransformConsumes(payload), refs: [], payload: { ...payload }, degraded: false, diagnostics: [], lastGoodBoundTo: {} } as unknown as DagNodeSnapshot,
+        {
+          client,
+          lookupLiveBody: (id) => bodyHandlesRef.current.get(id),
+          resolvePlane: (id) => extrudePlaneDef(dag, id, scheduler.statusOf(id)),
+          refusalText: bodyTransformRefusalText,
+        },
+      )
+      if (!isCurrent()) {
+        if (result.body !== undefined) await client.dispose(result.body).catch(() => undefined)
+        return
+      }
+      if (!result.ok || result.body === undefined) {
+        const reason = result.diagnostics.find((d) => typeof d.params?.reason === 'string')?.params?.reason
+        setMirrorPreview({ kind: 'failed', message: typeof reason === 'string' ? reason : result.diagnostics.map((d) => d.code).join(', ') })
+        return
+      }
+      mirrorPreviewRef.current.handle = result.body
+      const stale = new Error('stale mirror preview')
+      try {
+        await progressiveTessellate(client, cacheRef.current, MIRROR_PREVIEW_BODY_ID, result.body, (_phase, cachedBody) => {
+          if (!isCurrent()) throw stale
+          paintCachedBody(MIRROR_PREVIEW_BODY_ID, cachedBody)
+        })
+      } catch (error) {
+        if (!isCurrent() || error === stale) return
+        setMirrorPreview({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+        return
+      }
+      if (isCurrent()) setMirrorPreview({ kind: 'ready' })
+    })()
+  }, [dag, scheduler, evictStaleBodyMesh, paintCachedBody])
 
   const cancelFilletPreviewSession = useCallback(async (resetState = true): Promise<void> => {
     const session = filletPreviewSessionRef.current
@@ -12863,8 +13081,15 @@ function SolidsWorkbenchPageDocument({
     // consumable profile, and the user is told which refusal fired and why. Regen reports the same
     // refusal as a warning DIAGNOSTIC on the node; the console line here is the one the user reads
     // at the moment they pressed Finish.
-    for (const diag of await recomputeSketchProfile(nodeId)) {
+    const finishDiags = await recomputeSketchProfile(nodeId)
+    for (const diag of finishDiags) {
       notify('warning', workbenchText('SolidsWorkbenchPage.sketchSavedWithoutAProfile', { value1: String(diag.params?.refusal ?? diag.code), value2: String(diag.params?.message ?? diag.params?.reason ?? '') }))
+    }
+    // WO-3230: an open path sketch is saved as what it is -- a path Sweep can follow, with no profile.
+    const finished = dag.getNode(nodeId)
+    if (finishDiags.length === 0 && finished !== undefined && finished.payload.regions === undefined &&
+        sweepPathCandidatesForSketch(nodeId, (id) => dag.getNode(id)).candidates.length > 0) {
+      notify('info', sweepPathText('savedAsPath'))
     }
 
     // NO camera restore here. `sketcher.exit()` above already restored the pose, through the ONE
@@ -13383,6 +13608,9 @@ function SolidsWorkbenchPageDocument({
     s.modelStlGeoId === null ? undefined : s.project.geometry.find((g) => g.id === s.modelStlGeoId)?.color)
   const modelStlMeshEdits = useCamStore((s) =>
     s.modelStlGeoId === null ? undefined : s.project.geometry.find((g) => g.id === s.modelStlGeoId)?.meshEdits)
+  // WO-3092: existing-feature edits and history rewrites keep record IDs.
+  // Key the drawing by persisted contents, even while its editor is closed.
+  const modelStlDrawingJournalKey = useMemo(() => JSON.stringify(modelStlMeshEdits ?? []), [modelStlMeshEdits])
   const stlBodyRef = useRef<StlModelBodyPresentation | null>(null)
   /** WO-2120: the STL row whose next redraw follows an applied edit (no reopen line). */
   const stlRedrawAfterApplyRef = useRef<{ geoId: string; done: boolean } | null>(null)
@@ -13533,6 +13761,14 @@ function SolidsWorkbenchPageDocument({
   const handleStlChamferPreviewIntent = useCallback((intent: { payload: { distance: number } } | null): void => {
     const edges = stlChamferEdgesRef.current
     stlToolsSetBooleanShape(intent === null || edges.length === 0 ? null : stlChamferShape(edges, intent.payload.distance))
+  }, [stlToolsSetBooleanShape])
+  // WO-3092: Fillet on the STL's sharp edges, the same way: the radius and the
+  // picked runs become the boolean-body 'fillet' shape.
+  const stlFilletEdgesRef = useRef<StlEdgeChain[]>([])
+  stlFilletEdgesRef.current = dialog.kind === 'stl-fillet' ? dialog.edges : []
+  const handleStlSharpFilletPreviewIntent = useCallback((intent: { payload: { radius: number } } | null): void => {
+    const edges = stlFilletEdgesRef.current
+    stlToolsSetBooleanShape(intent === null || edges.length === 0 ? null : stlFilletShape(edges, intent.payload.radius))
   }, [stlToolsSetBooleanShape])
   const handleStlHolePreviewIntent = useCallback((intent: HolePreviewIntent | null): void => {
     const mesh = stlBodyRef.current?.model.mesh
@@ -13729,10 +13965,19 @@ function SolidsWorkbenchPageDocument({
     return findStlSharpEdge(presentation.model.mesh, hit.point, hit.reachMm)
   }, [stlSurfaceAt])
 
-  /** WO-2089: Chamfer's picked (and hovered) STL edges, drawn over the part. */
+  /** WO-3092: the sharp edge run of the STL under a canvas point, whole - what Fillet picks. */
+  const stlEdgeChainAt = useCallback((clientX: number, clientY: number): StlEdgeChain | null => {
+    const hit = stlSurfaceAt(clientX, clientY)
+    const presentation = stlBodyRef.current
+    if (hit === null || presentation === null) return null
+    return findStlEdgeChain(presentation.model.mesh, hit.point, hit.reachMm, stlCurvedSurfaceOf(presentation.model))
+  }, [stlSurfaceAt])
+
+  /** WO-2089: Chamfer's picked (and hovered) STL edges, drawn over the part.
+   *  WO-3092: and Fillet's (a run is drawn segment by segment). */
   const stlEdgeOverlayRef = useRef<THREE.LineSegments | null>(null)
-  const stlEdgeHoverRef = useRef<StlSharpEdge | null>(null)
-  const paintStlEdges = useCallback((edges: readonly StlSharpEdge[]): void => {
+  const stlEdgeHoverRef = useRef<StlSharpEdge | StlEdgeChain | null>(null)
+  const paintStlEdges = useCallback((edges: ReadonlyArray<StlSharpEdge | StlEdgeChain>): void => {
     const old = stlEdgeOverlayRef.current
     if (old !== null) {
       old.removeFromParent()
@@ -13745,28 +13990,32 @@ function SolidsWorkbenchPageDocument({
     const shown = hover !== null && !edges.some((e) => e.id === hover.id) ? [...edges, hover] : edges
     if (presentation !== null && shown.length > 0) {
       const geometry = new THREE.BufferGeometry()
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(shown.flatMap((e) => [...e.start, ...e.end]), 3))
-      const lines = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: 0xff8c00, depthTest: false }))
-      lines.renderOrder = 10
-      lines.userData.stlChamferEdges = shown.map((e) => e.id)
-      presentation.root.add(lines)
-      stlEdgeOverlayRef.current = lines
+      const lines = (e: StlSharpEdge | StlEdgeChain): number[] => 'points' in e
+        ? e.points.slice(0, e.closed ? undefined : -1).flatMap((p, k) => [...p, ...e.points[(k + 1) % e.points.length]])
+        : [...e.start, ...e.end]
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(shown.flatMap(lines), 3))
+      const overlay = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: 0xff8c00, depthTest: false }))
+      overlay.renderOrder = 10
+      overlay.userData.stlChamferEdges = shown.map((e) => e.id)
+      presentation.root.add(overlay)
+      stlEdgeOverlayRef.current = overlay
     }
     runtimeRef.current?.requestRender()
   }, [])
   // The picked edges follow the dialog (and the part, which is rebuilt after
   // every edit); the hover goes when no Chamfer is armed or open.
-  const stlChamferArmed = dialog.kind === 'stl-chamfer' || (dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === 'chamfer')
+  const stlChamferArmed = dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-fillet' ||
+    (dressUpPickMode.kind !== 'none' && (dressUpPickMode.feature === 'chamfer' || dressUpPickMode.feature === 'fillet'))
   useEffect(() => {
     if (!stlChamferArmed) stlEdgeHoverRef.current = null
-    paintStlEdges(dialog.kind === 'stl-chamfer' ? dialog.edges : [])
+    paintStlEdges(stlPickedEdges(dialog))
   }, [dialog, stlChamferArmed, paintStlEdges, stlBody])
   // WO-2089: a Hole or Chamfer preview left behind when another tool takes
   // over is ended with it (the Boolean dialog keeps its own).
   const stlSessionKind = stlTools.session.kind
   const stlToolsClose = stlTools.close
   useEffect(() => {
-    if (stlSessionKind === 'boolean' && dialog.kind !== 'boolean' && dialog.kind !== 'stl-hole' && dialog.kind !== 'stl-chamfer' &&
+    if (stlSessionKind === 'boolean' && dialog.kind !== 'boolean' && dialog.kind !== 'stl-hole' && dialog.kind !== 'stl-chamfer' && dialog.kind !== 'stl-fillet' &&
       dialog.kind !== 'stl-shell' && dialog.kind !== 'stl-draft') {
       stlToolsClose()
     }
@@ -14569,12 +14818,15 @@ function SolidsWorkbenchPageDocument({
       const hit = pickAcrossBodies(cacheRef.current, pickEngine, liveBodyFeatureIds(dag, (id) => bodyHandlesRef.current.has(id)), ray, 'face')
       if (hit === null || hit.kind !== 'face') return
       // SR-2: cache is keyed by lineageId -- translate the hit body's raw leaf id.
-      const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), hit.bodyId)) ?? []
-      const matched = eligibleResizeHoleVerdicts(verdicts).find((v) => v.faceIds.includes(hit.id))
-      if (matched === undefined) return
+      // WO-3202: the target is read off the shared result for that body.
+      const result = resizeHoleResultsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), hit.bodyId))
+      const target = result !== undefined ? resizeHoleTargetOnFace(result, hit.id) : undefined
+      if (result === undefined || target === undefined) return
+      const matched = target.verdict
       // WO-2762: a pick on the counterbore wall edits that step, not the pilot.
       const { step, diameter } = resizeHoleField === 'move' ? { step: undefined, diameter: matched.params.diameter } : pickedHoleStep(matched, hit.id)
       if (typeof diameter !== 'number' || !Number.isFinite(diameter) || diameter <= 0) return
+      resizeHoleFeatureSelectionRef.current = selectionFromResult('resize-hole', result, matched, hit.id)
       pickHighlightSelectionRef.current.selectMany(matched.faceIds)
       beginResizeHoleSelection({
         ownerId: hit.bodyId,
@@ -14638,9 +14890,12 @@ function SolidsWorkbenchPageDocument({
     // must not resolve against the about-to-be-replaced map.
     if (resizeHoleVerdictsDagVersionRef.current !== dagVersion) return
     // SR-2: cache is keyed by lineageId -- translate the row's raw owner id.
-    const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), row.ownerId)) ?? []
-    const matched = eligibleResizeHoleVerdicts(verdicts).find((v) => v.featureKey === row.featureKey)
-    if (matched === undefined) return
+    // WO-3202: the target is read off the shared result for that body.
+    const result = resizeHoleResultsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), row.ownerId))
+    const target = result !== undefined ? resizeHoleTargetByKey(result, row.featureKey) : undefined
+    if (result === undefined || target === undefined) return
+    const matched = target.verdict
+    resizeHoleFeatureSelectionRef.current = selectionFromResult('resize-hole', result, matched, null)
     pickHighlightSelectionRef.current.selectMany(matched.faceIds)
     setDialog({ kind: 'none' })
     // WO UI-58-R1 (minor): no real viewport hit for a list-selected row --
@@ -16104,6 +16359,18 @@ function SolidsWorkbenchPageDocument({
   // WO-2978: the live ModelSession, reachable by model item id for this mount's
   // lifetime. Identity-guarded cleanup, same reasoning as the collector above.
   useEffect(() => registerModelSession(session), [session])
+  // WO-3202: lend the session this mount's committed body handles and kernel,
+  // so Resize Hole and a Setup Bore pick read ONE recognition result per body
+  // revision (partFeatureBinding.ts). Declared after the collector above, so
+  // its cleanup runs after the collector's -- the unmount stash still sees the
+  // live bodies when it decides which results to carry into the archive.
+  useEffect(() => {
+    session.setLiveBodySource({
+      handleOf: (bodyId) => bodyHandlesRef.current.get(bodyId),
+      kernel: () => clientRef.current,
+    })
+    return () => session.setLiveBodySource(null)
+  }, [session])
   // WO-3013: model.summary reports each body's volume as the Bodies list shows it.
   useEffect(() => {
     setBodyFacts(session, () => Object.fromEntries(bodies.flatMap((b) => (b.volume === undefined ? [] : [[b.bodyId, { volume: b.volume }]]))))
@@ -16253,6 +16520,8 @@ function SolidsWorkbenchPageDocument({
       scheduler,
       map,
       client,
+      modelItemId,
+      getResizeHoleFeatureSelection: () => resizeHoleFeatureSelectionRef.current,
       getBodyHandle: (featureId) => bodyHandlesRef.current.get(featureId),
       getBodyPresentationVisible: (featureId) => meshesRef.current.get(featureId)?.mesh.visible,
       getExportBodies: () => getExportBodiesRef.current(),
@@ -17509,7 +17778,9 @@ function SolidsWorkbenchPageDocument({
     void (async () => {
       let inputMatch: FeatureVerdict | undefined
       try {
-        inputMatch = eligibleResizeHoleVerdicts(await client.recognizeFeatures(ownerHandle)).find((v) => sameHoleLocation(v.featureKey, featureKey))
+        // WO-3202: the owner's committed body reads through the same shared
+        // result as every other Resize Hole consumer.
+        inputMatch = eligibleResizeHoleVerdicts([...(await readLiveModelBodyFeatures(session, ownerId)).verdicts]).find((v) => sameHoleLocation(v.featureKey, featureKey))
       } catch {
         inputMatch = undefined
       }
@@ -17527,7 +17798,7 @@ function SolidsWorkbenchPageDocument({
     // resizeHoleVerdictsTick: an Edit that arrives while the verdict cache is
     // refreshing (the dag moved while the tool was off - a Suppress, another
     // edit) resolves the moment the refresh lands, instead of never.
-  }, [resizeHoleEditRequest, resizeHolePickMode.kind, dagVersion, resizeHoleVerdictsTick, dag, addConsoleEvent, beginResizeHoleSelection, finishResizeHoleInteraction])
+  }, [resizeHoleEditRequest, resizeHolePickMode.kind, dagVersion, resizeHoleVerdictsTick, dag, session, addConsoleEvent, beginResizeHoleSelection, finishResizeHoleInteraction])
 
   /** BK-174: FeatureTree Edit on a resizeHole feature -- reopens the SAME
    *  in-viewport surface it was created with (armed pick mode + anchored
@@ -18783,6 +19054,19 @@ function SolidsWorkbenchPageDocument({
     }
     return options
   })()
+  // WO-3244: the bodies a Mirror may take - the live ones; when editing, the
+  // ones upstream of it plus the body it already mirrors.
+  const mirrorBodyOptions = (() => {
+    if (dialog.kind !== 'mirror' || dialog.mode !== 'edit') return liveBodyOptions
+    const order = dag.featureOrder()
+    const featureIndex = order.indexOf(dialog.featureId)
+    const upstream = (id: string): boolean => { const i = order.indexOf(id); return i >= 0 && i < featureIndex }
+    const options = liveBodyOptions.filter((option) => upstream(option.id))
+    const current = parseBodyTransformPayload(dag.getNode(dialog.featureId)?.payload ?? {})?.sourceBodyId
+    const existing = current === undefined ? undefined : availableBodies.find((option) => option.id === current)
+    if (existing !== undefined && upstream(existing.id) && !options.some((option) => option.id === existing.id)) options.push(existing)
+    return options
+  })()
   // Merge UI-6X (defeature) + UI-6Y (resize hole): both derive from the same
   // live-body set; share the one computation.
   // WO UI-58 (P5): resize-hole no longer needs a single RESOLVED owner to
@@ -19938,6 +20222,9 @@ function SolidsWorkbenchPageDocument({
           ...(snapshot.targetFeatureId === null ? {} : { targetFeatureId: snapshot.targetFeatureId }),
           ...(intent.expression === undefined ? {} : { expression: intent.expression }),
         }
+        // WO-3234: the wall keys come from the dialog's own helper so the ghost
+        // is built from exactly the payload Apply writes (thin thickness/side
+        // included; an edited explicit solid stays explicit).
         if (snapshot.mode === 'edit') {
           const node = candidateDag.getNode(snapshot.featureId)
           if (node === undefined) {
@@ -19951,16 +20238,24 @@ function SolidsWorkbenchPageDocument({
             terminalOffset: _priorTerminalOffset,
             endTarget: _priorEndTarget,
             resolvedEndTargets: _priorResolvedEndTargets,
+            wallMode: priorWallMode,
+            wallThickness: _priorWallThickness,
+            wallSide: _priorWallSide,
             ...restPayload
           } = node.payload
-          new EditFeaturePayloadCommand(snapshot.featureId, { ...restPayload, ...intentFields }, consumes, []).do(candidateDag)
+          new EditFeaturePayloadCommand(
+            snapshot.featureId,
+            { ...restPayload, ...intentFields, ...extrudeWallPayloadFields(intent, priorWallMode) },
+            consumes,
+            [],
+          ).do(candidateDag)
           candidateDag.setRollbackMarker({ kind: 'after', nodeId: snapshot.featureId })
         } else {
           createFeatureCommand(candidateDag, {
             id: snapshot.featureId,
             kind: 'feature',
             consumes,
-            payload: { opType: 'extrude', ...intentFields, name: workbenchText('SolidsWorkbenchPage.extrude2', { featureId: String(snapshot.featureId) }) },
+            payload: { opType: 'extrude', ...intentFields, ...extrudeWallPayloadFields(intent), name: workbenchText('SolidsWorkbenchPage.extrude2', { featureId: String(snapshot.featureId) }) },
           }).do(candidateDag)
         }
 
@@ -21051,6 +21346,8 @@ function SolidsWorkbenchPageDocument({
           if (opType === 'form') return toolSwitchEntry(() => openForm(nodeId))
           // Relief: editing reopens relief mode with the picture and every value.
           if (opType === 'relief') return toolSwitchEntry(() => openRelief(nodeId))
+          // WO-3244: Mirror reopens its body and plane choice.
+          if (opType === 'bodyTransform') return toolSwitchEntry(() => setDialog({ kind: 'mirror', mode: 'edit', featureId: nodeId }))
           const FEATURE_OP_LABEL: Record<string, string> = {
             boolean: workbenchText('SolidsWorkbenchPage.boolean'), fillet: workbenchText('SolidsWorkbenchPage.fillet'), chamfer: workbenchText('SolidsWorkbenchPage.chamfer'), shell: workbenchText('SolidsWorkbenchPage.shell'),
             draft: workbenchText('SolidsWorkbenchPage.draft'), hole: workbenchText('SolidsWorkbenchPage.hole'), sweep: workbenchText('SolidsWorkbenchPage.sweep'), loft: workbenchText('SolidsWorkbenchPage.loft'), defeature: workbenchText('SolidsWorkbenchPage.defeature'),
@@ -21213,7 +21510,38 @@ function SolidsWorkbenchPageDocument({
     const edge = stlEdgeAt(clientX, clientY)
     if ((edge?.id ?? null) === (stlEdgeHoverRef.current?.id ?? null)) return
     stlEdgeHoverRef.current = edge
-    paintStlEdges(dialog.kind === 'stl-chamfer' ? dialog.edges : [])
+    paintStlEdges(stlPickedEdges(dialog))
+  }
+  /** WO-3092: an armed Fillet whose click lands on a sharp edge of the STL
+   *  opens Fillet on that edge - the whole run of it, a hole's rim all the way
+   *  round (the kernel pick stands down). */
+  const startStlFilletAt = (clientX: number, clientY: number): boolean => {
+    const edge = stlEdgeChainAt(clientX, clientY)
+    if (edge === null || stlBody === null) return false
+    void cancelFilletPreviewSession()
+    finishFilletInteraction()
+    setDressUpPickMode({ kind: 'none' })
+    stlTools.close()
+    setDialog({ kind: 'stl-fillet', edges: [edge] })
+    notify('info', workbenchText('SolidsWorkbenchPage.selectedAMmEdgeOn1Selected', { value1: String(edge.lengthMm.toFixed(2)), name: String(stlBody.name) }))
+    return true
+  }
+  /** WO-3092: with Fillet open on the STL, a click on a sharp edge adds it, or takes it back off. */
+  const toggleStlFilletEdgeAt = (clientX: number, clientY: number): void => {
+    if (dialog.kind !== 'stl-fillet') return
+    const edge = stlEdgeChainAt(clientX, clientY)
+    if (edge === null) return
+    const removing = dialog.edges.some((e) => e.id === edge.id)
+    const edges = removing ? dialog.edges.filter((e) => e.id !== edge.id) : [...dialog.edges, edge]
+    setDialogState((current) => current.kind === 'stl-fillet' ? { ...current, edges } : current)
+    notify('info', workbenchText('SolidsWorkbenchPage.aMmEdgeSelected', { value1: String(removing ? workbenchText('SolidsWorkbenchPage.removed') : workbenchText('SolidsWorkbenchPage.added')), value2: String(edge.lengthMm.toFixed(2)), length: String(edges.length) }))
+  }
+  /** WO-3092: the edge run an armed or open Fillet would pick, lit under the cursor. */
+  const hoverStlFilletEdgeAt = (clientX: number, clientY: number): void => {
+    const edge = stlEdgeChainAt(clientX, clientY)
+    if ((edge?.id ?? null) === (stlEdgeHoverRef.current?.id ?? null)) return
+    stlEdgeHoverRef.current = edge
+    paintStlEdges(stlPickedEdges(dialog))
   }
   const closeStlCreateTool = (): void => {
     stlTools.close()
@@ -21485,18 +21813,18 @@ function SolidsWorkbenchPageDocument({
           disabled: anyPickModeArmed ||
             (availableBodies.length === 0 && stlBody === null),
           active: (dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === feature) ||
-            (feature === 'fillet' && stlTools.session.kind === 'fillet') ||
+            (feature === 'fillet' && (dialog.kind === 'stl-fillet' || stlTools.session.kind === 'fillet')) ||
             (feature === 'chamfer' && (dialog.kind === 'stl-chamfer' || stlTools.session.kind === 'chamfer')) ||
             (feature === 'hole' && dialog.kind === 'stl-hole') ||
             (feature === 'shell' && dialog.kind === 'stl-shell') ||
             (feature === 'draft' && dialog.kind === 'stl-draft'),
           onClick: () => {
             if ((feature === 'fillet' && stlTools.session.kind === 'fillet') || (feature === 'chamfer' && stlTools.session.kind === 'chamfer')) return stlTools.close()
-            if ((feature === 'chamfer' && dialog.kind === 'stl-chamfer') || (feature === 'hole' && dialog.kind === 'stl-hole') ||
+            if ((feature === 'chamfer' && dialog.kind === 'stl-chamfer') || (feature === 'fillet' && dialog.kind === 'stl-fillet') || (feature === 'hole' && dialog.kind === 'stl-hole') ||
               (feature === 'shell' && dialog.kind === 'stl-shell') || (feature === 'draft' && dialog.kind === 'stl-draft')) {
               return closeStlCreateTool()
             }
-            if (dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-hole' || dialog.kind === 'stl-shell' || dialog.kind === 'stl-draft') {
+            if (dialog.kind === 'stl-chamfer' || dialog.kind === 'stl-fillet' || dialog.kind === 'stl-hole' || dialog.kind === 'stl-shell' || dialog.kind === 'stl-draft') {
               setDialog({ kind: 'none' })
             }
             stlTools.close()
@@ -21597,12 +21925,24 @@ function SolidsWorkbenchPageDocument({
           },
         },
         {
+          // WO-3244: Mirror one solid across a plane (replace original). An open
+          // mesh that is not a solid is not offered; the dialog says why.
+          testId: 'workbench-mirror', label: mirrorText('railLabel'), icon: MirrorIcon,
+          title: currentLiveBodyIds.length === 0 && stlBody !== null ? mirrorText('meshNeedsExactBody') : mirrorText('railTip'),
+          disabled: anyPickModeArmed || currentLiveBodyIds.length === 0,
+          active: dialog.kind === 'mirror',
+          onClick: () => runAfterResizeHoleToolSwitch(() => {
+            stlTools.close()
+            setDialog({ kind: 'mirror', mode: 'create' })
+          }),
+        },
+        {
           testId: 'workbench-edit-feature', label: workbenchText('SolidsWorkbenchPage.edit'), icon: Pencil,
           // WO UI-80: push/pull is editable-after-the-fact (AM4), so the toolbar
           // Edit button enables for it too -- keeping this gate in lockstep with
           // editEntryFor's onEdit set (extrude/revolve/boolean/fillet/chamfer/shell/draft/hole/pushPull/package-sketch),
           // the SAME resolver this button's onClick and the tree menu both call.
-          disabled: !modelStlMeshEdits?.some((record) => stlEditRowId(record.id) === selectedId && (record.kind === MOVE_FLAT_FACE_KIND || record.kind === MOVE_HOLE_KIND)) && selectedOpType !== 'extrude' && selectedOpType !== 'revolve' && selectedOpType !== 'boolean' && selectedOpType !== 'fillet' && selectedOpType !== 'chamfer' && selectedOpType !== 'shell' && selectedOpType !== 'draft' && selectedOpType !== 'hole' && selectedOpType !== 'pushPull' && selectedOpType !== 'sweep' && selectedOpType !== 'loft' && selectedOpType !== 'defeature' && selectedOpType !== 'resizeHole' && !selectedIsPackageSketch && !selectedIsOffsetPlane && !selectedIsAxis && !selectedIsPoint,
+          disabled: !modelStlMeshEdits?.some((record) => stlEditRowId(record.id) === selectedId && (record.kind === MOVE_FLAT_FACE_KIND || record.kind === MOVE_HOLE_KIND)) && selectedOpType !== 'extrude' && selectedOpType !== 'revolve' && selectedOpType !== 'boolean' && selectedOpType !== 'fillet' && selectedOpType !== 'chamfer' && selectedOpType !== 'shell' && selectedOpType !== 'draft' && selectedOpType !== 'hole' && selectedOpType !== 'pushPull' && selectedOpType !== 'sweep' && selectedOpType !== 'loft' && selectedOpType !== 'defeature' && selectedOpType !== 'resizeHole' && selectedOpType !== 'bodyTransform' && !selectedIsPackageSketch && !selectedIsOffsetPlane && !selectedIsAxis && !selectedIsPoint,
           // WO UI-18 (D3): routed through editEntryFor -- the SAME per-node
           // resolver the tree context menu's own "Edit..." item calls, so this
           // button and that menu item are provably the SAME code path, not two
@@ -21760,7 +22100,30 @@ function SolidsWorkbenchPageDocument({
   // WO-2994: where a drawing's source body stands right now. Read from the dag
   // on every render (a delete, suppress, rollback or undo re-renders the page),
   // so the drawing says what happened instead of drawing a blank sheet.
+  // WO-3092: the STL kept as an STL is a body a drawing can be made of, as the
+  // Bodies panel lists it. It reads its own mesh - the row's bytes with its
+  // edit journal replayed, through the WO-2988 drawing adapter - so an edit
+  // (a chamfer) redraws the views, and its key follows the journal.
+  const stlDrawingBody: DrawingBody | null = stlBody === null || stlInModel ? null : (() => {
+    const { geoId, bodyId, name } = stlBody
+    const edits = modelStlMeshEdits
+    const scope = { modelItemId, documentId: documentIdForProject(autosaveProjectId, modelItemId), lineageId: bodyId }
+    return {
+      bodyId,
+      name,
+      mesh: {
+        key: `${geoId}|${modelStlDrawingJournalKey}`,
+        read: async () => meshBodyRead(buildMeshDrawingSource({ scope, bytes: await loadCachedSTL(geoId), edits })),
+      },
+    }
+  })()
+  const drawingBodies = stlDrawingBody === null ? bodies : [...bodies, stlDrawingBody]
   const drawingSourceStatus = (lineageId: string): DrawingSourceStatus => {
+    if (isStlModelBodyId(lineageId)) {
+      if (stlDrawingBody?.bodyId === lineageId) return 'present'
+      // The row is still in the project: its STL is just not open here (or went into a Boolean).
+      return useCamStore.getState().project.geometry.some((g) => stlModelBodyId(g.id) === lineageId) ? 'closed' : 'deleted'
+    }
     if (!dag.has(lineageId)) return 'deleted'
     if (dag.isEffectivelySuppressed(lineageId) || dag.isRolledBack(lineageId)) return 'off'
     if (scheduler.statusOf(lineageId) === 'failed') return 'failed'
@@ -22052,8 +22415,9 @@ function SolidsWorkbenchPageDocument({
           <DrawingEntry
             modelItemId={modelItemId}
             documentId={documentIdForProject(autosaveProjectId, modelItemId)}
-            bodies={bodies}
-            selectedId={selectedBodyRowId ?? selectedId}
+            bodies={drawingBodies}
+            // WO-3092: the STL row (or a feature on it) selected means the STL - never the kernel body beside it.
+            selectedId={stlSelection !== null && stlDrawingBody !== null ? stlDrawingBody.bodyId : (selectedBodyRowId ?? selectedId)}
             getClient={() => clientRef.current}
             getBodyHandle={(id) => bodyHandlesRef.current.get(id)}
             sourceStatus={drawingSourceStatus}
@@ -22214,11 +22578,13 @@ function SolidsWorkbenchPageDocument({
         {/* WO-2994: an open drawing covers the Model canvas; the canvas stays mounted underneath. */}
         <DrawingEditor
           modelItemId={modelItemId}
-          bodies={bodies}
+          bodies={drawingBodies}
           getClient={() => clientRef.current}
           getBodyHandle={(id) => bodyHandlesRef.current.get(id)}
           sourceStatus={drawingSourceStatus}
-          partName={(lineageId) => featureLabel(dag, lineageId)}
+          partName={(lineageId) => isStlModelBodyId(lineageId)
+            ? useCamStore.getState().project.geometry.find((g) => stlModelBodyId(g.id) === lineageId)?.name ?? lineageId
+            : featureLabel(dag, lineageId)}
         />
         <canvas
           ref={canvasRef}
@@ -22282,6 +22648,8 @@ function SolidsWorkbenchPageDocument({
             else if (extrudeEndTargetPickKind !== null) handleExtrudeEndTargetPick({ clientX: e.clientX, clientY: e.clientY })
             // WO-2089: Chamfer / Hole open on the STL take its edges / points.
             else if (dialog.kind === 'stl-chamfer') toggleStlChamferEdgeAt(e.clientX, e.clientY)
+            // WO-3092: Fillet open on the STL takes its sharp edges.
+            else if (dialog.kind === 'stl-fillet') toggleStlFilletEdgeAt(e.clientX, e.clientY)
             else if (dialog.kind === 'stl-hole') placeStlHoleAt(e.clientX, e.clientY)
             // WO-2090: Shell / Draft open on the STL take its flat faces.
             else if (dialog.kind === 'stl-shell') toggleStlShellFaceAt(e.clientX, e.clientY)
@@ -22294,7 +22662,7 @@ function SolidsWorkbenchPageDocument({
               if (!startStlToolFromPick('push-pull', e.clientX, e.clientY)) void handlePushPullPick({ clientX: e.clientX, clientY: e.clientY })
             } else if (dressUpPickMode.kind !== 'none') {
               const armed = dressUpPickMode.feature
-              if (!(armed === 'fillet' && (startStlToolFromPick('fillet', e.clientX, e.clientY) || explainStlFilletPick(e.clientX, e.clientY))) &&
+              if (!(armed === 'fillet' && (startStlToolFromPick('fillet', e.clientX, e.clientY) || startStlFilletAt(e.clientX, e.clientY) || explainStlFilletPick(e.clientX, e.clientY))) &&
                 !(armed === 'chamfer' && (startStlToolFromPick('chamfer', e.clientX, e.clientY) || startStlChamferAt(e.clientX, e.clientY))) &&
                 !(armed === 'hole' && placeStlHoleAt(e.clientX, e.clientY)) &&
                 !(armed === 'shell' && startStlShellAt(e.clientX, e.clientY)) &&
@@ -22344,6 +22712,8 @@ function SolidsWorkbenchPageDocument({
               handleExtrudeEndTargetPickHover({ clientX: e.clientX, clientY: e.clientY })
             } else if (dialog.kind === 'stl-chamfer') {
               hoverStlChamferEdgeAt(e.clientX, e.clientY)
+            } else if (dialog.kind === 'stl-fillet') {
+              hoverStlFilletEdgeAt(e.clientX, e.clientY)
             } else if (dialog.kind === 'stl-shell' || dialog.kind === 'stl-draft') {
               // WO-2090: the flat faces Shell / Draft pick light up.
               stlTools.hover('push-pull', pickStlBodyAt(e.clientX, e.clientY))
@@ -22369,6 +22739,9 @@ function SolidsWorkbenchPageDocument({
               if (armedStlTool !== null && stlBodyRef.current !== null) stlTools.hover(armedStlTool, pickStlBodyAt(e.clientX, e.clientY))
               if (dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === 'chamfer' && stlBodyRef.current !== null) {
                 hoverStlChamferEdgeAt(e.clientX, e.clientY)
+              }
+              if (dressUpPickMode.kind !== 'none' && dressUpPickMode.feature === 'fillet' && stlBodyRef.current !== null) {
+                hoverStlFilletEdgeAt(e.clientX, e.clientY)
               }
             } else if (activeUi4Tool !== 'none' && sketchMode.kind === 'none' && pushPullMode.kind === 'none' && dressUpPickMode.kind === 'none') {
               const ray = computeUi4Ray(e.clientX, e.clientY)
@@ -23008,6 +23381,23 @@ function SolidsWorkbenchPageDocument({
             onClose={stlTools.close}
           />
         )}
+        {/* WO-3092: the SAME Fillet dialog, rounding the STL's picked sharp edges. */}
+        {dialog.kind === 'stl-fillet' && stlBody !== null && (
+          <FilletDialog
+            key={`stl-sharp-fillet:${stlBody.geoId}`}
+            dag={dag}
+            history={history}
+            mode="create"
+            ownerId={stlBody.bodyId}
+            edgeIds={dialog.edges.map((edge) => edge.id)}
+            previewFeatureId={`stl-sharp-fillet:${stlBody.geoId}`}
+            previewState={stlShapePreviewState}
+            onPreviewIntent={handleStlSharpFilletPreviewIntent}
+            onApplyPreview={stlToolsApply}
+            onApplied={() => {}}
+            onClose={closeStlCreateTool}
+          />
+        )}
         {dialog.kind === 'stl-chamfer' && stlBody !== null && (
           <ChamferDialog
             key={`stl-chamfer:${stlBody.geoId}`}
@@ -23584,6 +23974,22 @@ function SolidsWorkbenchPageDocument({
           onClose={() => setDialog({ kind: 'none' })}
         />
       )}
+      {dialog.kind === 'mirror' && (
+        <MirrorDialog
+          dag={dag}
+          history={history}
+          {...(dialog.mode === 'edit'
+            ? { mode: 'edit' as const, featureId: dialog.featureId }
+            : { mode: 'create' as const })}
+          bodyOptions={mirrorBodyOptions}
+          planeOptions={referencePlaneSources().map((source) => ({ id: source.id, label: source.label }))}
+          meshName={stlBody !== null && !stlInModel ? stlBody.name : undefined}
+          preview={mirrorPreview}
+          onSelectionChange={handleMirrorSelectionChange}
+          onApplied={handleDialogApplied}
+          onClose={() => setDialog({ kind: 'none' })}
+        />
+      )}
       {dialog.kind === 'boolean' && (
         // WO UI-51A-R2 (audit MAJOR): liveBodyOptions, not the raw
         // availableBodies superset -- see the extrude target picker's own
@@ -23767,6 +24173,7 @@ function SolidsWorkbenchPageDocument({
           treeSketchPick={dialog.treeSketchPick}
           onTreePickConsumed={handleTreeSketchPickConsumed}
           onStartProfilePick={startProfilePick}
+          onPathPreview={setSweepPathPreview}
           onApplied={(id) => handleDialogApplied(id, dialog.mode === 'create')}
           onClose={() => setDialog({ kind: 'none' })}
         />

@@ -1,7 +1,7 @@
 import { stableStringify, type JsonObject, type JsonValue } from './stable-json'
 import { compareIds } from '../stable-id'
 
-export const CURRENT_SCHEMA_VERSION = 6
+export const CURRENT_SCHEMA_VERSION = 9
 export const MIN_SCHEMA_VERSION = 1
 
 export interface MigrationPackage {
@@ -63,6 +63,33 @@ export function migrateToCurrent(manifest: JsonObject, document: JsonObject): Mi
         manifest: JSON.parse(stableStringify({ ...pkg.manifest, schemaVersion: 6 })) as JsonObject,
       }
       version = 6
+      continue
+    }
+    // WO-3237: v8 lets an extrude's profileSelector be a sketch-chain built as
+    // a Thin open wall (wallSide left / right / center of travel). Every v7
+    // payload means what it meant, so nothing is rewritten; the stamp alone
+    // advances. Its purpose is the other way round: a schema-7 build, which
+    // only knows closed Thin, refuses a v8 file through FutureSchemaVersionError
+    // instead of opening an open-chain wall it would rebuild as something else.
+    if (version === 7) {
+      pkg = {
+        ...pkg,
+        manifest: JSON.parse(stableStringify({ ...pkg.manifest, schemaVersion: 8 })) as JsonObject,
+      }
+      version = 8
+      continue
+    }
+    // WO-3244: v9 adds the Body Transform feature (Mirror, opType
+    // 'bodyTransform', src/doc/features/bodyTransform.ts). A v8 document holds
+    // none, so - like v5 -> v6 and v7 -> v8 - the step is pure identity and only
+    // advances the manifest stamp; a v8 reader meets a v9 file as a future
+    // version and refuses it instead of showing its history without the mirror.
+    if (version === 8) {
+      pkg = {
+        ...pkg,
+        manifest: JSON.parse(stableStringify({ ...pkg.manifest, schemaVersion: 9 })) as JsonObject,
+      }
+      version = 9
       continue
     }
     const migration = migrations.get(version)
@@ -225,7 +252,11 @@ type MigrationFaceEdit = { featureKey?: unknown; kind?: unknown; delta?: unknown
 //     promotion renames NODES, not faces.
 //   - consumes[] edges and the rollback marker nodeId: rewired structurally in
 //     the migration body below, not through this payload-carrier set.
-export const BODY_IDENTITY_PAYLOAD_CARRIERS = ['ownerId', 'targetFeatureId', 'toolFeatureId'] as const
+// WO-3244: sourceBodyId (Mirror / bodyTransform) names the body it reflects
+// and replaces, exactly like a dress-up's ownerId - a feature inserted at the
+// rollback marker on that body must carry a rolled-back Mirror with it
+// (commands.ts rewireRolledBackConsumers).
+export const BODY_IDENTITY_PAYLOAD_CARRIERS = ['ownerId', 'targetFeatureId', 'toolFeatureId', 'sourceBodyId'] as const
 
 /** Mint the next free `F<n>` feature id not already present in `used`; records
  *  the minted id in `used` so a chain of promotions never collides. Scans upward
@@ -443,6 +474,43 @@ function migrationV4ToV5(pkg: MigrationPackage): MigrationPackage {
 }
 
 registerMigration(4, migrationV4ToV5)
+
+// WO-3234: extrudes gain an explicit wall mode -- 'solid' or 'thin' (with
+// wallThickness and wallSide). No schema-6 reader ever honoured a wall field:
+// makeExtrude ignored the kernel request's `thin` until WO-3233 and no payload
+// field reached it, so every schema-6 extrude was built solid. The migration
+// records exactly that, wallMode 'solid', and leaves every other key as it
+// was -- an old opaque `thin` object stays inert data (only wallMode makes an
+// extrude thin) and no thickness is backfilled. Files written at schema 7 may
+// carry wallMode 'thin'; a schema-6 build refuses them through the
+// FutureSchemaVersionError check in migrateToCurrent.
+function migrationV6ToV7(pkg: MigrationPackage): MigrationPackage {
+  const document = { ...pkg.document }
+  const dag = document.dag
+  if (dag !== null && typeof dag === 'object' && !Array.isArray(dag)) {
+    const nodes = (dag as { nodes?: unknown }).nodes
+    if (Array.isArray(nodes)) {
+      const nextNodes = nodes.map((raw) => {
+        if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return raw
+        const node = raw as { kind?: unknown; payload?: unknown }
+        if (node.kind !== 'feature') return raw
+        const payload = node.payload
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return raw
+        const p = payload as Record<string, unknown>
+        if (p.opType !== 'extrude') return raw
+        return { ...node, payload: { ...p, wallMode: 'solid' } }
+      })
+      document.dag = { ...(dag as Record<string, unknown>), nodes: nextNodes }
+    }
+  }
+  const manifest = { ...pkg.manifest, schemaVersion: 7 }
+  return {
+    manifest: JSON.parse(stableStringify(manifest)) as JsonObject,
+    document: JSON.parse(stableStringify(document)) as JsonObject,
+  }
+}
+
+registerMigration(6, migrationV6ToV7)
 
 export function asJsonObject(value: JsonValue, label: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {

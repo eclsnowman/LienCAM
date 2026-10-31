@@ -102,12 +102,14 @@ describe('WO-2775: the simulator default work zero is checked at Load', () => {
     expect(useCamStore.getState().machineWorkOffsets[sample.id]?.G54).toBeUndefined()
   })
 
-  it('a stored G54 on the Sample router is not the default: unchanged (still unchecked until set)', async () => {
+  // WO-3184 (owner report 2026-10-27): a stored G54 handed to the simulator at connect
+  // counts as reported, as a real bridge's write receipt does - checked at Load.
+  it('a stored G54 on the Sample router is handed to the simulator: checked at Load, no "unchecked" note', async () => {
     const sample = useCamStore.getInitialState().project.machine
     useCamStore.getState().setMachineWorkOffset(sample.id, 'G54', { x: -250, y: -240, z: -60 }, 'not-sent')
     await connectSimulatorWith(sample)
     await homeAndLoad('final-o9-comments-first.nc', PLAIN_FILE)
-    expect(uncheckedNotes().length).toBeGreaterThan(0)
+    expect(uncheckedNotes()).toEqual([])
   })
 
   it('another simulated machine (no default G54): unchanged - the note stays', async () => {

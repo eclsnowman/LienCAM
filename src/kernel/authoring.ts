@@ -41,6 +41,8 @@ export interface OperationAuthoringFacts {
   chamferHeightAuthority: string
   engraveHeightAuthority: string
   vcarveHeightAuthority: string
+  threadMillHasMachiningGeometry?: boolean
+  vcarveHasMachiningGeometry?: boolean
   vcarveClearingMode: string
   faceHeightPreview: AuthoringHeightPreview
   planarRoughHeightPreview: AuthoringHeightPreview
@@ -121,44 +123,49 @@ export function operationAuthoringDecision(facts: OperationAuthoringFacts, tx: A
     : (!!toolId && !loopsExplicitlyEmpty && !contourHasNoEligiblePaths &&
        planarRoughHeightValid && (!isContour || contourHeightValid) && drillBoreHeightValid &&
        threadMillHeightValid && chamferHeightValid && engraveHeightValid && vcarveHeightValid)
+  const activePreview = (isParallel3d || isSteepShallow3d || isScallop3d || isPencil3d)
+    ? parallel3dHeightPreview : isWaterline3d ? waterline3dHeightPreview
+    : isAdaptive3d ? adaptive3dHeightPreview : isFace ? faceHeightPreview
+    : isContour ? contourHeightPreview : (isDrill || isBore) ? drillBoreHeightPreview
+    : (isPocket || isAdaptive) ? planarRoughHeightPreview : isThreadMill ? threadMillHeightPreview
+    : isChamfer ? chamferHeightPreview : isEngrave ? engraveHeightPreview : vcarveHeightPreview
+  const heightErrorMessage = activePreview.message?.endsWith("Smart Height requires 'owning_stock' evidence.")
+    ? tx('NewOperationModalBody.Select_part_stock_in_Setup')
+    : activePreview.message
+  const repairRequired = isThreadMill ? threadMillHeightAuthority === 'repair_required'
+    : isChamfer ? chamferHeightAuthority === 'repair_required'
+    : isEngrave ? engraveHeightAuthority === 'repair_required'
+    : isVCarve ? vcarveHeightAuthority === 'repair_required' : heightRepairRequired
+  // Keep readiness contracts intact. Explain the prerequisite that prevents the
+  // job from starting before describing the job itself (WO-3137).
+  const noMachiningGeometry = (isThreadMill && facts.threadMillHasMachiningGeometry === false) ||
+    (isVCarve && facts.vcarveHasMachiningGeometry === false)
   const message =
               loopsExplicitlyEmpty ? tx('NewOperationModalBody.No_loops_are_selected_to_machine_Pick_at_least')
               : contourHasNoEligiblePaths ? tx('NewOperationModalBody.The_selected_source_has_no_to_machine', { p1: contourPathType === 'open' ? tx('NewOperationModalBody.open_paths') : tx('NewOperationModalBody.closed_profiles') })
+              : noMachiningGeometry ? tx('NewOperationModalBody.No_closed_profiles_to_machine')
               : !toolId ? tx('NewOperationModalBody.Go_to_the_Tool_tab_and_select_a_tool')
               : isFace && !faceHeightValid
                 ? heightRepairRequired || !faceHeightChosen || faceHeightPreview.state === 'error'
                   ? tx('NewOperationModalBody.Choose_a_finished_face_in_Heights_Bottom_Height_Finished', { p1: faceHeightPreview.state === 'error' ? ` ${faceHeightPreview.message}` : '' })
-                  : tx('NewOperationModalBody.Wait_for_Face_Smart_Height_preflight_to_resolve')
+                  : tx(faceHeightPreview.state === 'loading' ? 'NewOperationModalBody.Height_preflight_running' : 'NewOperationModalBody.Height_preflight_not_resolved')
               : (isParallel3d || isSteepShallow3d || isScallop3d || isPencil3d) && !parallelHeightPartIdEff ? tx('NewOperationModalBody.Go_to_the_Geometry_tab_and_select_a_3D')
               : isPencil3d && !pencilCutterSupported ? tx('NewOperationModalBody.Pencil_needs_a_ball_or_bull_nose_end_mill')
               : isParallel3d && !parallelCutterSupported ? tx('NewOperationModalBody.Parallel_finish_needs_a_flat_ball_or_bull_nose')
               : (isSteepShallow3d || isScallop3d) && !cutter3dSupported ? tx('NewOperationModalBody.3D_finish_needs_a_flat_ball_or_bull_nose')
               : isAdaptive3d && !adaptive3dPartIdEff ? tx('NewOperationModalBody.Go_to_the_Geometry_tab_and_select_a_3D_2')
               : isAdaptive3d && !cutter3dSupported ? tx('NewOperationModalBody.3D_rough_needs_a_flat_ball_or_bull_nose')
-              : isContour && contourHeightPreview.state === 'error' ? contourHeightPreview.message
-              : isContour && !heightRepairRequired && contourHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Contour_Smart_Height_preflight_to_resolve')
-              : (isDrill || isBore) && drillBoreHeightPreview.state === 'error'
-                ? drillBoreHeightPreview.message
-              : (isDrill || isBore) && !heightRepairRequired && drillBoreHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Smart_Height_preflight_to_resolve', { p1: isDrill ? tx('NewOperationModalBody.Drill') : tx('NewOperationModalBody.Bore') })
-              : isThreadMill && threadMillHeightPreview.state === 'error'
-                ? threadMillHeightPreview.message
-              : isThreadMill && threadMillHeightAuthority !== 'repair_required' && threadMillHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Thread_Mill_Smart_Height_preflight_to_resolve')
-              : isEngrave && engraveHeightPreview.state === 'error'
-                ? engraveHeightPreview.message
-              : isEngrave && engraveHeightAuthority !== 'repair_required' &&
-                  !engraveUseWidthForDepth && !engraveDepthEntered
+              : isWaterline3d && !waterline3dPartIdEff ? tx('NewOperationModalBody.Go_to_the_Geometry_tab_and_select_a_3D')
+              : isWaterline3d && !cutter3dSupported ? tx('NewOperationModalBody.3D_finish_needs_a_flat_ball_or_bull_nose')
+              : isAdaptive3d && !adaptive3dBandValid ? tx('NewOperationModalBody.Band_top_must_be_greater_than_or_equal_to')
+              : repairRequired && !canCreate ? tx('NewOperationModalBody.Review_height_authority')
+              : isEngrave && !engraveUseWidthForDepth && !engraveDepthEntered
                 ? tx('NewOperationModalBody.Enter_the_explicit_Engrave_depth_on_the_Heights_tab')
-              : isEngrave && engraveHeightAuthority !== 'repair_required' && engraveHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_Engrave_Smart_Height_preflight_to_resolve')
               : isVCarve && !vcarveClearingToolValid
                 ? tx('NewOperationModalBody.Choose_the_end_mill_that_clears_the_flat_floors')
-              : isVCarve && vcarveHeightPreview.state === 'error'
-                ? vcarveHeightPreview.message
-              : isVCarve && vcarveHeightAuthority !== 'repair_required' && vcarveHeightPreview.state !== 'resolved'
-                ? tx('NewOperationModalBody.Wait_for_V_carve_Smart_Height_preflight_to_resolve')
+              : !canCreate && activePreview.state === 'error' ? heightErrorMessage || tx('NewOperationModalBody.Height_preflight_not_resolved')
+              : !canCreate && activePreview.state === 'loading' ? tx('NewOperationModalBody.Height_preflight_running')
+              : !canCreate ? tx('NewOperationModalBody.Height_preflight_not_resolved')
               : undefined
   return { loopsExplicitlyEmpty, contourHasNoEligiblePaths, faceHeightValid, planarRoughHeightValid, contourHeightValid, drillBoreHeightValid, threadMillHeightValid, chamferHeightValid, engraveHeightValid, vcarveClearingToolValid, vcarveHeightValid, canCreate, message }
 }

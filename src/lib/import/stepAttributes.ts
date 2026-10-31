@@ -1,43 +1,11 @@
-/* CAM-13 - CAM import reads embedded STEP part names/colors (Operator Q-33).
- *
- * The CAM workspace imports STEP through its own occt-model worker
- * (src/lib/cam/geometry/occt/model), whose vendored OCCT build carries only
- * STEPControl_Reader - NO XCAF bindings (verified: occt-model.yml lists no
- * STEPCAFControl/XCAFDoc symbol). It therefore physically cannot read embedded
- * PRODUCT names or colors. The ONE reader in the app that can is the geom
- * worker's importStep (src/geom, occt-wasm), which the 3D modeling workspace already uses.
- *
- * Per WORKER-CHARTER + this WO ("one shared reader - no parallel STEP-attribute
- * truth path"), this module reads NOTHING itself: it asks that same geom reader
- * for the file's per-part {name,color} and collapses them into the single
- * name/color the CAM geometry tree row can show. The values land in the exact
- * fields the user's rename/color picker edit (ImportedGeometry.name / .color),
- * so "the user can change them after" (Operator's Q-33 reason) works with zero
- * extra UI, and re-import is additive (new geometry id) so a user's later edits
- * are never clobbered.
- *
- * MEASURED READER GAP (CAM-13 report, 2026-07-15; RE-VERIFIED CAM-13-R1,
- * 2026-07-15): the geom reader surfaces embedded NAMES but not COLORS -
- * occt-wasm's compiled xcafImportSTEP binding drops XCAF color even for ITS
- * OWN self-authored export (doc.exportSTEP() -> kernel.importXCAFFromSTEP()
- * round trip on an in-memory doc with a freshly-set color loses hasColor,
- * with no vendor-file ambiguity involved at all - see
- * src/tests/geom/occtWasmColorGap.test.ts, a committed pin of that exact
- * probe). This is a read-side defect in the vendored occt-wasm .wasm binary
- * itself (vendor/occt-wasm/*.tgz, NOTICE-GEO9.md), not a TS-level bug: there
- * is no colorMode toggle or lower-level API exposed by the package
- * (raw-types.d.ts has exactly one xcafImportSTEP/xcafGetLabelInfo pair, no
- * parameters), and rebuilding it requires the Docker+emsdk+cargo toolchain
- * NOTICE-GEO9.md documents - unavailable in this work order's environment
- * (verified: no docker/cargo/emcc on PATH). It affects the 3D modeling workspace
- * identically, since both workspaces call this exact function. The color
- * path below is therefore correct but dormant: the instant a patched
- * occt-wasm build returns a color, the CAM tree shows it with no further
- * change here (unit-proven via an injected colored body).
- */
+/* STEP attributes use the shared geom reader. WO-3093 keeps a combined file
+ * row while preserving each part's appearance on the merged CAM mesh. */
 
 import type { GeomClient } from '../../geom'
 import type { Diag } from '../../geom/geom-service'
+import type { BrepModelPayload } from '../cam/geometry/occt/model/types'
+import { readStepFaceColors } from './stepPartColors'
+import { readStepPresentationColors } from './stepPresentationColors'
 
 /** One part's raw embedded attributes as the geom reader returns them. */
 export interface RawPartAttributes {
@@ -55,6 +23,8 @@ export interface StepDisplayAttributes {
   color?: string
   /** Parts the reader found (0 when the read failed). */
   partCount: number
+  /** Persisted face-index colours for the combined CAM mesh. */
+  faceColors?: string[]
   /** User-facing reason when the attribute read failed/degraded (defaults used). */
   warning?: string
 }
@@ -124,19 +94,6 @@ function checkColor(c: unknown): ColorCheck {
   return { kind: 'invalid' }
 }
 
-/** Collapse an assembly's per-part color checks. Any INVALID (present-but-malformed)
- *  triple forces a degrade-to-default with a named warning, distinct from and
- *  combinable with collapseField's ordinary "parts disagree" warning - an assembly
- *  where every part is simply uncolored still gets no warning at all. */
-function collapseColorField(checks: ColorCheck[]): { value?: string; warning?: string } {
-  const invalidCount = checks.filter((c) => c.kind === 'invalid').length
-  const base = collapseField(checks.map((c) => (c.kind === 'valid' ? c.hex : undefined)), 'color')
-  if (invalidCount === 0) return base
-  const invalidWarning =
-    `${invalidCount}/${checks.length} part(s) carry a malformed or out-of-[0,1]-range embedded color - using default`
-  return { warning: base.warning ? `${invalidWarning}; ${base.warning}` : invalidWarning }
-}
-
 /**
  * True when importStep handed back its deterministic fallback name (no XCAF /
  * PRODUCT name was present), so the CAM row should keep the filename rather
@@ -148,56 +105,23 @@ function isSyntheticName(name: string | undefined, importId: string): name is un
   return name === undefined || name.length === 0 || name.startsWith(`${importId}:step:body#`)
 }
 
-/**
- * Collapse one field (name or color, already normalized to `string |
- * undefined` per part) across an assembly's parts, per the WO's "every part
- * agrees" rule (CAM-13-R1 MAJOR 5 fix):
- *  - NO part carries the field: a plain, legitimate absence (most STEP files;
- *    the common single-body case with a value counts as "every part agrees"
- *    trivially) - value stays undefined, no warning.
- *  - EVERY part carries the field and they all agree: that shared value wins.
- *  - Otherwise (some parts have it and others don't, or they disagree): one
- *    merged CAM tree row cannot honestly show a single label for a partial or
- *    inconsistent assembly, so it degrades to the caller's default AND names
- *    why via a warning - never silently adopts the one value it happened to
- *    see (the bug: filtering missing/invalid values out before comparing,
- *    which let one named part win over an unnamed one).
- */
-function collapseField(values: Array<string | undefined>, label: string): { value?: string; warning?: string } {
-  const defined = values.filter((v): v is string => v !== undefined)
-  if (defined.length === 0) return {}
-  const unique = new Set(defined)
-  if (defined.length === values.length && unique.size === 1) return { value: defined[0] }
-  if (defined.length === values.length) {
-    return {
-      warning: `parts disagree on embedded ${label} (${unique.size} distinct values across ${values.length} parts) - using default`,
-    }
-  }
-  return {
-    warning: `parts disagree on embedded ${label} (${defined.length}/${values.length} carry one) - using default`,
-  }
-}
-
-/**
- * Pure: collapse the reader's per-part attributes into the one name+color the
- * CAM tree row (one row per imported file - CAM's current, unchanged
- * part-splitting behavior) can display, plus a warning when an assembly's
- * parts disagreed or only partially carried a value (MAJOR 5).
- */
+/** A combined row uses a shared name only when every part agrees. Different
+ * names are normal assembly metadata. Its swatch represents the first part;
+ * per-face colours below retain the rest instead of collapsing them away. */
 export function pickDisplayAttributes(
   parts: RawPartAttributes[],
   importId: string,
 ): { name?: string; color?: string; warning?: string } {
-  const nameResult = collapseField(
-    parts.map((p) => (isSyntheticName(p.name, importId) ? undefined : p.name)),
-    'name',
-  )
-  const colorResult = collapseColorField(parts.map((p) => checkColor(p.color)))
-  const warnings = [nameResult.warning, colorResult.warning].filter((w): w is string => w !== undefined)
+  const names = parts.map(p => isSyntheticName(p.name, importId) ? undefined : p.name)
+  const checks = parts.map(p => checkColor(p.color))
+  const invalid = checks.filter(c => c.kind === 'invalid').length
+  const first = checks[0]
   return {
-    name: nameResult.value,
-    color: colorResult.value,
-    warning: warnings.length > 0 ? warnings.join('; ') : undefined,
+    name: names.length > 0 && names.every(n => n === names[0]) ? names[0] : undefined,
+    color: first?.kind === 'valid' ? first.hex : undefined,
+    warning: invalid > 0
+      ? `${invalid}/${parts.length} part(s) carry a malformed or out-of-[0,1]-range embedded color - using default for those parts`
+      : undefined,
   }
 }
 
@@ -266,6 +190,7 @@ export async function readStepDisplayAttributes(
   bytes: ArrayBuffer,
   importId: string,
   makeService?: ServiceFactory,
+  mesh?: BrepModelPayload['mesh'],
 ): Promise<StepDisplayAttributes> {
   let service: GeomClient | undefined
 
@@ -275,9 +200,12 @@ export async function readStepDisplayAttributes(
     service = await factory()
     const svc = service
     await svc.init()
-    // WO-3046: the names-only read - the same XCAF read importStep makes, with
-    // no bodies minted, so the attribute read costs one parse and nothing more.
-    const { parts, diagnostics } = await svc.readStepAttributes(bytes, importId)
+    // WO-3046 fast path: the names-only shared read mints no bodies. Only a
+    // mixed palette needs the surface matching pass below (WO-3093).
+    const read = await svc.readStepAttributes(bytes, importId)
+    const embedded = readStepPresentationColors(bytes)
+    const parts = read.parts.map(p => ({ ...p, color: p.color ?? embedded.get(p.name ?? '') }))
+    const diagnostics = read.diagnostics
     const picked = pickDisplayAttributes(parts, importId)
     const failure = readFailureMessage(diagnostics)
     const warning = failure
@@ -291,6 +219,9 @@ export async function readStepDisplayAttributes(
       name: failure ? undefined : picked.name,
       color: failure ? undefined : picked.color,
       partCount: parts.length,
+      ...(mesh && !failure && parts.length > 1 && new Set(parts.map(p =>
+        isValidColor(p.color) ? rgb01ToHex(p.color) : '#8ab4cc')).size > 1
+        ? { faceColors: await readStepFaceColors(svc, bytes, importId, mesh) } : {}),
       warning,
     }
   }

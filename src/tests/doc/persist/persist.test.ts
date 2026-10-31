@@ -245,7 +245,7 @@ describe('DOC-3 document archive persistence', () => {
     // adds v4 (faceOffset faceEdits -> pushPull nodes); WO-214 adds v5 (extrude
     // endCondition becomes explicit persisted intent, migrationV4ToV5), so a
     // genuine v1 archive walks the full chain 1->2, 2->3, 3->4, 4->5.
-    expect(migrated.migrationsApplied).toEqual([1, 2, 3, 4])
+    expect(migrated.migrationsApplied).toEqual([1, 2, 3, 4, 6]) // WO-3234 adds the v6->v7 Thin wall-mode step
     expect(migrated.manifest.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
     expect(migrated.document.documentKind).toBe('liencam-3d-document')
   })

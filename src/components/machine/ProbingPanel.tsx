@@ -702,7 +702,7 @@ export function ProbingPanel({ machineConsole }: { machineConsole?: ReactNode } 
       relationship: setup.flipOf,
       plan: planSecondSideSetup(
         { setups, stocks },
-        { parentSetupId: setup.flipOf.setupId, axis: setup.flipOf.axis },
+        { parentSetupId: setup.flipOf.setupId, axis: setup.flipOf.axis, existingSetup: setup },
       ),
     }
   }, [setups, stocks, activeSetupId])
@@ -1335,6 +1335,7 @@ export function ProbingPanel({ machineConsole }: { machineConsole?: ReactNode } 
       frame: {
         stockSize: secondSidePlan.stockSize,
         originInStock: secondSidePlan.originInStock,
+        secondOriginInStock: secondSidePlan.secondOriginInStock,
       },
       featureOnFirstSideMm: featureFirstSideMm,
       probedMachineMm,

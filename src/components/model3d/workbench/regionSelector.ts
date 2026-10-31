@@ -1,6 +1,19 @@
 import { textFor } from '../../../i18n'
 const workbenchText = textFor('sketch-and-model-workbench')
+const thinOpenText = textFor('thin-open-extrude.wo3237')
 import type { ProfileRegion } from '../../../geom/geom-service'
+import {
+  expandSweepPathSelection,
+  resolveSweepPathChain,
+  type SketchChainPathSelector,
+  type SweepPathNodeLookup,
+  type SweepPathResolution,
+} from '../../../geom/sweep-path'
+import { sweepPathCandidatesForSketch, type SweepPathSketchCandidates } from './sweepPathPicker'
+import { expandBlocksForGeometry } from '../../../lib/sketch/blocks'
+import type { Sketch } from '../../../lib/sketch/types'
+import type { Sketch3dDocument } from '../../../sketch3d/types'
+
 
 export interface RegionSignature {
   signature: string[]
@@ -27,8 +40,10 @@ export type ProfileSelector =
   | { kind: 'whole-sketch' }
   | RegionProfileSelector
   | { kind: 'regions'; regions: RegionSignature[] }
+  | SketchChainPathSelector
 
 export type ProfileSelectorRefusalCode =
+  | 'open-chain-requires-thin'
   | 'invalid-selector'
   | 'regions-unavailable'
   | 'region-not-found'
@@ -109,6 +124,11 @@ export function resolveProfileSelector(
   regions: readonly ProfileRegion[] | undefined,
   selector: ProfileSelector | undefined,
 ): ProfileSelectorResolution {
+  // An open wire is never a region. Existing face-only replay consumers must
+  // refuse it until they explicitly support the open-wall request in WO-3237.
+  if (selector?.kind === 'sketch-chain') {
+    return { ok: false, code: 'open-chain-requires-thin', message: 'An open sketch chain requires Thin open walls.' }
+  }
   if (selector === undefined || selector.kind === 'whole-sketch') {
     return regions === undefined || regions.length === 0
       ? {
@@ -191,4 +211,87 @@ export function resolveProfileSelector(
     }
   }
   return { ok: true, profiles: [matches[ordinal]] }
+}
+
+/** Extrude uses the SAME ordered entity/direction selector and exact chain
+ * resolver as Sweep. Only source eligibility is adapted: construction geometry
+ * cannot become an Extrude wall, including a saved curve changed to construction.
+ * Flatten blocks with the existing adapter before filtering their members. */
+function openChainSourceLookup(lookup: SweepPathNodeLookup): SweepPathNodeLookup {
+  return (id) => {
+    const node = lookup(id)
+    if (node?.kind !== 'sketch') return node
+    const sketch = node.payload.sketch as Sketch | undefined
+    if (sketch !== undefined && sketch !== null && typeof sketch === 'object') {
+      const flat = expandBlocksForGeometry((sketch.entities ?? []).filter((entity) => !entity.construction), sketch.constraints ?? [], sketch.blockDefs)
+      return { ...node, payload: { ...node.payload, sketch: {
+        ...sketch, entities: flat.entities.filter((entity) => !entity.construction), constraints: flat.constraints, blockDefs: undefined,
+      } } }
+    }
+    const document = node.payload.document as Sketch3dDocument | undefined
+    if (document !== undefined && document !== null && typeof document === 'object') {
+      return { ...node, payload: { ...node.payload, document: {
+        ...document, entities: (document.entities ?? []).filter((entity) => !entity.construction),
+      } } }
+    }
+    return node
+  }
+}
+
+/** Resolve a persisted open-chain selection to a wire, never to a face. The
+ * selector's producer and ordered directions are authoritative; no region or
+ * whole-sketch fallback is permitted when any entity cannot resolve. */
+export function resolveOpenChainProfileSelector(
+  selector: unknown,
+  lookup: SweepPathNodeLookup,
+): SweepPathResolution {
+  return resolveSweepPathChain(selector, openChainSourceLookup(lookup))
+}
+
+/** One click expands only when the shared authority finds a unique open chain.
+ * Explicit ordered selectors may still name an unambiguous route at a branch. */
+export function expandOpenChainProfileSelection(
+  sketchId: string,
+  entityId: string,
+  lookup: SweepPathNodeLookup,
+) {
+  return expandSweepPathSelection(sketchId, entityId, openChainSourceLookup(lookup))
+}
+
+/** WO-3237: what an Extrude is built from. */
+export type ExtrudeSelectionResolution =
+  | { ok: true; profiles: [ProfileRegion, ...ProfileRegion[]]; openChain: boolean }
+  | { ok: false; code: string; message: string }
+
+/** WO-3237: an Extrude's persisted selection resolved for its builder. A
+ * sketch-chain selector goes through the shared chain authority to ONE profile
+ * whose single loop is the chain in its persisted travel order, flagged
+ * `openChain` so only a Thin open wall may be built from it (extrudeParams
+ * resolveExtrudeWall). It must be a chain of the extrude's own sketch, the one
+ * its feature consumes. Every other selector is resolveProfileSelector,
+ * unchanged. Nothing falls back from a chain to a region or the whole sketch. */
+export function resolveExtrudeSelection(
+  sketchId: string,
+  regions: readonly ProfileRegion[] | undefined,
+  selector: ProfileSelector | undefined,
+  lookup: SweepPathNodeLookup,
+): ExtrudeSelectionResolution {
+  if (selector?.kind !== 'sketch-chain') {
+    const resolved = resolveProfileSelector(regions, selector)
+    return resolved.ok ? { ok: true, profiles: resolved.profiles, openChain: false } : resolved
+  }
+  if (selector.sketchId !== sketchId) {
+    return { ok: false, code: 'invalid-selector', message: thinOpenText('wrongSketch', { chainSketch: String(selector.sketchId), sketch: sketchId }) }
+  }
+  const chain = resolveOpenChainProfileSelector(selector, lookup)
+  if (!chain.ok) {
+    return { ok: false, code: chain.diagnostic.code, message: thinOpenText('chainUnresolved', { message: chain.diagnostic.message }) }
+  }
+  return { ok: true, profiles: [{ sketchId: chain.path.sketchId, plane: chain.path.plane, loops: [chain.path.segments] }], openChain: true }
+}
+
+/** WO-3237: every open chain of one sketch an Extrude wall may follow - the
+ * Sweep path list, read through the Extrude source rule (no construction). */
+export function openChainCandidatesForSketch(sketchId: string, lookup: SweepPathNodeLookup): SweepPathSketchCandidates {
+  return sweepPathCandidatesForSketch(sketchId, openChainSourceLookup(lookup))
 }

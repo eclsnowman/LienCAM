@@ -128,6 +128,9 @@ const CLASSIFICATIONS: Record<string, Classification> = {
   // --- disposal bookkeeping: own-id, not a pick.
   'bodyHandlesRef.get::const handle = bodyHandlesRef.current.get(featureId)':
     { verdict: 'RAW-BY-DESIGN', reason: 'disposeFeatureBody(featureId) disposes its own explicit deletion target, not a fresh pick. Proven by SolidsWorkbenchPage.delete.test.tsx "deleting a leaf feature disposes its viewport body and drops its tree row; undo restores the node and replays the kernel op".' },
+  // --- WO-3202: the shared recognition result is lent the mount's committed handles.
+  'bodyHandlesRef.get::handleOf: (bodyId) => bodyHandlesRef.current.get(bodyId),':
+    { verdict: 'RAW-BY-DESIGN', reason: 'ModelSession.setLiveBodySource lends this mount\'s committed body handles to the session so Resize Hole and a Setup Bore pick read ONE recognition result per body revision; bodyId is the key the caller already holds (a picked or recorded body), never a fresh pick surface, and the source is unmounted with setLiveBodySource(null) in the same effect\'s cleanup. Proven by SolidsWorkbenchPage.resizeHole.test.tsx "shows live geometry before history mutation, adopts that exact candidate once, stays armed, and round-trips undo/redo".' },
   'bodyHandlesRef.get::const prior = bodyHandlesRef.current.get(featureId)':
     { verdict: 'RAW-BY-DESIGN', reason: 'disposePriorReplayHandle(featureId) disposes THIS node\'s own prior handle before its own replay -- own-id bookkeeping, not a pick. Proven by SolidsWorkbenchPage.handleLeak.test.tsx "disposes the prior handle before a replay, and leaves no stale handle when the replay fails".' },
 
@@ -202,10 +205,13 @@ const CLASSIFICATIONS: Record<string, Classification> = {
     { verdict: 'RAW-BY-DESIGN', reason: 'the WO UI-58 verdict-cache fetch effect uses this only as lineageIdOf\'s ancestry table; every translated id comes from liveIds. Proven by SolidsWorkbenchPage.resizeHole.test.tsx "applying a diameter change on hole A while STAYING armed invalidates the cache -- re-selecting hole A (and hole B on the same body) shows the POST-apply diameter, never the pre-apply cached verdict".' },
   'bodyFeatureIds()::? resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), next.ownerId)) ?? []':
     { verdict: 'RAW-BY-DESIGN', reason: 'handlePickHover\'s next.ownerId comes from pickAcrossBodies over liveBodyFeatureIds; the raw census is only lineageIdOf\'s ancestor-walk table. Proven by SolidsWorkbenchPage.resizeHole.test.tsx "shows live geometry before history mutation, adopts that exact candidate once, stays armed, and round-trips undo/redo".' },
-  'bodyFeatureIds()::const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), hit.bodyId)) ?? []':
-    { verdict: 'RAW-BY-DESIGN', reason: 'handleResizeHolePick\'s hit.bodyId comes from pickAcrossBodies over liveBodyFeatureIds; the raw census is only lineageIdOf\'s ancestor-walk table. Proven by SolidsWorkbenchPage.liveBodyPick.test.tsx "Resize hole: a post-supersede pick on the hole itself resolves to F2 (opens the anchored entry, creates a resizeHole node consuming F2), never silently misses behind F1s stale solid face".' },
-  'bodyFeatureIds()::const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), row.ownerId)) ?? []':
-    { verdict: 'RAW-BY-DESIGN', reason: 'handleResizeHoleListSelect\'s row.ownerId is built from resizeHoleLiveBodyIds; the raw census is only lineageIdOf\'s ancestor-walk table. Proven by SolidsWorkbenchPage.resizeHole.test.tsx "the List affordance is reachable only from the armed state, and a row click behaves as a click-select".' },
+  // WO-3202: the shared per-body recognition result is keyed by lineageId, so the
+  // same two call sites now read resizeHoleResultsRef with the raw census only as
+  // lineageIdOf's ancestor table. Same ruling as the verdict-cache pair above.
+  'bodyFeatureIds()::const result = resizeHoleResultsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), hit.bodyId))':
+    { verdict: 'RAW-BY-DESIGN', reason: 'handleResizeHolePick\'s hit.bodyId comes from pickAcrossBodies over liveBodyFeatureIds; bodyFeatureIds(dag) is used only as lineageIdOf\'s ancestor-walk table to key the shared WO-3202 recognition result, never to choose a target. Proven by SolidsWorkbenchPage.liveBodyPick.test.tsx "Resize hole: a post-supersede pick on the hole itself resolves to F2 (opens the anchored entry, creates a resizeHole node consuming F2), never silently misses behind F1s stale solid face".' },
+  'bodyFeatureIds()::const result = resizeHoleResultsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), row.ownerId))':
+    { verdict: 'RAW-BY-DESIGN', reason: 'handleResizeHoleListSelect\'s row.ownerId is built from resizeHoleLiveBodyIds; bodyFeatureIds(dag) only translates it into the shared WO-3202 result cache key. Proven by SolidsWorkbenchPage.resizeHole.test.tsx "the List affordance is reachable only from the armed state, and a row click behaves as a click-select".' },
   'bodyFeatureIds()::const census = bodyFeatureIds(dag)':
     { verdict: 'RAW-BY-DESIGN', reason: 'resizeHoleVerdictsByBody and resizeHoleFailuresByBody both map live resizeHoleLiveBodyIds and use this census only to translate each live id into its lineage cache key. Proven by SolidsWorkbenchPage.resizeHole.test.tsx "a thrown recognizeFeatures failure is surfaced BY NAME in the armed hint -- never collapsed into the same no recognized holes text an honest zero-hole body gets".' },
   'bodyFeatureIds()::const verdicts = resizeHoleVerdictsRef.current.get(lineageIdOf(dag, bodyFeatureIds(dag), ownerId)) ?? []':
@@ -367,6 +373,19 @@ const CLASSIFICATIONS: Record<string, Classification> = {
     { verdict: 'RAW-BY-DESIGN', reason: 'extrudeBodyOptions backfills only the edit dialog\'s own stored target when it is absent from liveBodyOptions; new choices remain live-only. Proven by SolidsWorkbenchPage.extrudeBoolean.test.tsx "a consumed target stays visible in its own edit, is excluded from a new picker, and a forced payload naming it refuses BY NAME with no kernel call".' },
   'availableBodies::const existing = availableBodies.find((option) => option.id === candidate)':
     { verdict: 'RAW-BY-DESIGN', reason: 'booleanBodyOptions backfills only the dialog\'s own stored target/tool when absent from liveBodyOptions and still requires each to precede the edited feature. Proven by SolidsWorkbenchPage.booleanHoleEdit.ui38.test.tsx "edits from tree/toolbar, preserves graph and topology, replays, undoes, and refuses invalid references".' },
+  'availableBodies::const existing = current === undefined ? undefined : availableBodies.find((option) => option.id === current)':
+    { verdict: 'RAW-BY-DESIGN', reason: 'WO-3244 mirrorBodyOptions: the same edit-dialog backfill shape as the extrude/boolean siblings -- it re-adds only the Mirror\'s own stored sourceBodyId when it is absent from liveBodyOptions and still requires that body to precede the edited Mirror, so a new choice stays live-only. Proven by SolidsWorkbenchPage.mirror.test.tsx "Edit reopens the plane choice, keeps the id and timeline slot, and follows a moved plane".' },
+
+  // --- WO-3244 Mirror dialog (Model > Modify > Mirror): the page-side live preview resolves the
+  // body the dialog's source picker offers. Its option list is mirrorBodyOptions -- liveBodyOptions
+  // (currentLiveBodyIds) plus, when editing, the Mirror's own stored source backfilled by the site
+  // just above -- and MirrorDialog emits a selection only while `bodyValid` (sourceBodyId is one of
+  // those options), so the preview can paint a live body or the Mirror's own retained source and
+  // nothing else. Nothing the preview builds reaches history: its handle is disposed on every new
+  // choice and on unmount (SolidsWorkbenchPage.mirror.test.tsx "previews, applies as one history
+  // step and replaces the body with its exact reflection").
+  'bodyHandlesRef.get::lookupLiveBody: (id) => bodyHandlesRef.current.get(id),':
+    { verdict: 'LIVE-FILTERED', reason: 'the id is the Mirror dialog\'s sourceBodyId, emitted only while it is one of mirrorBodyOptions (liveBodyOptions built from currentLiveBodyIds, plus the Mirror\'s own stored source when editing); the preview body never reaches history and its handle is disposed on a newer choice and on unmount. Proven by SolidsWorkbenchPage.mirror.test.tsx "previews, applies as one history step and replaces the body with its exact reflection".' },
 
   // --- SKETCH-ON-FACE-FIX (workplan 4d): the unified New-sketch pick's ADAPTIVE HINT COPY only asks
   // "does a flat face exist to sketch on" to pick which sentence to show -- it selects no body and

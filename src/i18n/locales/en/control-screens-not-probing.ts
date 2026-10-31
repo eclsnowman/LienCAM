@@ -1,5 +1,16 @@
 // WO-2324: English Control screen text. Protocol words and controller output stay English.
 const controlScreens = {
+  "ProgramInsight": {
+    "title": "Program insight",
+    "unknown": "Unknown",
+    "feed": "Cutting feed (commanded)",
+    "spindle": "Spindle during cutting (commanded)",
+    "tools": "Tools used for cutting",
+    "bounds": "Work bounds",
+    "time": "Estimated time",
+    "minutes": "{{value}} min",
+    "note": "Commanded values, not feedback. Time is an estimate; tool changes and operator stops can take longer."
+},
   "ControlPage": {
     "mdiHeld": "Program held at line {{value1}} - MDI is locked until it ends or you press Stop/Reset",
     "text001": "LinuxCNC gateway",
@@ -780,6 +791,8 @@ const controlScreens = {
     "text135": "lines {{value1}}-{{value2}}",
     "loadRefusedShort": "Load refused - see the console.",
     "setupNotesButton": "Setup notes",
+    "setupNotesInsightButton": "Notes",
+    "setupNotesInsightTitle": "Setup notes and program insight - {{value1}}",
     "setupNotesTitle": "Setup notes - {{value1}}",
     "setupNotesClose": "Close setup notes",
     "setupNotesEmpty": "No notes for this setup yet.",

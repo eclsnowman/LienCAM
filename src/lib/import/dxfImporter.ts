@@ -180,7 +180,107 @@ function parseLayers(pairs: Pair[]): Map<string, Layer2D> {
 
 // ── Entity parser ─────────────────────────────────────────────────────────────
 
-interface RawSeg { points: Vec2[]; layerName: string }
+/**
+ * A CIRCLE keeps its analytic fact until we can prove that the joined loop is
+ * still exactly that entity.  This is deliberately not a circle fit: a DXF
+ * polygon or a partial arc closed by a chord can sample onto the same circle.
+ */
+interface AnalyticCircle { center: Vec2; diameter: number }
+interface RawSeg { points: Vec2[]; layerName: string; analyticCircle?: AnalyticCircle }
+
+// Loop2D predates DXF analytic provenance. Keep this narrow optional fact on
+// the loop rather than abusing Layer2D.holes: those are physical 3D features
+// whose depth facts affect drill dispatch. assignStableLoopIds and persistence
+// preserve unknown loop fields, so the fact stays bound when the import host
+// namespaces loop ids.
+type LoopWithImportedCircle = Loop2D & { importedCircleDiameter?: number }
+
+function dist2(a: Vec2, b: Vec2): number {
+  return (a.x - b.x) ** 2 + (a.y - b.y) ** 2
+}
+
+function sameClosedSamples(loop: Loop2D, samples: Vec2[]): boolean {
+  if (!loop.closed || samples.length < 4) return false
+  const boundary = [...samples]
+  // CIRCLE is sampled to 359.9999 degrees; joining closes that tiny gap and
+  // drops the duplicate end point. Match the boundary it actually handed on.
+  if (dist2(boundary[0], boundary.at(-1)!) < 0.05 ** 2) boundary.pop()
+  if (boundary.length !== loop.points.length) return false
+  const tol2 = 1e-12
+  for (let start = 0; start < boundary.length; start++) {
+    if (dist2(loop.points[0], boundary[start]) > tol2) continue
+    const forward = boundary.every((_, index) =>
+      dist2(loop.points[index], boundary[(start + index) % boundary.length]) <= tol2)
+    if (forward) return true
+    const backward = boundary.every((_, index) =>
+      dist2(loop.points[index], boundary[(start - index + boundary.length) % boundary.length]) <= tol2)
+    if (backward) return true
+  }
+  return false
+}
+
+// WO-3185: each loop only meets the circles on its layer with its sample count
+// and a centroid in a neighbouring grid cell. Matching samples lie within
+// 1e-6 mm of each other, so their centroids can never be a whole cell apart;
+// sameClosedSamples still decides. Linear instead of loops x circles.
+const CIRCLE_CELL_MM = 0.01
+
+function closedSampleKey(points: readonly Vec2[], layerName: string): { key: string; cx: number; cy: number } {
+  let sx = 0, sy = 0
+  for (const point of points) { sx += point.x; sy += point.y }
+  const cx = Math.floor(sx / points.length / CIRCLE_CELL_MM)
+  const cy = Math.floor(sy / points.length / CIRCLE_CELL_MM)
+  return { key: `${layerName}\u0000${points.length}`, cx, cy }
+}
+
+export function linkAnalyticCircles(loops: Loop2D[], segments: readonly RawSeg[]): LoopWithImportedCircle[] {
+  const index = new Map<string, Array<{ order: number; segment: RawSeg }>>()
+  segments.forEach((segment, order) => {
+    if (segment.analyticCircle === undefined || segment.points.length < 4) return
+    // The same tiny closing gap sameClosedSamples drops.
+    const boundary = dist2(segment.points[0], segment.points.at(-1)!) < 0.05 ** 2
+      ? segment.points.slice(0, -1)
+      : segment.points
+    const { key, cx, cy } = closedSampleKey(boundary, segment.layerName)
+    const cell = `${key}\u0000${cx}\u0000${cy}`
+    const list = index.get(cell)
+    if (list) list.push({ order, segment })
+    else index.set(cell, [{ order, segment }])
+  })
+  return loops.map(loop => {
+    if (!loop.closed || loop.points.length === 0) return loop
+    const { key, cx, cy } = closedSampleKey(loop.points, loop.layerId)
+    // The earliest matching segment wins, as the old segments.find did.
+    let best: { order: number; segment: RawSeg } | undefined
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const entry of index.get(`${key}\u0000${cx + dx}\u0000${cy + dy}`) ?? []) {
+          if (best && entry.order > best.order) break
+          if (sameClosedSamples(loop, entry.segment.points)) { best = entry; break }
+        }
+      }
+    }
+    const source = best?.segment
+    return source?.analyticCircle
+      ? { ...loop, importedCircleDiameter: source.analyticCircle.diameter }
+      : loop
+  })
+}
+
+function transformedAnalyticCircle(
+  circle: AnalyticCircle | undefined,
+  points: readonly Vec2[],
+  transform: (point: Vec2) => Vec2,
+): AnalyticCircle | undefined {
+  if (!circle) return undefined
+  const center = transform(circle.center)
+  const radii = points.map(point => Math.hypot(transform(point).x - center.x, transform(point).y - center.y))
+  const radius = radii[0]
+  // INSERT rotation, translation, mirroring and UNIFORM scale preserve a
+  // circle. Unequal X/Y scaling makes an ellipse, so keep it unknown.
+  if (!(radius > 0) || radii.some(value => Math.abs(value - radius) > Math.max(1e-9, radius * 1e-10))) return undefined
+  return { center, diameter: radius * 2 }
+}
 
 // Geometry entity types we actively parse.
 // WO-1841 added SPLINE, ELLIPSE and the legacy heavyweight POLYLINE: rule 11 -
@@ -274,8 +374,11 @@ function parseEntities(pairs: Pair[], unitScale: number, blocks: Map<string, Dxf
         ], unitScale, blocks, depth + 1)
         for (const transform of insertPlacements(insertPairs, block, unitScale)) {
           for (const child of children.segs) {
-            segs.push({ points: child.points.map(transform),
-              layerName: child.layerName === '0' ? layerName : child.layerName })
+            const points = child.points.map(transform)
+            segs.push({ points,
+              layerName: child.layerName === '0' ? layerName : child.layerName,
+              analyticCircle: transformedAnalyticCircle(child.analyticCircle, child.points, transform),
+            })
           }
           for (const [type, count] of children.skipped) {
             skipped.set(type, (skipped.get(type) ?? 0) + count)
@@ -291,7 +394,14 @@ function parseEntities(pairs: Pair[], unitScale: number, blocks: Map<string, Dxf
         if (r > 0) segs.push({ points: sampleArc(s(cx), s(cy), s(r), startAngle, endAngle), layerName })
         break
       case 'CIRCLE':
-        if (r > 0) segs.push({ points: sampleArc(s(cx), s(cy), s(r), 0, 359.9999), layerName })
+        if (r > 0) {
+          const center = { x: s(cx), y: s(cy) }
+          segs.push({
+            points: sampleArc(center.x, center.y, s(r), 0, 359.9999),
+            layerName,
+            analyticCircle: { center, diameter: s(r) * 2 },
+          })
+        }
         break
       case 'LWPOLYLINE': {
         // Flush any pending incomplete vertex
@@ -560,6 +670,11 @@ export function importDXF(dxfText: string, options: DxfImportOptions = {}): DxfI
   for (const [layerName, segs] of byLayer) {
     allLoops = allLoops.concat(joinSegments(segs, layerName, joinReport))
   }
+
+  // Provenance only survives when the joined boundary is byte-for-byte the
+  // sampled CIRCLE boundary. A branch, overlap rewrite or extra segment makes
+  // the result unknown instead of attaching a size to altered geometry.
+  allLoops = linkAnalyticCircles(allLoops, rawSegs)
 
   // WO-1900: the drawing's own origin is kept only when asked for. Default
   // re-centres exactly as before, so the default output is byte-identical.

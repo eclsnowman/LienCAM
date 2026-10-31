@@ -61,7 +61,21 @@ beforeEach(() => {
   requests = []; responses = []; instances = []; holdTerminal = false; alterWire = undefined
   install()
 })
-afterEach(() => { vi.useRealTimers() })
+afterEach(async () => {
+  // WO-3126: stock settlement may still have 16 ms frames queued on the fake
+  // clock; let them run so the shared authority is not left mid-settlement.
+  if (vi.isFakeTimers()) for (let frame = 0; frame < 20; frame++) await vi.advanceTimersByTimeAsync(20)
+  vi.useRealTimers()
+})
+// WO-3126: a result's stock witness is prepared across a 16 ms renderer frame
+// before it publishes. On the fake clock, let those frames pass while waiting.
+async function settled<T>(promise: Promise<T>): Promise<T> {
+  if (!vi.isFakeTimers()) return promise
+  let finished = false
+  void promise.then(() => { finished = true }, () => { finished = true })
+  for (let frame = 0; !finished && frame < 50; frame++) await vi.advanceTimersByTimeAsync(20)
+  return promise
+}
 afterAll(() => {
   vi.unstubAllGlobals(); vi.unstubAllEnvs()
   if (process.env.WO2953_REST_CAPTURE === '1') writeFileSync('src/tests/evidence/WO-2953/rest-application.json', JSON.stringify({
@@ -168,7 +182,7 @@ function operation() { return useCamStore.getState().project.setups[0].operation
 async function compute(engine: 'current' | 'both' | 'kernel') {
   vi.stubEnv('LIENCAM_ENGINE', engine)
   const setup = useCamStore.getState().project.setups[0]
-  await useCamStore.getState().computeOperationToolpath(setup.id, operation().id)
+  await settled(useCamStore.getState().computeOperationToolpath(setup.id, operation().id))
   expect(operation().status, operation().errorMessage).toBe('ready')
   return structuredClone(operation())
 }
@@ -540,7 +554,7 @@ describe('WO-2944 actual Face application route', () => {
       } else await endHeld(worker, terminal, done)
       expect(operation()).toEqual(pending)
       expect(instances[1].terminated).toBe(false)
-      instances[1].release(); await newer
+      instances[1].release(); await settled(newer)
       expect(operation().status).toBe('ready')
     })
     it.each(['browser error', 'watchdog timeout'] as const)('preserves newer success after %s', async terminal => {

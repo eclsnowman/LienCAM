@@ -148,7 +148,8 @@ describe('WO-3048 the tool-reach trim leaves no empty visits', () => {
     // The one setter is the adaptive_3d strategy's own trim: the nearest trim call above it
     // comes after the adaptive strategy ran, with no other 3D strategy in between.
     const before = store.slice(0, sets[0].index)
-    const call = before.lastIndexOf('trimToToolReachInPartFrame(')
+    // WO-3085 (361191f72f) moved the store's trim off the page; same seam, new name.
+    const call = before.lastIndexOf('trimToToolReachOffPage(')
     expect(call).toBeGreaterThan(before.lastIndexOf('strategyResult = await runAdaptive3dStrategy()'))
   })
 
